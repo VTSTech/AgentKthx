@@ -2,10 +2,15 @@
 Tests for OpenRouterBackend — tool-call parsing, request construction,
 and ReAct fallback when the upstream rejects the `tools` field.
 
+Also tests the CLI's _print_agent_steps helper that surfaces tool calls
+to the user in chat / run mode.
+
 Written by VTSTech — https://www.vts-tech.org
 """
 
+import io
 import json
+import sys
 import unittest
 from unittest.mock import patch, MagicMock
 
@@ -97,12 +102,40 @@ class TestParseOpenAiResponse(unittest.TestCase):
         # Should NOT crash; _raw fallback surfaces the bad payload.
         self.assertEqual(out["tool_calls"][0]["arguments"], {"_raw": "not-valid-json{"})
 
-    def test_no_choices_returns_empty(self):
-        """Missing choices → empty content/tool_calls, no crash."""
-        out = OpenRouterBackend._parse_openai_response({})
-        self.assertEqual(out["content"], "")
-        self.assertEqual(out["tool_calls"], [])
-        self.assertIsNone(out["finish_reason"])
+    def test_no_choices_raises(self):
+        """Missing choices raises RuntimeError so the chat loop can surface it."""
+        with self.assertRaises(RuntimeError) as ctx:
+            OpenRouterBackend._parse_openai_response({})
+        self.assertIn("no choices", str(ctx.exception).lower())
+
+    def test_provider_error_field_raises(self):
+        """HTTP 200 + top-level `error` field raises with the provider message.
+
+        OpenRouter sometimes returns 200 with a provider-side error (e.g.
+        "Provider rate limited"). This must surface as a RuntimeError so
+        the user sees a real message instead of an empty response.
+        """
+        # Format 1: error as dict with message
+        with self.assertRaises(RuntimeError) as ctx:
+            OpenRouterBackend._parse_openai_response({
+                "error": {"message": "Provider rate limited", "code": 429},
+            })
+        self.assertIn("Provider rate limited", str(ctx.exception))
+
+        # Format 2: error as string
+        with self.assertRaises(RuntimeError) as ctx:
+            OpenRouterBackend._parse_openai_response({
+                "error": "Upstream connection error",
+            })
+        self.assertIn("Upstream connection error", str(ctx.exception))
+
+    def test_provider_error_takes_precedence_over_choices(self):
+        """If both `error` and `choices` exist, the error wins."""
+        with self.assertRaises(RuntimeError):
+            OpenRouterBackend._parse_openai_response({
+                "error": {"message": "Provider failed mid-stream"},
+                "choices": [{"message": {"content": "hi"}, "finish_reason": "stop"}],
+            })
 
     def test_text_only_response(self):
         """Plain text response (no tool_calls) parsed correctly."""
@@ -350,6 +383,107 @@ class TestTestToolSupport(unittest.TestCase):
         b = self._backend()
         result = b.test_tool_support("any/model", force_test=False)
         self.assertEqual(result, ToolSupportLevel.NATIVE)
+
+
+class TestPrintAgentSteps(unittest.TestCase):
+    """Tests for the CLI's _print_agent_steps helper.
+
+    This helper surfaces tool calls + their results to the user in chat
+    and run mode, so the agent's actions are visible — not just the
+    final answer.
+    """
+
+    def _make_run(self, steps):
+        """Build a minimal AgentRun-like object with the given steps."""
+        from agentnova.core.models import AgentRun, StepResult, ToolCall
+        from agentnova.core.types import StepResultType
+        return AgentRun(
+            final_answer="done",
+            steps=steps,
+            total_tokens=0,
+            total_ms=0.0,
+            tool_calls=len(steps),
+            success=True,
+        )
+
+    def _make_tool_step(self, name, args, result):
+        from agentnova.core.models import StepResult, ToolCall
+        from agentnova.core.types import StepResultType
+        return StepResult(
+            type=StepResultType.TOOL_CALL,
+            tool_call=ToolCall(name=name, arguments=args),
+            tool_result=result,
+        )
+
+    def _capture_stdout(self, fn):
+        """Run fn() and return everything it printed to stdout."""
+        buf = io.StringIO()
+        old = sys.stdout
+        sys.stdout = buf
+        try:
+            fn()
+        finally:
+            sys.stdout = old
+        return buf.getvalue()
+
+    def test_prints_tool_calls_when_present(self):
+        """A run with tool calls should print each call + truncated result."""
+        from agentnova.cli import _print_agent_steps
+        run = self._make_run([
+            self._make_tool_step("shell", {"command": "echo hi"}, "hi\n"),
+            self._make_tool_step("read_file", {"file_path": "/tmp/x"}, "file contents"),
+        ])
+        out = self._capture_stdout(lambda: _print_agent_steps(run, debug=False))
+        self.assertIn("shell", out)
+        self.assertIn("echo hi", out)
+        self.assertIn("hi", out)
+        self.assertIn("read_file", out)
+        self.assertIn("file contents", out)
+
+    def test_prints_nothing_in_debug_mode(self):
+        """In debug mode the agent already prints verbose output — skip."""
+        from agentnova.cli import _print_agent_steps
+        run = self._make_run([
+            self._make_tool_step("shell", {"command": "echo hi"}, "hi"),
+        ])
+        out = self._capture_stdout(lambda: _print_agent_steps(run, debug=True))
+        self.assertEqual(out, "")
+
+    def test_prints_nothing_when_no_tool_calls(self):
+        """A run with no tool calls (just text answer) prints nothing."""
+        from agentnova.cli import _print_agent_steps
+        from agentnova.core.models import StepResult
+        from agentnova.core.types import StepResultType
+        run = self._make_run([
+            StepResult(type=StepResultType.FINAL_ANSWER, content="answer"),
+        ])
+        out = self._capture_stdout(lambda: _print_agent_steps(run, debug=False))
+        self.assertEqual(out, "")
+
+    def test_truncates_long_tool_results(self):
+        """Tool results longer than 200 chars are truncated for display."""
+        from agentnova.cli import _print_agent_steps
+        long_result = "x" * 500
+        run = self._make_run([
+            self._make_tool_step("shell", {"command": "cat big"}, long_result),
+        ])
+        out = self._capture_stdout(lambda: _print_agent_steps(run, debug=False))
+        # Should be truncated to ~200 chars + ellipsis
+        # (the full 500-char result should NOT be in the output)
+        self.assertIn("...", out)
+        self.assertNotIn("x" * 500, out)
+
+    def test_truncates_long_args(self):
+        """Tool args JSON longer than 120 chars are truncated."""
+        from agentnova.cli import _print_agent_steps
+        long_arg = "y" * 200
+        run = self._make_run([
+            self._make_tool_step("shell", {"command": long_arg}, "ok"),
+        ])
+        out = self._capture_stdout(lambda: _print_agent_steps(run, debug=False))
+        self.assertIn("...", out)
+        # Full arg should NOT be in output
+        self.assertNotIn("y" * 200, out)
 
 
 if __name__ == "__main__":

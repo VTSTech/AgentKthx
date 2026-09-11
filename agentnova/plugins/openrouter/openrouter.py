@@ -623,16 +623,35 @@ class OpenRouterBackend(OllamaBackend):
           "usage": {...},
           "raw": <original response>,
         }
+
+        Raises:
+            RuntimeError: if the response body carries an OpenRouter
+                provider-side `error` field (this happens on HTTP 200
+                when an upstream provider is rate-limited or fails).
+                Surfacing it here lets the chat loop print a meaningful
+                message instead of silently showing an empty response.
         """
+        # OpenRouter sometimes returns HTTP 200 with a top-level `error`
+        # field (e.g. "Provider rate limited", "upstream error"). Detect
+        # this and raise so the user sees a real message.
+        err_field = raw_response.get("error")
+        if err_field:
+            if isinstance(err_field, dict):
+                err_msg = err_field.get("message") or str(err_field)
+                err_code = err_field.get("code")
+            else:
+                err_msg = str(err_field)
+                err_code = None
+            code_str = f" (code={err_code})" if err_code is not None else ""
+            raise RuntimeError(f"OpenRouter provider error: {err_msg}{code_str}")
+
         choices = raw_response.get("choices", []) or []
         if not choices:
-            return {
-                "content": "",
-                "tool_calls": [],
-                "finish_reason": None,
-                "usage": {},
-                "raw": raw_response,
-            }
+            # No choices and no error field — surface a clear message rather
+            # than silently returning an empty response the user sees as blank.
+            raise RuntimeError(
+                "OpenRouter returned no choices in the response"
+            )
 
         choice = choices[0]
         message = choice.get("message", {}) or {}

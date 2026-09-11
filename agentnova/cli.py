@@ -618,6 +618,18 @@ def cmd_run(args: argparse.Namespace) -> int:
         if acp:
             acp.a2a_unregister()
         return 130
+    except RuntimeError as e:
+        # Surface rate limits / API errors clearly instead of crashing
+        print(f"\n{red('Error:')} {e}", file=sys.stderr)
+        if "rate limit" in str(e).lower() or "429" in str(e):
+            print(f"{red('This appears to be a rate limit error.')}", file=sys.stderr)
+        if acp:
+            acp.a2a_unregister()
+        return 1
+    # Print tool-call summary so the user sees what the agent did,
+    # not just the final answer. Skipped in debug or quiet mode.
+    if not getattr(args, 'quiet', False) and not agent.debug:
+        _print_agent_steps(result, debug=agent.debug)
     print(result.final_answer)
 
     # Print run summary (unless quiet)
@@ -634,6 +646,55 @@ def cmd_run(args: argparse.Namespace) -> int:
         acp.a2a_unregister()
 
     return 0
+
+
+def _print_agent_steps(result, debug: bool = False) -> None:
+    """Print a brief summary of each agent step (tool calls + results).
+
+    Visible by default in chat mode so the user can see what the agent is
+    doing, not just the final answer. Suppressed when debug is on
+    (debug already prints verbose step-by-step output).
+
+    Args:
+        result: AgentRun returned by agent.run()
+        debug: If True, the agent already printed verbose step output —
+               skip the summary to avoid duplication.
+    """
+    from .core.types import StepResultType
+
+    # In debug mode the agent already printed verbose step output.
+    if debug:
+        return
+
+    has_tool_calls = any(
+        s.type == StepResultType.TOOL_CALL for s in result.steps
+    )
+    if not has_tool_calls:
+        return
+
+    print()  # blank line before step summary
+    for i, step in enumerate(result.steps, 1):
+        if step.type == StepResultType.TOOL_CALL and step.tool_call:
+            name = step.tool_call.name
+            args = step.tool_call.arguments or {}
+            # Compact one-line arg preview
+            try:
+                args_str = json.dumps(args, ensure_ascii=False)
+            except (TypeError, ValueError):
+                args_str = str(args)
+            if len(args_str) > 120:
+                args_str = args_str[:117] + "..."
+
+            # Truncate result for display
+            result_str = str(step.tool_result) if step.tool_result is not None else ""
+            if len(result_str) > 200:
+                result_str = result_str[:197] + "..."
+
+            print(f"  {dim(f'[{i}]')} {cyan('tool')} {yellow(name)}"
+                  f" {dim(args_str)}")
+            if result_str:
+                print(f"      {dim('→')} {dim(result_str)}")
+    print()  # blank line before final answer
 
 
 def cmd_chat(args: argparse.Namespace) -> int:
@@ -865,6 +926,10 @@ def cmd_chat(args: argparse.Namespace) -> int:
             # Estimate: ~60% prompt, ~40% completion (rough heuristic)
             _session_tokens_in += int(step.tokens_used * 0.6)
             _session_tokens_out += int(step.tokens_used * 0.4)
+        # Print tool-call summary so the user sees what the agent did,
+        # not just the final answer. Skipped in debug mode (agent already
+        # printed verbose step output).
+        _print_agent_steps(result, debug=agent.debug)
         print(f"\n{bright_green('Agent Nova')}: {result.final_answer}\n")
 
         # Log assistant response to ACP
