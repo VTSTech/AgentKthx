@@ -1,8 +1,8 @@
-# ⚛️ AgentNova R05.1
+# ⚛️ AgentNova R05.2
 
 **Status: Alpha**
 
-A minimal, hackable agentic framework for autonomous AI agents. Runs **locally** with [Ollama](https://ollama.com), or **in the cloud** with [ZAI](https://api.z.ai). Extensible via a manifest-based **plugin system** for additional backends and features.
+A minimal, hackable agentic framework for autonomous AI agents. Runs **locally** with [Ollama](https://ollama.com), **in the cloud** with [OpenRouter](https://openrouter.ai) and [ZAI](https://api.z.ai). Extensible via a manifest-based **plugin system** for additional backends and features.
 
 Inspired by the architecture of OpenClaw, rebuilt from scratch for local-first operation.
 
@@ -33,7 +33,8 @@ Inspired by the architecture of OpenClaw, rebuilt from scratch for local-first o
 
 - **Zero dependencies** — Uses Python stdlib only (urllib for HTTP)
 - **Plugin system** — Manifest-based plugin discovery, lazy loading, and dependency resolution (R05.0)
-- **Native + plugin backends** — Ollama and llama-server built-in; BitNet, ZAI, ACP, TurboQuant as plugins
+- **Native + plugin backends** — Ollama built-in; OpenRouter, BitNet, ZAI, ACP, TurboQuant as plugins
+- **Multi-cloud support** — Access to 500+ models from OpenRouter, OpenAI, Anthropic, Google, Cohere
 - **Dual API support** — OpenResponses (`--api openre`) and OpenAI Chat-Completions (`--api openai`)
 - **Three-tier tool support** — Native, ReAct, or none (auto-detected)
 - **Small model optimized** — Fuzzy matching, argument normalization
