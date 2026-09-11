@@ -71,6 +71,12 @@ TURBOQUANT_SERVER_PATH = os.environ.get("TURBOQUANT_SERVER_PATH", "llama-server"
 TURBOQUANT_PORT = int(os.environ.get("TURBOQUANT_PORT", "8764"))
 TURBOQUANT_CTX = int(os.environ.get("TURBOQUANT_CTX", "8192"))
 
+# OpenRouter plugin (agentnova/plugins/openrouter/)
+OPENROUTER_BASE_URL = os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
+OPENROUTER_DEFAULT_MODEL = os.environ.get("OPENROUTER_DEFAULT_MODEL", "anthropic/claude-3.5-sonnet")
+OPENROUTER_FREE_ONLY = os.environ.get("OPENROUTER_FREE_ONLY", "").lower() in ("1", "true", "yes")
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # BACKEND SELECTION
@@ -87,13 +93,16 @@ AGENTNOVA_BACKEND = os.environ.get("AGENTNOVA_BACKEND", "ollama").lower()
 # Default model for tests and examples
 # BitNet default: bitnet-b1.58-2b-4t
 # Ollama default: qwen2.5-coder:0.5b-instruct-q4_k_m
-# ZAI default: glm-4-flash
+# ZAI default: glm-5.1
+# OpenRouter default: anthropic/claude-3.5-sonnet
 if AGENTNOVA_BACKEND == "bitnet":
     DEFAULT_MODEL = os.environ.get("AGENTNOVA_MODEL", "bitnet-b1.58-2b-4t")
 elif AGENTNOVA_BACKEND in ("llama-server", "llama_server"):
     DEFAULT_MODEL = os.environ.get("AGENTNOVA_MODEL", "default")
 elif AGENTNOVA_BACKEND == "zai":
     DEFAULT_MODEL = os.environ.get("AGENTNOVA_MODEL", "glm-5.1")
+elif AGENTNOVA_BACKEND == "openrouter":
+    DEFAULT_MODEL = os.environ.get("AGENTNOVA_MODEL", "anthropic/claude-3.5-sonnet")
 else:
     DEFAULT_MODEL = os.environ.get("AGENTNOVA_MODEL", "qwen2.5:0.5b")
 

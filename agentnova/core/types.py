@@ -69,6 +69,7 @@ class BackendType(Enum):
     LLAMA_SERVER = "llama_server"
     BITNET = "bitnet"
     ZAI = "zai"
+    OPENROUTER = "openrouter"
 
 
 class ApiMode(Enum):

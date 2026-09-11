@@ -1064,7 +1064,15 @@ def cmd_models(args: argparse.Namespace) -> int:
     # Always display both columns
     modes_display = ["openre", "openai"]
 
-    backend = get_backend(backend_name, api_mode="openre")  # default for list_models etc.
+    # Use appropriate API mode for the backend
+    from .core.types import ApiMode
+    if backend_name == "openrouter":
+        # OpenRouter only supports OpenAI Chat-Completions
+        api_mode = ApiMode.OPENAI
+    else:
+        api_mode = ApiMode.OPENRE
+    
+    backend = get_backend(backend_name, api_mode=api_mode)  # default for list_models etc.
 
     if not isinstance(backend, OllamaBackend):
         print(f"Models command works best with Ollama backend (current: {backend_name})")
@@ -1755,6 +1763,7 @@ def cmd_config(args: argparse.Namespace) -> int:
     from .config import (
         OLLAMA_BASE_URL, BITNET_BASE_URL, LLAMA_SERVER_BASE_URL,
         ZAI_BASE_URL, ZAI_API_KEY, ZAI_FREE_ONLY, ZAI_FREE_FALLBACK_MODEL,
+        OPENROUTER_BASE_URL, OPENROUTER_API_KEY, OPENROUTER_DEFAULT_MODEL, OPENROUTER_FREE_ONLY,
         ACP_BASE_URL, ACP_USER, ACP_PASS,
         TURBOQUANT_SERVER_PATH, TURBOQUANT_PORT, TURBOQUANT_CTX,
         AGENTNOVA_BACKEND, DEFAULT_MODEL, NUM_CTX,
@@ -1769,6 +1778,7 @@ def cmd_config(args: argparse.Namespace) -> int:
             ("BITNET_BASE_URL",        BITNET_BASE_URL),
             ("LLAMA_SERVER_BASE_URL",  LLAMA_SERVER_BASE_URL),
             ("ZAI_BASE_URL",           ZAI_BASE_URL),
+            ("OPENROUTER_BASE_URL",    OPENROUTER_BASE_URL),
             ("ACP_BASE_URL",           ACP_BASE_URL),
         ]
         for name, val in urls:
@@ -1788,7 +1798,13 @@ def cmd_config(args: argparse.Namespace) -> int:
                 ("BITNET_BASE_URL",       BITNET_BASE_URL),
                 ("LLAMA_SERVER_BASE_URL", LLAMA_SERVER_BASE_URL),
                 ("ZAI_BASE_URL",          ZAI_BASE_URL),
+                ("OPENROUTER_BASE_URL",   OPENROUTER_BASE_URL),
                 ("ACP_BASE_URL",          ACP_BASE_URL),
+            ],
+            "OpenRouter": [
+                ("OPENROUTER_API_KEY",      _mask_key(OPENROUTER_API_KEY)),
+                ("OPENROUTER_DEFAULT_MODEL", OPENROUTER_DEFAULT_MODEL),
+                ("OPENROUTER_FREE_ONLY",    str(OPENROUTER_FREE_ONLY)),
             ],
             "ZAI": [
                 ("ZAI_API_KEY",             _mask_key(ZAI_API_KEY)),
@@ -1848,8 +1864,12 @@ def cmd_config(args: argparse.Namespace) -> int:
             "BitNet":       BITNET_BASE_URL,
             "llama-server": LLAMA_SERVER_BASE_URL,
             "ZAI":          ZAI_BASE_URL,
+            "OpenRouter":   OPENROUTER_BASE_URL,
             "ACP":          ACP_BASE_URL,
         },
+        openrouter_key=_mask_key(OPENROUTER_API_KEY),
+        openrouter_default=OPENROUTER_DEFAULT_MODEL,
+        openrouter_free_only=OPENROUTER_FREE_ONLY,
         zai_key=ZAI_API_KEY,
         zai_free_only=ZAI_FREE_ONLY,
         zai_fallback=ZAI_FREE_FALLBACK_MODEL,
@@ -1880,6 +1900,7 @@ def _print_config_summary(
     max_steps: int, debug: bool, verbose: bool,
     urls: dict[str, str],
     zai_key: str, zai_free_only: bool, zai_fallback: str,
+    openrouter_key: str, openrouter_default: str, openrouter_free_only: bool,
     acp_user: str, acp_pass: str,
     turboquant: dict[str, str],
     retry_on_error: bool, max_tool_retries: int,
@@ -1926,6 +1947,13 @@ def _print_config_summary(
     print(f"    {dim('User:')}          {cyan(acp_user)}")
     print(f"    {dim('Password:')}      {_mask_key(acp_pass)}")
 
+    # ── OpenRouter API ────────────────────────────────────────────────────
+    print(f"\n  {yellow('OpenRouter API')}")
+    print(f"    {dim('API Key:')}       {openrouter_key}")
+    print(f"    {dim('Default Model:')} {cyan(openrouter_default)}")
+    free_badge = green("ON") if openrouter_free_only else dim("OFF")
+    print(f"    {dim('Free Only:')}     {free_badge}")
+
     # ── TurboQuant ────────────────────────────────────────────────────────
     print(f"\n  {yellow('TurboQuant')}")
     for name, val in turboquant.items():
@@ -1939,7 +1967,7 @@ def _print_config_summary(
 
     # ── Environment variable reference ────────────────────────────────────
     env_vars = [
-        ("AGENTNOVA_BACKEND",       "Default backend (ollama|bitnet|llama-server|zai)"),
+        ("AGENTNOVA_BACKEND",       "Default backend (ollama|bitnet|llama-server|zai|openrouter)"),
         ("AGENTNOVA_MODEL",         "Override default model"),
         ("AGENTNOVA_MAX_STEPS",     "Max agent steps (default: 10)"),
         ("AGENTNOVA_DEBUG",         "Enable debug output (1/true/yes)"),
@@ -1962,6 +1990,10 @@ def _print_config_summary(
         ("ZAI_API_KEY",             "ZAI API key"),
         ("ZAI_FREE_ONLY",           "Restrict to free ZAI models only"),
         ("ZAI_FREE_FALLBACK_MODEL", "Fallback model when credits insufficient"),
+        ("OPENROUTER_BASE_URL",     "OpenRouter API URL"),
+        ("OPENROUTER_API_KEY",      "OpenRouter API key"),
+        ("OPENROUTER_DEFAULT_MODEL", "Default OpenRouter model"),
+        ("OPENROUTER_FREE_ONLY",     "Restrict to free OpenRouter models only"),
         ("ACP_BASE_URL",            "ACP server URL"),
         ("ACP_USER",                "ACP username (default: admin)"),
         ("ACP_PASS",                "ACP password (default: secret)"),
@@ -2387,6 +2419,16 @@ def cmd_update(args: argparse.Namespace) -> int:
 
 def main(argv: Optional[list[str]] = None) -> int:
     """Main entry point."""
+    
+    # Load plugins early so that CLI arguments can include plugin backends
+    try:
+        from .plugins import get_plugin_manager
+        pm = get_plugin_manager()
+        pm.load_all()  # Load all plugins to register backends
+    except Exception as e:
+        # Plugin loading should not prevent CLI from working
+        pass
+    
     parser = create_parser()
 
     # Discover plugin-provided CLI commands, add as subparsers, and mark with *
