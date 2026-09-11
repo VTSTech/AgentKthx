@@ -38,7 +38,7 @@ Inspired by the architecture of OpenClaw, rebuilt from scratch for local-first o
 - **Dual API support** — OpenResponses (`--api openre`) and OpenAI Chat-Completions (`--api openai`)
 - **Three-tier tool support** — Native, ReAct, or none (auto-detected)
 - **Small model optimized** — Fuzzy matching, argument normalization
-- **Built-in security** — Path validation, command blocklist, SSRF protection
+- **Built-in security** — Path validation, command blocklist, SSRF protection (toggleable via `--security max|off`)
 - **Multi-agent orchestration** — Router, pipeline, and parallel modes
 - **Soul Spec v0.5** — Persona packages with progressive disclosure
 - **AgentSkills spec** — Skill loading with SPDX license validation
@@ -51,6 +51,9 @@ Inspired by the architecture of OpenClaw, rebuilt from scratch for local-first o
 - **Argument normalization** — ~100+ tool argument aliases for small model compatibility
 - **JSON structured output** — `--response-format json` for structured JSON responses
 - **Self-update** — `agentnova update` to update to latest version from GitHub
+- **Persistent status footer** — 2-line terminal footer with live model/backend/token info (R05.4, scroll-region based)
+- **OpenRouter 429 retry** — Automatic retry with `Retry-After` header support for rate-limited providers (R05.4)
+- **Tool-call visibility** — Tool calls and results displayed in chat mode (R05.4)
 
 ## Installation
 
@@ -352,15 +355,35 @@ Configured model families with optimized prompts:
 
 ## Security Features
 
-Built-in security for safe operation:
+Built-in security for safe operation, with a runtime-toggleable mode:
 
+- **Two security modes** — `max` (default, all checks enabled) and `off` (all checks disabled)
+- **Toggle at runtime** — `/security max` or `/security off` in chat mode, or `--security off` at startup
 - **Command blocklist** — Blocks dangerous shell commands (rm, sudo, etc.)
 - **Path validation** — Prevents access to sensitive directories
 - **SSRF protection** — Blocks requests to local/internal URLs
-- **Injection detection** — Detects shell injection patterns
+- **Injection detection** — Detects shell injection patterns (`&&`, `||`, `|`, `;`, `$()`, backticks, etc.)
 - **Dangerous tool confirmation** — `--confirm` flag requires interactive approval before shell, write, or edit operations
 - **Audit logging** — Shell, write, and edit operations logged to `~/.agentnova/audit.log`
 - **Response size limits** — Files capped at 512KB, HTTP responses at 256KB
+
+```bash
+# Default — all security checks enabled
+agentnova chat --backend openrouter --tools shell,python_repl
+
+# Disable all security checks (use with caution — model can run any command)
+agentnova chat --backend openrouter --tools shell,python_repl --security off
+```
+
+In chat mode, toggle at runtime:
+```
+/security              — show current mode
+/security max          — enable all checks (default)
+/security off          — disable ALL checks (model can run any command,
+                        read/write any path, fetch any URL)
+```
+
+**Warning**: `--security off` disables ALL safety checks. Only use when you trust the model and need unrestricted access (e.g., local dev with a fine-tuned model that legitimately uses `&&`, `|`, etc.).
 
 ## Configuration
 
@@ -428,6 +451,7 @@ agentnova config --urls  # Show only URLs
 | `-v, --verbose` | Verbose output |
 | `--no-retry` | Disable retry-with-error-feedback on tool failures |
 | `--max-retries N` | Maximum retries per tool call failure (default: 2) |
+| `--security max\|off` | Security mode: `max` (default, all checks) or `off` (disable all checks) |
 
 ## LocalClaw Redirect
 

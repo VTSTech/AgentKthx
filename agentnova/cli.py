@@ -436,6 +436,12 @@ def _build_agent(args: argparse.Namespace, config) -> Agent:
     duplicated in cmd_run, cmd_chat, and cmd_agent.  Every new CLI flag
     only needs to be added here (and in add_agent_args).
     """
+    # Apply security mode from --security flag (default "max").
+    # The /security slash command can change this at runtime.
+    from .core.helpers import set_security_mode
+    security_mode = getattr(args, "security", "max") or "max"
+    set_security_mode(security_mode)
+
     backend_name = args.backend or config.backend
     
     # Default to OpenAI API mode (more compatible with cloud providers)
@@ -949,14 +955,39 @@ def cmd_chat(args: argparse.Namespace) -> int:
             break
 
         if user_input == "/help":
-            print(f"  {cyan('/clear')}    Clear conversation memory")
-            print(f"  {cyan('/debug')}    Toggle debug output on/off")
-            print(f"  {cyan('/help')}     Show this help message")
-            print(f"  {cyan('/model')}    Show or change the model (e.g. /model glm-4.7-flash)")
-            print(f"  {cyan('/status')}   Show model, backend, tools, and memory info")
-            print(f"  {cyan('/system')}   Print the current system prompt")
-            print(f"  {cyan('/tools')}    List available tools with descriptions")
-            print(f"  {cyan('/quit')}     Exit AgentNova")
+            print(f"  {cyan('/clear')}      Clear conversation memory")
+            print(f"  {cyan('/debug')}      Toggle debug output on/off")
+            print(f"  {cyan('/help')}       Show this help message")
+            print(f"  {cyan('/model')}      Show or change the model (e.g. /model glm-4.7-flash)")
+            print(f"  {cyan('/security')}   Show or set security mode (max|off)")
+            print(f"  {cyan('/status')}     Show model, backend, tools, and memory info")
+            print(f"  {cyan('/system')}     Print the current system prompt")
+            print(f"  {cyan('/tools')}      List available tools with descriptions")
+            print(f"  {cyan('/quit')}       Exit AgentNova")
+            continue
+
+        if user_input == "/security" or user_input.startswith("/security "):
+            from .core.helpers import get_security_mode, set_security_mode
+            parts = user_input.split(None, 1)
+            if len(parts) < 2:
+                # No argument — show current mode
+                current = get_security_mode()
+                label = green("max (strict)") if current == "max" else red("off (unrestricted)")
+                print(f"Security mode: {label}")
+                print(dim("  Usage: /security max   — all checks enabled (default)"))
+                print(dim("         /security off  — disable all checks (use with caution)"))
+            else:
+                mode = parts[1].strip().lower()
+                if mode in ("max", "off"):
+                    set_security_mode(mode)
+                    if mode == "max":
+                        print(green("Security mode: max (all checks enabled)"))
+                    else:
+                        print(red("Security mode: off (ALL CHECKS DISABLED)"))
+                        print(yellow("  The model can now run any command, read/write any path,"))
+                        print(yellow("  and fetch any URL. Use with caution."))
+                else:
+                    print(yellow(f"Invalid security mode: {mode!r}. Use 'max' or 'off'."))
             continue
 
         if user_input == "/system":
@@ -1005,6 +1036,7 @@ def cmd_chat(args: argparse.Namespace) -> int:
             continue
 
         if user_input == "/status":
+            from .core.helpers import get_security_mode
             print(f"Model: {cyan(agent.model)}")
             backend_name = getattr(agent.backend, 'backend_type', None)
             if backend_name is not None:
@@ -1012,6 +1044,7 @@ def cmd_chat(args: argparse.Namespace) -> int:
             print(f"API mode: {green(agent._is_comp_mode and 'openai' or 'openre')}")
             print(f"Tools: {yellow(str(agent.tools.names()))}")
             print(f"Tool choice: {yellow(agent.tool_choice.type.value)}")
+            print(f"Security: {green('max') if get_security_mode() == 'max' else red('off')}")
             print(f"Memory turns: {yellow(str(len(agent.memory)))}")
             print(f"Debug: {green('ON') if agent.debug else red('OFF')}")
             if agent.soul:
@@ -1056,7 +1089,19 @@ def cmd_chat(args: argparse.Namespace) -> int:
         # not just the final answer. Skipped in debug mode (agent already
         # printed verbose step output).
         _print_agent_steps(result, debug=agent.debug)
-        print(f"\n{bright_green('Agent Nova')}: {result.final_answer}\n")
+
+        # Detect empty final answers — the agent ran but produced no
+        # response text. This usually means the model hit a rate limit
+        # or content filter mid-conversation. Surface it as an error
+        # instead of showing a blank "Agent Nova: " line.
+        if not result.final_answer or not result.final_answer.strip():
+            print(f"\n{red('Agent Nova: (empty response)')}")
+            print(yellow("  The model returned no content. This is likely a "
+                         "rate limit (429) or content filter."))
+            print(yellow("  Try again in a few seconds, or use /debug to see "
+                         "what happened."))
+        else:
+            print(f"\n{bright_green('Agent Nova')}: {result.final_answer}\n")
 
         # Refresh the persistent footer with updated token counts.
         # The footer lives on the reserved bottom line (scroll region)

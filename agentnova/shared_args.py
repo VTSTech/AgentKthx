@@ -188,6 +188,12 @@ def add_agent_args(
     )
     parser.add_argument("--debug", action="store_true", help="Enable debug output")
     parser.add_argument(
+        "--security",
+        default="max",
+        choices=["max", "off"],
+        help="Security mode: 'max' (default, all checks enabled) or 'off' (disable all checks — use with caution)",
+    )
+    parser.add_argument(
         "--force-react",
         action="store_true",
         help="Force ReAct mode for tool calling",

@@ -10,8 +10,51 @@ from __future__ import annotations
 import os
 import re
 from difflib import SequenceMatcher
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlparse
+
+
+# ============================================================================
+# Security Mode
+# ============================================================================
+#
+# SecurityMode controls how strictly the built-in tools enforce their
+# safety checks (shell injection, path validation, SSRF blocking).
+#
+#   "max"  — (default) all security checks enabled. Rejects shell
+#            injection patterns (&&, ||, |, ;, $(), etc.), blocked
+#            commands, path traversal, and SSRF hosts.
+#   "off"  — all security checks DISABLED. The model can run any
+#            command, read/write any path, and fetch any URL.
+#            Use this only when you trust the model and need
+#            unrestricted access (e.g., local dev with a fine-tuned
+#            model that legitimately uses &&, |, etc.).
+#
+# The mode is a global, process-wide setting. The CLI's /security
+# command toggles it at runtime; the Python API exposes it via
+# set_security_mode() / get_security_mode().
+
+SecurityMode = Literal["max", "off"]
+
+_security_mode: SecurityMode = "max"
+
+
+def set_security_mode(mode: SecurityMode) -> None:
+    """Set the global security mode ("max" or "off")."""
+    global _security_mode
+    if mode not in ("max", "off"):
+        raise ValueError(f"Invalid security mode: {mode!r}. Use 'max' or 'off'.")
+    _security_mode = mode
+
+
+def get_security_mode() -> SecurityMode:
+    """Return the current global security mode."""
+    return _security_mode
+
+
+def _security_enabled() -> bool:
+    """True when security checks are active (mode == 'max')."""
+    return _security_mode == "max"
 
 
 # ============================================================================
@@ -339,9 +382,16 @@ def validate_path(path: str, allowed_dirs: list[str] | None = None) -> tuple[boo
 
     Returns:
         Tuple of (is_valid, error_message)
+
+    When security mode is "off", all checks are skipped and the path is
+    returned as valid. Use with caution — the model can read/write any path.
     """
     if not path:
         return False, "Path cannot be empty"
+
+    # Security mode "off" — skip all checks, allow any path.
+    if not _security_enabled():
+        return True, ""
 
     # Normalize path (resolve . and .. components)
     try:
@@ -432,9 +482,16 @@ def is_safe_url(url: str, block_ssrf: bool = True) -> tuple[bool, str]:
 
     Returns:
         Tuple of (is_safe, error_message)
+
+    When security mode is "off", all checks are skipped and the URL is
+    returned as safe. Use with caution — the model can fetch any URL.
     """
     if not url:
         return False, "URL cannot be empty"
+
+    # Security mode "off" — skip all checks, allow any URL.
+    if not _security_enabled():
+        return True, ""
 
     try:
         parsed = urlparse(url)
@@ -469,9 +526,16 @@ def sanitize_command(command: str) -> tuple[bool, str, str]:
 
     Returns:
         Tuple of (is_safe, error_message, sanitized_command)
+
+    When security mode is "off", all checks are skipped and the command
+    is returned as-is. Use with caution — the model can run anything.
     """
     if not command:
         return False, "Command cannot be empty", ""
+
+    # Security mode "off" — skip all checks, run anything.
+    if not _security_enabled():
+        return True, "", command
 
     # Parse the command to get the base command
     parts = command.strip().split()

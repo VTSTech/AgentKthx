@@ -408,6 +408,107 @@ class TestGenerateFlow(unittest.TestCase):
         self.assertEqual(len(result["tool_calls"]), 1)
 
 
+class TestSecurityMode(unittest.TestCase):
+    """Tests for the security mode toggle (max / off).
+
+    In 'max' mode (default), sanitize_command, validate_path, and
+    is_safe_url enforce all checks. In 'off' mode, all checks are
+    skipped — the model can run any command, read/write any path,
+    and fetch any URL.
+    """
+
+    def setUp(self):
+        """Reset to 'max' before each test so tests don't bleed into each other."""
+        from agentnova.core.helpers import set_security_mode
+        set_security_mode("max")
+
+    def tearDown(self):
+        """Reset to 'max' after each test for safety."""
+        from agentnova.core.helpers import set_security_mode
+        set_security_mode("max")
+
+    def test_default_mode_is_max(self):
+        from agentnova.core.helpers import get_security_mode
+        self.assertEqual(get_security_mode(), "max")
+
+    def test_set_mode_off(self):
+        from agentnova.core.helpers import set_security_mode, get_security_mode
+        set_security_mode("off")
+        self.assertEqual(get_security_mode(), "off")
+
+    def test_set_mode_max(self):
+        from agentnova.core.helpers import set_security_mode, get_security_mode
+        set_security_mode("off")
+        set_security_mode("max")
+        self.assertEqual(get_security_mode(), "max")
+
+    def test_invalid_mode_raises(self):
+        from agentnova.core.helpers import set_security_mode
+        with self.assertRaises(ValueError):
+            set_security_mode("strict")  # not a valid mode
+
+    def test_sanitize_command_max_mode_rejects_injection(self):
+        """In max mode, && is rejected as a shell injection pattern."""
+        from agentnova.core.helpers import sanitize_command
+        safe, err, _ = sanitize_command("echo hi && pwd")
+        self.assertFalse(safe)
+        self.assertIn("injection", err.lower())
+
+    def test_sanitize_command_off_mode_allows_injection(self):
+        """In off mode, && is allowed (no checks performed)."""
+        from agentnova.core.helpers import set_security_mode, sanitize_command
+        set_security_mode("off")
+        safe, err, cmd = sanitize_command("echo hi && pwd")
+        self.assertTrue(safe)
+        self.assertEqual(err, "")
+        self.assertEqual(cmd, "echo hi && pwd")
+
+    def test_sanitize_command_off_mode_allows_pipes(self):
+        """In off mode, pipe | is allowed."""
+        from agentnova.core.helpers import set_security_mode, sanitize_command
+        set_security_mode("off")
+        safe, _, cmd = sanitize_command("ls -la | grep test")
+        self.assertTrue(safe)
+        self.assertEqual(cmd, "ls -la | grep test")
+
+    def test_sanitize_command_off_mode_still_rejects_empty(self):
+        """Empty command is rejected even in off mode (it's not a security check)."""
+        from agentnova.core.helpers import set_security_mode, sanitize_command
+        set_security_mode("off")
+        safe, err, _ = sanitize_command("")
+        self.assertFalse(safe)
+        self.assertIn("empty", err.lower())
+
+    def test_validate_path_max_mode_rejects_traversal(self):
+        """In max mode, path traversal (../) is rejected."""
+        from agentnova.core.helpers import validate_path
+        safe, err = validate_path("../../../etc/passwd")
+        self.assertFalse(safe)
+        self.assertIn("traversal", err.lower())
+
+    def test_validate_path_off_mode_allows_traversal(self):
+        """In off mode, path traversal is allowed."""
+        from agentnova.core.helpers import set_security_mode, validate_path
+        set_security_mode("off")
+        safe, err = validate_path("../../../etc/passwd")
+        self.assertTrue(safe)
+        self.assertEqual(err, "")
+
+    def test_is_safe_url_max_mode_rejects_localhost(self):
+        """In max mode, localhost is blocked by SSRF protection."""
+        from agentnova.core.helpers import is_safe_url
+        safe, err = is_safe_url("http://127.0.0.1:8080/admin")
+        self.assertFalse(safe)
+        self.assertIn("ssrf", err.lower())
+
+    def test_is_safe_url_off_mode_allows_localhost(self):
+        """In off mode, localhost is allowed."""
+        from agentnova.core.helpers import set_security_mode, is_safe_url
+        set_security_mode("off")
+        safe, _ = is_safe_url("http://127.0.0.1:8080/admin")
+        self.assertTrue(safe)
+
+
 class TestTestToolSupport(unittest.TestCase):
     """Tests for test_tool_support() — should always return NATIVE without probing."""
 

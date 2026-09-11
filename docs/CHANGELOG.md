@@ -4,11 +4,11 @@ All notable changes to AgentNova will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [R05.4] - 09-11-2026 10:35:00 PM
+## [R05.4] - 09-11-2026 7:21:00 PM
 
-### OpenRouter Tool-Calling Fix & CLI Visibility Improvements
+### OpenRouter Tool-Calling Fix, CLI Visibility, Security Modes & 429 Retry
 
-Fixes a critical defect in the OpenRouter backend where native tool calls were never sent to the API and never parsed from the response, causing the agent to silently fall back to treating the model's text output as a final answer. Also adds CLI visibility for tool-call execution and proper error surfacing for provider-side rate limits. This release makes the OpenRouter backend actually usable for agentic workflows with cloud models.
+Fixes a critical defect in the OpenRouter backend where native tool calls were never sent to the API and never parsed from the response, causing the agent to silently fall back to treating the model's text output as a final answer. Also adds a runtime-toggleable security mode (`/security max|off`), automatic 429 retry with `Retry-After` support, a 2-line persistent terminal status footer, CLI visibility for tool-call execution, and proper error surfacing for empty responses and provider-side rate limits. This release makes the OpenRouter backend fully usable for agentic workflows with cloud models.
 
 ### Fixed
 
@@ -33,19 +33,55 @@ Fixes a critical defect in the OpenRouter backend where native tool calls were n
 - **Bug**: Some `:free` / fine-tuned models on OpenRouter reject the `tools` field at runtime with HTTP 400 ("Model does not support tools"), even though the cloud provider nominally supports native tool calling. The original code had no fallback for this case.
 - **Fix**: `generate()` now detects "does not support tools" / "tools are not supported" / "function calling is not supported" in the error message and automatically retries the request once *without* the `tools` field. This lets the model fall back to text-format (ReAct) tool calls that the Agent's `ToolParser` can still parse from the response content. The fallback is logged in debug mode.
 
+#### OpenRouter 429 Rate Limit Retry (`plugins/openrouter/openrouter.py`)
+- **Bug**: When the upstream provider returned HTTP 429 (rate limited), `_make_api_request()` immediately raised a `RuntimeError`. The user saw a rate-limit error or, worse, a blank "Agent Nova: " response if the 429 came back as a provider-side error field with HTTP 200.
+- **Fix**: `_make_api_request()` now retries up to 3 times on HTTP 429, honoring the `Retry-After` header (capped at 60 seconds to avoid hanging). In debug mode, prints: `[OpenRouter] 429 rate limited (attempt 1/4): <message>. Retrying in 10s...`. Only after exhausting all retries does it raise the `RuntimeError` that surfaces as `Error: OpenRouter rate limit: ...` in the chat loop. This dramatically reduces the number of "empty response" errors the user sees with `:free` models that have aggressive rate limits.
+
+#### Empty Response Detection (`plugins/openrouter/openrouter.py`, `cli.py`)
+- **Bug**: When the model returned empty/whitespace-only content with no tool calls (often caused by provider-side rate limiting, content filtering, or model issues), the agent silently accepted it as a final answer and the user saw a blank `Agent Nova: ` line.
+- **Fix — Backend layer**: `generate()` now raises `RuntimeError("OpenRouter returned an empty response (no content, no tool_calls)...")` when the API response has no content AND no tool calls. This surfaces as a visible error in the chat loop instead of a silent blank.
+- **Fix — CLI layer**: The chat loop now checks `result.final_answer` after the agent run completes. If empty/whitespace, displays:
+  ```
+  Agent Nova: (empty response)
+    The model returned no content. This is likely a rate limit (429) or content filter.
+    Try again in a few seconds, or use /debug to see what happened.
+  ```
+  instead of the blank `Agent Nova: ` line.
+
 ### Added
 
-#### Chat Mode Status Footer — Restored with Scroll Region (`cli.py`)
+#### Chat Mode Status Footer — Restored with 2-Line Scroll Region (`cli.py`)
 - **History**: R05.1 introduced a persistent emoji status footer bar drawn below the `You:` input prompt every turn, showing version (⚛️), model (🧠), prompt size (📝), context window (📦), max response tokens (💬), temperature (🌡️), backend (🔌), and cumulative session token usage with ↑/↓ arrows (📈). R05.2 removed it because the ANSI cursor-up rendering approach caused visual stacking — each turn's footer was never erased from terminal scrollback, accumulating one extra line per turn.
 - **R05.4 Attempt 1**: Printed the footer once per turn after the agent's response. This prevented stacking, but old footer text still appeared in the chat log as it scrolled by — the user wanted ONLY the current footer visible at all times.
-- **R05.4 Final Fix**: Uses a terminal **scroll region** (DECSTBM — `Set Top and Bottom Margins`) to reserve the bottom line of the terminal for the footer:
-  - On chat start: `\033[1;{height-1}r` sets the scroll region to lines 1 through (height-1). The bottom line is excluded from scrolling and reserved for the footer.
+- **R05.4 Final Fix**: Uses a terminal **scroll region** (DECSTBM — `Set Top and Bottom Margins`) to reserve the bottom **two** lines of the terminal for the footer (the single-line footer was getting cut off on narrower terminals):
+  - **Line 1**: version (⚛️), model (🧠), prompt size (📝), context window (📦), max response tokens (💬), temperature (🌡️)
+  - **Line 2**: backend (🔌), session token usage (📈 ↑in ↓out), debug indicator (🐛)
+  - On chat start: `\033[1;{height-2}r` sets the scroll region to lines 1 through (height-2). The bottom 2 lines are excluded from scrolling and reserved for the footer.
   - The conversation (user input, agent responses, slash command output) all scroll within the region above. The footer stays fixed at the bottom.
-  - The footer is redrawn in place via save-cursor (`\033[s`), move-to-bottom-line, clear-line (`\033[2K`), write-footer, restore-cursor (`\033[u`). No footer text EVER enters the scrollback history.
-  - On every exit path (quit, EOF, Ctrl+C, exception): a `try/finally` block calls `_teardown_footer_region()` which resets the scroll region (`\033[r`) and clears the footer line, so the terminal is never left in a broken state.
+  - The footer is redrawn in place via save-cursor (`\033[s`), move-to-footer-line, clear-line (`\033[2K`), write-footer, restore-cursor (`\033[u`). No footer text EVER enters the scrollback history — exactly one footer (2 lines) visible at all times.
+  - On every exit path (quit, EOF, Ctrl+C, exception): a `try/finally` block calls `_teardown_footer_region()` which resets the scroll region (`\033[r`) and clears both footer lines, so the terminal is never left in a broken state.
+  - `_position_for_input()` moves the cursor to the bottom of the scroll region (one line above the footer) before each `input("You: ")` call, so the prompt always appears in the right place.
   - Handles terminal resize: re-queries `shutil.get_terminal_size()` on each footer update and re-establishes the scroll region if dimensions changed.
-  - Graceful fallback: if stdout is not a TTY (piped output) or the terminal is smaller than 5 lines, the scroll region is skipped entirely — no garbage ANSI codes in piped output.
+  - Graceful fallback: if stdout is not a TTY (piped output) or the terminal is smaller than 6 lines, the scroll region is skipped entirely — no garbage ANSI codes in piped output.
   - Footer is refreshed at the top of each loop iteration (before `input()`) and after each agent response (to update token counts).
+  - Backward-compatible `_footer_text()` wrapper kept for legacy tests that expect a single function.
+
+#### Security Mode Toggle (`core/helpers.py`, `cli.py`, `shared_args.py`)
+- **Feature**: Added a runtime-toggleable security mode with two settings:
+  - `max` (default) — all security checks enabled: shell injection patterns, blocked commands, path traversal, SSRF protection
+  - `off` — ALL security checks disabled: the model can run any command, read/write any path, and fetch any URL
+- **Implementation**:
+  - New `SecurityMode` type (`Literal["max", "off"]`) and global `_security_mode` flag in `core/helpers.py`
+  - `set_security_mode(mode)` / `get_security_mode()` API for programmatic access
+  - `sanitize_command()`, `validate_path()`, and `is_safe_url()` all check the flag and skip ALL checks when mode is `"off"` (empty inputs are still rejected — that's input validation, not security)
+  - Exported from `agentnova.core.__init__` as part of the public API
+- **CLI integration**:
+  - New `/security` slash command in chat mode: `/security` (show current), `/security max`, `/security off`
+  - New `--security max|off` CLI flag for startup (in `shared_args.py`, wired in `_build_agent()`)
+  - Security mode now displayed in `/status` output
+  - `/help` updated to list the new command
+- **Use case**: When using a fine-tuned model that legitimately uses `&&`, `|`, `$()`, etc. in shell commands, the user can switch to `off` mode to allow these without hitting false-positive injection rejections. The default `max` mode preserves the strict security posture for untrusted models.
+- **Warning**: `--security off` disables ALL safety checks. Only use when you trust the model and need unrestricted access.
 
 #### CLI Tool-Call Visibility (`_print_agent_steps`)
 - **Feature**: The chat loop previously only printed `result.final_answer` — the user saw nothing about what the agent actually *did*. Now a new `_print_agent_steps(result, debug)` helper prints a compact summary of each tool call between the user prompt and the final answer:
@@ -62,13 +98,14 @@ Fixes a critical defect in the OpenRouter backend where native tool calls were n
   - No-op when the run had no tool calls (just a text answer)
 
 #### OpenRouter Backend Test Suite (`tests/test_openrouter_backend.py`)
-- **24 tests** covering:
+- **39 tests** covering:
   - Response parsing: native tool_calls, object args, malformed args, missing choices, provider error field, text-only response
   - Request body construction: tools included/omitted, optional params, `max_tokens` vs `max_completion_tokens`
   - Error-text matching for ReAct fallback (`_is_tools_not_supported_error`)
-  - Full `generate()` flow with mocked HTTP: happy path, fallback retry, unrelated-error propagation, missing finish_reason synthesis
+  - Full `generate()` flow with mocked HTTP: happy path, fallback retry, unrelated-error propagation, missing finish_reason synthesis, empty response detection, whitespace-only response detection, empty content + tool_calls (valid)
   - `test_tool_support()` returns NATIVE without any API call (cloud provider handles detection)
   - `_print_agent_steps` CLI helper: prints calls when present, silent in debug mode, silent when no tool calls, truncates long args/results
+  - Security mode toggle: default mode, set max/off, invalid mode rejection, shell injection allowed/blocked per mode, path traversal allowed/blocked per mode, SSRF localhost allowed/blocked per mode
 
 ### Changed
 
@@ -86,12 +123,15 @@ Fixes a critical defect in the OpenRouter backend where native tool calls were n
 |--------|------|:-------:|
 | Updated | `pyproject.toml` | Version: 0.5.3 → 0.5.4 |
 | Updated | `agentnova/__init__.py` | Version 0.5.3 → 0.5.4, docstring R05.3 → R05.4 |
-| Updated | `agentnova/cli.py` | Docstring R05.3 → R05.4, added `_print_agent_steps()` + `_print_footer()`, wired both into `cmd_chat` + `cmd_run`, added `RuntimeError` handler in `cmd_run`, restored status footer (R05.1-style, with stacking fix) |
-| Updated | `agentnova/plugins/openrouter/openrouter.py` | Rewrote `generate()` (sends tools, parses tool_calls, ReAct fallback), rewrote `_make_api_request()` (extracts upstream error messages), rewrote `_parse_openai_response()` (surfaces `error` field, raises on missing choices), simplified `test_tool_support()` (returns NATIVE without probe), added `_build_openai_body()` + `_is_tools_not_supported_error()` helpers |
-| Updated | `README.md` | Title R05.3 → R05.4 |
-| Added | `tests/test_openrouter_backend.py` | 24 tests for OpenRouter backend + CLI helper |
+| Updated | `agentnova/cli.py` | Docstring R05.3 → R05.4, added `_print_agent_steps()` + 2-line scroll-region footer (`_setup_footer_region`, `_teardown_footer_region`, `_update_footer`, `_position_for_input`), wired into `cmd_chat` + `cmd_run`, added `RuntimeError` handler in `cmd_run`, added `/security` slash command, `--security` flag wiring in `_build_agent()`, `/status` shows security mode, empty-answer detection |
+| Updated | `agentnova/core/helpers.py` | Added `SecurityMode` type, `_security_mode` flag, `set_security_mode()` / `get_security_mode()` / `_security_enabled()`; `sanitize_command()`, `validate_path()`, `is_safe_url()` now skip checks when mode is "off" |
+| Updated | `agentnova/core/__init__.py` | Exported `set_security_mode`, `get_security_mode`, `SecurityMode` |
+| Updated | `agentnova/shared_args.py` | Added `--security max\|off` CLI argument |
+| Updated | `agentnova/plugins/openrouter/openrouter.py` | Rewrote `generate()` (sends tools, parses tool_calls, ReAct fallback, empty-response detection), rewrote `_make_api_request()` (429 retry with Retry-After, extracts upstream error messages), rewrote `_parse_openai_response()` (surfaces `error` field, raises on missing choices), simplified `test_tool_support()` (returns NATIVE without probe), added `_build_openai_body()` + `_is_tools_not_supported_error()` helpers |
+| Updated | `README.md` | Title R05.3 → R05.4, added security mode docs, `--security` CLI option, R05.4 feature list |
+| Added | `tests/test_openrouter_backend.py` | 39 tests for OpenRouter backend, CLI helper, and security mode |
 | Updated | `docs/CHANGELOG.md` | Added R05.4 entry |
-| **Total** | **7 files** | **Bug fixes, CLI visibility, tests, version bump** |
+| **Total** | **10 files** | **Bug fixes, security mode, 429 retry, 2-line footer, CLI visibility, tests, version bump** |
 
 ---
 

@@ -12,7 +12,8 @@ from .tool_parse import ToolParser
 from .helpers import (
     fuzzy_match, normalize_args, validate_path, is_safe_url,
     strip_tool_prefix, is_simple_answered_query, is_greeting_or_simple,
-    is_small_model, detect_and_fix_repetition, synthesize_tool_args
+    is_small_model, detect_and_fix_repetition, synthesize_tool_args,
+    set_security_mode, get_security_mode, SecurityMode,
 )
 from .prompts import (
     get_system_prompt, get_tool_prompt, get_react_prompt,
@@ -85,6 +86,9 @@ __all__ = [
     "is_small_model",
     "detect_and_fix_repetition",
     "synthesize_tool_args",
+    "set_security_mode",
+    "get_security_mode",
+    "SecurityMode",
     # Prompts
     "get_system_prompt",
     "get_tool_prompt",

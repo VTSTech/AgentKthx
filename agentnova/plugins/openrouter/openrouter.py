@@ -425,12 +425,18 @@ class OpenRouterBackend(OllamaBackend):
         # For now, return None to let OllamaBackend handle defaults
         return None
 
-    def _make_api_request(self, endpoint: str, data: dict, stream: bool = False) -> dict | Generator:
-        """Make request to OpenRouter API.
+    # Maximum retries for 429 rate-limit responses before giving up.
+    _MAX_429_RETRIES = 3
 
-        Errors are normalized to RuntimeError carrying the upstream error
-        message so callers can pattern-match on the text (e.g. to detect
-        "does not support tools" for the ReAct fallback path).
+    def _make_api_request(self, endpoint: str, data: dict, stream: bool = False) -> dict | Generator:
+        """Make request to OpenRouter API with automatic 429 retry.
+
+        On HTTP 429 (rate limit), reads the `Retry-After` header and waits
+        the requested duration (capped at 60s) before retrying. Retries up
+        to `_MAX_429_RETRIES` times. Other errors are normalized to
+        RuntimeError carrying the upstream error message so callers can
+        pattern-match on the text (e.g. to detect "does not support
+        tools" for the ReAct fallback path).
         """
         url = f"{self.base_url}/{endpoint}"
 
@@ -449,63 +455,99 @@ class OpenRouterBackend(OllamaBackend):
         if stream:
             return self._stream_request(url, data, headers)
 
-        response = requests.post(
-            url,
-            json=data,
-            headers=headers,
-            timeout=self.config.timeout
-        )
-
-        # Handle rate limiting (429) and auth errors (401) with friendly messages.
-        if response.status_code == 429:
-            error_msg = "Rate limit exceeded"
-            retry_after = response.headers.get("Retry-After", "60")
-            try:
-                error_data = response.json()
-                if "error" in error_data:
-                    inner = error_data["error"]
-                    error_msg = inner.get("message", inner) if isinstance(inner, dict) else str(inner)
-                elif "message" in error_data:
-                    error_msg = error_data["message"]
-            except Exception:
-                pass
-            raise RuntimeError(f"OpenRouter rate limit: {error_msg}. Try again in {retry_after} seconds.")
-
-        if response.status_code == 401:
-            raise RuntimeError("OpenRouter authentication failed. Please check your OPENROUTER_API_KEY environment variable.")
-
-        # Any other non-2xx: extract upstream error message and raise as
-        # RuntimeError so generate() can pattern-match on the text.
-        if response.status_code >= 400:
-            upstream_msg = ""
-            try:
-                err_data = response.json()
-                # OpenRouter error shape: {"error": {"message": "...", "code": 400}}
-                # or just {"error": "..."} or {"message": "..."}
-                if isinstance(err_data, dict):
-                    err_field = err_data.get("error")
-                    if isinstance(err_field, dict):
-                        upstream_msg = err_field.get("message", "") or str(err_field)
-                    elif isinstance(err_field, str):
-                        upstream_msg = err_field
-                    elif err_data.get("message"):
-                        upstream_msg = err_data["message"]
-                    else:
-                        upstream_msg = str(err_data)
-                else:
-                    upstream_msg = str(err_data)
-            except Exception:
-                upstream_msg = response.text[:500]
-
-            # Truncate long upstream payloads for log readability.
-            if len(upstream_msg) > 500:
-                upstream_msg = upstream_msg[:500] + "..."
-
-            raise RuntimeError(
-                f"OpenRouter API error {response.status_code}: {upstream_msg}"
+        # Retry loop for 429 rate-limit responses.
+        # OpenRouter sends 429 with a Retry-After header (seconds) when
+        # the upstream provider is rate-limited. We honor it and retry
+        # automatically so the user sees fewer "empty response" errors.
+        last_429_error = None
+        for attempt in range(self._MAX_429_RETRIES + 1):
+            response = requests.post(
+                url,
+                json=data,
+                headers=headers,
+                timeout=self.config.timeout
             )
 
-        return response.json()
+            # ---- 429 Rate Limit: wait and retry ----
+            if response.status_code == 429:
+                error_msg = "Rate limit exceeded"
+                retry_after_raw = response.headers.get("Retry-After", "10")
+                try:
+                    error_data = response.json()
+                    if "error" in error_data:
+                        inner = error_data["error"]
+                        error_msg = (inner.get("message", inner)
+                                     if isinstance(inner, dict) else str(inner))
+                    elif "message" in error_data:
+                        error_msg = error_data["message"]
+                except Exception:
+                    pass
+                last_429_error = error_msg
+
+                # Parse Retry-After (seconds). Cap at 60s so we don't hang forever.
+                try:
+                    retry_after = int(retry_after_raw)
+                except (ValueError, TypeError):
+                    retry_after = 10
+                retry_after = min(max(retry_after, 1), 60)
+
+                if attempt < self._MAX_429_RETRIES:
+                    if os.environ.get("AGENTNOVA_DEBUG"):
+                        print(f"  [OpenRouter] 429 rate limited "
+                              f"(attempt {attempt + 1}/{self._MAX_429_RETRIES + 1}): "
+                              f"{error_msg}. Retrying in {retry_after}s...")
+                    time.sleep(retry_after)
+                    continue
+                else:
+                    # Exhausted retries — raise the error.
+                    raise RuntimeError(
+                        f"OpenRouter rate limit: {error_msg}. "
+                        f"Retried {self._MAX_429_RETRIES} times. "
+                        f"Try again in {retry_after} seconds."
+                    )
+
+            # ---- 401 Auth error ----
+            if response.status_code == 401:
+                raise RuntimeError(
+                    "OpenRouter authentication failed. Please check your "
+                    "OPENROUTER_API_KEY environment variable."
+                )
+
+            # ---- Any other 4xx/5xx error ----
+            if response.status_code >= 400:
+                upstream_msg = ""
+                try:
+                    err_data = response.json()
+                    if isinstance(err_data, dict):
+                        err_field = err_data.get("error")
+                        if isinstance(err_field, dict):
+                            upstream_msg = err_field.get("message", "") or str(err_field)
+                        elif isinstance(err_field, str):
+                            upstream_msg = err_field
+                        elif err_data.get("message"):
+                            upstream_msg = err_data["message"]
+                        else:
+                            upstream_msg = str(err_data)
+                    else:
+                        upstream_msg = str(err_data)
+                except Exception:
+                    upstream_msg = response.text[:500]
+
+                if len(upstream_msg) > 500:
+                    upstream_msg = upstream_msg[:500] + "..."
+
+                raise RuntimeError(
+                    f"OpenRouter API error {response.status_code}: {upstream_msg}"
+                )
+
+            # Success
+            return response.json()
+
+        # Should never reach here (loop exits via return or raise above).
+        raise RuntimeError(
+            f"OpenRouter rate limit: {last_429_error}. "
+            f"Retried {self._MAX_429_RETRIES} times."
+        )
 
     def _stream_request(self, url: str, data: dict, headers: dict) -> Generator[dict, None, None]:
         """Handle streaming requests."""
