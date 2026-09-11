@@ -4,6 +4,49 @@ All notable changes to AgentNova will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [R05.3] - 09-11-2026 4:22:00 PM
+
+### Documentation Updates & Version Bump for OpenRouter Plugin Release
+
+Updates all documentation and version banners to reflect the completed OpenRouter plugin implementation. This release is a documentation update that ensures consistency across all user-facing materials following the successful OpenRouter plugin integration in R05.2.
+
+### Updated
+
+#### Version Numbers and Banners
+- **pyproject.toml** — Updated version from `0.5.2` to `0.5.3` for release preparation
+- **README.md** — Updated title from "R05.2" to "R05.3" and enhanced OpenRouter documentation
+- **CLI Banner** — Updated `agentnova/cli.py` docstring to show "AgentNova R05.3" 
+- **Main Module** — Updated `agentnova/__init__.py` docstring and `__version__` to "0.5.3"
+
+#### Documentation Enhancements
+- **OpenRouter Examples** — Added comprehensive usage examples showing different model types (OpenAI, Anthropic, Google)
+- **Environment Variables** — Documented all OpenRouter configuration options with examples
+- **Backend Examples** — Updated backend options section to include OpenRouter alongside existing backends
+- **Changelog Link** — Added link to docs/CHANGELOG.md in README for easy version tracking
+
+### Configuration
+
+The OpenRouter plugin configuration remains the same as R05.2:
+```bash
+export OPENROUTER_API_KEY="your_api_key_here"
+export OPENROUTER_BASE_URL="https://openrouter.ai/api/v1"
+export OPENROUTER_DEFAULT_MODEL="anthropic/claude-3.5-sonnet"
+export OPENROUTER_FREE_ONLY="1"
+```
+
+### File Changes Summary
+
+| Action | File | Changes |
+|--------|------|:-------:|
+| Updated | `pyproject.toml` | Version: 0.5.2 → 0.5.3 |
+| Updated | `README.md` | Title, OpenRouter docs, changelog link |
+| Updated | `agentnova/cli.py` | Banner docstring |
+| Updated | `agentnova/__init__.py` | Version and docs |
+| Updated | `docs/CHANGELOG.md` | Added R05.3 entry |
+| **Total** | **5 files** | **Version and documentation updates** |
+
+---
+
 ## [R05.2] - 09-11-2026 2:37:37 PM
 
 ### OpenRouter Plugin Implementation & Backend API Mode Improvements

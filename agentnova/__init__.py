@@ -1,14 +1,15 @@
 """
-⚛️ AgentNova
+⚛️ AgentNova R05.3
 A minimal, hackable agentic framework engineered for local inference.
 
 Features:
   • Zero dependencies — uses Python stdlib only
-  • Ollama + BitNet backends — switch with --backend flag
+  • Ollama + OpenRouter + BitNet backends — switch with --backend flag
   • Three-tier tool support — native, ReAct, or none (auto-detected)
   • Small model optimized — fuzzy matching, argument normalization
   • Built-in security — path validation, command blocklist, SSRF protection
   • Soul Spec v0.5 — persona packages (disabled by default, use --soul)
+  • Multi-cloud support — 500+ models via OpenRouter plugin
 
 Status: Alpha
 
@@ -28,7 +29,7 @@ Example Usage:
     agent = Agent(model="qwen2.5:0.5b", soul="/path/to/soul/package")
 """
 
-__version__ = "0.5.1"
+__version__ = "0.5.3"
 __author__ = "VTSTech"
 __status__ = "Alpha"
 

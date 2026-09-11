@@ -1,4 +1,4 @@
-# ⚛️ AgentNova R05.2
+# ⚛️ AgentNova R05.3
 
 **Status: Alpha**
 
@@ -115,9 +115,12 @@ agentnova chat -m qwen2.5:0.5b --backend ollama         # Ollama (default)
 agentnova chat -m qwen2.5:7b --backend llama-server      # llama.cpp / TurboQuant
 
 # Plugin backends (loaded on demand)
-agentnova chat -m bitnet-b1.58-2b-4t --backend bitnet     # BitNet (plugin)
-agentnova chat -m glm-4.5-flash --backend zai             # ZAI (free tier, plugin)
-agentnova chat -m glm-5.1 --backend zai                   # ZAI (paid, plugin)
+agentnova chat -m poolside/laguna-xs-2.1:free --backend openrouter     # OpenRouter (free tier, plugin)
+agentnova chat -m openai/gpt-4o --backend openrouter                # OpenRouter (OpenAI models)
+agentnova chat -m anthropic/claude-3.5-sonnet --backend openrouter   # OpenRouter (Anthropic models)
+agentnova chat -m bitnet-b1.58-2b-4t --backend bitnet              # BitNet (plugin)
+agentnova chat -m glm-4.5-flash --backend zai                       # ZAI (free tier, plugin)
+agentnova chat -m glm-5.1 --backend zai                             # ZAI (paid, plugin)
 
 # Plugin management
 agentnova plugins                    # List discovered plugins
@@ -208,6 +211,41 @@ if status:
 
 # Stop server
 stop_server()
+```
+
+### OpenRouter Configuration
+
+OpenRouter provides access to 500+ models from Anthropic, OpenAI, Google, Cohere, and other providers.
+
+#### Environment Variables
+
+```bash
+export OPENROUTER_API_KEY="your_api_key_here"                    # Required
+export OPENROUTER_BASE_URL="https://openrouter.ai/api/v1"        # Optional (default)
+export OPENROUTER_DEFAULT_MODEL="anthropic/claude-3.5-sonnet"    # Optional
+export OPENROUTER_FREE_ONLY="1"                                 # Optional (filter to free models)
+```
+
+#### Usage Examples
+
+```bash
+# Basic usage with free model
+agentnova chat --backend openrouter --model poolside/laguna-xs-2.1:free
+
+# OpenAI models via OpenRouter
+agentnova chat --backend openrouter --model openai/gpt-4o
+
+# Anthropic models via OpenRouter
+agentnova chat --backend openrouter --model anthropic/claude-3.5-sonnet
+
+# Google models via OpenRouter
+agentnova chat --backend openrouter --model google/gemini-flash
+
+# List available models
+agentnova models --backend openrouter
+
+# Free models only
+OPENROUTER_FREE_ONLY=1 agentnova models --backend openrouter
 ```
 
 ### Chat-Completions Streaming
@@ -498,3 +536,7 @@ MIT License - See LICENSE file for details.
 ## Contributing
 
 Contributions welcome!
+
+## Changelog
+
+See [docs/CHANGELOG.md](https://github.com/VTSTech/AgentNova/blob/main/docs/CHANGELOG.md) for detailed version history and release notes.

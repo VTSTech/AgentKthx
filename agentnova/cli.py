@@ -1,6 +1,6 @@
 """
 ⚛️ AgentNova — CLI
-Command-line interface for AgentNova.
+Command-line interface for AgentNova R05.3.
 
 Status: Alpha
 
