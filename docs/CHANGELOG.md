@@ -4,6 +4,85 @@ All notable changes to AgentNova will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [R05.4] - 09-11-2026 10:35:00 PM
+
+### OpenRouter Tool-Calling Fix & CLI Visibility Improvements
+
+Fixes a critical defect in the OpenRouter backend where native tool calls were never sent to the API and never parsed from the response, causing the agent to silently fall back to treating the model's text output as a final answer. Also adds CLI visibility for tool-call execution and proper error surfacing for provider-side rate limits. This release makes the OpenRouter backend actually usable for agentic workflows with cloud models.
+
+### Fixed
+
+#### Critical: OpenRouter Backend Never Sent or Parsed Tool Calls
+- **Bug**: `OpenRouterBackend.generate()` built the request body without the `tools` field — OpenRouter had no idea what tools existed, so the model hallucinated its own non-standard text format (`shellcommand\`echo ...\``) instead of using proper function-calling JSON. The agent's ToolParser couldn't recognize this format, so every tool request was silently accepted as a final answer.
+- **Root Cause**: The original `generate()` method hardcoded `"tool_calls": []` in its return dict and never read `message.get("tool_calls")` from the API response. It also used `max_completion_tokens` (the newer OpenAI field) instead of `max_tokens` (universally supported), causing silent failures on some `:free` providers.
+- **Fix**: Rewrote `generate()` to:
+  - Build the request body with `tools` in OpenAI function-calling schema (`t.to_openai_schema()`)
+  - Send `max_tokens` for maximum provider compatibility
+  - Parse `choices[0].message.tool_calls` from the response, normalizing arguments (JSON string → dict, handling malformed JSON gracefully with `_raw` fallback)
+  - Synthesize `finish_reason` when providers omit it (some do)
+  - Return `latency_ms` for performance tracking
+
+#### OpenRouter HTTP Errors Not Surfaced to User
+- **Bug**: `_make_api_request()` called `response.raise_for_status()` which raised a bare `requests.exceptions.HTTPError` with no upstream error message. The chat loop caught this as a generic `RuntimeError` and printed a vague "Error:" line, or worse — when OpenRouter returned HTTP 200 with a top-level `error` field (provider-side rate limit), the parser silently returned an empty response and the user saw a blank "Agent Nova: " line.
+- **Fix**:
+  - `_make_api_request()` now extracts the upstream error message from any 4xx/5xx response (handles `{"error": {"message": ...}}`, `{"error": "..."}`, and `{"message": "..."}` shapes) and raises `RuntimeError("OpenRouter API error {status}: {message}")` so callers can pattern-match on the text.
+  - `_parse_openai_response()` now checks for a top-level `error` field *before* looking at `choices`. If found, raises `RuntimeError("OpenRouter provider error: {message} (code={code})")`. Also raises on missing `choices` instead of silently returning empty.
+  - Both errors propagate to the chat loop's existing `except RuntimeError` handler, which prints the real message in red.
+
+#### ReAct Fallback Safety Net for Free Models
+- **Bug**: Some `:free` / fine-tuned models on OpenRouter reject the `tools` field at runtime with HTTP 400 ("Model does not support tools"), even though the cloud provider nominally supports native tool calling. The original code had no fallback for this case.
+- **Fix**: `generate()` now detects "does not support tools" / "tools are not supported" / "function calling is not supported" in the error message and automatically retries the request once *without* the `tools` field. This lets the model fall back to text-format (ReAct) tool calls that the Agent's `ToolParser` can still parse from the response content. The fallback is logged in debug mode.
+
+### Added
+
+#### CLI Tool-Call Visibility (`_print_agent_steps`)
+- **Feature**: The chat loop previously only printed `result.final_answer` — the user saw nothing about what the agent actually *did*. Now a new `_print_agent_steps(result, debug)` helper prints a compact summary of each tool call between the user prompt and the final answer:
+  ```
+  [1] tool shell {"command": "echo hi"}
+      → hi
+  [2] tool read_file {"file_path": "/tmp/x"}
+      → file contents...
+  ```
+- **Behavior**:
+  - Wired into both `cmd_chat` and `cmd_run`
+  - Suppressed when `agent.debug=True` (debug mode already prints verbose step output)
+  - Long args (>120 chars) and long results (>200 chars) truncated with `...`
+  - No-op when the run had no tool calls (just a text answer)
+
+#### OpenRouter Backend Test Suite (`tests/test_openrouter_backend.py`)
+- **24 tests** covering:
+  - Response parsing: native tool_calls, object args, malformed args, missing choices, provider error field, text-only response
+  - Request body construction: tools included/omitted, optional params, `max_tokens` vs `max_completion_tokens`
+  - Error-text matching for ReAct fallback (`_is_tools_not_supported_error`)
+  - Full `generate()` flow with mocked HTTP: happy path, fallback retry, unrelated-error propagation, missing finish_reason synthesis
+  - `test_tool_support()` returns NATIVE without any API call (cloud provider handles detection)
+  - `_print_agent_steps` CLI helper: prints calls when present, silent in debug mode, silent when no tool calls, truncates long args/results
+
+### Changed
+
+#### OpenRouter `test_tool_support()` Simplified
+- **Before**: Returned `NATIVE` for most models, `UNTESTED` for a hardcoded blocklist (`anthropic/claude-3-haiku`). Did not actually probe the model.
+- **After**: Always returns `ToolSupportLevel.NATIVE` without any API call. OpenRouter is a cloud aggregator that only exposes models which already support native function calling on their underlying provider, so probing is unnecessary. The signature now accepts `model`, `family`, and `force_test` parameters for API compatibility with other backends (all ignored). The defensive ReAct fallback in `generate()` handles the rare runtime rejection case.
+
+#### Refactored Request/Response Helpers
+- **`_build_openai_body()`** — new method that centralizes OpenAI Chat-Completions request body construction. Adds optional fields (`top_p`, `top_k`, `seed`, `n`, `presence_penalty`, `frequency_penalty`, `stop`, `response_format`, `tool_choice`) only when explicitly provided. Keeps `generate()` and `generate_stream()` in sync.
+- **`_parse_openai_response()`** — new static method that parses an OpenAI-format response into the dict shape AgentNova's agent loop expects (`content`, `tool_calls`, `finish_reason`, `usage`, `raw`). Handles arguments as JSON string (OpenAI spec) or object (some providers), with `_raw` fallback for malformed JSON.
+
+### File Changes Summary
+
+| Action | File | Changes |
+|--------|------|:-------:|
+| Updated | `pyproject.toml` | Version: 0.5.3 → 0.5.4 |
+| Updated | `agentnova/__init__.py` | Version 0.5.3 → 0.5.4, docstring R05.3 → R05.4 |
+| Updated | `agentnova/cli.py` | Docstring R05.3 → R05.4, added `_print_agent_steps()`, wired into `cmd_chat` + `cmd_run`, added `RuntimeError` handler in `cmd_run` |
+| Updated | `agentnova/plugins/openrouter/openrouter.py` | Rewrote `generate()` (sends tools, parses tool_calls, ReAct fallback), rewrote `_make_api_request()` (extracts upstream error messages), rewrote `_parse_openai_response()` (surfaces `error` field, raises on missing choices), simplified `test_tool_support()` (returns NATIVE without probe), added `_build_openai_body()` + `_is_tools_not_supported_error()` helpers |
+| Updated | `README.md` | Title R05.3 → R05.4 |
+| Added | `tests/test_openrouter_backend.py` | 24 tests for OpenRouter backend + CLI helper |
+| Updated | `docs/CHANGELOG.md` | Added R05.4 entry |
+| **Total** | **7 files** | **Bug fixes, CLI visibility, tests, version bump** |
+
+---
+
 ## [R05.3] - 09-11-2026 4:22:00 PM
 
 ### Documentation Updates & Version Bump for OpenRouter Plugin Release
