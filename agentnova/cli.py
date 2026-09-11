@@ -436,7 +436,9 @@ def _build_agent(args: argparse.Namespace, config) -> Agent:
     only needs to be added here (and in add_agent_args).
     """
     backend_name = args.backend or config.backend
-    api_mode = getattr(args, "api_mode", "openre")
+    
+    # Default to OpenAI API mode (more compatible with cloud providers)
+    api_mode = getattr(args, "api_mode", "openai")
     timeout = getattr(args, "timeout", None)
 
     # When --backend bitnet is used without --model, discover the actual

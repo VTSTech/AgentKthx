@@ -276,6 +276,8 @@ class OpenRouterBackend(OllamaBackend):
             resolved_url = f"http://{host}:{port}"
         else:
             resolved_url = OPENROUTER_BASE_URL.rstrip("/")
+            
+        print(f"[DEBUG] OpenRouter using URL: {resolved_url}")
 
         # Set API mode (OpenRouter only supports OpenAI Chat-Completions)
         if isinstance(api_mode, str):
@@ -299,7 +301,7 @@ class OpenRouterBackend(OllamaBackend):
 
     @property
     def backend_type(self) -> BackendType:
-        return BackendType.ZAI  # Using ZAI as a proxy for "cloud API backends"
+        return BackendType.OPENROUTER
 
     @property
     def base_url(self) -> str:
@@ -320,10 +322,18 @@ class OpenRouterBackend(OllamaBackend):
             return self._model_cache
         
         try:
+            # Use proper headers for API call
+            headers = {
+                "HTTP-Referer": "https://github.com/VTSTech/AgentNova",
+                "X-Title": "AgentNova"
+            }
+            if self.api_key:
+                headers["Authorization"] = f"Bearer {self.api_key}"
+            
             response = requests.get(
                 f"{self.base_url}/models",
-                headers=self.headers,
-                timeout=self.config.timeout
+                headers=headers,
+                timeout=10  # Shorter timeout for model listing
             )
             response.raise_for_status()
             
@@ -426,8 +436,12 @@ class OpenRouterBackend(OllamaBackend):
             raise ValueError("OPENROUTER_API_KEY environment variable is required for API calls")
         
         # Update headers with API key if available
-        headers = self.headers.copy()
-        headers["Authorization"] = f"Bearer {self.api_key}"
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://github.com/VTSTech/AgentNova",
+            "X-Title": "AgentNova"
+        }
         
         if stream:
             return self._stream_request(url, data, headers)
@@ -438,6 +452,25 @@ class OpenRouterBackend(OllamaBackend):
                 headers=headers,
                 timeout=self.config.timeout
             )
+            
+            # Handle rate limiting
+            if response.status_code == 429:
+                error_msg = "Rate limit exceeded"
+                retry_after = response.headers.get("Retry-After", "60")
+                try:
+                    error_data = response.json()
+                    if "error" in error_data:
+                        error_msg = error_data["error"]
+                    elif "message" in error_data:
+                        error_msg = error_data["message"]
+                except:
+                    pass
+                raise RuntimeError(f"OpenRouter rate limit: {error_msg}. Try again in {retry_after} seconds.")
+            
+            # Handle authentication errors
+            if response.status_code == 401:
+                raise RuntimeError("OpenRouter authentication failed. Please check your OPENROUTER_API_KEY environment variable.")
+            
             response.raise_for_status()
             return response.json()
 
@@ -484,19 +517,19 @@ class OpenRouterBackend(OllamaBackend):
         model: str,
         messages: list[dict],
         tools: list[Tool] | None = None,
-        tool_choice: str | dict = "auto",
         temperature: float = 0.7,
         max_tokens: int | None = None,
-        top_p: float = 1.0,
-        stream: bool = False,
         **kwargs
-    ) -> dict | Generator:
+    ) -> dict:
         """
         Generate text using OpenRouter Chat Completions API.
         
         This method implements OpenAI Chat-Completions format compatible with
         OpenRouter's API specification.
         """
+        print(f"[DEBUG] OpenRouter.generate called with model: {model}")
+        print(f"[DEBUG] Messages: {messages}")
+        
         # Get model info for defaults
         model_info = self._get_model_info(model)
         model_max_tokens = model_info.get("max_tokens", 4096) if model_info else 4096
@@ -505,93 +538,44 @@ class OpenRouterBackend(OllamaBackend):
         if max_tokens is None:
             max_tokens = model_max_tokens
         
-        # Convert AgentNova messages to OpenAI format
-        openai_messages = []
-        for msg in messages:
-            converted = {
-                "role": msg["role"],
-                "content": msg.get("content", "")
-            }
-            
-            # Handle tool calls in messages
-            if "tool_calls" in msg and msg["tool_calls"]:
-                converted["tool_calls"] = []
-                for tc in msg["tool_calls"]:
-                    converted_tc = {
-                        "id": tc.get("id", ""),
-                        "type": "function",
-                        "function": {
-                            "name": tc["function"]["name"],
-                            "arguments": json.dumps(tc["function"]["arguments"]) 
-                            if isinstance(tc["function"]["arguments"], dict) 
-                            else tc["function"]["arguments"]
-                        }
-                    }
-                    converted["tool_calls"].append(converted_tc)
-            
-            # Handle tool responses
-            if "tool_call_id" in msg:
-                converted["tool_call_id"] = msg["tool_call_id"]
-                converted["content"] = msg.get("content", "")
-            
-            openai_messages.append(converted)
-        
-        # Build request data
+        # Build request data in OpenAI format
         request_data = {
             "model": model,
-            "messages": openai_messages,
+            "messages": messages,
             "temperature": temperature,
-            "top_p": top_p,
             "max_completion_tokens": max_tokens,
         }
         
-        # Add tools if provided
-        if tools:
-            openai_tools = []
-            for tool in tools:
-                openai_tools.append({
-                    "type": "function",
-                    "function": {
-                        "name": tool.name,
-                        "description": tool.description,
-                        "parameters": tool.parameters
-                    }
-                })
-            request_data["tools"] = openai_tools
-            request_data["tool_choice"] = tool_choice
-        
-        # Add streaming parameter
-        if stream:
-            request_data["stream"] = True
+        print(f"[DEBUG] Request data: {json.dumps(request_data, indent=2)}")
         
         # Make API request
         try:
-            response = self._make_api_request("chat/completions", request_data, stream)
-            return response
+            raw_response = self._make_api_request("chat/completions", request_data)
+            
+            # Parse the OpenRouter response and format it for AgentNova
+            if "choices" in raw_response and raw_response["choices"]:
+                choice = raw_response["choices"][0]
+                message = choice.get("message", {})
+                content = message.get("content", "")
+                
+                # Return in the format that AgentNova expects
+                return {
+                    "content": content,
+                    "tool_calls": [],
+                    "usage": raw_response.get("usage", {}),
+                    "raw": raw_response
+                }
+            else:
+                # No choices in response
+                return {
+                    "content": "",
+                    "tool_calls": [],
+                    "usage": raw_response.get("usage", {}),
+                    "raw": raw_response
+                }
+                
         except Exception as e:
             # Wrap error for consistent error handling
             raise RuntimeError(f"OpenRouter API error: {e}")
 
-    def generate_stream(
-        self,
-        model: str,
-        messages: list[dict],
-        tools: list[Tool] | None = None,
-        tool_choice: str | dict = "auto",
-        temperature: float = 0.7,
-        max_tokens: int | None = None,
-        top_p: float = 1.0,
-        **kwargs
-    ) -> Generator[dict, None, None]:
-        """Generate streaming text using OpenRouter Chat Completions API."""
-        return self.generate(
-            model=model,
-            messages=messages,
-            tools=tools,
-            tool_choice=tool_choice,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            top_p=top_p,
-            stream=True,
-            **kwargs
-        )
+    # Generate_stream method is inherited from OllamaBackend

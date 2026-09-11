@@ -182,7 +182,7 @@ def add_agent_args(
     parser.add_argument(
         "--api",
         choices=["openre", "openai"],
-        default="openre",
+        default="openai",
         dest="api_mode",
         help="API mode: 'openre' (OpenResponses) or 'openai' (Chat-Completions)",
     )
