@@ -426,13 +426,18 @@ class OpenRouterBackend(OllamaBackend):
         return None
 
     def _make_api_request(self, endpoint: str, data: dict, stream: bool = False) -> dict | Generator:
-        """Make request to OpenRouter API."""
+        """Make request to OpenRouter API.
+
+        Errors are normalized to RuntimeError carrying the upstream error
+        message so callers can pattern-match on the text (e.g. to detect
+        "does not support tools" for the ReAct fallback path).
+        """
         url = f"{self.base_url}/{endpoint}"
-        
+
         # Lazy API key check - only required for actual API calls
         if not self.api_key:
             raise ValueError("OPENROUTER_API_KEY environment variable is required for API calls")
-        
+
         # Update headers with API key if available
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -440,37 +445,67 @@ class OpenRouterBackend(OllamaBackend):
             "HTTP-Referer": "https://github.com/VTSTech/AgentNova",
             "X-Title": "AgentNova"
         }
-        
+
         if stream:
             return self._stream_request(url, data, headers)
-        else:
-            response = requests.post(
-                url,
-                json=data,
-                headers=headers,
-                timeout=self.config.timeout
+
+        response = requests.post(
+            url,
+            json=data,
+            headers=headers,
+            timeout=self.config.timeout
+        )
+
+        # Handle rate limiting (429) and auth errors (401) with friendly messages.
+        if response.status_code == 429:
+            error_msg = "Rate limit exceeded"
+            retry_after = response.headers.get("Retry-After", "60")
+            try:
+                error_data = response.json()
+                if "error" in error_data:
+                    inner = error_data["error"]
+                    error_msg = inner.get("message", inner) if isinstance(inner, dict) else str(inner)
+                elif "message" in error_data:
+                    error_msg = error_data["message"]
+            except Exception:
+                pass
+            raise RuntimeError(f"OpenRouter rate limit: {error_msg}. Try again in {retry_after} seconds.")
+
+        if response.status_code == 401:
+            raise RuntimeError("OpenRouter authentication failed. Please check your OPENROUTER_API_KEY environment variable.")
+
+        # Any other non-2xx: extract upstream error message and raise as
+        # RuntimeError so generate() can pattern-match on the text.
+        if response.status_code >= 400:
+            upstream_msg = ""
+            try:
+                err_data = response.json()
+                # OpenRouter error shape: {"error": {"message": "...", "code": 400}}
+                # or just {"error": "..."} or {"message": "..."}
+                if isinstance(err_data, dict):
+                    err_field = err_data.get("error")
+                    if isinstance(err_field, dict):
+                        upstream_msg = err_field.get("message", "") or str(err_field)
+                    elif isinstance(err_field, str):
+                        upstream_msg = err_field
+                    elif err_data.get("message"):
+                        upstream_msg = err_data["message"]
+                    else:
+                        upstream_msg = str(err_data)
+                else:
+                    upstream_msg = str(err_data)
+            except Exception:
+                upstream_msg = response.text[:500]
+
+            # Truncate long upstream payloads for log readability.
+            if len(upstream_msg) > 500:
+                upstream_msg = upstream_msg[:500] + "..."
+
+            raise RuntimeError(
+                f"OpenRouter API error {response.status_code}: {upstream_msg}"
             )
-            
-            # Handle rate limiting
-            if response.status_code == 429:
-                error_msg = "Rate limit exceeded"
-                retry_after = response.headers.get("Retry-After", "60")
-                try:
-                    error_data = response.json()
-                    if "error" in error_data:
-                        error_msg = error_data["error"]
-                    elif "message" in error_data:
-                        error_msg = error_data["message"]
-                except:
-                    pass
-                raise RuntimeError(f"OpenRouter rate limit: {error_msg}. Try again in {retry_after} seconds.")
-            
-            # Handle authentication errors
-            if response.status_code == 401:
-                raise RuntimeError("OpenRouter authentication failed. Please check your OPENROUTER_API_KEY environment variable.")
-            
-            response.raise_for_status()
-            return response.json()
+
+        return response.json()
 
     def _stream_request(self, url: str, data: dict, headers: dict) -> Generator[dict, None, None]:
         """Handle streaming requests."""
@@ -496,19 +531,153 @@ class OpenRouterBackend(OllamaBackend):
                     except json.JSONDecodeError:
                         continue
 
-    def test_tool_support(self, model_name: str) -> ToolSupportLevel:
-        """Test tool support for a model via OpenRouter API."""
-        # Most models in OpenRouter support native tool calling
-        # Some models might need special handling
-        unsupported_models = [
-            "anthropic/claude-3-haiku",  # May have limited tool support
-        ]
-        
-        if any(unsupported in model_name for unsupported in unsupported_models):
-            return ToolSupportLevel.UNTESTED
-        
-        # Assume most models support native tool calling
+    def test_tool_support(
+        self,
+        model: str,
+        family: str | None = None,
+        force_test: bool = False,
+    ) -> ToolSupportLevel:
+        """Test tool support for a model via OpenRouter API.
+
+        OpenRouter is a cloud aggregator that only exposes models which
+        already support native function calling on their underlying
+        provider. We therefore assume NATIVE for every model without
+        probing — no live API call is made.
+
+        The actual generate() path keeps a defensive ReAct fallback for
+        the rare case where a specific free / fine-tuned model rejects
+        the `tools` field at runtime (HTTP 400), so text-format tool
+        calls can still flow through the Agent's ToolParser.
+
+        Args:
+            model: OpenRouter model id (e.g. "openai/gpt-4o")
+            family: Optional family hint (unused, kept for API compat)
+            force_test: Ignored — kept for API compatibility with other backends
+
+        Returns:
+            ToolSupportLevel.NATIVE for every model.
+        """
         return ToolSupportLevel.NATIVE
+
+    def _build_openai_body(
+        self,
+        model: str,
+        messages: list[dict],
+        tools: list[Tool] | None,
+        temperature: float,
+        max_tokens: int,
+        **kwargs,
+    ) -> dict:
+        """Build an OpenAI Chat-Completions request body for OpenRouter.
+
+        Centralises request construction so generate() and generate_stream()
+        stay in sync. All optional fields are only added when supplied.
+        """
+        body: dict = {
+            "model": model,
+            "messages": messages,
+            "stream": False,
+            "temperature": temperature,
+            # OpenRouter accepts both `max_tokens` (legacy, universally
+            # supported) and `max_completion_tokens` (newer OpenAI). We send
+            # `max_tokens` to maximise compatibility with free / 3rd-party
+            # providers that may not have adopted the new field yet.
+            "max_tokens": max_tokens,
+        }
+
+        # Tools in OpenAI function-calling format.
+        if tools:
+            body["tools"] = [t.to_openai_schema() for t in tools]
+
+        # Optional fields — only added when explicitly provided.
+        optional_int_fields = ("top_p", "top_k", "seed", "n")
+        optional_float_fields = ("presence_penalty", "frequency_penalty")
+        for field in optional_int_fields + optional_float_fields:
+            val = kwargs.get(field)
+            if val is not None:
+                body[field] = val
+
+        stop = kwargs.get("stop")
+        if stop is not None:
+            body["stop"] = stop if isinstance(stop, list) else [stop]
+
+        response_format = kwargs.get("response_format")
+        if response_format is not None:
+            body["response_format"] = response_format
+
+        tool_choice = kwargs.get("tool_choice")
+        if tool_choice is not None:
+            body["tool_choice"] = tool_choice
+
+        return body
+
+    @staticmethod
+    def _parse_openai_response(raw_response: dict) -> dict:
+        """Parse an OpenAI-format Chat Completions response.
+
+        Returns a dict in the shape AgentNova's agent loop expects:
+        {
+          "content": str,
+          "tool_calls": [{"id", "name", "arguments": dict}, ...],
+          "finish_reason": str | None,
+          "usage": {...},
+          "raw": <original response>,
+        }
+        """
+        choices = raw_response.get("choices", []) or []
+        if not choices:
+            return {
+                "content": "",
+                "tool_calls": [],
+                "finish_reason": None,
+                "usage": {},
+                "raw": raw_response,
+            }
+
+        choice = choices[0]
+        message = choice.get("message", {}) or {}
+
+        content = message.get("content") or ""
+        raw_tool_calls = message.get("tool_calls") or []
+        finish_reason = choice.get("finish_reason")
+
+        # Parse OpenAI tool_calls format:
+        #   { "id": "...", "type": "function",
+        #     "function": { "name": "...", "arguments": "<JSON string>" } }
+        parsed_tool_calls: list[dict] = []
+        for tc in raw_tool_calls:
+            func = tc.get("function", {}) or {}
+            args = func.get("arguments", "{}")
+            # OpenAI returns arguments as a JSON STRING, not an object.
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args) if args.strip() else {}
+                except json.JSONDecodeError:
+                    # Fall back to a raw wrapper so the agent loop can
+                    # surface the bad payload rather than crashing.
+                    args = {"_raw": args}
+            if not isinstance(args, dict):
+                args = {"input": args}
+
+            parsed_tool_calls.append({
+                "id": tc.get("id", ""),
+                "name": func.get("name", ""),
+                "arguments": args,
+            })
+
+        usage = raw_response.get("usage", {}) or {}
+
+        return {
+            "content": content,
+            "tool_calls": parsed_tool_calls,
+            "finish_reason": finish_reason,
+            "usage": {
+                "prompt_tokens": usage.get("prompt_tokens", 0),
+                "completion_tokens": usage.get("completion_tokens", 0),
+                "total_tokens": usage.get("total_tokens", 0),
+            },
+            "raw": raw_response,
+        }
 
     def generate(
         self,
@@ -517,63 +686,104 @@ class OpenRouterBackend(OllamaBackend):
         tools: list[Tool] | None = None,
         temperature: float = 0.7,
         max_tokens: int | None = None,
-        **kwargs
+        **kwargs,
     ) -> dict:
+        """Generate a response using OpenRouter's Chat Completions API.
+
+        Implements the OpenAI Chat Completions spec for OpenRouter, with
+        native tool-calling support and automatic ReAct fallback when the
+        provider rejects the `tools` field (many free models do).
+
+        Fallback behaviour:
+        - If OpenRouter returns HTTP 400 with a "does not support tools"
+          message, the request is retried once WITHOUT the `tools` field,
+          so the model can fall back to text-based (ReAct) tool calls that
+          the Agent's ToolParser can still parse from `content`.
+
+        Args:
+            model: OpenRouter model id (e.g. "openai/gpt-4o")
+            messages: Chat messages in OpenAI format
+            tools: Optional list of Tool objects for native function calling
+            temperature: Sampling temperature
+            max_tokens: Maximum tokens to generate
+            **kwargs: Optional OpenAI params — top_p, stop,
+                presence_penalty, frequency_penalty, response_format,
+                tool_choice, etc.
+
+        Returns:
+            Dict with keys: content, tool_calls, finish_reason, usage,
+            latency_ms, raw.
         """
-        Generate text using OpenRouter Chat Completions API.
-        
-        This method implements OpenAI Chat-Completions format compatible with
-        OpenRouter's API specification.
-        """
-        # Get model info for defaults
+        # Resolve model max_tokens from catalog if not provided
         model_info = self._get_model_info(model)
-        model_max_tokens = model_info.get("max_tokens", 4096) if model_info else 4096
-        
-        # Set default max tokens if not provided
         if max_tokens is None:
-            max_tokens = model_max_tokens
-        
-        # Build request data in OpenAI format
-        request_data = {
-            "model": model,
-            "messages": messages,
-            "temperature": temperature,
-            "max_completion_tokens": max_tokens,
-        }
-        
-        # Make API request
+            max_tokens = (model_info or {}).get("max_tokens", 4096)
+
+        body = self._build_openai_body(
+            model=model,
+            messages=messages,
+            tools=tools,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **kwargs,
+        )
+
+        if os.environ.get("AGENTNOVA_DEBUG"):
+            print(f"  [OpenRouter] POST chat/completions — "
+                  f"tools={len(tools) if tools else 0}, "
+                  f"tool_choice={kwargs.get('tool_choice', 'auto')}")
+
+        start_time = time.time()
         try:
-            raw_response = self._make_api_request("chat/completions", request_data)
-            
-            # Parse the OpenRouter response and format it for AgentNova
-            if "choices" in raw_response and raw_response["choices"]:
-                choice = raw_response["choices"][0]
-                message = choice.get("message", {})
-                content = message.get("content", "")
-                
-                # Check for empty content and raise error
-                if not content or content.strip() == "":
-                    error_msg = "Empty response from OpenRouter API"
-                    if "error" in raw_response:
-                        error_msg = f"OpenRouter API error: {raw_response['error']}"
-                    raise RuntimeError(error_msg)
-                
-                # Return in the format that AgentNova expects
-                return {
-                    "content": content,
-                    "tool_calls": [],
-                    "usage": raw_response.get("usage", {}),
-                    "raw": raw_response
-                }
+            raw_response = self._make_api_request("chat/completions", body)
+        except RuntimeError as e:
+            err_str = str(e)
+            # ReAct fallback: many :free / fine-tuned models on OpenRouter
+            # reject the `tools` field. Retry without it so the model can
+            # emit text-format tool calls that the ToolParser handles.
+            if tools and self._is_tools_not_supported_error(err_str):
+                if os.environ.get("AGENTNOVA_DEBUG"):
+                    print(f"  [OpenRouter] Model doesn't support tools — "
+                          f"retrying without tools (ReAct fallback)")
+                body.pop("tools", None)
+                body.pop("tool_choice", None)
+                raw_response = self._make_api_request("chat/completions", body)
             else:
-                # No choices in response - this indicates an API error
-                error_msg = "No choices in OpenRouter API response"
-                if "error" in raw_response:
-                    error_msg = f"OpenRouter API error: {raw_response['error']}"
-                raise RuntimeError(error_msg)
-                
-        except Exception as e:
-            # Wrap error for consistent error handling
-            raise RuntimeError(f"OpenRouter API error: {e}")
+                raise RuntimeError(f"OpenRouter API error: {err_str}")
+
+        latency_ms = (time.time() - start_time) * 1000
+        parsed = self._parse_openai_response(raw_response)
+        parsed["latency_ms"] = latency_ms
+
+        # Synthesize a finish_reason if the API omitted one (some providers do)
+        if parsed["finish_reason"] is None:
+            if parsed["tool_calls"]:
+                parsed["finish_reason"] = "tool_calls"
+            elif not parsed["content"]:
+                parsed["finish_reason"] = "stop"
+            else:
+                parsed["finish_reason"] = "stop"
+
+        if os.environ.get("AGENTNOVA_DEBUG"):
+            print(f"  [OpenRouter] finish_reason={parsed['finish_reason']}, "
+                  f"tool_calls={len(parsed['tool_calls'])}, "
+                  f"content_len={len(parsed['content'])}")
+
+        return parsed
+
+    @staticmethod
+    def _is_tools_not_supported_error(err_str: str) -> bool:
+        """Detect OpenRouter / upstream 'tools not supported' rejection."""
+        err_lower = err_str.lower()
+        indicators = (
+            "does not support tools",
+            "tools are not supported",
+            "tool calling is not supported",
+            "tools are not yet supported",
+            "does not support function calling",
+            "function calling is not supported",
+            "no tools endpoint",
+        )
+        return any(ind in err_lower for ind in indicators)
 
     # Generate_stream method is inherited from OllamaBackend
