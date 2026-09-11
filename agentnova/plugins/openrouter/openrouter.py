@@ -551,6 +551,13 @@ class OpenRouterBackend(OllamaBackend):
                 message = choice.get("message", {})
                 content = message.get("content", "")
                 
+                # Check for empty content and raise error
+                if not content or content.strip() == "":
+                    error_msg = "Empty response from OpenRouter API"
+                    if "error" in raw_response:
+                        error_msg = f"OpenRouter API error: {raw_response['error']}"
+                    raise RuntimeError(error_msg)
+                
                 # Return in the format that AgentNova expects
                 return {
                     "content": content,
@@ -559,13 +566,11 @@ class OpenRouterBackend(OllamaBackend):
                     "raw": raw_response
                 }
             else:
-                # No choices in response
-                return {
-                    "content": "",
-                    "tool_calls": [],
-                    "usage": raw_response.get("usage", {}),
-                    "raw": raw_response
-                }
+                # No choices in response - this indicates an API error
+                error_msg = "No choices in OpenRouter API response"
+                if "error" in raw_response:
+                    error_msg = f"OpenRouter API error: {raw_response['error']}"
+                raise RuntimeError(error_msg)
                 
         except Exception as e:
             # Wrap error for consistent error handling

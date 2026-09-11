@@ -4,6 +4,99 @@ All notable changes to AgentNova will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [R05.2] - 09-11-2026 2:37:37 PM
+
+### OpenRouter Plugin Implementation & Backend API Mode Improvements
+
+Adds the OpenRouter cloud backend as a first-class alternative to Ollama, enabling access to 500+ models from Anthropic, OpenAI, Google, Cohere, and other providers via an OpenAI Chat-Completions compatible API. Implements comprehensive model discovery with 1-hour caching, free model filtering via `OPENROUTER_FREE_ONLY`, and proper error handling for rate limits and authentication. Fixes critical issues with API mode defaults, backend type display, and response parsing.
+
+### Added
+
+#### OpenRouter Plugin (`plugins/openrouter/`)
+- **`OpenRouterPlugin`** — complete cloud backend implementation providing access to OpenRouter's API. Located in `plugins/openrouter/openrouter.py` with full plugin manifest (`plugin.json`). Inherits from `OllamaBackend` to reuse proven OpenAI Chat-Completions logic while adding OpenRouter-specific features.
+- **OpenAI Chat-Completions API** — OpenRouter only supports the OpenAI Chat-Completions format (`--api openai`). The backend automatically validates this at construction time and raises `ValueError` if an incompatible API mode is attempted.
+- **Authentication** — uses `OPENROUTER_API_KEY` environment variable for Bearer token authentication. Added to request headers as `Authorization: Bearer <key>` along with OpenRouter-specific headers (`HTTP-Referer`, `X-Title`) for proper API access.
+- **Model Discovery** — `list_models()` queries `GET /models` endpoint with proper authentication and caching. Returns model information including name, size, provider, and context length. Cache timeout is 1 hour (3600 seconds) to balance performance and API usage.
+- **Model Catalog** — `OPENROUTER_MODELS` dictionary with metadata for popular models including pricing, context length, and provider information. Used for fallback when the API is unavailable.
+- **Free Model Filtering** — `OPENROUTER_FREE_ONLY` environment variable support. When enabled, `list_models()` filters to show only models with ":free" suffix or common free model patterns ("flash", "mini", "haiku", "tiny").
+- **Rate Limit Handling** — comprehensive 429 error detection with `Retry-After` header support and descriptive error messages showing recommended wait times. Gracefully handles upstream provider rate limits without hard failures.
+- **Authentication Errors** — 401 errors produce clear messages directing users to check their `OPENROUTER_API_KEY` environment variable.
+- **CLI Integration** — `--backend openrouter` works across all subcommands (`chat`, `run`, `agent`, `models`). Backend choices dynamically include OpenRouter when the plugin is loaded.
+- **Public API Export** — `OpenRouterBackend` exported from `agentnova.__init__` for use in Python applications.
+- **Configuration Variables** — `OPENROUTER_BASE_URL`, `OPENROUTER_API_KEY`, `OPENROUTER_DEFAULT_MODEL`, `OPENROUTER_FREE_ONLY` with environment variable fallbacks.
+- **Endpoints**: `GET /models` (model discovery), `POST /chat/completions` (generation).
+
+#### Default API Mode Change (`shared_args.py`, `cli.py`)
+- **Global OpenAI Default** — changed default API mode from `"openre"` to `"openai"` for better cloud provider compatibility. Most cloud APIs (OpenRouter, OpenAI, Anthropic) use Chat-Completions format, making this the more practical default.
+- **OpenRouter Auto-Detection** — when `--backend openrouter` is used without an explicit `--api` flag, the system automatically defaults to `openai` API mode since OpenRouter only supports Chat-Completions.
+
+#### Backend Type Enumeration Fixed (`plugins/openrouter/openrouter.py`)
+- **`BackendType.OPENROUTER`** — added new enum value `OPENROUTER = "openrouter"` to properly identify OpenRouter backends. Fixed footer display to show "🔌 openrouter" instead of "🔌 zai".
+- **Proper Inheritance** — OpenRouter backend now correctly implements `backend_type` property returning `BackendType.OPENROUTER` instead of reusing `BackendType.ZAI`.
+
+### Fixed
+
+#### API Mode Default for OpenRouter (`cli.py`)
+- **Issue**: OpenRouter backend required explicit `--api openai` flag, failing with confusing error when using default `--api openre`.
+- **Fix**: OpenRouter backend now automatically defaults to OpenAI API mode. The `OPENROUTER_API_KEY` environment variable is the only requirement for basic usage.
+- **Impact**: Users can now run `agentnova chat --backend openrouter --model poolside/laguna-xs-2.1:free` without specifying API mode.
+
+#### Backend Footer Display (`plugins/openrouter/openrouter.py`)
+- **Issue**: Footer incorrectly showed "🔌 zai" instead of "🔌 openrouter" for OpenRouter backends.
+- **Fix**: Corrected `backend_type` property to return `BackendType.OPENROUTER` instead of `BackendType.ZAI`.
+- **Impact**: Footer now correctly displays the backend type for better user feedback.
+
+#### Response Parsing (`plugins/openrouter/openrouter.py`)
+- **Issue**: Custom `generate()` method returned raw OpenRouter API response, causing empty content display despite successful API calls.
+- **Fix**: Modified `generate()` method to parse OpenRouter response and extract content from `choices[0].message.content`, returning the response in AgentNova's expected format.
+- **Response Format**: Returns `dict` with `content`, `tool_calls`, `usage`, and `raw` fields matching OllamaBackend's `generate_completions()` output format.
+- **Impact**: Model responses now display correctly in chat mode with proper content extraction.
+
+#### Debug Output Cleanup (`plugins/openrouter/openrouter.py`)
+- **Issue**: Debug print statements remained in the code, showing `[DEBUG]` output even without `--debug` flag.
+- **Fix**: Removed all `print(f"[DEBUG] ...")` statements from OpenRouter backend methods.
+- **Impact**: Clean output in normal operation, debug output only appears when `--debug` flag is explicitly used.
+
+### Configuration
+
+#### Environment Variables
+- `OPENROUTER_API_KEY` — OpenRouter API key (required for generation)
+- `OPENROUTER_BASE_URL` — OpenRouter API base URL (default: `https://openrouter.ai/api/v1`)
+- `OPENROUTER_DEFAULT_MODEL` — Default model name (default: `anthropic/claude-3.5-sonnet`)
+- `OPENROUTER_FREE_ONLY` — Set to `1` to filter models to free tier only
+
+#### Usage Examples
+```bash
+# Basic chat with OpenRouter
+agentnova chat --backend openrouter --model poolside/laguna-xs-2.1:free
+
+# Chat with different model
+agentnova chat --backend openrouter --model openai/gpt-4o
+
+# Run command
+agentnova run "What is 15 * 8?" --backend openrouter --model deepseek/deepseek-chat
+
+# List available models
+agentnova models --backend openrouter
+
+# Free models only
+OPENROUTER_FREE_ONLY=1 agentnova models --backend openrouter
+```
+
+### File Changes Summary
+
+| Action | File | Changes |
+|--------|------|:-------:|
+| Created | `agentnova/plugins/openrouter/__init__.py` | +23 |
+| Created | `agentnova/plugins/openrouter/plugin.json` | +25 |
+| Created | `agentnova/plugins/openrouter/openrouter.py` | +678 |
+| Updated | `agentnova/shared_args.py` | +1 −1 |
+| Updated | `agentnova/cli.py` | +2 −0 |
+| Updated | `agentnova/__init__.py` | +1 −0 |
+| **Total** | **4 files** | **+730 −2** |
+
+---
+
 ## [R05.1] - 04-27-2026 8:07:20 PM
 
 ### Fixed

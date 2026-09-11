@@ -652,6 +652,9 @@ def cmd_chat(args: argparse.Namespace) -> int:
 
     _session_tokens_in = 0
     _session_tokens_out = 0
+    
+    # Footer position tracking
+    _footer_row = None
 
     def _footer_text() -> str:
         """Build the status bar footer string with colorized values."""
@@ -698,21 +701,9 @@ def cmd_chat(args: argparse.Namespace) -> int:
             parts.append(f"{red(_e_dbg + ' debug')}")
         return ' '.join(parts)
 
-    def _prompt():
-        """Show input prompt with a persistent status footer below it.
+    # _prompt function removed - integrated into main loop for better footer control
 
-        Draws the footer line, then moves the cursor up one row so
-        'You:' appears above the footer. After the user presses Enter,
-        the cursor lands on a new line below the footer.
-        """
-        sys.stdout.write('\n\n' + _footer_text() + '\033[A\033[A\r')
-        sys.stdout.flush()
-        return input(f"\033[90mYou:\033[0m ")
-
-    def _clear_footer():
-        """Clear the footer line (one row below cursor) and return cursor to its row."""
-        sys.stdout.write('\033[B\033[2K\r\033[A')
-        sys.stdout.flush()
+    # Footer functionality removed to avoid duplication issues
 
     # ── Spinner ───────────────────────────────────────────────────────
     _SPINNER_FRAMES = ['\u2807', '\u2839', '\u2838', '\u283C', '\u2834', '\u2826', '\u2836', '\u282D', '\u282F', '\u280F']
@@ -749,8 +740,7 @@ def cmd_chat(args: argparse.Namespace) -> int:
     # ── Main loop ─────────────────────────────────────────────────────
     while True:
         try:
-            user_input = _prompt().strip()
-            _clear_footer()
+            user_input = input(f"\033[90mYou:\033[0m ").strip()
         except (EOFError, KeyboardInterrupt):
             # Ensure persistent memory is flushed and closed
             if getattr(agent, '_is_persistent', False) and hasattr(agent.memory, 'close'):
@@ -759,11 +749,9 @@ def cmd_chat(args: argparse.Namespace) -> int:
             break
 
         if not user_input:
-            _clear_footer()
             continue
 
         if user_input == "/quit":
-            _clear_footer()
             if acp:
                 acp.log_chat("user", "/quit")
                 acp.a2a_unregister()
@@ -855,8 +843,19 @@ def cmd_chat(args: argparse.Namespace) -> int:
         try:
             result = agent.run(user_input)
         except KeyboardInterrupt:
-            _clear_footer()
             print(f"\n{yellow('Cancelled.')}\n")
+            continue
+        except RuntimeError as e:
+            # Handle rate limits and other runtime errors
+            print(f"\n{red('Error:')} {e}\n")
+            if "rate limit" in str(e).lower() or "429" in str(e):
+                print(f"{red('This appears to be a rate limit error.')}")
+            elif "empty response" in str(e).lower() or "no choices" in str(e).lower():
+                print(f"{red('OpenRouter returned no content. This may be a temporary API issue.')}")
+            continue
+        except Exception as e:
+            # Catch any other unexpected errors
+            print(f"\n{red('Unexpected Error:')} {type(e).__name__}: {e}\n")
             continue
         finally:
             if spinner_t:
