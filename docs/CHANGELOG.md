@@ -35,6 +35,18 @@ Fixes a critical defect in the OpenRouter backend where native tool calls were n
 
 ### Added
 
+#### Chat Mode Status Footer — Restored with Scroll Region (`cli.py`)
+- **History**: R05.1 introduced a persistent emoji status footer bar drawn below the `You:` input prompt every turn, showing version (⚛️), model (🧠), prompt size (📝), context window (📦), max response tokens (💬), temperature (🌡️), backend (🔌), and cumulative session token usage with ↑/↓ arrows (📈). R05.2 removed it because the ANSI cursor-up rendering approach caused visual stacking — each turn's footer was never erased from terminal scrollback, accumulating one extra line per turn.
+- **R05.4 Attempt 1**: Printed the footer once per turn after the agent's response. This prevented stacking, but old footer text still appeared in the chat log as it scrolled by — the user wanted ONLY the current footer visible at all times.
+- **R05.4 Final Fix**: Uses a terminal **scroll region** (DECSTBM — `Set Top and Bottom Margins`) to reserve the bottom line of the terminal for the footer:
+  - On chat start: `\033[1;{height-1}r` sets the scroll region to lines 1 through (height-1). The bottom line is excluded from scrolling and reserved for the footer.
+  - The conversation (user input, agent responses, slash command output) all scroll within the region above. The footer stays fixed at the bottom.
+  - The footer is redrawn in place via save-cursor (`\033[s`), move-to-bottom-line, clear-line (`\033[2K`), write-footer, restore-cursor (`\033[u`). No footer text EVER enters the scrollback history.
+  - On every exit path (quit, EOF, Ctrl+C, exception): a `try/finally` block calls `_teardown_footer_region()` which resets the scroll region (`\033[r`) and clears the footer line, so the terminal is never left in a broken state.
+  - Handles terminal resize: re-queries `shutil.get_terminal_size()` on each footer update and re-establishes the scroll region if dimensions changed.
+  - Graceful fallback: if stdout is not a TTY (piped output) or the terminal is smaller than 5 lines, the scroll region is skipped entirely — no garbage ANSI codes in piped output.
+  - Footer is refreshed at the top of each loop iteration (before `input()`) and after each agent response (to update token counts).
+
 #### CLI Tool-Call Visibility (`_print_agent_steps`)
 - **Feature**: The chat loop previously only printed `result.final_answer` — the user saw nothing about what the agent actually *did*. Now a new `_print_agent_steps(result, debug)` helper prints a compact summary of each tool call between the user prompt and the final answer:
   ```
@@ -74,7 +86,7 @@ Fixes a critical defect in the OpenRouter backend where native tool calls were n
 |--------|------|:-------:|
 | Updated | `pyproject.toml` | Version: 0.5.3 → 0.5.4 |
 | Updated | `agentnova/__init__.py` | Version 0.5.3 → 0.5.4, docstring R05.3 → R05.4 |
-| Updated | `agentnova/cli.py` | Docstring R05.3 → R05.4, added `_print_agent_steps()`, wired into `cmd_chat` + `cmd_run`, added `RuntimeError` handler in `cmd_run` |
+| Updated | `agentnova/cli.py` | Docstring R05.3 → R05.4, added `_print_agent_steps()` + `_print_footer()`, wired both into `cmd_chat` + `cmd_run`, added `RuntimeError` handler in `cmd_run`, restored status footer (R05.1-style, with stacking fix) |
 | Updated | `agentnova/plugins/openrouter/openrouter.py` | Rewrote `generate()` (sends tools, parses tool_calls, ReAct fallback), rewrote `_make_api_request()` (extracts upstream error messages), rewrote `_parse_openai_response()` (surfaces `error` field, raises on missing choices), simplified `test_tool_support()` (returns NATIVE without probe), added `_build_openai_body()` + `_is_tools_not_supported_error()` helpers |
 | Updated | `README.md` | Title R05.3 → R05.4 |
 | Added | `tests/test_openrouter_backend.py` | 24 tests for OpenRouter backend + CLI helper |

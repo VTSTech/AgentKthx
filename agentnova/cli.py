@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import sys
 import time
 import threading
@@ -713,40 +714,28 @@ def cmd_chat(args: argparse.Namespace) -> int:
 
     _session_tokens_in = 0
     _session_tokens_out = 0
-    
-    # Footer position tracking
-    _footer_row = None
 
-    def _footer_text() -> str:
-        """Build the status bar footer string with colorized values."""
-        backend = getattr(agent.backend, 'backend_type', None)
-        bname = backend.value if backend and hasattr(backend, 'value') else str(backend) if backend else '?'
+    def _footer_line1() -> str:
+        """Build the first footer line: version, model, prompt, context, tokens."""
         ctx = agent.num_ctx
         ctx_str = f"{ctx // 1024}K" if ctx and ctx >= 1024 else str(ctx) if ctx else '?'
         max_t = agent._num_predict if agent._num_predict is not None else agent.model_config.default_max_tokens
         max_t_str = f"{max_t // 1024}K" if max_t >= 1024 else str(max_t)
         temp = agent._temperature if agent._temperature is not None else agent.model_config.default_temperature
-        # Format token counts
         def _fmt_tok(n):
             n = int(str(n).strip())
             if n >= 1000:
                 return f"{n/1000:.1f}k"
             return str(n)
-        tok_str = f"\u2191{_fmt_tok(_session_tokens_in)} \u2193{_fmt_tok(_session_tokens_out)}"
-        # Prompt size (system prompt / soul-derived prompt)
         _sys_prompt = getattr(agent, '_custom_system_prompt', '') or ''
         _prompt_chr = len(_sys_prompt)
-        _prompt_tok = _prompt_chr // 4  # rough heuristic: ~4 chars per token
+        _prompt_tok = _prompt_chr // 4
         prompt_str = f"{_fmt_tok(_prompt_chr)} chr {_fmt_tok(_prompt_tok)} tok"
-        # Emoji constants (extracted to avoid \u in f-string expressions — Python 3.10 compat)
         _e_brand = '\u269b\ufe0f'
         _e_model = '\U0001f9e0'
         _e_ctx   = '\U0001f4e6'
         _e_resp  = '\U0001f4ac'
         _e_temp  = '\U0001f321\ufe0f'
-        _e_be    = '\U0001f50c'
-        _e_tok   = '\U0001f4c8'
-        _e_dbg   = '\U0001f41b'
         _e_prmpt = '\U0001f4dd'
         parts = [
             f"{dim(_e_brand)} {cyan(__version__)}",
@@ -755,6 +744,23 @@ def cmd_chat(args: argparse.Namespace) -> int:
             f"{dim(_e_ctx)} {yellow(ctx_str)}",
             f"{dim(_e_resp)} {yellow(max_t_str)}",
             f"{dim(_e_temp)} {yellow(str(temp))}",
+        ]
+        return ' '.join(parts)
+
+    def _footer_line2() -> str:
+        """Build the second footer line: backend, token usage, debug flag."""
+        backend = getattr(agent.backend, 'backend_type', None)
+        bname = backend.value if backend and hasattr(backend, 'value') else str(backend) if backend else '?'
+        def _fmt_tok(n):
+            n = int(str(n).strip())
+            if n >= 1000:
+                return f"{n/1000:.1f}k"
+            return str(n)
+        tok_str = f"\u2191{_fmt_tok(_session_tokens_in)} \u2193{_fmt_tok(_session_tokens_out)}"
+        _e_be    = '\U0001f50c'
+        _e_tok   = '\U0001f4c8'
+        _e_dbg   = '\U0001f41b'
+        parts = [
             f"{dim(_e_be)} {green(bname)}",
             f"{dim(_e_tok)} {yellow(tok_str)}",
         ]
@@ -762,9 +768,115 @@ def cmd_chat(args: argparse.Namespace) -> int:
             parts.append(f"{red(_e_dbg + ' debug')}")
         return ' '.join(parts)
 
-    # _prompt function removed - integrated into main loop for better footer control
+    def _footer_text() -> str:
+        """Build the full 2-line footer (backward-compat wrapper).
 
-    # Footer functionality removed to avoid duplication issues
+        Returns both footer lines joined with a newline. Used by
+        legacy code and tests that expect a single _footer_text() call.
+        The actual rendering uses _footer_line1() + _footer_line2()
+        separately for the 2-line scroll-region footer.
+        """
+        return f"{_footer_line1()}\n{_footer_line2()}"
+
+    # ── Footer bar — persistent scroll-region approach (R05.4) ──────────
+    # R05.1 drew the footer below `You:` using ANSI cursor-up, but never
+    # erased the previous turn's footer → each turn stacked another footer
+    # line in the scrollback.
+    # R05.2 removed the footer entirely.
+    # R05.4 first attempt: print footer once per turn after the response.
+    #   → User complained that old footer text scrolled by in the chat log.
+    #
+    # R05.4 final fix: use a terminal SCROLL REGION (DECSTBM) to reserve
+    # the bottom TWO lines for the footer. The conversation scrolls within
+    # the region above; the footer stays fixed at the bottom and updates
+    # in place via save/restore cursor. No footer text EVER enters the
+    # scrollback history — exactly one footer (2 lines) visible at all times.
+
+    _FOOTER_LINES = 2  # number of reserved footer lines at terminal bottom
+
+    _is_tty = sys.stdout.isatty()
+    _term_size = shutil.get_terminal_size() if _is_tty else None
+    # Need at least 6 lines for a usable chat + 2-line footer area
+    _use_persistent_footer = bool(
+        _is_tty and _term_size and _term_size.lines >= 6
+    )
+
+    def _setup_footer_region():
+        """Reserve the terminal's bottom 2 lines for the footer via DECSTBM."""
+        if not _use_persistent_footer:
+            return
+        # Set scroll region: lines 1 through (height - 2).
+        # The bottom 2 lines are excluded from scrolling and reserved for
+        # the footer.
+        bottom = _term_size.lines - _FOOTER_LINES  # last line of scroll region
+        sys.stdout.write(f"\033[1;{bottom}r")
+        # Move cursor to the BOTTOM of the scroll region (just above the
+        # footer) so the first `You:` prompt appears there, not at the top.
+        sys.stdout.write(f"\033[{bottom};1H")
+        sys.stdout.flush()
+
+    def _teardown_footer_region():
+        """Reset terminal: restore full-screen scroll region, clear footer."""
+        if not _use_persistent_footer:
+            return
+        # Reset scroll region to full terminal
+        sys.stdout.write("\033[r")
+        # Clear the footer lines (bottom 2 lines)
+        if _term_size:
+            for i in range(_FOOTER_LINES):
+                row = _term_size.lines - i
+                sys.stdout.write(f"\033[{row};1H\033[2K")
+            # Move cursor to the line just above where the footer was
+            sys.stdout.write(f"\033[{_term_size.lines - _FOOTER_LINES};1H")
+        sys.stdout.flush()
+
+    def _update_footer():
+        """Redraw the 2-line footer in place on the reserved bottom lines."""
+        nonlocal _term_size
+        if not _use_persistent_footer:
+            return
+        # Re-query terminal size to handle resize
+        new_size = shutil.get_terminal_size()
+        if (new_size.lines != _term_size.lines or
+            new_size.columns != _term_size.columns):
+            _term_size = new_size
+            # Re-establish scroll region with new dimensions
+            bottom = _term_size.lines - _FOOTER_LINES
+            sys.stdout.write(f"\033[1;{bottom}r")
+            sys.stdout.flush()
+
+        line1 = _footer_line1()
+        line2 = _footer_line2()
+        # Save cursor, move to footer area, clear + write both lines, restore
+        sys.stdout.write("\033[s")                            # save cursor
+        sys.stdout.write("\033[?7l")                           # disable line wrap
+        # Line 1: second-to-last terminal line
+        row1 = _term_size.lines - 1
+        sys.stdout.write(f"\033[{row1};1H")                    # move to line 1
+        sys.stdout.write("\033[2K")                            # clear entire line
+        sys.stdout.write(line1)                                # write footer line 1
+        # Line 2: last terminal line
+        row2 = _term_size.lines
+        sys.stdout.write(f"\033[{row2};1H")                    # move to line 2
+        sys.stdout.write("\033[2K")                            # clear entire line
+        sys.stdout.write(line2)                                # write footer line 2
+        sys.stdout.write("\033[?7h")                           # re-enable line wrap
+        sys.stdout.write("\033[u")                             # restore cursor
+        sys.stdout.flush()
+
+    def _position_for_input():
+        """Move cursor to the bottom of the scroll region for the `You:` prompt.
+
+        This ensures the input prompt always appears one line above the
+        footer, regardless of where the previous response left the cursor.
+        """
+        if not _use_persistent_footer:
+            return
+        # Move to last line of scroll region (just above footer)
+        bottom = _term_size.lines - _FOOTER_LINES
+        sys.stdout.write(f"\033[{bottom};1H")
+        sys.stdout.write("\033[2K")  # clear the line (remove stale text)
+        sys.stdout.flush()
 
     # ── Spinner ───────────────────────────────────────────────────────
     _SPINNER_FRAMES = ['\u2807', '\u2839', '\u2838', '\u283C', '\u2834', '\u2826', '\u2836', '\u282D', '\u282F', '\u280F']
@@ -799,7 +911,21 @@ def cmd_chat(args: argparse.Namespace) -> int:
         t.join(timeout=1)
 
     # ── Main loop ─────────────────────────────────────────────────────
-    while True:
+    # Setup terminal scroll region for persistent footer BEFORE the loop.
+    # The try/finally ensures _teardown_footer_region() runs on EVERY exit
+    # path (quit, EOF, Ctrl+C, unexpected exception) so the terminal is
+    # never left in a broken scroll-region state.
+    _setup_footer_region()
+    try:
+      while True:
+        # Refresh the persistent footer at the top of each iteration.
+        # This updates token counts, handles terminal resize, and ensures
+        # the footer is visible before the user types.
+        _update_footer()
+        # Position cursor at the bottom of the scroll region (one line
+        # above the footer) so the `You:` prompt appears there — not at
+        # the top of the screen or wherever the last response left it.
+        _position_for_input()
         try:
             user_input = input(f"\033[90mYou:\033[0m ").strip()
         except (EOFError, KeyboardInterrupt):
@@ -932,9 +1058,19 @@ def cmd_chat(args: argparse.Namespace) -> int:
         _print_agent_steps(result, debug=agent.debug)
         print(f"\n{bright_green('Agent Nova')}: {result.final_answer}\n")
 
+        # Refresh the persistent footer with updated token counts.
+        # The footer lives on the reserved bottom line (scroll region)
+        # and updates in place — no old footer text enters scrollback.
+        _update_footer()
+
         # Log assistant response to ACP
         if acp:
             acp.log_chat("assistant", result.final_answer)
+
+    finally:
+        # Tear down terminal scroll region on ALL exit paths so the
+        # terminal is never left in a broken state.
+        _teardown_footer_region()
 
     return 0
 

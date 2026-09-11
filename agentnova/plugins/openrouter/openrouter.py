@@ -783,6 +783,18 @@ class OpenRouterBackend(OllamaBackend):
             else:
                 parsed["finish_reason"] = "stop"
 
+        # Detect empty responses — model returned no content AND no
+        # tool_calls. This usually means the provider silently failed
+        # (rate limit, content filter, or the model just returned
+        # whitespace). Surface it as an error so the chat loop can show
+        # the user something went wrong instead of a blank "Agent Nova: ".
+        if not parsed["content"].strip() and not parsed["tool_calls"]:
+            raise RuntimeError(
+                "OpenRouter returned an empty response (no content, no tool_calls). "
+                "This may be a rate limit, content filter, or model issue. "
+                f"finish_reason={parsed['finish_reason']}"
+            )
+
         if os.environ.get("AGENTNOVA_DEBUG"):
             print(f"  [OpenRouter] finish_reason={parsed['finish_reason']}, "
                   f"tool_calls={len(parsed['tool_calls'])}, "

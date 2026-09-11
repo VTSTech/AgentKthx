@@ -360,6 +360,53 @@ class TestGenerateFlow(unittest.TestCase):
         result = b.generate(model="m", messages=[], tools=None, max_tokens=10)
         self.assertEqual(result["finish_reason"], "stop")
 
+    @patch.object(OpenRouterBackend, "_make_api_request")
+    def test_generate_raises_on_empty_response(self, mock_req):
+        """Empty content + no tool_calls should raise, not silently return."""
+        mock_req.return_value = {
+            "choices": [{
+                "message": {"content": "", "tool_calls": []},
+                "finish_reason": "stop",
+            }],
+        }
+        b = self._backend()
+        with self.assertRaises(RuntimeError) as ctx:
+            b.generate(model="m", messages=[], tools=None, max_tokens=10)
+        self.assertIn("empty response", str(ctx.exception).lower())
+
+    @patch.object(OpenRouterBackend, "_make_api_request")
+    def test_generate_raises_on_whitespace_only_response(self, mock_req):
+        """Whitespace-only content + no tool_calls should also raise."""
+        mock_req.return_value = {
+            "choices": [{
+                "message": {"content": "   \n  \n  ", "tool_calls": []},
+                "finish_reason": "stop",
+            }],
+        }
+        b = self._backend()
+        with self.assertRaises(RuntimeError) as ctx:
+            b.generate(model="m", messages=[], tools=None, max_tokens=10)
+        self.assertIn("empty response", str(ctx.exception).lower())
+
+    @patch.object(OpenRouterBackend, "_make_api_request")
+    def test_generate_does_not_raise_on_empty_content_with_tool_calls(self, mock_req):
+        """Empty content WITH tool_calls is valid (model called a tool)."""
+        mock_req.return_value = {
+            "choices": [{
+                "message": {
+                    "content": "",
+                    "tool_calls": [{
+                        "id": "x", "type": "function",
+                        "function": {"name": "shell", "arguments": "{}"},
+                    }],
+                },
+                "finish_reason": "tool_calls",
+            }],
+        }
+        b = self._backend()
+        result = b.generate(model="m", messages=[], tools=None, max_tokens=10)
+        self.assertEqual(len(result["tool_calls"]), 1)
+
 
 class TestTestToolSupport(unittest.TestCase):
     """Tests for test_tool_support() — should always return NATIVE without probing."""
