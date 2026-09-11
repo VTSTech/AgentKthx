@@ -276,8 +276,6 @@ class OpenRouterBackend(OllamaBackend):
             resolved_url = f"http://{host}:{port}"
         else:
             resolved_url = OPENROUTER_BASE_URL.rstrip("/")
-            
-        print(f"[DEBUG] OpenRouter using URL: {resolved_url}")
 
         # Set API mode (OpenRouter only supports OpenAI Chat-Completions)
         if isinstance(api_mode, str):
@@ -527,9 +525,6 @@ class OpenRouterBackend(OllamaBackend):
         This method implements OpenAI Chat-Completions format compatible with
         OpenRouter's API specification.
         """
-        print(f"[DEBUG] OpenRouter.generate called with model: {model}")
-        print(f"[DEBUG] Messages: {messages}")
-        
         # Get model info for defaults
         model_info = self._get_model_info(model)
         model_max_tokens = model_info.get("max_tokens", 4096) if model_info else 4096
@@ -545,8 +540,6 @@ class OpenRouterBackend(OllamaBackend):
             "temperature": temperature,
             "max_completion_tokens": max_tokens,
         }
-        
-        print(f"[DEBUG] Request data: {json.dumps(request_data, indent=2)}")
         
         # Make API request
         try:
