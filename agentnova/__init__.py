@@ -1,5 +1,5 @@
 """
-⚛️ AgentNova R05.4
+⚛️ AgentNova R05.6
 A minimal, hackable agentic framework engineered for local inference.
 
 Features:
@@ -29,7 +29,7 @@ Example Usage:
     agent = Agent(model="qwen2.5:0.5b", soul="/path/to/soul/package")
 """
 
-__version__ = "0.5.4"
+__version__ = "0.5.6"
 __author__ = "VTSTech"
 __status__ = "Alpha"
 
