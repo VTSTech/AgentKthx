@@ -310,7 +310,11 @@ class OpenRouterBackend(OllamaBackend):
         return self._api_mode
 
     def list_models(self) -> list[dict]:
-        """List available models from OpenRouter API with caching."""
+        """List available models from OpenRouter API with caching.
+        
+        Cache timeout: 1 hour (3600 seconds)
+        Refresh endpoint: GET /v1/models (automatic refresh when cache expires)
+        """
         import time
         
         # Check cache first
@@ -372,13 +376,8 @@ class OpenRouterBackend(OllamaBackend):
             
             # Filter models if OPENROUTER_FREE_ONLY is enabled
             if OPENROUTER_FREE_ONLY:
-                free_models = [m for m in available_models 
-                             if m["name"].endswith(":free") or m["name"].endswith("-free")]
-                # Fallback to catalog free models if API doesn't return :free models
-                if not free_models:
-                    free_models = [m for m in available_models 
-                                 if "free" in m["name"].lower() or 
-                                 any(free in m["name"].lower() for free in ["flash", "mini", "haiku", "tiny"])]
+                # OpenRouter free models have :free suffix at the end
+                free_models = [m for m in available_models if m["name"].endswith(":free")]
                 self._model_cache = sorted(free_models, key=lambda x: x["name"])
             else:
                 self._model_cache = sorted(available_models, key=lambda x: x["name"])

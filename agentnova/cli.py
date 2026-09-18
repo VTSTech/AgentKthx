@@ -27,6 +27,7 @@ from .backends import get_backend, get_default_backend, get_backend_choices, Oll
 from .config import get_config, AGENTNOVA_BACKEND, OLLAMA_BASE_URL
 from . import __version__
 from .model_discovery import match_models, get_models
+from .core.types import ApiMode
 from .shared_args import add_agent_args
 from .colors import (
     Color, c, dim, bold, cyan, green, yellow, red, magenta, blue,
@@ -1284,6 +1285,21 @@ def _save_tool_cache(cache: dict) -> None:
         print(f"Warning: Could not save tool cache: {e}", file=sys.stderr)
 
 
+def _get_cloud_model_size(model_name: str, backend) -> int:
+    """Get model size for cloud providers when available."""
+    try:
+        # Try to get model info from the backend
+        model_info = backend.get_model_info(model_name)
+        if model_info and model_info.get("size", 0) > 0:
+            return model_info["size"]
+        
+        # For cloud providers that don't provide size, return 0 (unknown)
+        return 0
+    except Exception:
+        # If we can't determine the size, return 0 (unknown)
+        return 0
+
+
 def _tool_status(status: str) -> str:
     """Format a tool support status with color."""
     if status == "native":
@@ -1338,6 +1354,22 @@ def cmd_models(args: argparse.Namespace) -> int:
         if backend_name == "ollama":
             print("Pull one with: ollama pull qwen2.5:0.5b")
         return 0
+    
+    # Apply free-only filtering at the CLI level
+    from .config import OPENROUTER_FREE_ONLY, ZAI_FREE_ONLY
+    
+    if backend_name == "openrouter" and OPENROUTER_FREE_ONLY:
+        # OpenRouter free models have :free suffix
+        models = [m for m in models if m["name"].endswith(":free")]
+        if not models:
+            print("No free models found on OpenRouter.")
+            return 0
+    elif backend_name == "zai" and ZAI_FREE_ONLY:
+        # Only glm-4.5-flash and glm-4.7-flash are free on ZAI
+        models = [m for m in models if m["name"] in ["glm-4.5-flash", "glm-4.7-flash"]]
+        if not models:
+            print("No free models found on ZAI.")
+            return 0
 
     # Initialize ACP plugin if requested
     acp, _ = _init_acp(args, config, "AgentNova-Models")
@@ -1359,7 +1391,19 @@ def cmd_models(args: argparse.Namespace) -> int:
     if acp:
         print(f"  {dim('ACP:')} {green('✓ Connected')} ({acp.base_url})")
     print(dim("-" * sep_len))
-    print(f"  {'Name':<{NAME_W}} {'Size':>{SIZE_W}}  {'Context':>{CTX_W}}  {'openre':>{TOOLS_W}}  {'openai':>{TOOLS_W}}  {'Family':<{FAMILY_W}}")
+    # Build header based on backend type
+    from .core.types import BackendType
+    is_cloud_provider = backend.backend_type in [BackendType.OPENROUTER, BackendType.ZAI]
+    
+    if not is_cloud_provider:
+        # Ollama and other local backends - show family column
+        header = f"  {'Name':<{NAME_W}} {'Size':>{SIZE_W}}  {'Context':>{CTX_W}}  {'openre':>{TOOLS_W}}  {'openai':>{TOOLS_W}}  {'Family':<{FAMILY_W}}"
+    else:
+        # Cloud providers - skip family column since it's in the model name
+        header = f"  {'Name':<{NAME_W}} {'Size':>{SIZE_W}}  {'Context':>{CTX_W}}  {'openre':>{TOOLS_W}}  {'openai':>{TOOLS_W}}"
+        sep_len = 4 + NAME_W + SIZE_W + CTX_W + TOOLS_W + TOOLS_W + 10
+    
+    print(header)
     print(dim("-" * sep_len))
 
     for m in models:
@@ -1380,7 +1424,12 @@ def cmd_models(args: argparse.Namespace) -> int:
         size_col = f"{size_gb:>6.2f} GB"
         ctx_col = pad_colored(dim(ctx_str), CTX_W, 'right')
 
-        if isinstance(backend, OllamaBackend):
+        # Detect if this is a cloud provider backend
+        from .core.types import BackendType
+        is_cloud_provider = backend.backend_type in [BackendType.OPENROUTER, BackendType.ZAI]
+        
+        # Handle Ollama with full tool support testing (not cloud providers)
+        if isinstance(backend, OllamaBackend) and not is_cloud_provider:
             results = {}  # mode -> status string
 
             if args.tool_support:
@@ -1434,10 +1483,98 @@ def cmd_models(args: argparse.Namespace) -> int:
                 tool_re = pad_colored(_tool_status(results.get("openre")), TOOLS_W, 'right')
                 tool_ai = pad_colored(_tool_status(results.get("openai")), TOOLS_W, 'right')
                 print(f"  {name_col} {size_col}  {ctx_col}  {tool_re}  {tool_ai}  {dim('(' + family + ')')}")
-        else:
-            tool_na_re = pad_colored(dim("? n/a"), TOOLS_W, 'right')
-            tool_na_ai = pad_colored(dim("? n/a"), TOOLS_W, 'right')
-            print(f"  {name_col} {size_col}  {dim(pad_colored(ctx_str, CTX_W, 'right'))}  {tool_na_re}  {tool_na_ai}  {dim('(' + family + ')')}")
+        
+        # Handle cloud providers (ZAI, OpenRouter) with proper metadata and tool support
+        elif is_cloud_provider:
+            # Initialize results for cloud providers
+            results = {}
+            
+            # Cloud providers don't provide reliable size info
+            size_col = dim("unknown")
+            
+            # Format context size with units for better readability
+            if max_ctx >= 1000:
+                ctx_display = f"{max_ctx // 1024}K"
+            else:
+                ctx_display = str(max_ctx)
+            ctx_col = pad_colored(dim(ctx_display), CTX_W, 'right')
+            
+            # Format context size with units for better readability
+            if max_ctx >= 1000:
+                ctx_display = f"{max_ctx // 1024}K"
+            else:
+                ctx_display = str(max_ctx)
+            ctx_col = pad_colored(dim(ctx_display), CTX_W, 'right')
+            
+            # Get tool support for cloud providers
+            if args.tool_support:
+                modes_label = ", ".join(modes_to_test)
+                print(f"  {dim('Testing:')} {cyan(name)} [{dim(modes_label)}]...", end="", flush=True)
+                
+                for mode in modes_to_test:
+                    # Skip models that are already cached (unless --no-cache)
+                    if not args.no_cache:
+                        cached = get_cached_tool_support(name, api_mode=mode)
+                        if cached is not None:
+                            results[mode] = cached.value
+                            continue
+                    
+                    try:
+                        support = backend.test_tool_support(name, family=family, force_test=True)
+                        cache_tool_support(name, support, family=family, api_mode=mode)
+                        results[mode] = support.value
+                    except Exception as e:
+                        cache_tool_support(name, ToolSupportLevel.NONE, family=family,
+                                           error=str(e)[:100], api_mode=mode)
+                        results[mode] = "error"
+                
+                # Fill untested display modes from cache
+                for mode in modes_display:
+                    if mode not in results and not args.no_cache:
+                        cached = get_cached_tool_support(name, api_mode=mode)
+                        if cached is not None:
+                            results[mode] = cached.value
+                
+                # Overwrite the "Testing..." line with the final row
+                tool_re = pad_colored(_tool_status(results.get("openre", "untested")), TOOLS_W, 'right')
+                tool_ai = pad_colored(_tool_status(results.get("openai", "untested")), TOOLS_W, 'right')
+                print(f"\r  {name_col} {size_col}  {ctx_col}  {tool_re}  {tool_ai}  {dim('(' + family + ')')}")
+                
+                # Log per-model test result to ACP
+                if acp:
+                    acp.model_name = name
+                    re_status = results.get('openre', '?')
+                    ai_status = results.get('openai', '?')
+                    acp.log_chat("user", f"Testing tool support...")
+                    acp.log_chat("assistant", f"openre={re_status} openai={ai_status} | {size_gb:.2f} GB | ctx {max_ctx}")
+            else:
+                # Read from cache or show default tool support for cloud providers
+                results = {}
+                
+                # Only read from cache if not forcing fresh tests
+                if not args.no_cache:
+                    for mode in modes_display:
+                        cached = get_cached_tool_support(name, api_mode=mode)
+                        if cached is not None:
+                            results[mode] = cached.value
+                
+                # For cloud providers, provide intelligent default tool support status
+                if not results:
+                    from .core.types import BackendType
+                    if backend.backend_type in [BackendType.OPENROUTER, BackendType.ZAI]:
+                        # Cloud providers have already validated tool support - default to native
+                        results = {"openre": "native", "openai": "native"}
+                    else:
+                        # Unknown cloud provider - mark as untested
+                        results = {"openre": "untested", "openai": "untested"}
+                
+                from .core.types import BackendType
+                tool_re = pad_colored(_tool_status(results.get("openre", "untested")), TOOLS_W, 'right')
+                tool_ai = pad_colored(_tool_status(results.get("openai", "untested")), TOOLS_W, 'right')
+                if backend.backend_type == BackendType.OLLAMA:
+                    print(f"  {name_col} {size_col}  {ctx_col}  {tool_re}  {tool_ai}  {dim('(' + family + ')')}")
+                else:
+                    print(f"  {name_col} {size_col}  {ctx_col}  {tool_re}  {tool_ai}")
 
     print(dim("-" * sep_len))
     print(f"Total: {bright_green(str(len(models)))} models")

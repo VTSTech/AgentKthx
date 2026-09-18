@@ -24,6 +24,30 @@ Usage:
   agent = Agent(model="glm-4-plus", backend="zai", tools=["calculator"])
   result = agent.run("What is 15 * 8?")
 
+Max Tokens Information (from ZAI API docs):
+  Note: max_tokens limits the length of generated content (output), not including input.
+  Context window (input + output) confirmed for each model below.
+  
+  Model Code          Default max_tokens    Maximum max_tokens    Context Length (Official)
+  glm-5.3             65536               131072               128K → 125K display
+  glm-5.3-flash       65536               131072               128K → 125K display  
+  glm-5.2             65536               131072               128K → 125K display
+  glm-5.1             65536               131072               128K → 125K display
+  glm-5               65536               131072               128K → 125K display
+  glm-4.7             65536               131072               200K → 195K display * Official
+  glm-4.7-flash       65536               131072               200K → 195K display * Official
+  glm-4.6             65536               131072               200K → 195K display * Official
+  glm-4.6v            16384               32768                varies
+  glm-4.6v-flash      16384               32768                varies
+  glm-4.6v-flashx     16384               32768                varies
+  glm-4.5             65536               98304                128K → 125K display → 132K display * Updated
+  glm-4.5-air         65536               98304                128K → 125K display
+  glm-4.5-x           65536               98304                128K → 125K display
+  glm-4.5-airx        65536               98304                128K → 125K display
+  glm-4.5-flash       65536               98304                128K → 125K display → 132K display * Updated
+  glm-4.5v           16384               16384                varies
+  glm-4-32b-0414-128k 16384               16384                128K → 125K display
+
 Written by VTSTech — https://www.vts-tech.org
 """
 
@@ -50,85 +74,110 @@ from agentnova.config import ZAI_BASE_URL, ZAI_API_KEY, ZAI_FREE_ONLY, ZAI_FREE_
 ZAI_MODELS: dict[str, dict] = {
     # ── GLM 5.x ──────────────────────────────────────────────────────
     "glm-5.1": {
-        "context_length": 128000,
+        "context_length": 204800,  # 200K for display (200 * 1024)
         "default_temperature": 0.7,
-        "default_max_tokens": 8192,
+        "default_max_tokens": 131072,  # 128K maximum output
         "pricing": {"input": 1.4, "output": 4.4},
     },
-    "glm-5": {
-        "context_length": 128000,
+    "glm-5.2": {
+        "context_length": 1048576,  # 1M for display (1024 * 1024)
         "default_temperature": 0.7,
-        "default_max_tokens": 8192,
+        "default_max_tokens": 131072,  # 128K maximum output
+        "pricing": {"input": 0.6, "output": 2.2},
+    },
+    "glm-5": {
+        "context_length": 204800,  # 200K for display (200 * 1024)
+        "default_temperature": 0.7,
+        "default_max_tokens": 131072,  # 128K maximum output
         "pricing": {"input": 1.0, "output": 3.2},
     },
     "glm-5-turbo": {
-        "context_length": 128000,
+        "context_length": 204800,  # 200K for display (200 * 1024)
         "default_temperature": 0.7,
-        "default_max_tokens": 8192,
+        "default_max_tokens": 131072,  # 128K maximum output
         "pricing": {"input": 1.2, "output": 4.0},
+    },
+    # ── GLM 5.3 ─────────────────────────────────────────────────────
+    "glm-5.3": {
+        "context_length": 1048576,  # 1M for display (1024 * 1024)
+        "default_temperature": 0.7,
+        "default_max_tokens": 131072,  # 128K maximum output
+        "pricing": {"input": 0.6, "output": 2.2},
+    },
+    "glm-5.3-flash": {
+        "context_length": 1048576,  # 1M for display (1024 * 1024)
+        "default_temperature": 0.7,
+        "default_max_tokens": 131072,  # 128K maximum output
+        "pricing": {"input": 0.0, "output": 0.0},
+    },
+    "glm-5.3-flashx": {
+        "context_length": 1048576,  # 1M for display (1024 * 1024)
+        "default_temperature": 0.7,
+        "default_max_tokens": 131072,  # 128K maximum output
+        "pricing": {"input": 0.07, "output": 0.4},
     },
     # ── GLM 4.7 ─────────────────────────────────────────────────────
     "glm-4.7": {
-        "context_length": 128000,
+        "context_length": 204800,  # 200K for display (200 * 1024)
         "default_temperature": 0.7,
-        "default_max_tokens": 8192,
+        "default_max_tokens": 131072,  # 128K maximum output
         "pricing": {"input": 0.6, "output": 2.2},
     },
     "glm-4.7-flash": {
-        "context_length": 128000,
+        "context_length": 204800,  # 200K for display (200 * 1024)
         "default_temperature": 0.7,
-        "default_max_tokens": 8192,
-        "pricing": {"input": 0.0, "output": 0.0},
+        "default_max_tokens": 131072,  # 128K maximum output
+        "pricing": {"input": 0.0, "output": 0.0},  # Free
     },
     "glm-4.7-flashx": {
-        "context_length": 128000,
+        "context_length": 204800,  # 200K for display (200 * 1024)
         "default_temperature": 0.7,
-        "default_max_tokens": 8192,
+        "default_max_tokens": 131072,  # 128K maximum output
         "pricing": {"input": 0.07, "output": 0.4},
     },
     # ── GLM 4.6 ─────────────────────────────────────────────────────
     "glm-4.6": {
-        "context_length": 128000,
+        "context_length": 204800,  # 200K for display (200 * 1024)
         "default_temperature": 0.7,
-        "default_max_tokens": 8192,
+        "default_max_tokens": 131072,  # 128K maximum output
         "pricing": {"input": 0.6, "output": 2.2},
     },
     # ── GLM 4.5 ─────────────────────────────────────────────────────
     "glm-4.5": {
-        "context_length": 128000,
+        "context_length": 132000,  # 128K rounded for display
         "default_temperature": 0.7,
-        "default_max_tokens": 8192,
+        "default_max_tokens": 131072,  # 128K maximum output
         "pricing": {"input": 0.6, "output": 2.2},
     },
     "glm-4.5-flash": {
-        "context_length": 128000,
+        "context_length": 132000,  # 128K rounded for display
         "default_temperature": 0.7,
-        "default_max_tokens": 8192,
-        "pricing": {"input": 0.0, "output": 0.0},
+        "default_max_tokens": 131072,  # 128K maximum output
+        "pricing": {"input": 0.0, "output": 0.0},  # Free
     },
     "glm-4.5-x": {
-        "context_length": 128000,
+        "context_length": 132000,  # 128K rounded for display
         "default_temperature": 0.7,
-        "default_max_tokens": 8192,
+        "default_max_tokens": 131072,  # 128K maximum output
         "pricing": {"input": 2.2, "output": 8.9},
     },
     "glm-4.5-air": {
-        "context_length": 128000,
+        "context_length": 132000,  # 128K rounded for display
         "default_temperature": 0.7,
-        "default_max_tokens": 8192,
+        "default_max_tokens": 131072,  # 128K maximum output
         "pricing": {"input": 0.2, "output": 1.1},
     },
     "glm-4.5-airx": {
-        "context_length": 128000,
+        "context_length": 132000,  # 128K rounded for display
         "default_temperature": 0.7,
-        "default_max_tokens": 8192,
+        "default_max_tokens": 131072,  # 128K maximum output
         "pricing": {"input": 1.1, "output": 4.5},
     },
     # ── GLM 4.x variants ─────────────────────────────────────────────
     "glm-4-32b-0414-128k": {
-        "context_length": 128000,
+        "context_length": 131072,  # 128K for display
         "default_temperature": 0.7,
-        "default_max_tokens": 8192,
+        "default_max_tokens": 131072,  # 128K maximum output
         "pricing": {"input": 0.1, "output": 0.1},
     },
 }
@@ -363,6 +412,24 @@ class ZaiBackend(OllamaBackend):
             },
         }
 
+    def _get_model_defaults(self, model: str) -> dict:
+        """
+        Get model-specific defaults from catalog.
+        
+        Returns:
+            dict: temperature, max_tokens, and other model defaults
+        """
+        model_key = model.split("/")[-1] if "/" in model else model
+        meta = ZAI_MODELS.get(model_key, {})
+        
+        defaults = {
+            "temperature": meta.get("default_temperature", 0.7),
+            "max_tokens": meta.get("default_max_tokens", 8192),
+            "context_length": meta.get("context_length", 128000),
+        }
+        
+        return defaults
+
     # ─────────────────────────────────────────────────────────────────────
     # Generation — always OpenAI Chat-Completions
     # ─────────────────────────────────────────────────────────────────────
@@ -372,8 +439,8 @@ class ZaiBackend(OllamaBackend):
         model: str,
         messages: list[dict],
         tools: list[Tool] | None = None,
-        temperature: float = 0.7,
-        max_tokens: int = 2048,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
         think: bool | None = None,
         **kwargs,
     ) -> dict:
@@ -386,6 +453,13 @@ class ZaiBackend(OllamaBackend):
         Injects Bearer token authentication into every request.
         Supports ZAI_FREE_ONLY mode and auto-fallback on insufficient credits.
         """
+        # Use model defaults from catalog if not specified
+        defaults = self._get_model_defaults(model)
+        if temperature is None:
+            temperature = defaults["temperature"]
+        if max_tokens is None:
+            max_tokens = defaults["max_tokens"]
+            
         if think is not None and os.environ.get("AGENTNOVA_DEBUG"):
             print(f"  [ZAI] 'think' parameter ignored — ZAI manages thinking internally")
 
@@ -411,8 +485,8 @@ class ZaiBackend(OllamaBackend):
         model: str,
         messages: list[dict],
         tools: list[Tool] | None = None,
-        temperature: float = 0.7,
-        max_tokens: int = 2048,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
         **kwargs,
     ) -> Generator[str, None, None]:
         """
@@ -494,6 +568,13 @@ class ZaiBackend(OllamaBackend):
 
         url = f"{self.base_url}/api/paas/v4/chat/completions"
 
+        # Use model defaults from catalog if not specified
+        defaults = self._get_model_defaults(model)
+        if temperature is None:
+            temperature = defaults["temperature"]
+        if max_tokens is None:
+            max_tokens = defaults["max_tokens"]
+        
         # Build request body in OpenAI format
         body = {
             "model": model,
