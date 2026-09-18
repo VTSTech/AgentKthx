@@ -1559,13 +1559,14 @@ def cmd_models(args: argparse.Namespace) -> int:
                             results[mode] = cached.value
                 
                 # For cloud providers, provide intelligent default tool support status
-                if not results:
-                    from .core.types import BackendType
-                    if backend.backend_type in [BackendType.OPENROUTER, BackendType.ZAI]:
-                        # Cloud providers have already validated tool support - default to native
-                        results = {"openre": "native", "openai": "native"}
-                    else:
-                        # Unknown cloud provider - mark as untested
+                from .core.types import BackendType
+                if backend.backend_type in [BackendType.OPENROUTER, BackendType.ZAI]:
+                    # Cloud providers have already validated tool support - always default to native
+                    # Override any cached results since cloud providers have confirmed tool support
+                    results = {"openre": "native", "openai": "native"}
+                else:
+                    # For non-cloud providers, use cached results or mark as untested
+                    if not results:
                         results = {"openre": "untested", "openai": "untested"}
                 
                 from .core.types import BackendType
