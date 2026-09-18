@@ -490,6 +490,29 @@ def _build_agent(args: argparse.Namespace, config) -> Agent:
     # Load skills if requested
     skills_prompt = _load_skills_prompt(args)
 
+    # Get catalog defaults for cloud providers
+    catalog_defaults = _get_catalog_defaults(backend, model)
+    
+    # Apply catalog defaults only if user didn't specify explicit values
+    final_num_ctx = (
+        getattr(args, "num_ctx", None)
+        if getattr(args, "num_ctx", None) is not None
+        else catalog_defaults.get('num_ctx') or config.num_ctx
+    )
+    
+    final_num_predict = (
+        getattr(args, "num_predict", None)
+        if getattr(args, "num_predict", None) is not None
+        else catalog_defaults.get('num_predict')
+    )
+    
+    # Enable streaming by default for cloud providers
+    from .core.types import BackendType
+    default_stream = (
+        hasattr(backend, 'backend_type') and 
+        backend.backend_type in [BackendType.OPENROUTER, BackendType.ZAI]
+    )
+    
     return Agent(
         model=model,
         tools=tools,
@@ -498,14 +521,10 @@ def _build_agent(args: argparse.Namespace, config) -> Agent:
         debug=args.debug,
         soul=getattr(args, "soul", None),
         soul_level=getattr(args, "soul_level", 2),
-        num_ctx=(
-            getattr(args, "num_ctx", None)
-            if getattr(args, "num_ctx", None) is not None
-            else config.num_ctx
-        ),
+        num_ctx=final_num_ctx,
         temperature=getattr(args, "temperature", None),
         top_p=getattr(args, "top_p", None),
-        num_predict=getattr(args, "num_predict", None),
+        num_predict=final_num_predict,
         skills_prompt=skills_prompt,
         retry_on_error=not getattr(args, "no_retry", False),
         max_tool_retries=getattr(args, "max_tool_retries", None) or config.max_tool_retries,
@@ -514,6 +533,48 @@ def _build_agent(args: argparse.Namespace, config) -> Agent:
         session_id=getattr(args, "session", None),
     )
 
+
+def _get_catalog_defaults(backend, model: str) -> dict:
+    """
+    Get model defaults from backend catalog if available.
+    
+    Returns:
+        dict: num_ctx and num_predict defaults from catalog
+    """
+    from .core.types import BackendType
+    
+    # Only apply catalog defaults for cloud providers
+    if not hasattr(backend, 'backend_type') or backend.backend_type not in [BackendType.OPENROUTER, BackendType.ZAI]:
+        return {}
+    
+    try:
+        family = None
+        if hasattr(backend, 'get_model_info'):
+            model_info = backend.get_model_info(model)
+            if model_info and 'details' in model_info:
+                family = model_info['details'].get('family')
+        
+        # Get context length and max tokens from catalog
+        max_ctx = backend.get_model_max_context(model, family=family)
+        
+        defaults = {
+            'num_ctx': max_ctx,
+            'num_predict': None,  # Will be handled by _get_model_defaults
+        }
+        
+        # Try to get max tokens if the backend supports it
+        if hasattr(backend, '_get_model_defaults'):
+            try:
+                model_defaults = backend._get_model_defaults(model)
+                defaults['num_predict'] = model_defaults.get('max_tokens', 4096)
+            except Exception:
+                # Fallback to reasonable defaults
+                defaults['num_predict'] = 4096
+        
+        return defaults
+    except Exception:
+        # If catalog lookup fails, return empty dict
+        return {}
 
 def _print_session_header(agent: Agent, args: argparse.Namespace, config, label: str) -> None:
     """Print the common header shown by chat and agent modes."""
@@ -620,7 +681,15 @@ def cmd_run(args: argparse.Namespace) -> int:
         _print_run_header(agent, args, config)
 
     try:
-        result = agent.run(args.prompt, stream=getattr(args, "stream", False))
+        # Enable streaming by default for cloud providers
+        from .core.types import BackendType
+        is_cloud_provider = (
+            hasattr(agent.backend, 'backend_type') and 
+            agent.backend.backend_type in [BackendType.OPENROUTER, BackendType.ZAI]
+        )
+        
+        stream = getattr(args, "stream", False) or is_cloud_provider
+        result = agent.run(args.prompt, stream=stream)
     except KeyboardInterrupt:
         print(f"\n{yellow('Cancelled.')}")
         if acp:
@@ -1062,7 +1131,15 @@ def cmd_chat(args: argparse.Namespace) -> int:
             print()  # blank line before spinner
             spinner_t = _spinner_start()
         try:
-            result = agent.run(user_input)
+            # Enable streaming by default for cloud providers
+            from .core.types import BackendType
+            is_cloud_provider = (
+                hasattr(agent.backend, 'backend_type') and 
+                agent.backend.backend_type in [BackendType.OPENROUTER, BackendType.ZAI]
+            )
+            
+            stream = getattr(args, 'stream', False) or is_cloud_provider
+            result = agent.run(user_input, stream=stream)
         except KeyboardInterrupt:
             print(f"\n{yellow('Cancelled.')}\n")
             continue

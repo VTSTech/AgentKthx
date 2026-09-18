@@ -146,31 +146,31 @@ ZAI_MODELS: dict[str, dict] = {
     "glm-4.5": {
         "context_length": 132000,  # 128K rounded for display
         "default_temperature": 0.7,
-        "default_max_tokens": 131072,  # 128K maximum output
+        "default_max_tokens": 98304,  # Model-specific maximum (96K)
         "pricing": {"input": 0.6, "output": 2.2},
     },
     "glm-4.5-flash": {
         "context_length": 132000,  # 128K rounded for display
         "default_temperature": 0.7,
-        "default_max_tokens": 131072,  # 128K maximum output
+        "default_max_tokens": 98304,  # Model-specific maximum (96K)
         "pricing": {"input": 0.0, "output": 0.0},  # Free
     },
     "glm-4.5-x": {
         "context_length": 132000,  # 128K rounded for display
         "default_temperature": 0.7,
-        "default_max_tokens": 131072,  # 128K maximum output
+        "default_max_tokens": 98304,  # Model-specific maximum (96K)
         "pricing": {"input": 2.2, "output": 8.9},
     },
     "glm-4.5-air": {
         "context_length": 132000,  # 128K rounded for display
         "default_temperature": 0.7,
-        "default_max_tokens": 131072,  # 128K maximum output
+        "default_max_tokens": 98304,  # Model-specific maximum (96K)
         "pricing": {"input": 0.2, "output": 1.1},
     },
     "glm-4.5-airx": {
         "context_length": 132000,  # 128K rounded for display
         "default_temperature": 0.7,
-        "default_max_tokens": 131072,  # 128K maximum output
+        "default_max_tokens": 98304,  # Model-specific maximum (96K)
         "pricing": {"input": 1.1, "output": 4.5},
     },
     # ── GLM 4.x variants ─────────────────────────────────────────────

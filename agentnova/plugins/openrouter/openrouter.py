@@ -296,6 +296,15 @@ class OpenRouterBackend(OllamaBackend):
             "HTTP-Referer": "https://github.com/VTSTech/AgentNova",
             "X-Title": "AgentNova"
         }
+        
+        # Force model list to be loaded on initialization so cache is populated
+        try:
+            if os.environ.get("AGENTNOVA_DEBUG"):
+                print("  [OpenRouter Debug] Initializing: loading models into cache")
+            self.list_models()
+        except Exception as e:
+            if os.environ.get("AGENTNOVA_DEBUG"):
+                print(f"  [OpenRouter Debug] Failed to initialize models: {e}")
 
     @property
     def backend_type(self) -> BackendType:
@@ -309,6 +318,34 @@ class OpenRouterBackend(OllamaBackend):
     def api_mode(self) -> ApiMode:
         return self._api_mode
 
+    def _parse_openrouter_model(self, model_data: dict) -> dict:
+        """
+        Parse OpenRouter API model data into AgentNova format.
+        
+        Uses live API data for context length and max tokens instead of static catalog.
+        """
+        model_id = model_data["id"]
+        
+        # Get context length and max tokens from live API data
+        context_length = model_data.get("context_length", 128000)
+        max_completion_tokens = model_data.get("top_provider", {}).get("max_completion_tokens", 4096)
+        
+        # Determine family from provider or model name
+        provider = model_data.get("top_provider", {}).get("provider", model_data.get("id", "/").split("/")[0])
+        family = provider
+        
+        return {
+            "name": model_id,
+            "size": 0,  # OpenRouter doesn't provide size info
+            "details": {
+                "family": family,
+                "backend": "openrouter",
+                "context_length": context_length,
+                "max_completion_tokens": max_completion_tokens,
+            },
+            "model_data": model_data  # Store original data for future reference
+        }
+    
     def list_models(self) -> list[dict]:
         """List available models from OpenRouter API with caching.
         
@@ -342,22 +379,13 @@ class OpenRouterBackend(OllamaBackend):
             models_data = response.json()
             available_models = []
             
-            # Parse API response
+            # Parse API response using live data
             for model in models_data.get("data", []):
                 model_id = model.get("id")
                 if model_id:
-                    # Get model info from catalog if available
-                    model_info = OPENROUTER_MODELS.get(model_id, {})
-                    available_models.append({
-                        "name": model_id,
-                        "size": 0,  # OpenRouter doesn't provide size info
-                        "details": {
-                            "family": model_info.get("provider", "unknown"),
-                            "backend": "openrouter",
-                            "context_length": model_info.get("context_length", 128000),
-                        },
-                        "model_data": model  # Store original model data
-                    })
+                    # Use live API data instead of static catalog
+                    parsed_model = self._parse_openrouter_model(model)
+                    available_models.append(parsed_model)
             
             # Add catalog-only models (not returned by API)
             catalog_models = list(OPENROUTER_MODELS.keys())
@@ -382,6 +410,11 @@ class OpenRouterBackend(OllamaBackend):
             else:
                 self._model_cache = sorted(available_models, key=lambda x: x["name"])
             
+            if os.environ.get("AGENTNOVA_DEBUG"):
+                print(f"  [OpenRouter Debug] Stored {len(self._model_cache)} models in cache:")
+                for model in self._model_cache:
+                    print(f"    - {model['name']}")
+            
             self._cache_time = current_time
             return self._model_cache
             
@@ -389,15 +422,16 @@ class OpenRouterBackend(OllamaBackend):
             # Fallback to catalog if API fails
             catalog_models = []
             for name, model_info in OPENROUTER_MODELS.items():
-                catalog_models.append({
-                    "name": name,
-                    "size": 0,
-                    "details": {
-                        "family": model_info.get("provider", "unknown"),
-                        "backend": "openrouter",
-                        "context_length": model_info.get("context_length", 128000),
+                # Create mock model data for fallback
+                mock_model_data = {
+                    "id": name,
+                    "context_length": model_info.get("context_length", 128000),
+                    "top_provider": {
+                        "max_completion_tokens": model_info.get("max_tokens", 4096)
                     }
-                })
+                }
+                parsed_model = self._parse_openrouter_model(mock_model_data)
+                catalog_models.append(parsed_model)
             
             if OPENROUTER_FREE_ONLY:
                 free_models = [m for m in catalog_models 
@@ -415,14 +449,100 @@ class OpenRouterBackend(OllamaBackend):
         return True
     
     def _get_model_info(self, model_name: str) -> dict | None:
-        """Get model metadata from catalog or API."""
+        """Get model metadata from catalog, cache, or API."""
         # Check catalog first
         if model_name in OPENROUTER_MODELS:
             return OPENROUTER_MODELS[model_name]
         
+        # Check cache if available
+        if self._model_cache:
+            for cached_model in self._model_cache:
+                if cached_model["name"] == model_name:
+                    # Return a dict compatible with the catalog format
+                    details = cached_model["details"]
+                    return {
+                        "max_tokens": details.get("max_completion_tokens", 4096),
+                        "context_length": details.get("context_length", 128000),
+                    }
+        
         # Try to get from API (future enhancement)
         # For now, return None to let OllamaBackend handle defaults
         return None
+
+    def get_model_max_context(self, model: str, family: str | None = None) -> int:
+        """
+        Get the model's maximum trained context window size.
+        
+        Uses live OpenRouter API data for accurate context lengths.
+        """
+        # Try to get model from cache first
+        if self._model_cache:
+            for cached_model in self._model_cache:
+                if cached_model["name"] == model:
+                    return cached_model["details"].get("context_length", 128000)
+        
+        # Fallback to catalog if not in cache
+        model_info = self._get_model_info(model)
+        if model_info and "context_length" in model_info:
+            return model_info["context_length"]
+        
+        # Fallback to family-based defaults from OllamaBackend
+        if family:
+            ctx = self.get_context_by_family(family)
+            if ctx:
+                return ctx
+        
+        # Default fallback
+        return 128000
+
+    def _get_model_defaults(self, model: str) -> dict:
+        """
+        Get model-specific defaults from live API data.
+        
+        Returns:
+            dict: temperature, max_tokens, and other model defaults
+        """
+        # Try to get model from cache first
+        if self._model_cache:
+            if os.environ.get("AGENTNOVA_DEBUG"):
+                print(f"  [OpenRouter Debug] Looking for model '{model}' in cache with {len(self._model_cache)} models")
+                for cached_model in self._model_cache:
+                    cached_name = cached_model["name"]
+                    print(f"    Cache entry: '{cached_name}'")
+            for cached_model in self._model_cache:
+                cached_name = cached_model["name"]
+                if cached_name == model:
+                    if os.environ.get("AGENTNOVA_DEBUG"):
+                        print(f"  [OpenRouter Debug] Found exact match: '{cached_name}'")
+                    details = cached_model["details"]
+                    max_tokens = details.get("max_completion_tokens", 4096)
+                    if os.environ.get("AGENTNOVA_DEBUG"):
+                        print(f"  [OpenRouter Debug] Using max_tokens: {max_tokens}")
+                    return {
+                        "temperature": 0.7,  # Default temperature
+                        "max_tokens": max_tokens,
+                        "context_length": details.get("context_length", 128000),
+                    }
+                elif model in cached_name or cached_name in model:
+                    if os.environ.get("AGENTNOVA_DEBUG"):
+                        print(f"  [OpenRouter Debug] Partial match: '{cached_name}' (searching for '{model}')")
+        
+        # Fallback to catalog if not in cache
+        if os.environ.get("AGENTNOVA_DEBUG"):
+            print(f"  [OpenRouter Debug] Model not found in cache, falling back to catalog")
+        model_info = self._get_model_info(model)
+        
+        max_tokens = model_info.get("max_tokens", 4096) if model_info else 4096
+        if os.environ.get("AGENTNOVA_DEBUG"):
+            print(f"  [OpenRouter Debug] Catalog max_tokens: {max_tokens}")
+        
+        defaults = {
+            "temperature": 0.7,  # Default temperature
+            "max_tokens": max_tokens,
+            "context_length": model_info.get("context_length", 128000) if model_info else 128000,
+        }
+        
+        return defaults
 
     # Maximum retries for 429 rate-limit responses before giving up.
     _MAX_429_RETRIES = 3
@@ -774,10 +894,12 @@ class OpenRouterBackend(OllamaBackend):
             Dict with keys: content, tool_calls, finish_reason, usage,
             latency_ms, raw.
         """
-        # Resolve model max_tokens from catalog if not provided
-        model_info = self._get_model_info(model)
+        # Use model defaults from catalog if not specified
+        defaults = self._get_model_defaults(model)
+        if temperature is None:
+            temperature = defaults["temperature"]
         if max_tokens is None:
-            max_tokens = (model_info or {}).get("max_tokens", 4096)
+            max_tokens = defaults["max_tokens"]
 
         body = self._build_openai_body(
             model=model,
