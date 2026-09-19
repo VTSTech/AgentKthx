@@ -545,7 +545,7 @@ def _build_agent(args: argparse.Namespace, config) -> Agent:
         response_format=response_format,
         session_id=getattr(args, "session", None),
         truncation=truncation,
-        **({"max_steps": getattr(args, "max_steps")} if getattr(args, "max_steps") is not None else {})
+        max_steps=getattr(args, "max_steps", 10)
     )
 
 
@@ -760,6 +760,10 @@ def _print_agent_steps(result, debug: bool = False) -> None:
 
     # Show all steps, not just tool calls
     if not result.steps:
+        return
+
+    # Skip step summary if there's only 1 step (just the final answer)
+    if len(result.steps) == 1:
         return
 
     print()  # blank line before step summary

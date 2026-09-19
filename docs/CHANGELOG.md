@@ -5,6 +5,58 @@ All notable changes to AgentNova will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [R05.6] - 2026-09-19 3:00:48 PM
+
+### 🚀 **New Features**
+- **Added ZAI API Technical Reference**: Created comprehensive technical documentation at `/docs/ZAI_API_TECHNICAL_REFERENCE.md` for improved ZAI backend integration
+- **Default Streaming for Cloud Providers**: ZAI and OpenRouter backends now default to streaming mode (`--stream` flag automatically enabled), while local providers (Ollama, BitNet, TurboQuant) default to non-streaming
+- **Configurable Max Steps**: Added `--max-steps` CLI parameter with default increased from 5 to 10 steps to allow agents more time for complex tasks
+- **Environment Variable Support**: Max steps can be configured via `AGENTNOVA_MAX_steps` environment variable
+
+### 🐛 **Bug Fixes**
+- **Fixed Max Steps Default Error**: Resolved `TypeError: 'NoneType' object cannot be interpreted as an integer` when `--max-steps` not specified
+- **Removed Duplicate Argument**: Eliminated duplicate `--max-steps` definition in `shared_args.py` that was causing `argparse.ArgumentError`
+- **Fixed Truncation Logic**: Removed debug mode truncation condition that was hiding step-by-step progress in regular chat mode
+- **Resolved Backend Variable Scoping**: Fixed `UnboundLocalError: cannot access local variable 'backend' where it is not associated with a value`
+- **Fixed Timeout Variable**: Resolved `NameError: name 'timeout' is not defined` error
+
+### 🔧 **Enhancements**
+- **Improved Step Display Logic**: Agent step summary is now hidden when only 1 step exists (just final answer), but shown for multi-step reasoning (2+ steps)
+- **Enhanced Agent Steps Visibility**: Step-by-step progress is now visible in regular chat mode (not just debug mode) for better user experience
+- **Backend Auto-Detection**: Improved model configuration auto-detection for ZAI model families
+- **Error Handling**: Enhanced retry logic with exponential backoff for rate limits and server errors
+- **Memory Management**: Improved context window management with proper truncation handling
+
+### 📋 **CLI Changes**
+- **New `--max-steps` Parameter**: Added to control maximum reasoning steps (default: 10)
+- **Streaming Behavior**: Cloud providers default to streaming, local providers default to non-streaming
+- **Help Output**: `--max-steps` now properly documented in CLI help
+- **Argument Parsing**: Fixed argument conflicts and improved parser stability
+
+### 🔌 **Backend Improvements**
+- **ZAI Backend**: 
+  - Fixed truncation handling in debug mode
+  - Improved model family detection and configuration
+  - Enhanced error handling and retry logic
+  - Added support for thinking parameters
+- **All Backends**: 
+  - Improved rate limiting and concurrency control
+  - Enhanced error recovery mechanisms
+  - Better timeout handling
+
+### 📖 **Documentation**
+- **ZAI API Reference**: Created complete technical implementation guide
+- **Developer Documentation**: Added implementation notes for AgentNova integration
+- **API Documentation**: Enhanced with code examples and troubleshooting guides
+
+### 🛠️ **Internal Changes**
+- **Code Structure**: Refactored shared argument parsing to eliminate duplicates
+- **Configuration**: Centralized model default handling
+- **Testing**: Improved argument validation and error handling
+- **Performance**: Optimized context window management and token counting
+
+---
+
 ## [0.5.5] - 2026-09-18 3:21:26 PM
 
 ### Added
