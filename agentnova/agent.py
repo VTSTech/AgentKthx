@@ -154,6 +154,10 @@ class Agent:
             max_tool_retries: Maximum retries per tool call failure (default: 2)
             **kwargs: Additional configuration (persistent, session_id, memory_db, confirm_dangerous, response_format)
         """
+        # Ensure max_steps is never None (defensive fix)
+        if max_steps is None:
+            max_steps = 10  # Default value
+        
         self.model = model
         self.max_steps = max_steps
         self.debug = debug

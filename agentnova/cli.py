@@ -335,6 +335,7 @@ def _make_confirm_callback(args: argparse.Namespace):
         print(f"\n{yellow('⚠')}  Dangerous tool: {yellow(tool_name)}")
         print(f"{dim('  ' + arg_str)}")
         try:
+            import readline
             choice = input(f"  {dim('Execute?')} [y/N] ").strip().lower()
         except (EOFError, KeyboardInterrupt):
             print(f"  {red('Blocked.')}")
@@ -1029,7 +1030,21 @@ def cmd_chat(args: argparse.Namespace) -> int:
         # the top of the screen or wherever the last response left it.
         _position_for_input()
         try:
+            # Use readline for better terminal input handling (arrow keys, etc.)
+            import readline
+            
+            # Initialize readline history to enable UP/DOWN arrow navigation
+            history_file = os.path.expanduser('~/.agentnova_history')
+            try:
+                readline.read_history_file(history_file)
+            except FileNotFoundError:
+                pass
+            
             user_input = input(f"\033[90mYou:\033[0m ").strip()
+            
+            # Save to history for UP/DOWN arrow navigation
+            readline.add_history(user_input)
+            readline.write_history_file(history_file)
         except (EOFError, KeyboardInterrupt):
             # Ensure persistent memory is flushed and closed
             if getattr(agent, '_is_persistent', False) and hasattr(agent.memory, 'close'):
@@ -1179,7 +1194,11 @@ def cmd_chat(args: argparse.Namespace) -> int:
             continue
         except Exception as e:
             # Catch any other unexpected errors
-            print(f"\n{red('Unexpected Error:')} {type(e).__name__}: {e}\n")
+            import traceback
+            print(f"\n{red('Unexpected Error:')} {type(e).__name__}: {e}")
+            print(f"{dim('Full Traceback:')}")
+            traceback.print_exc()
+            print()
             continue
         finally:
             if spinner_t:

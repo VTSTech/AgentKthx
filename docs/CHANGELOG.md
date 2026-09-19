@@ -12,13 +12,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Default Streaming for Cloud Providers**: ZAI and OpenRouter backends now default to streaming mode (`--stream` flag automatically enabled), while local providers (Ollama, BitNet, TurboQuant) default to non-streaming
 - **Configurable Max Steps**: Added `--max-steps` CLI parameter with default increased from 5 to 10 steps to allow agents more time for complex tasks
 - **Environment Variable Support**: Max steps can be configured via `AGENTNOVA_MAX_steps` environment variable
+- **Enhanced Terminal Input**: Added readline support for proper arrow key navigation (← → ↑ ↓) and message history browsing
 
 ### 🐛 **Bug Fixes**
-- **Fixed Max Steps Default Error**: Resolved `TypeError: 'NoneType' object cannot be interpreted as an integer` when `--max-steps` not specified
+- **Fixed Max Steps Default Error**: Resolved `TypeError: 'NoneType' object cannot be interpreted as an integer` when `--max-steps` not specified, including defensive null-check in Agent constructor
 - **Removed Duplicate Argument**: Eliminated duplicate `--max-steps` definition in `shared_args.py` that was causing `argparse.ArgumentError`
 - **Fixed Truncation Logic**: Removed debug mode truncation condition that was hiding step-by-step progress in regular chat mode
 - **Resolved Backend Variable Scoping**: Fixed `UnboundLocalError: cannot access local variable 'backend' where it is not associated with a value`
 - **Fixed Timeout Variable**: Resolved `NameError: name 'timeout' is not defined` error
+- **Enhanced Error Handling**: Added full traceback display for unexpected errors to improve debugging experience
 
 ### 🔧 **Enhancements**
 - **Improved Step Display Logic**: Agent step summary is now hidden when only 1 step exists (just final answer), but shown for multi-step reasoning (2+ steps)
@@ -32,6 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Streaming Behavior**: Cloud providers default to streaming, local providers default to non-streaming
 - **Help Output**: `--max-steps` now properly documented in CLI help
 - **Argument Parsing**: Fixed argument conflicts and improved parser stability
+- **Enhanced Terminal Input**: Integrated Python `readline` module for proper arrow key handling
+- **Message History Navigation**: UP/DOWN arrows now browse through previous user messages with persistent history storage in `~/.agentnova_history`
 
 ### 🔌 **Backend Improvements**
 - **ZAI Backend**: 
@@ -54,6 +58,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Configuration**: Centralized model default handling
 - **Testing**: Improved argument validation and error handling
 - **Performance**: Optimized context window management and token counting
+- **Terminal Enhancement**: Integrated Python readline module for improved terminal input handling and escape sequence processing
 
 ---
 
