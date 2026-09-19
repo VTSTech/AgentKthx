@@ -4,7 +4,7 @@ AgentNova is a modular agent framework designed for local LLMs with tool-calling
 
 **Specification Compliance**: 100% (R03.5+) -- R04.1, R04.2, R04.3, R04.4, R04.5, R04.6, R04.7, R05.0
 
-**Version**: R05.5
+**Version**: R05.6
 - OpenResponses API: 100%
 - Chat Completions API: 100%
 - Soul Spec v0.5: 100%
