@@ -445,20 +445,20 @@ def _build_agent(args: argparse.Namespace, config) -> Agent:
 
     backend_name = args.backend or config.backend
     
-    # Default to OpenAI API mode (more compatible with cloud providers)
-    api_mode = getattr(args, "api_mode", "openai")
+    # Set default timeout and API mode first
     timeout = getattr(args, "timeout", None)
-
+    api_mode = getattr(args, "api_mode", "openre")
+    
     # When --backend bitnet is used without --model, discover the actual
     # model name from the server via list_models() (/props endpoint).
     # This ensures correct family config resolution (stop tokens, prompt
     # format) instead of falling back to generic "bitnet" with no family.
-    backend = None
     if args.model:
         model = args.model
     elif backend_name == "bitnet":
-        backend = get_backend(backend_name, timeout=timeout, api_mode=api_mode)
-        discovered = backend.list_models()
+        # Initialize backend temporarily for model discovery
+        temp_backend = get_backend(backend_name, timeout=timeout, api_mode=api_mode)
+        discovered = temp_backend.list_models()
         if discovered and discovered[0].get("name") and discovered[0]["name"] != "bitnet":
             model = discovered[0]["name"]
             if os.environ.get("AGENTNOVA_DEBUG"):
@@ -468,8 +468,21 @@ def _build_agent(args: argparse.Namespace, config) -> Agent:
     else:
         model = config.default_model
 
-    if backend is None:
+    # Initialize backend with proper API mode
+    backend = get_backend(backend_name, timeout=timeout, api_mode=api_mode)
+    
+    # Default API mode: cloud providers use OpenAI, local providers use OpenResponses
+    from .core.types import BackendType
+    if hasattr(backend, 'backend_type') and backend.backend_type in [BackendType.OPENROUTER, BackendType.ZAI]:
+        api_mode = getattr(args, "api_mode", "openai")
+        # Re-initialize backend with correct API mode for cloud providers
         backend = get_backend(backend_name, timeout=timeout, api_mode=api_mode)
+    
+    # Handle truncation configuration
+    truncation = getattr(args, "truncation", "auto")
+    if args.debug:
+        print(f"[AgentNova] Truncation mode: {truncation}")
+        print(f"[AgentNova] API mode: {api_mode}")
 
     # Build tools
     if args.tools:
@@ -531,6 +544,8 @@ def _build_agent(args: argparse.Namespace, config) -> Agent:
         confirm_dangerous=_make_confirm_callback(args),
         response_format=response_format,
         session_id=getattr(args, "session", None),
+        truncation=truncation,
+        **({"max_steps": getattr(args, "max_steps")} if getattr(args, "max_steps") is not None else {})
     )
 
 
@@ -704,8 +719,8 @@ def cmd_run(args: argparse.Namespace) -> int:
             acp.a2a_unregister()
         return 1
     # Print tool-call summary so the user sees what the agent did,
-    # not just the final answer. Skipped in debug or quiet mode.
-    if not getattr(args, 'quiet', False) and not agent.debug:
+    # not just the final answer. Skipped in quiet mode (debug shows verbose steps).
+    if not getattr(args, 'quiet', False):
         _print_agent_steps(result, debug=agent.debug)
     print(result.final_answer)
 
@@ -743,10 +758,8 @@ def _print_agent_steps(result, debug: bool = False) -> None:
     if debug:
         return
 
-    has_tool_calls = any(
-        s.type == StepResultType.TOOL_CALL for s in result.steps
-    )
-    if not has_tool_calls:
+    # Show all steps, not just tool calls
+    if not result.steps:
         return
 
     print()  # blank line before step summary
@@ -771,6 +784,15 @@ def _print_agent_steps(result, debug: bool = False) -> None:
                   f" {dim(args_str)}")
             if result_str:
                 print(f"      {dim('→')} {dim(result_str)}")
+        elif step.type == StepResultType.FINAL_ANSWER:
+            content = step.content[:100] + "..." if len(step.content) > 100 else step.content
+            print(f"  {dim(f'[{i}]')} {cyan('answer')} {dim(content)}")
+        elif step.type == StepResultType.ERROR:
+            error_msg = step.error[:100] + "..." if step.error and len(step.error) > 100 else step.error or "Error"
+            print(f"  {dim(f'[{i}]')} {red('error')} {dim(error_msg)}")
+        elif step.type == StepResultType.MAX_STEPS:
+            content = step.content[:100] + "..." if step.content and len(step.content) > 100 else step.content or "Max steps reached"
+            print(f"  {dim(f'[{i}]')} {yellow('max-steps')} {dim(content)}")
     print()  # blank line before final answer
 
 

@@ -187,18 +187,27 @@ class OllamaBackend(BaseBackend):
         # Debug output for request
         if os.environ.get("AGENTNOVA_DEBUG"):
             print(f"  [Ollama] Request: tools={len(tools) if tools else 0}, think={think}")
-            # Show messages being sent (truncated for readability)
+            # Show messages being sent (respect truncation setting)
+            truncation_disabled = kwargs.get("truncation") == "disabled"
             for i, msg in enumerate(body.get("messages", [])):
                 role = msg.get("role", "?")
                 if role == "system":
                     print(f"  [Ollama.Body] msg[{i}]: role={role}, content=<{len(msg.get('content', ''))} chars>")
                 elif role == "tool":
-                    print(f"  [Ollama.Body] msg[{i}]: role={role}, tool_call_id={msg.get('tool_call_id', 'MISSING')!r}, content={msg.get('content', '')[:50]!r}")
+                    content = msg.get('content', '')
+                    if truncation_disabled:
+                        print(f"  [Ollama.Body] msg[{i}]: role={role}, tool_call_id={msg.get('tool_call_id', 'MISSING')!r}, content={content}")
+                    else:
+                        print(f"  [Ollama.Body] msg[{i}]: role={role}, tool_call_id={msg.get('tool_call_id', 'MISSING')!r}, content={content[:50]!r}")
                 elif "tool_calls" in msg:
                     tc = msg.get("tool_calls", [])
                     print(f"  [Ollama.Body] msg[{i}]: role={role}, tool_calls={tc}")
                 else:
-                    print(f"  [Ollama.Body] msg[{i}]: role={role}, content={msg.get('content', '')[:100]!r}")
+                    content = msg.get('content', '')
+                    if truncation_disabled:
+                        print(f"  [Ollama.Body] msg[{i}]: role={role}, content={content}")
+                    else:
+                        print(f"  [Ollama.Body] msg[{i}]: role={role}, content={content[:100]!r}")
 
         # Make request
         start_time = time.time()
@@ -253,7 +262,10 @@ class OllamaBackend(BaseBackend):
         if os.environ.get("AGENTNOVA_DEBUG"):
             print(f"  [Ollama] Raw result keys: {list(result.keys())}")
             print(f"  [Ollama] Message keys: {list(message.keys())}")
-            print(f"  [Ollama] Content: {content[:1024] if content else '(empty)'}")
+            if kwargs.get("truncation") == "disabled":
+                print(f"  [Ollama] Content: {content if content else '(empty)'}")
+            else:
+                print(f"  [Ollama] Content: {content[:1024] if content else '(empty)'}")
             print(f"  [Ollama] Tool calls: {tool_calls}")
 
         # Parse tool calls from Ollama format
@@ -492,7 +504,10 @@ class OllamaBackend(BaseBackend):
         # Debug output
         if os.environ.get("AGENTNOVA_DEBUG"):
             print(f"  [OpenAI-Comp] Choices: {num_choices}")
-            print(f"  [OpenAI-Comp] Content[0]: {content[:1024] if content else '(empty)'}")
+            if kwargs.get("truncation") == "disabled":
+                print(f"  [OpenAI-Comp] Content[0]: {content if content else '(empty)'}")
+            else:
+                print(f"  [OpenAI-Comp] Content[0]: {content[:1024] if content else '(empty)'}")
             print(f"  [OpenAI-Comp] Tool calls[0]: {parsed_tool_calls}")
 
         # Build response dict

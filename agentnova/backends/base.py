@@ -23,6 +23,7 @@ class BackendConfig:
     timeout: int = 120
     max_retries: int = 3
     retry_delay: float = 1.0
+    truncation: str = "auto"
 
 
 class BaseBackend(ABC):

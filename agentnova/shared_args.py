@@ -199,6 +199,13 @@ def add_agent_args(
         help="Force ReAct mode for tool calling",
     )
     parser.add_argument(
+        "--max-steps",
+        type=int,
+        default=None,
+        dest="max_steps",
+        help="Maximum reasoning steps (default: 10)",
+    )
+    parser.add_argument(
         "--soul",
         default=None,
         help="Path to Soul Spec package (disabled by default)",

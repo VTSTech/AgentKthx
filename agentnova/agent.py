@@ -107,7 +107,7 @@ class Agent:
         model: str,
         tools: ToolRegistry | list[str] | list[Tool] | None = None,
         backend: BaseBackend | str | None = None,
-        max_steps: int = 5,
+        max_steps: int = 10,
         memory_config: MemoryConfig | None = None,
         debug: bool = False,
         system_prompt: str | None = None,
@@ -126,6 +126,8 @@ class Agent:
         # Retry-with-error-feedback
         retry_on_error: bool = DEFAULT_RETRY_ON_ERROR,
         max_tool_retries: int = DEFAULT_MAX_TOOL_RETRIES,
+        # Truncation behavior
+        truncation: str = "auto",
         **kwargs,
     ):
         """
@@ -197,6 +199,11 @@ class Agent:
         # (tool_name, args) and returns True (allow) or False (deny).
         # If not set, dangerous tools execute without confirmation.
         self._confirm_dangerous = kwargs.pop("confirm_dangerous", None)
+        
+        # Truncation behavior for context overflow
+        self.truncation = truncation
+        if self.debug:
+            print(f"[Agent] Truncation mode: {self.truncation}")
 
         # Initialize backend
         if backend is None:
@@ -1477,9 +1484,15 @@ Final Answer: <the answer>
                     content_preview = f"<{len(content)} chars>"
                 elif role == 'tool':
                     # Show tool message with tool_call_id
-                    content_preview = f"{content[:100] if content else '(empty)'} (tool_call_id={tool_call_id})"
+                    if self.truncation == "disabled":
+                        content_preview = f"{content if content else '(empty)'} (tool_call_id={tool_call_id})"
+                    else:
+                        content_preview = f"{content[:100] if content else '(empty)'} (tool_call_id={tool_call_id})"
                 else:
-                    content_preview = content[:200] if content else '(empty)'
+                    if self.truncation == "disabled":
+                        content_preview = content if content else '(empty)'
+                    else:
+                        content_preview = content[:200] if content else '(empty)'
                 print(f"  [MSG {i}] role={role}, content={content_preview!r}{' as tool_calls]' if tc else ']'}")
             print(f"  [DEBUG] Tools: {[t.name for t in self.tools.all()] if self.tools else None}")
 
@@ -1518,6 +1531,9 @@ Final Answer: <the answer>
         # Pass tools for native tool calling (OpenResponses/ChatCompletions compliant)
         # ReAct parsing remains as fallback for models without native support
         tools_for_backend = self.tools.all() if self.tools and len(self.tools) > 0 else None
+
+        # Pass truncation setting to backend
+        backend_kwargs["truncation"] = self.truncation
 
         # Get generation parameters (use overrides or model defaults)
         gen_temperature = self._temperature if self._temperature is not None else self.model_config.default_temperature
