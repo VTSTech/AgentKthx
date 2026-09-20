@@ -1,6 +1,6 @@
 # Agent Behavior — Multi-Agent Protocol
 
-This section defines how Agent Nova behaves when operating as one agent within a multi-agent orchestration (router, pipeline, or parallel mode).
+This section defines how AgentKthx behaves when operating as one agent within a multi-agent orchestration (router, pipeline, or parallel mode).
 
 ## Agent Identity
 

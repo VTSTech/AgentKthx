@@ -973,7 +973,7 @@ class OpenRouterBackend(OllamaBackend):
         # tool_calls. This usually means the provider silently failed
         # (rate limit, content filter, or the model just returned
         # whitespace). Surface it as an error so the chat loop can show
-        # the user something went wrong instead of a blank "Agent Nova: ".
+        # the user something went wrong instead of a blank "AgentKthx: ".
         if not parsed["content"].strip() and not parsed["tool_calls"]:
             raise RuntimeError(
                 "OpenRouter returned an empty response (no content, no tool_calls). "

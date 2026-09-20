@@ -1248,15 +1248,36 @@ def cmd_chat(args: argparse.Namespace) -> int:
         # Detect empty final answers — the agent ran but produced no
         # response text. This usually means the model hit a rate limit
         # or content filter mid-conversation. Surface it as an error
-        # instead of showing a blank "Agent Nova: " line.
+        # instead of showing a blank "AgentKthx: " line.
         if not result.final_answer or not result.final_answer.strip():
-            print(f"\n{red('Agent Nova: (empty response)')}")
+            print(f"\n{red('AgentKthx: (empty response)')}")
             print(yellow("  The model returned no content. This is likely a "
                          "rate limit (429) or content filter."))
             print(yellow("  Try again in a few seconds, or use /debug to see "
                          "what happened."))
         else:
-            print(f"\n{bright_green('Agent Nova')}: {result.final_answer}\n")
+            # Display reasoning_content under the answer when --think is set
+            # (only if the model emitted reasoning_content).
+            show_reasoning = getattr(agent, '_show_reasoning', False)
+            reasoning_content = ""
+            if show_reasoning and result.steps:
+                # Get reasoning_content from the LAST FINAL_ANSWER step
+                from .core.types import StepResultType
+                for step in reversed(result.steps):
+                    if step.type == StepResultType.FINAL_ANSWER:
+                        reasoning_content = getattr(step, 'reasoning_content', '') or ""
+                        break
+
+            if reasoning_content:
+                print(f"\n{bright_green('AgentKthx')}: {result.final_answer}")
+                print(f"{dim('  reasoning:')}")
+                for line in reasoning_content.splitlines():
+                    if len(line) > 200:
+                        line = line[:197] + "..."
+                    print(f"    {dim(line)}")
+                print()
+            else:
+                print(f"\n{bright_green('AgentKthx')}: {result.final_answer}\n")
 
         # Refresh the persistent footer with updated token counts.
         # The footer lives on the reserved bottom line (scroll region)

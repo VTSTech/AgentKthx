@@ -5,6 +5,28 @@ All notable changes to AgentKthx will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [R06.2] - 2026-09-20
+
+### 🐛 **Bug Fixes**
+- **Chat mode displayed "Agent Nova:" instead of "AgentKthx:"**: The chat loop's response prefix was hardcoded as `bright_green("Agent Nova")` in two places (`cli.py:1253` for empty responses, `cli.py:1259` for normal responses). Updated to `AgentKthx`.
+- **Soul files still referenced "Agent Nova"**: All three default soul packages (`nova-helper`, `nova-skills`, `nova-trading`) had "Agent Nova" as their persona name in `IDENTITY.md`, `SOUL.md`, `AGENTS.md`, and `soul.json displayName`. Updated to `AgentKthx` (except `nova-trading` which keeps "Nova Trading Analyst" as a thematic name — Nova = new/novel in trading context).
+- **Comment in OpenRouter backend**: Referenced "blank 'Agent Nova: '" — updated to "blank 'AgentKthx: '".
+- **`--think` flag had no effect in chat mode**: Previously only `run` mode surfaced `reasoning_content` in CLI output. Added chat-mode display logic: when `--think` is set AND the last FINAL_ANSWER step has `reasoning_content`, it's printed under the answer (dimmed, indented, line-truncated to 200 chars). Falls through to normal display when no reasoning_content is present (non-thinking models).
+
+### ✅ **Verified**
+- 245/245 tests pass after fixes.
+- Chat display logic verified with simulated AgentRun containing reasoning_content — output is:
+  ```
+  AgentKthx: Hello VTSTech!
+    reasoning:
+      I need to greet the user politely. They said hello, so I should respond in kind.
+  ```
+
+### 🔧 **Migration from R06.1**
+```bash
+pip install --upgrade agentkthx  # gets you to 0.6.2
+```
+
 ## [R06.1] - 2026-09-20
 
 ### 🐛 **Bug Fixes**
