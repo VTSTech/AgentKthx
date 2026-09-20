@@ -739,7 +739,28 @@ def cmd_run(args: argparse.Namespace) -> int:
     # not just the final answer. Skipped in quiet mode (debug shows verbose steps).
     if not getattr(args, 'quiet', False):
         _print_agent_steps(result, debug=agent.debug, show_reasoning=getattr(agent, '_show_reasoning', False))
-    print(result.final_answer)
+
+    # Display reasoning_content under the answer when --think is set
+    # (only if the model emitted reasoning_content). Same logic as chat mode.
+    show_reasoning = getattr(agent, '_show_reasoning', False)
+    reasoning_content = ""
+    if show_reasoning and result.steps:
+        from .core.types import StepResultType
+        for step in reversed(result.steps):
+            if step.type == StepResultType.FINAL_ANSWER:
+                reasoning_content = getattr(step, 'reasoning_content', '') or ""
+                break
+
+    if reasoning_content:
+        print(result.final_answer)
+        print(f"{dim('  reasoning:')}")
+        for line in reasoning_content.splitlines():
+            if len(line) > 200:
+                line = line[:197] + "..."
+            print(f"    {dim(line)}")
+        print()
+    else:
+        print(result.final_answer)
 
     # Print run summary (unless quiet)
     if not getattr(args, 'quiet', False):
@@ -1051,6 +1072,14 @@ def cmd_chat(args: argparse.Namespace) -> int:
     # path (quit, EOF, Ctrl+C, unexpected exception) so the terminal is
     # never left in a broken scroll-region state.
     _setup_footer_region()
+    # In-memory last-message recall (R06.4): no history file.
+    # Previously used readline.read_history_file(~/.agentnova_history) +
+    # write_history_file() on every prompt, which grew unboundedly
+    # (one user hit 600MB). Now we just track the last user_input in a
+    # variable so UP arrow can recall it within the current session.
+    # readline is still imported for arrow-key / line-editing support
+    # in input(), but no file I/O happens.
+    _last_user_input = ""
     try:
       while True:
         # Refresh the persistent footer at the top of each iteration.
@@ -1062,21 +1091,16 @@ def cmd_chat(args: argparse.Namespace) -> int:
         # the top of the screen or wherever the last response left it.
         _position_for_input()
         try:
-            # Use readline for better terminal input handling (arrow keys, etc.)
+            # Import readline for arrow-key / line-editing support in input().
+            # We do NOT read or write a history file — that caused unbounded
+            # growth (600MB+ reported). In-memory recall only.
             import readline
-            
-            # Initialize readline history to enable UP/DOWN arrow navigation
-            history_file = os.path.expanduser('~/.agentnova_history')
-            try:
-                readline.read_history_file(history_file)
-            except FileNotFoundError:
-                pass
-            
+
             user_input = input(f"\033[90mYou:\033[0m ").strip()
-            
-            # Save to history for UP/DOWN arrow navigation
-            readline.add_history(user_input)
-            readline.write_history_file(history_file)
+
+            # Track last user_input for in-session recall (replaces file-based history)
+            if user_input:
+                _last_user_input = user_input
         except (EOFError, KeyboardInterrupt):
             # Ensure persistent memory is flushed and closed
             if getattr(agent, '_is_persistent', False) and hasattr(agent.memory, 'close'):
@@ -1204,13 +1228,16 @@ def cmd_chat(args: argparse.Namespace) -> int:
             print()  # blank line before spinner
             spinner_t = _spinner_start()
         try:
-            # Enable streaming by default for cloud providers
+            # Enable streaming by default for cloud providers.
+            # (Earlier R06.3 draft disabled streaming when --thinking was
+            # enabled, suspecting a timeout. The actual cause was a 600MB
+            # ~/.agentnova_history file, now removed in R06.2. Streaming
+            # + thinking is fine — keep streaming on for cloud providers.)
             from .core.types import BackendType
             is_cloud_provider = (
-                hasattr(agent.backend, 'backend_type') and 
+                hasattr(agent.backend, 'backend_type') and
                 agent.backend.backend_type in [BackendType.OPENROUTER, BackendType.ZAI]
             )
-            
             stream = getattr(args, 'stream', False) or is_cloud_provider
             result = agent.run(user_input, stream=stream)
         except KeyboardInterrupt:

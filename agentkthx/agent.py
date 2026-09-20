@@ -730,6 +730,7 @@ Final Answer: <the answer>
                         type=StepResultType.FINAL_ANSWER,
                         content=final_answer,
                         tokens_used=tokens,
+                        reasoning_content=reasoning_content,
                     ))
                     
                     # Mark response as completed
@@ -993,6 +994,7 @@ Final Answer: <the answer>
                     type=StepResultType.FINAL_ANSWER,
                     content=answer,
                     tokens_used=tokens,
+                    reasoning_content=reasoning_content,
                 ))
 
                 if self.debug:
@@ -1042,6 +1044,7 @@ Final Answer: <the answer>
                     type=StepResultType.FINAL_ANSWER,
                     content=final_answer,
                     tokens_used=tokens,
+                    reasoning_content=reasoning_content,
                 ))
                 
                 # Mark response as completed
@@ -1079,6 +1082,7 @@ Final Answer: <the answer>
                 type=StepResultType.FINAL_ANSWER,
                 content=content,
                 tokens_used=tokens,
+                reasoning_content=reasoning_content,
             ))
             self.memory.add("assistant", content)
             break

@@ -14,18 +14,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Skill files referenced AgentNova**: `skill-creator/SKILL.md`, `test-harness/SKILL.md`, and `crypto-signals/references/free_apis.md` (User-Agent string) all referenced "AgentNova" — updated to "AgentKthx".
 - **Test docstrings referenced AgentNova**: All test files had `AgentNova — <description>` headers. Updated to `AgentKthx`.
 - **Comment in OpenRouter backend**: Referenced "blank 'Agent Nova: '" — updated to "blank 'AgentKthx: '".
+- **Restored missing `skills/` directory**: Discovered during testing — the `agentkthx/skills/` directory was accidentally missing from R06.0-R06.1 (likely lost during the bulk rename operation). Restored from R05.7 baseline. All 4 skills (codebase-audit, crypto-signals, skill-creator, test-harness) plus `loader.py` are now back. All imports inside skill scripts updated from `agentnova` → `agentkthx`.
+- **Chat mode 2-minute startup caused by 600MB history file**: `cmd_chat` was calling `readline.read_history_file(~/.agentnova_history)` on every chat session start. The history file grew unboundedly because `readline.write_history_file()` was called after EVERY user prompt, rewriting the whole file each time. A user reported a 600MB file causing ~2 minute startup delays. Fixed: removed all history file I/O. The chat loop now:
+  - Still imports `readline` (so arrow keys / line-editing work in `input()`)
+  - No longer reads any history file at startup
+  - No longer writes any history file after prompts
+  - Existing `~/.agentnova_history` files can be safely deleted by users — they're now ignored
 - **`--think` flag had no effect in chat mode**: Previously only `run` mode surfaced `reasoning_content` in CLI output. Added chat-mode display logic: when `--think` is set AND the last FINAL_ANSWER step has `reasoning_content`, it's printed under the answer (dimmed, indented, line-truncated to 200 chars). Falls through to normal display when no reasoning_content is present (non-thinking models).
+- **`--think` flag did nothing in `run` mode either**: The reasoning_content display logic was added to `cmd_chat` but NOT to `cmd_run`. Fixed: `cmd_run` now extracts `reasoning_content` from the last FINAL_ANSWER step and prints it under the final answer (dimmed, indented, line-truncated to 200 chars). Same logic as chat mode.
 - **ZAI backend didn't surface `reasoning_content`**: `ZaiBackend._generate_with_auth()` builds its own response dict (separate from `OllamaBackend.generate_completions()` because it needs Bearer auth injection). The R05.8 reasoning_content capture only added to OllamaBackend — ZAI was dropping `message.reasoning_content` on the floor. As a result, `--think` showed no reasoning output for ZAI even when GLM-4.5-flash emitted reasoning. Fixed: `_generate_with_auth()` now extracts `reasoning_content` from `choices[0].message` and includes it in the response dict. Also added debug preview when `AGENTNOVA_DEBUG=1`.
 - **OpenRouter backend didn't surface `reasoning_content`**: Same root cause — `OpenRouterBackend._parse_openai_response()` is a separate response parser that wasn't updated. Fixed: now extracts `reasoning_content` from `choices[0].message` and includes it in the returned dict.
+- **Agent loop didn't propagate `reasoning_content` to StepResult in all code paths**: There are 5 places in `agent.py` where `StepResult(type=StepResultType.FINAL_ANSWER, ...)` is constructed. Only ONE initially included `reasoning_content=reasoning_content`. The other 4 dropped it silently. This meant `--think` would only display reasoning for SOME response paths (e.g., when the agent detected a pending_final_answer) but not others (e.g., the common "No tool calls detected, accepting as final answer" path). Fixed: all 5 FINAL_ANSWER StepResult constructions now include `reasoning_content=reasoning_content`.
 
 ### ✅ **Verified**
 - 245/245 tests pass after fixes.
 - ZAI chat mode with `--think` now displays reasoning_content under the agent's response (when GLM emits reasoning_content).
 - All `AgentNova` references in user-facing strings, souls, skills, and test docstrings updated to `AgentKthx`.
+- Chat startup is now instant (no 600MB history file to parse).
+- Skills load correctly: `agentkthx skills` now lists all 4 skills.
 
 ### 🔧 **Migration from R06.1**
 ```bash
 pip install --upgrade agentkthx  # gets you to 0.6.2
+
+# Optional cleanup: delete the now-ignored history file
+rm -f ~/.agentnova_history
 ```
 
 ## [R06.1] - 2026-09-20
