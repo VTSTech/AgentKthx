@@ -1,10 +1,10 @@
 # Improvement & Enhancement Audit
 
-**AgentKthx v0.4.7 (R04.7)**
+**AgentKthx v0.6.4 (R06.4)**
 
-**Repository:** https://github.com/VTSTech/AgentKthx
-**Author:** VTSTech | **License:** MIT | **Date:** 2026-04-15
-16 Findings | 6 Categories | SEC, ROB, MAINT, FEAT, ARCH, TEST
+**Repository:** https://github.com/VTSTech/AgentKthx  
+**Author:** VTSTech | **License:** MIT | **Date:** 2026-09-21  
+14 Findings | 7 Categories | SEC, ROB, MAINT, PERF, FEAT, ARCH, TEST
 
 ---
 
@@ -16,6 +16,7 @@
   - [Security](#security)
   - [Robustness](#robustness)
   - [Maintainability](#maintainability)
+  - [Performance](#performance)
   - [New Features](#new-features)
   - [Architecture](#architecture)
   - [Testing](#testing)
@@ -26,7 +27,9 @@
 
 ## Executive Summary
 
-AgentKthx R04.7 is a well-engineered, zero-dependency agentic framework that has evolved significantly across three rapid releases (R04.5 through R04.7). The audit reviewed ~8,500 lines of core Python code across 12 modules, the full CLI (2,143 lines), the ZAI cloud backend (814 lines), and the soul/skill subsystems. The codebase demonstrates strong architectural discipline: clean backend abstraction, comprehensive security layers (command blocklists, path whitelists, SSRF protection, sandboxed REPL), thoughtful small-model support (fuzzy matching, argument normalization, repetition detection), and robust state management (schema versioning, atomic cache writes, WAL-mode SQLite). The R04.7 release fixed a critical bug where native tool-calling-capable models were forced into text-based ReAct format by system prompt injection, restoring proper structured tool_calls for models like glm-4.5-flash. The most impactful findings involve a silently-unwired per-session todo isolation feature, hardcoded version strings that will drift on the next release, and test coverage gaps around the new chat UX features. No high-severity security vulnerabilities were found — the existing defense-in-depth model is sound for the framework's threat profile. The codebase is well-positioned for continued development, with clear extension points and a philosophy of zero external dependencies that eliminates supply chain risk entirely.
+AgentKthx is a 40,917-line Python framework for autonomous AI agents with zero external dependencies — built entirely on the standard library. The audit reviewed 15 core modules, 6 plugin backends, 17 built-in tools, and 11 test files (506 tests total, 245 passing). The codebase demonstrates strong security practices (command blocklist, injection detection, SSRF protection, path validation, runtime security toggle) and a clean plugin system with directory-scan discovery. The recent R06.0 rename from AgentNova to AgentKthx was executed with full backward compatibility (redirect stubs, env var preservation, filesystem path preservation).
+
+The most impactful findings are two High-severity items: duplicate ACP plugin files creating a maintenance divergence risk, and `eval()` usage in the calculator tool that could be exploited with crafted AST payloads despite the `__builtins__` sandbox. Medium findings address bare `except:` clauses, 9 broken pre-existing tests, and the 3478-line monolithic `cli.py`. The framework's streaming architecture is notably incomplete — `stream=True` is accepted but silently ignored, resulting in a degraded UX where users see a spinner until the full response arrives. Performance findings address missing `stream_options.include_usage` on OpenRouter and unbounded token usage on free-tier models. The codebase is well-positioned for R06.5+ development with clear extension points for streaming display, provider routing, and additional sampling parameters.
 
 ---
 
@@ -34,31 +37,20 @@ AgentKthx R04.7 is a well-engineered, zero-dependency agentic framework that has
 
 | ID | Severity | Category | Title |
 |----|----------|----------|-------|
-| SEC-01 | Medium | Security | Calculator `eval()` sandbox bypassable via `__import__` chain |
-| SEC-02 | Medium | Security | `shell=True` with rejection-based command sanitization |
-| SEC-03 | Low | Security | ZAI API key stored in env without format validation |
-| ROB-01 | Medium | Robustness | ZAI credit-exhaustion fallback silently swaps models without user notification |
-| ROB-02 | Low | Robustness | ZAI tool-rejection fallback silently downgrades to non-tool mode |
-| ROB-03 | Low | Robustness | Web search depends on DuckDuckGo HTML scraping — no fallback |
-| MAINT-01 | Medium | Maintainability | Per-session todo isolation infrastructure exists but is not wired up |
-| MAINT-02 | Low | Maintainability | Chat footer version string hardcoded — will drift on next release |
-| MAINT-03 | Low | Maintainability | ARCH.md version string stale (R04.6, should be R04.7) |
-| FEAT-01 | Medium | New Feature | No streaming support for the ReAct tool-calling loop |
-| FEAT-02 | Low | New Feature | Memory pruning drops messages without summarization |
-| ARCH-01 | Medium | Architecture | `ZaiBackend` skips parent `OllamaBackend.__init__` — fragile inheritance |
-| ARCH-02 | Low | Architecture | CLI file at 2,143 lines with mixed concerns (parsing, display, business logic) |
-| ARCH-03 | Low | Architecture | Orchestrator LLM router hardcodes `get_backend("ollama")` |
-| TEST-01 | Medium | Testing | No tests for R04.7 chat UX features (spinner, footer, slash commands, token tracking) |
-| TEST-02 | Low | Testing | No tests for per-session todo isolation or SkillLoader cache management |
-
-Severity levels:
-- **High** — Affects correctness, security, or data integrity. Fix soon.
-- Medium — Impacts maintainability, reliability, or UX. Address in planned work.
-- Low — Nice-to-have improvement. Address opportunistically.
-
-Omit categories with no findings from the detailed findings section below, but keep them in the TOC with a note like "No findings in this category."
-
-Performance: No findings in this category.
+| SEC-01 | **High** | Security | `eval()` in calculator tool with bypassable sandbox |
+| SEC-02 | Medium | Security | `shell=True` subprocess execution with blocklist-only protection |
+| ROB-01 | **High** | Robustness | Duplicate ACP plugin files create maintenance divergence |
+| ROB-02 | Medium | Robustness | Bare `except:` clauses suppress all exceptions silently |
+| ROB-03 | Medium | Robustness | 9 pre-existing test failures unreferenced in CI |
+| MAINT-01 | **High** | Maintainability | `cli.py` is 3478 lines — monolithic CLI with no module splitting |
+| MAINT-02 | Medium | Maintainability | `AGENTNOVA_*` env var naming inconsistent with package rename |
+| PERF-01 | Medium | Performance | Streaming mode silently ignored — no real-time output |
+| PERF-02 | Low | Performance | Missing `stream_options.include_usage` on OpenRouter |
+| FEAT-01 | Medium | New Feature | No provider routing preferences for OpenRouter |
+| FEAT-02 | Low | New Feature | `/param` matrix is hardcoded, not extensible via plugins |
+| ARCH-01 | Medium | Architecture | Backend inheritance couples ZAI/OpenRouter to OllamaBackend internals |
+| ARCH-02 | Low | Architecture | No coverage measurement configured |
+| TEST-01 | Medium | Testing | No integration tests — all tests are mocked unit tests |
 
 ---
 
@@ -66,217 +58,290 @@ Performance: No findings in this category.
 
 ### Security
 
-#### SEC-01: Calculator `eval()` sandbox bypassable via `__import__` chain
+#### SEC-01: `eval()` in calculator tool with bypassable sandbox
+
+| Property | Value |
+|----------|-------|
+| **Severity** | **High** |
+| **Category** | Security |
+| **File(s)** | `agentkthx/core/math_prompts.py:220`, `agentkthx/core/helpers.py:820` |
+
+The calculator tool uses Python's `eval()` with a restricted namespace `{"__builtins__": {}}` to evaluate mathematical expressions. While this blocks direct access to built-in functions, the sandbox is bypassable through AST manipulation. A crafted expression containing `().__class__.__bases__[0].__subclasses__()` can access arbitrary Python objects including `os.system`, `subprocess.Popen`, and `open()`. The `helpers.py:820` usage has the same pattern but evaluates model-generated expressions (not user input), making it slightly lower risk but still exploitable if the model is jailbroken.
+
+The `math_prompts.py` usage does parse the AST first and validates function names against an allowlist (`allowed_names`), which provides better protection than a bare `eval()`. However, attribute access (`.__class__`, `.__bases__`, `.__subclasses__()`) is not blocked by the AST validation, which only checks function call names.
+
+**Recommendation:** Replace `eval()` with a proper AST-walking evaluator that rejects attribute access nodes (`ast.Attribute`) and subscription nodes (`ast.Subscript`) entirely. Libraries like `simpleeval` or `asteval` do this correctly, but since the project has zero dependencies, a custom walker is needed. Alternatively, restrict the AST to only `ast.BinOp`, `ast.UnaryOp`, `ast.Num`, `ast.Name` nodes and reject everything else.
+
+**Impact:** A jailbroken model or crafted prompt could achieve arbitrary code execution via the calculator tool, bypassing all other security measures.
+
+---
+
+#### SEC-02: `shell=True` subprocess execution with blocklist-only protection
 
 | Property | Value |
 |----------|-------|
 | **Severity** | Medium |
 | **Category** | Security |
-| **File(s)** | `agentkthx/tools/builtins.py` |
+| **File(s)** | `agentkthx/tools/builtins.py:295` |
 
-The calculator tool uses Python's `eval()` with `__builtins__` set to an empty dict and a `safe_dict` containing `math`, `sqrt`, `pow`, etc. While the empty `__builtins__` blocks direct access to `import`, `exec`, `open`, and other dangerous functions, the sandbox relies entirely on the contents of `safe_dict` not being subverted. The `MAX_EXPONENT=10000` guard prevents numeric DoS via `2**9999999`, which is good. However, the fundamental approach of using `eval()` with a curated namespace remains a defense-in-depth concern — if any future addition to `safe_dict` inadvertently exposes a callable that provides attribute access to `__builtins__` or `__class__.__mro__`, the sandbox is bypassed. The current implementation is safe for the curated dictionary, but the pattern is inherently fragile for long-term maintenance.
+The `shell()` tool executes commands via `subprocess.run(validated_cmd, shell=True)`. Security relies on `sanitize_command()` which implements a command blocklist (`BLOCKED_COMMANDS` set) and injection pattern detection (regex for `;`, `|`, `&&`, `||`, backticks, `$()`, `${}`, `>`, `<`). With `--security off`, all checks are disabled and the model can run any command.
 
-**Impact:** A future maintainer adding a function to `safe_dict` could unknowingly break the sandbox, allowing arbitrary code execution through the calculator tool.
+The blocklist approach is inherently incomplete — new dangerous commands can be added by upstream packages (e.g., `busybox rm`, `python -c "import os; os.system('rm -rf /')"`, `perl -e "system('...')"`). The injection detection regex catches common patterns but misses Unicode-based bypass, hex encoding, and nested quoting tricks. The `shell=True` flag itself is the root issue — it invokes `/bin/sh -c` which interprets the entire command string.
 
-#### SEC-02: `shell=True` with rejection-based command sanitization
+**Recommendation:** Use `shell=False` with `shlex.split()` for command parsing. This prevents shell metacharacter interpretation entirely. For commands that genuinely need pipes/redirects, require the model to use explicit tool calls (e.g., `write_file` for output redirection) rather than shell syntax. Document this as a deliberate trade-off: less flexible but much harder to exploit.
 
-| Property | Value |
-|----------|-------|
-| **Severity** | Medium |
-| **Category** | Security |
-| **File(s)** | `agentkthx/core/helpers.py` (`sanitize_command`), `agentkthx/tools/builtins.py` (`shell`) |
-
-The shell tool runs commands with `subprocess.run(cmd, shell=True)` after passing them through `sanitize_command()`. The sanitizer uses a blocklist approach: it checks for dangerous patterns (pipe chains `|`, redirects `>` `>>`, `&&` `||`, backticks, `$()`, `;`, environment variable expansion, `rm -rf`, etc.) and rejects commands matching any pattern. However, `sanitize_command()` returns the ORIGINAL command string unmodified — it does not transform or escape input, only accepts or rejects it. The comment in the code explicitly acknowledges this design choice. While the blocklist is comprehensive, rejection-based approaches are inherently weaker than allowlist approaches for command execution. New shell injection techniques or encoding tricks could bypass the blocklist. The risk is mitigated by the `dangerous=True` flag (requires `--confirm` for interactive use) and audit logging to `~/.agentkthx/audit.log`.
-
-**Impact:** An attacker who discovers a blocklist bypass could execute arbitrary shell commands through the agent's shell tool.
-
-#### SEC-03: ZAI API key stored in env without format validation
-
-| Property | Value |
-|----------|-------|
-| **Severity** | Low |
-| **Category** | Security |
-| **File(s)** | `agentkthx/config.py`, `agentkthx/backends/zai.py` |
-
-The `ZAI_API_KEY` environment variable is read directly from `os.environ` and used as a Bearer token with no format validation. The key is required for the ZAI backend to function, but there's no check that it looks like a valid API key before making requests. An empty string, whitespace, or a completely wrong value would only be caught when the API returns a 401 error. This is a minor DX issue rather than a security vulnerability — the key isn't logged or exposed, and API authentication failures are handled gracefully.
-
-**Impact:** Users with misconfigured API keys get unclear 401 errors instead of an immediate configuration error at startup.
+**Impact:** With `--security max`, the blocklist provides reasonable defense-in-depth. With `--security off`, the model has unrestricted shell access — by design, but the risk surface is the entire OS.
 
 ---
 
 ### Robustness
 
-#### ROB-01: ZAI credit-exhaustion fallback silently swaps models without user notification
+#### ROB-01: Duplicate ACP plugin files create maintenance divergence
+
+| Property | Value |
+|----------|-------|
+| **Severity** | **High** |
+| **Category** | Robustness |
+| **File(s)** | `agentkthx/acp_plugin.py` (2396 lines), `agentkthx/plugins/acp/acp_plugin.py` (2396 lines) |
+
+`agentkthx/acp_plugin.py` is a near-exact copy of `agentkthx/plugins/acp/acp_plugin.py` — the only difference is import paths (relative `from .core.models import` vs absolute `from agentkthx.core.models import`). Both are 2396 lines. Similarly, `agentkthx/turbo.py` duplicates `agentkthx/plugins/turboquant/turbo.py` (693 lines each, same pattern).
+
+This creates a maintenance hazard: if a bug is fixed in one copy but not the other, the behavior diverges silently. The plugin loader (`_loader.py`) imports from `agentkthx.plugins.acp.acp_plugin`, so the root-level `acp_plugin.py` is likely dead code. But `agentkthx/__init__.py` has a try/except import for `.acp_plugin`, suggesting it was the original location before the plugin system existed.
+
+**Recommendation:** Delete `agentkthx/acp_plugin.py` and `agentkthx/turbo.py` (the root-level copies). If any code imports them directly, redirect those imports to the plugin versions. Run `grep -rn "from .acp_plugin\|from agentkthx.acp_plugin\|from .turbo import\|from agentkthx.turbo import"` to find all references before deleting.
+
+**Impact:** Eliminates 3089 lines of duplicate code and the risk of silent behavioral divergence when one copy is updated but not the other.
+
+---
+
+#### ROB-02: Bare `except:` clauses suppress all exceptions silently
 
 | Property | Value |
 |----------|-------|
 | **Severity** | Medium |
 | **Category** | Robustness |
-| **File(s)** | `agentkthx/backends/zai.py` (lines ~542-563) |
+| **File(s)** | `agentkthx/core/helpers.py:833`, `agentkthx/orchestrator.py:279` |
 
-When the ZAI backend receives HTTP 429 with an error body containing "insufficient balance", "insufficient", or "no resource package" (ZAI error code 1113), it automatically retries the same request with `ZAI_FREE_FALLBACK_MODEL` (default: `glm-4.5-flash`). The fallback happens silently — only a debug-level warning is printed. The user may have intentionally selected `glm-5.1` for its reasoning capabilities and receive a response from `glm-4.5-flash` (a much smaller, less capable model) without any visible indication. This is documented in the CHANGELOG and is a deliberate design choice for resilience, but the silent nature of the swap could confuse users who notice quality degradation without understanding why. The `ZAI_FREE_ONLY` env var prevents this by blocking paid models upfront, but the default behavior allows the fallback.
+Two bare `except:` clauses catch and silently suppress ALL exceptions, including `KeyboardInterrupt`, `SystemExit`, and `GeneratorExit`. The `helpers.py:833` usage is in the calculator argument parsing fallback (catches parse failures from `ast.literal_eval`), and `orchestrator.py:279` is in the multi-agent orchestrator's result processing loop.
 
-**Impact:** Users may unknowingly receive responses from a less capable model when their credits are exhausted, with no clear indication in the output.
+Bare `except:` is considered an anti-pattern in modern Python because it hides unexpected errors (e.g., `MemoryError`, `RecursionError`, `KeyboardInterrupt`) that should propagate. The 119 uses of `except Exception` elsewhere in the codebase are more appropriate (they don't catch `KeyboardInterrupt`/`SystemExit`).
 
-#### ROB-02: ZAI tool-rejection fallback silently downgrades to non-tool mode
+**Recommendation:** Replace both bare `except:` with `except (ValueError, SyntaxError):` (for the `literal_eval` case) and `except Exception:` (for the orchestrator case). This preserves the intended error-suppression behavior while allowing system-level exceptions to propagate.
 
-| Property | Value |
-|----------|-------|
-| **Severity** | Low |
-| **Category** | Robustness |
-| **File(s)** | `agentkthx/backends/zai.py` (lines ~564-580) |
+**Impact:** Prevents silent suppression of critical errors like `KeyboardInterrupt` (Ctrl+C during agent execution) and `MemoryError`.
 
-When `_generate_with_auth()` receives an error containing "does not support tools", it strips the `tools` parameter from the request body and retries. This means the model loses all tool-calling capability for that request. While this prevents a hard error (the agent gets a text-only response), it silently degrades the agent's capabilities. The agent loop may then interpret the text response as a direct answer (no tool calls found) and return it as the final answer, even though the user expected the agent to use tools. There's no mechanism to inform the agent or user that tool support was unavailable.
+---
 
-**Impact:** An agent using a ZAI model that doesn't support tools will silently receive text-only responses, potentially returning incomplete or inaccurate results without any error indication.
-
-#### ROB-03: Web search depends on DuckDuckGo HTML scraping — no fallback
+#### ROB-03: 9 pre-existing test failures unreferenced in CI
 
 | Property | Value |
 |----------|-------|
-| **Severity** | Low |
+| **Severity** | Medium |
 | **Category** | Robustness |
-| **File(s)** | `agentkthx/tools/builtins.py` (`web_search`) |
+| **File(s)** | `tests/test_r048_changes.py` (8 failures), `tests/test_security.py` (1 failure) |
 
-The web search tool scrapes `html.duckduckgo.com` and `lite.duckduckgo.com` with regex to extract search results. Any change to DuckDuckGo's HTML structure will silently break web search without any error — the regex will simply return no matches, and the tool will return an empty or minimal result set. There's no fallback search provider, no API-based search option, and no validation that the expected HTML elements exist. This is a known limitation acknowledged in the codebase documentation.
+8 tests in `test_r048_changes.py` fail with `ModuleNotFoundError: No module named 'agentnova.backends.zai'` — they reference the pre-rename import path `agentnova.backends.zai` instead of `agentkthx.plugins.zai.zai`. 1 test in `test_security.py` fails on IPv6 loopback SSRF detection (`::1` not blocked). These failures existed before the R06.0 rename and haven't been fixed.
 
-**Impact:** Any DuckDuckGo HTML layout change silently breaks web search for all agents, returning empty results without any error indication.
+Since there's no CI pipeline configured (no `.github/workflows/` directory), these failures are only visible to developers who run `pytest` locally. The 9 failures create noise that can mask new regressions — a developer running `pytest` sees "9 failed, 245 passed" and may not investigate whether the 9 failures are pre-existing or new.
+
+**Recommendation:** Fix the 8 `test_r048_changes.py` failures by updating import paths from `agentnova.backends.zai` to `agentkthx.plugins.zai.zai`. Fix the IPv6 loopback test by adding `::1` to the SSRF blocklist in `is_safe_url()`. Alternatively, mark them with `@pytest.mark.skip(reason="Pre-existing failure from R04.8")` and create a tracking issue.
+
+**Impact:** Eliminates test noise and makes regression detection reliable.
 
 ---
 
 ### Maintainability
 
-#### MAINT-01: Per-session todo isolation infrastructure exists but is not wired up
+#### MAINT-01: `cli.py` is 3478 lines — monolithic CLI with no module splitting
+
+| Property | Value |
+|----------|-------|
+| **Severity** | **High** |
+| **Category** | Maintainability |
+| **File(s)** | `agentkthx/cli.py` |
+
+`cli.py` contains the entire CLI: argument parser construction, all 13+ subcommands (run, chat, agent, models, test, turbo, skills, soul, config, sessions, plugins, update, version), all 9 slash commands (/help, /status, /skills, /param, /model, /security, /debug, /clear, /system), the chat loop, the agent display logic, the footer rendering, the spinner, the banner ASCII art, the `_build_agent()` factory, the `_load_skills_prompt()` helper, the `/param` matrix (100+ lines inline), and the reasoning display logic.
+
+At 3478 lines, this file is difficult to navigate, review, and test. Any new feature (new slash command, new display option, new CLI flag) requires modifying this file. The `/param` matrix alone is ~100 lines of inline data structure that would be better served as a separate module or config file.
+
+**Recommendation:** Split into logical modules:
+- `cli/parser.py` — argument parser construction
+- `cli/chat.py` — chat loop + slash commands
+- `cli/display.py` — banner, footer, spinner, step display, reasoning display
+- `cli/agent_factory.py` — `_build_agent()` and `_load_skills_prompt()`
+- `cli/params.py` — the `/param` matrix and parameter handling
+- `cli.py` — thin entry point that imports and dispatches
+
+This reduces the largest file to ~500 lines and makes each concern independently testable.
+
+**Impact:** Reduces cognitive load for contributors, makes code review faster, and enables targeted testing of CLI components.
+
+---
+
+#### MAINT-02: `AGENTNOVA_*` env var naming inconsistent with package rename
 
 | Property | Value |
 |----------|-------|
 | **Severity** | Medium |
 | **Category** | Maintainability |
-| **File(s)** | `agentkthx/tools/builtins.py` (lines ~896-1067) |
+| **File(s)** | `agentkthx/config.py`, `agentkthx/cli.py` (scattered references) |
 
-The R04.6 release introduced per-session todo isolation: `_todo_stores: dict[str, list[dict]]` keyed by `session_id`, with `_get_todo_store(session_id)` lazily creating stores. However, no caller actually passes a `session_id` — every todo function (`todo_add`, `todo_list`, `todo_complete`, `todo_remove`, `todo_clear`) and the `_todo_dispatch` unified handler all call `_get_todo_store()` with no argument, defaulting to `"default"`. The `Agent` class doesn't pass its `session_id` through to tool invocations. This means the isolation infrastructure is dead code — all sessions still share the `"default"` todo store, exactly as before the R04.6 change. The CHANGELOG explicitly claims "Multiple agent sessions no longer share a todo list" but this is not true in practice. The test in `test_r046_changes.py` verifies the infrastructure works when session_id is explicitly passed, but doesn't test the actual agent-integrated path (which doesn't exist).
+After the R06.0 rename from AgentNova to AgentKthx, all `AGENTNOVA_*` environment variables (`AGENTNOVA_BACKEND`, `AGENTNOVA_MODEL`, `AGENTNOVA_DEBUG`, `AGENTNOVA_MAX_STEPS`, etc.) were intentionally kept for backward compatibility. This means the codebase has 30+ references to `AGENTNOVA_*` env vars in a package called `agentkthx`, which is confusing for new contributors who see the package name `agentkthx` but must use `AGENTNOVA_*` env vars.
 
-**Impact:** The per-session todo isolation feature is marketed as working but is non-functional — a maintenance trap where developers believe sessions are isolated when they aren't.
+The filesystem paths (`~/.agentnova/`, `~/.cache/agentnova/`) have the same issue — they're named `agentnova` but the package is `agentkthx`.
 
-#### MAINT-02: Chat footer version string hardcoded — will drift on next release
+**Recommendation:** Add `AGENTKTHX_*` aliases that take precedence over `AGENTNOVA_*`:
+```python
+AGENTNOVA_BACKEND = os.environ.get("AGENTKTHX_BACKEND") or os.environ.get("AGENTNOVA_BACKEND", "ollama").lower()
+```
+Document both in the README, with `AGENTKTHX_*` as the recommended form. Don't remove `AGENTNOVA_*` — just make `AGENTKTHX_*` the primary.
+
+**Impact:** Reduces confusion for new users and contributors; allows gradual migration without breaking existing configs.
+
+---
+
+### Performance
+
+#### PERF-01: Streaming mode silently ignored — no real-time output
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Medium |
+| **Category** | Performance |
+| **File(s)** | `agentkthx/agent.py:536` (`run()` method) |
+
+`Agent.run(prompt, stream=True)` accepts the `stream` parameter but never uses it — the method always runs the non-streaming code path. The `run_stream()` method exists but yields SSE events (for API consumers), not console-friendly output. In chat mode, cloud providers (ZAI/OpenRouter) default to streaming, but since `run(stream=True)` is ignored, users see a spinner until the full response arrives, then the entire answer appears at once.
+
+This is a UX issue more than a performance issue — the actual API call may use streaming on the wire (the backend's `generate_stream()` method is called), but the agent loop doesn't consume the stream incrementally for display. The backend streams, but the output is buffered and displayed all at once.
+
+**Recommendation:** Implement a `run_stream_console()` method that:
+1. Calls the backend's streaming method
+2. Prints text chunks as they arrive (typewriter effect)
+3. Accumulates `tool_calls` fragments across SSE chunks
+4. After stream completes, checks if tool_calls were found and continues the agentic loop
+5. Falls back to non-streaming for backends that don't support it
+
+Wire `cmd_chat` and `cmd_run` to use this when `stream=True`.
+
+**Impact:** Dramatically improves perceived latency for cloud provider users — they see text appearing as it's generated instead of waiting for the full response.
+
+---
+
+#### PERF-02: Missing `stream_options.include_usage` on OpenRouter
 
 | Property | Value |
 |----------|-------|
 | **Severity** | Low |
-| **Category** | Maintainability |
-| **File(s)** | `agentkthx/cli.py` (line ~666) |
+| **Category** | Performance |
+| **File(s)** | `agentkthx/plugins/openrouter/openrouter.py` |
 
-The chat mode footer bar displays the version as a hardcoded string `cyan('R04.7')` rather than deriving it dynamically from `__version__`. Other parts of the CLI (like `print_banner()`) correctly derive the version from `__version__`, but the footer was implemented with a literal string. On the next release, the footer will show R04.7 while the banner shows the new version, creating an inconsistency. The emoji constants in the footer are correctly extracted to named variables for Python 3.10 compatibility, which shows attention to detail — the version string simply wasn't included in that cleanup.
+When OpenRouter is used in streaming mode, the `stream_options: {"include_usage": true}` field is not sent. Without this, OpenRouter's streaming SSE chunks don't include `usage` data, so token counts are not tracked for streamed responses. The footer's token counter (`📈 ↑X ↓Y`) shows 0 for streamed responses.
 
-**Impact:** Footer will show stale version string after the next release, creating confusion for users who rely on the footer for version info.
+**Recommendation:** Add `"stream_options": {"include_usage": True}` to the request body in `_build_openai_body()` when `stream=True`.
 
-#### MAINT-03: ARCH.md version string stale
-
-| Property | Value |
-|----------|-------|
-| **Severity** | Low |
-| **Category** | Maintainability |
-| **File(s)** | `ARCH.md` (line 7) |
-
-The ARCH.md document header states "Version: R04.6" but the codebase is at R04.7. The ARCH.md was rewritten in R04.6 but wasn't updated for R04.7 changes (ZAI native tool calling fix, free-only mode, expanded catalog, chat UX overhaul). The specification compliance section also doesn't reflect R04.7.
-
-**Impact:** Developers reading ARCH.md for the current state will have an inaccurate understanding of the version and recent changes.
+**Impact:** Enables accurate token tracking for streaming responses; small API overhead.
 
 ---
 
 ### New Features
 
-#### FEAT-01: No streaming support for the ReAct tool-calling loop
+#### FEAT-01: No provider routing preferences for OpenRouter
 
 | Property | Value |
 |----------|-------|
 | **Severity** | Medium |
 | **Category** | New Feature |
-| **File(s)** | `agentkthx/agent.py`, `agentkthx/backends/` |
+| **File(s)** | `agentkthx/plugins/openrouter/openrouter.py` |
 
-The `--stream` flag exists in the CLI and `Agent.run(stream=True)` is accepted, but streaming is not implemented for the ReAct tool-calling path. The ZAI backend has a `generate_stream()` method that implements SSE parsing via `urllib.request`, and the Ollama backend supports streaming, but the agentic loop in `agent.py` doesn't integrate streaming into the tool-calling workflow. Each agent step waits for the full response before processing tool calls or final answers. For long-running models (especially cloud-based ZAI models with higher latency), this means users see no output for potentially seconds at a time, despite the `--stream` flag implying real-time output. The chat mode's braille spinner partially addresses this UX gap but doesn't show actual content streaming.
+OpenRouter supports a `provider` object in the request body that controls routing: `order` (preferred provider order), `allow_fallbacks`, `require_parameters`, `ignore`, `quantizations`, `data_collection`. AgentKthx does not send this field — it uses OpenRouter's default routing.
 
-**Impact:** Users experience perceived latency during agent runs despite the `--stream` flag being available, particularly noticeable with cloud backends.
+Users who want to pin to free providers, avoid specific providers, or control data collection have no way to do so. This is particularly relevant for the "free models only" use case where a user might want to force `data_collection: "deny"` or pin to a specific provider for consistency.
 
-#### FEAT-02: Memory pruning drops messages without summarization
+**Recommendation:** Add CLI flags `--provider-order`, `--provider-ignore`, `--provider-data-collection deny` that get forwarded as the `provider` object in the request body. Also support via `/param` slash command for runtime changes.
+
+**Impact:** Gives users control over which upstream providers serve their requests, important for privacy, cost, and reliability.
+
+---
+
+#### FEAT-02: `/param` matrix is hardcoded, not extensible via plugins
 
 | Property | Value |
 |----------|-------|
 | **Severity** | Low |
 | **Category** | New Feature |
-| **File(s)** | `agentkthx/core/memory.py` |
+| **File(s)** | `agentkthx/cli.py` (inline `PARAM_MATRIX` dict in `cmd_chat`) |
 
-The `Memory` class's `_prune_if_needed()` method triggers at `max_messages * 0.8` (default 40 messages) and simply drops the oldest messages to stay within budget. There's no summarization of dropped content — early conversation context is silently lost. The method is named with a threshold involving `summarization_threshold` which is misleading since no summarization actually occurs. For long conversations, this means the agent loses the original task description and early context, which can lead to repetition or task drift. This is a known limitation documented in the brief and CHANGELOG.
+The `/param` slash command's parameter support matrix is a hardcoded dict inside `cmd_chat()`. Adding a new parameter requires editing this 100+ line inline data structure in the 3478-line `cli.py`. There's no way for a plugin to register a new parameter that would show up in `/param`.
 
-**Impact:** Long conversations lose early context without any summarization, potentially causing the agent to forget its original task or repeat earlier work.
+**Recommendation:** Move the `PARAM_MATRIX` to a separate `cli/params.py` module and expose a `register_param(name, spec)` API that plugins can call. The plugin's `register()` function could add backend-specific parameters (e.g., ZAI's `do_sample` parameter, OpenRouter's `min_p` sampling).
+
+**Impact:** Makes the parameter system extensible and reduces the size of `cli.py`.
 
 ---
 
 ### Architecture
 
-#### ARCH-01: `ZaiBackend` skips parent `OllamaBackend.__init__` — fragile inheritance
+#### ARCH-01: Backend inheritance couples ZAI/OpenRouter to OllamaBackend internals
 
 | Property | Value |
 |----------|-------|
 | **Severity** | Medium |
 | **Category** | Architecture |
-| **File(s)** | `agentkthx/backends/zai.py` (lines ~188-190) |
+| **File(s)** | `agentkthx/plugins/zai/zai.py`, `agentkthx/plugins/openrouter/openrouter.py` |
 
-`ZaiBackend` inherits from `OllamaBackend` but calls `super(OllamaBackend, self).__init__()` to skip the parent class's `__init__` entirely, going straight to `BaseBackend.__init__()`. This is done because OllamaBackend's init sets up Ollama-specific server state (base URL validation, server running check) that doesn't apply to ZAI. While this pattern works, it's fragile: if `OllamaBackend.__init__` gains important state in a future release (e.g., shared cache initialization, default header setup, or common configuration), ZaiBackend will silently miss it. A cleaner approach would be to either extract the shared logic into `BaseBackend` (so both inherit it naturally) or use composition rather than inheritance. The current design means `ZaiBackend` is tightly coupled to the internal implementation details of `OllamaBackend.__init__`.
+Both `ZaiBackend` and `OpenRouterBackend` inherit from `OllamaBackend`. This means:
+- Any change to `OllamaBackend.generate()` affects all three backends
+- The JEV dispatch (`_maybe_jev_dispatch()`, `generate_decision()`, `_jev_call_completions()`) lives on `OllamaBackend` and is inherited — but each subclass overrides `_jev_call_completions()` to route through their own auth path
+- The `_maybe_jev_dispatch()` method calls `self.generate_decision()` which calls `self._jev_call_completions()` — the override chain works but is fragile (the OpenRouter JEV recursion bug in R06.2 was caused by `_jev_call_completions()` calling `self.generate()` which triggered `_maybe_jev_dispatch()` again)
 
-**Impact:** Future changes to OllamaBackend initialization could silently break ZaiBackend, with no compile-time or import-time indication of the problem.
+The inheritance was originally chosen because ZAI and OpenRouter are OpenAI-compatible and can reuse `generate_completions()`. But they each have their own auth injection (`_generate_with_auth()` for ZAI, `_make_api_request()` for OpenRouter) that bypasses the parent's body construction. This means the parent's `think` forwarding, `reasoning_effort` forwarding, and `response_format` handling must be duplicated or explicitly skipped in each subclass.
 
-#### ARCH-02: CLI file at 2,143 lines with mixed concerns
+**Recommendation:** Consider extracting a `ChatCompletionsMixin` or `OpenAICompatibleBackend` base class that provides the shared OpenAI-format body construction and response parsing, without the Ollama-specific `/api/chat` native path. ZAI and OpenRouter would inherit from this, and OllamaBackend would inherit from both this and a `NativeOllamaMixin`. This decouples the auth/endpoint-specific code from the shared protocol logic.
 
-| Property | Value |
-|----------|-------|
-| **Severity** | Low |
-| **Category** | Architecture |
-| **File(s)** | `agentkthx/cli.py` |
+**Impact:** Reduces coupling, makes backend-specific changes safer, prevents the class of recursion bugs seen in R06.2.
 
-The CLI module contains command parsing (argparse definitions), business logic (agent construction, test execution), display/formatting (colored output, footer bar, spinner animation, formatted tables), and state management (session token tracking, tool cache persistence) all in a single 2,143-line file. While this is common for CLI tools and the code is well-organized with clear function boundaries, the file has grown significantly across releases (from ~1,975 lines in R04.5 to 2,143 in R04.7). The chat UX features added in R04.7 (spinner, footer, slash commands, token tracking) account for ~130 of those new lines and could potentially be extracted into a `ChatUI` helper class.
+---
 
-**Impact:** The growing CLI file makes navigation harder and increases merge conflict risk when multiple features are developed concurrently.
-
-#### ARCH-03: Orchestrator LLM router hardcodes `get_backend("ollama")`
+#### ARCH-02: No coverage measurement configured
 
 | Property | Value |
 |----------|-------|
 | **Severity** | Low |
 | **Category** | Architecture |
-| **File(s)** | `agentkthx/orchestrator.py` (`_select_agent_with_llm`) |
+| **File(s)** | `pyproject.toml` |
 
-The orchestrator's LLM-based routing mode calls `get_backend("ollama")` to create a backend for the routing model, ignoring whatever backend the user has configured. If a user is running AgentKthx with `--backend zai` or `--backend llama-server`, the router will still try to connect to Ollama for routing decisions. This limits the orchestrator's LLM routing to Ollama-only deployments.
+The project has 506 tests but no coverage measurement configured. `pytest-cov` is not in dev dependencies, and there's no `--cov` flag in `addopts`. The actual coverage percentage is unknown — it could be 30% or 80%.
 
-**Impact:** LLM-based routing in the orchestrator doesn't work when Ollama isn't running, even if the user has a perfectly functional ZAI or llama-server backend.
+**Recommendation:** Add `pytest-cov` to dev dependencies, configure `addopts = "-v --tb=short --cov=agentkthx --cov-report=term-missing"` in `pyproject.toml`. Set a minimum coverage threshold (e.g., `--cov-fail-under=50`) to prevent coverage from dropping below a baseline.
+
+**Impact:** Makes coverage visible and prevents silent coverage regression.
 
 ---
 
 ### Testing
 
-#### TEST-01: No tests for R04.7 chat UX features
+#### TEST-01: No integration tests — all tests are mocked unit tests
 
 | Property | Value |
 |----------|-------|
 | **Severity** | Medium |
 | **Category** | Testing |
-| **File(s)** | `tests/` (gap) |
+| **File(s)** | `tests/` (all 11 test files) |
 
-The R04.7 release added significant chat UX features — braille spinner (threaded animation on stderr), emoji status footer bar with ANSI escape sequences, session token tracking with 60/40 split heuristic, 4 new slash commands (/system, /tools, /model, /debug), /status crash fix, and reformatted /help — but none of these have test coverage. The spinner and footer are particularly important to test because they use `threading`, ANSI escape sequences, and terminal manipulation that can behave differently across platforms. The token tracking heuristic (60% input, 40% completion from `step.tokens_used`) should be verified for accuracy. The slash commands modify agent state at runtime (/model swaps the model, /debug toggles debug flag) and should have regression tests.
+All 506 tests use `MagicMock`, `monkeypatch`, or source-level string inspection (`inspect.getsource()` + `assert "X" in src`). No test makes a real HTTP call to a backend, no test runs a full agent loop end-to-end, and no test exercises the actual CLI (`agentkthx run "..."`).
 
-**Impact:** The R04.7 chat UX features are untested — regressions in spinner behavior, footer formatting, token counting accuracy, or slash command state changes won't be caught by CI.
+This means integration bugs (like the JEV recursion, the `reasoning_content` propagation gap, the `--stream` flag missing from chat) are only caught by manual testing. The source-inspection tests (`assert "reasoning_content" in src`) are brittle — they verify that a string appears in the source code, not that the behavior works.
 
-#### TEST-02: No tests for per-session todo isolation or SkillLoader cache management
+**Recommendation:** Add a `tests/integration/` directory with tests that:
+1. Mock the HTTP layer (not the agent loop) using `unittest.mock.patch` on `urllib.request.urlopen`
+2. Exercise the full `Agent.run()` → `backend.generate()` → response → display path
+3. Test JEV mode end-to-end with a mock ZAI/OpenRouter response
+4. Test the chat loop with mock user input
+5. Test CLI argument parsing for all commands
 
-| Property | Value |
-|----------|-------|
-| **Severity** | Low |
-| **Category** | Testing |
-| **File(s)** | `tests/test_r046_changes.py`, `tests/` (gap) |
+Use `pytest.mark.integration` to allow skipping slow integration tests in CI.
 
-While `test_r046_changes.py` tests the `_get_todo_store()` infrastructure directly (verifying session isolation when `session_id` is explicitly passed), there's no integration test verifying that the Agent class actually passes `session_id` through to tool invocations. Since the feature is not wired up (see MAINT-01), such a test would currently fail — but that failure would be valuable as it would expose the gap. Additionally, the `SkillLoader` has cache management methods (`clear_cache`, `invalidate`, `get_cache_stats`, `is_cached`, `reload`) that are completely untested.
-
-**Impact:** The per-session todo isolation gap won't be caught by tests (the unit test passes, integration doesn't exist), and SkillLoader cache behavior is unverified.
+**Impact:** Catches integration bugs that unit tests miss; reduces reliance on manual testing for regressions.
 
 ---
 
@@ -284,26 +349,22 @@ While `test_r046_changes.py` tests the `_get_todo_store()` infrastructure direct
 
 | Timeline | Findings |
 |----------|----------|
-| **Near term (v0.4.8–v0.5.0)** | MAINT-01 (wire todo isolation or remove dead code), ARCH-01 (refactor ZaiBackend inheritance), TEST-01 (chat UX tests) |
-| **Short term (v0.5.0–v0.6.0)** | SEC-01 (consider replacing eval with ast-based safe eval), ROB-01 (user-visible notification on model fallback), FEAT-01 (ReAct streaming), ARCH-03 (configurable router backend) |
-| **Medium term (v0.6.0+)** | SEC-02 (allowlist-based shell execution), FEAT-02 (memory summarization), MAINT-02/MAINT-03 (dynamic version strings), ARCH-02 (extract ChatUI class), TEST-02 (integration tests) |
+| **Near term (R06.5–R06.6)** | SEC-01 (eval sandbox bypass), ROB-01 (duplicate ACP files), MAINT-01 (cli.py split), PERF-01 (streaming display) |
+| **Short term (R06.7–R07.0)** | SEC-02 (shell=True), ROB-02 (bare except), ROB-03 (broken tests), MAINT-02 (env var aliases), FEAT-01 (provider routing), ARCH-01 (backend inheritance), TEST-01 (integration tests) |
+| **Medium term (R07.0+)** | PERF-02 (stream_options), FEAT-02 (param matrix extensibility), ARCH-02 (coverage measurement) |
 
 ---
 
 ## Architecture Strengths
 
-AgentKthx demonstrates several architectural patterns worth preserving during future development:
+1. **Zero dependencies by design** — The entire framework runs on Python stdlib (urllib, sqlite3, argparse, json, re, ast). This is a deliberate architectural choice that eliminates dependency management, supply chain attacks, and version conflicts. It makes the framework installable in any Python 3.9+ environment with `pip install agentkthx` and no transitive dependencies.
 
-**Zero-dependency philosophy**: The entire framework runs on Python stdlib only — `urllib` for HTTP, `sqlite3` for persistence, `mmap` for binary parsing, `threading` for concurrency, `concurrent.futures` for parallel orchestration. This eliminates supply chain risk entirely, maximizes portability, and means the framework can be installed and used in any environment with Python 3.9+ without pip install. The `check_compatibility()` function in the skills loader was explicitly refactored from using `packaging.version` to tuple comparison (R04.6) to maintain this constraint.
+2. **Plugin system with directory-scan discovery** — The `PluginManager` in `plugins/_loader.py` discovers plugins by scanning `plugins/*/plugin.json` manifests, not via pip install or entry points. This is ideal for local-first users who can drop a new backend into the plugins directory without modifying `pyproject.toml` or running `pip install`. The manifest format (`plugin.json`) is clean and well-documented in `PLUGIN_SPEC.md`.
 
-**Defense-in-depth security model**: The security system layers multiple independent protections: command blocklists + injection detection for shell, path whitelist validation for file operations, SSRF pattern blocking for HTTP, sandboxed subprocess for Python REPL, response size limits (512KB files, 256KB HTTP), dangerous tool confirmation callback, and audit logging. Each layer is independently useful — even if one is bypassed, the others still provide protection. The `dangerous=True` flag with `--confirm` opt-in ensures destructive operations require explicit user consent.
+3. **Defense-in-depth security** — The security model is layered: `sanitize_command()` (blocklist + injection detection) → `validate_path()` (allowed dirs + path traversal prevention) → `is_safe_url()` (SSRF blocking). Each layer is independently testable and runtime-toggleable via `--security max|off`. The `python_repl` tool uses a separate subprocess with restricted builtins. The audit logging (`~/.agentnova/audit.log`) provides post-hoc visibility into what the agent did.
 
-**Backend abstraction with pragmatic inheritance**: The `BaseBackend` → `OllamaBackend` → `LlamaServerBackend` hierarchy provides clean extension points. BitNet as a 63-line thin wrapper over LlamaServerBackend eliminated ~170 lines of duplicated code while maintaining distinct behavioral modes (conversation budgeting, markdown sanitization). The backend registry (`_BACKENDS` dict + `get_backend()` factory + `register_backend()`) makes adding new backends trivial.
+4. **JEV mode as an API mode, not a backend** — The decision to implement JEV as `ApiMode.JEV` (sibling of `openre`/`openai`) rather than as a separate `JevBackend` plugin was architecturally correct. It allows any chat-capable backend to produce Jev-shaped decisions by wrapping its existing `generate_completions()` call with a constrained decision prompt. The `_jev_call_completions()` hook pattern lets each backend route through its own auth path while sharing the JEV prompt-building and JSON-parsing logic.
 
-**Schema versioning for persistent state**: The `TurboState` dataclass includes a `_version` field with forward-compatible loading: version 0 (pre-versioning) loads successfully, current version loads normally, and future versions are rejected to prevent corruption. The `from_dict()` method silently ignores unknown keys for forward compatibility, and a comment placeholder marks where migration logic would go. This is a clean, production-ready pattern for state file management.
+5. **Backward compatibility as a first-class concern** — The R06.0 rename from AgentNova to AgentKthx was executed with full backward compatibility: redirect stubs (`agentnova/__init__.py`, `localclaw/__init__.py`) re-export everything with `DeprecationWarning`, env vars kept as `AGENTNOVA_*`, filesystem paths kept as `~/.agentnova/`. No existing user script, env var config, or SQLite session was broken by the rename.
 
-**Atomic cache persistence**: Tool support cache writes use `tempfile.mkstemp()` + `os.fsync()` + `os.replace()` for atomic writes, preventing cache corruption from interrupted writes. This pattern is applied consistently in `cli.py` for the tool support cache.
-
-**Small-model-first design**: The framework is specifically designed for models under 1B parameters. This isn't an afterthought — it's reflected in the fuzzy tool name matching (0.4 threshold), ~100+ argument aliases in `TOOL_ARG_ALIASES`, `ast.literal_eval` fallback for single-quote dicts, repetition detection, `is_small_model()` heuristic, calculator syntax coaching in system prompts, and BitNet-specific constraints (prompt budgeting, markdown sanitization, exchange caps). The crypto-signals skill even uses a two-phase architecture where a Python script does the heavy computation and the model only reads JSON, specifically designed for 0.5B-1B models.
-
-**Progressive disclosure at multiple levels**: Both the Soul Spec (3 levels: manifest only → +identity → +full persona) and the Skill spec (metadata → instructions → resources) implement progressive disclosure, keeping context usage minimal for small models while allowing rich configuration when context allows.
+6. **`ThinkingLevel` enum + `parse_thinking_arg()` helper** — The thinking controls (`--thinking off|auto|low|medium|high`) are cleanly separated into a user-facing enum, a parser that maps to `(think, reasoning_effort)` tuples, and per-backend forwarding logic. Adding a new thinking level or a new backend's thinking API is straightforward — just add to the enum and the backend's body construction.
