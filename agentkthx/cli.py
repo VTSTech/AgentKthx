@@ -204,7 +204,7 @@ def create_parser() -> argparse.ArgumentParser:
     run_parser = subparsers.add_parser("run", help="Run a single prompt")
     run_parser.add_argument("prompt", help="The prompt to process")
     add_agent_args(run_parser, tools_default="calculator")
-    run_parser.add_argument("--stream", action="store_true", help="Stream output")
+    # --stream / --no-stream now come from add_agent_args() (shared_args.py)
     run_parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
     run_parser.add_argument("-q", "--quiet", action="store_true", help="Suppress header and summary")
 
@@ -715,14 +715,20 @@ def cmd_run(args: argparse.Namespace) -> int:
         _print_run_header(agent, args, config)
 
     try:
-        # Enable streaming by default for cloud providers
+        # Enable streaming by default for cloud providers, but respect
+        # explicit --stream / --no-stream from the user.
         from .core.types import BackendType
         is_cloud_provider = (
             hasattr(agent.backend, 'backend_type') and 
             agent.backend.backend_type in [BackendType.OPENROUTER, BackendType.ZAI]
         )
-        
-        stream = getattr(args, "stream", False) or is_cloud_provider
+        explicit_stream = getattr(args, 'stream', None)
+        if explicit_stream is True:
+            stream = True
+        elif explicit_stream is False:
+            stream = False
+        else:
+            stream = is_cloud_provider
         result = agent.run(args.prompt, stream=stream)
     except KeyboardInterrupt:
         print(f"\n{yellow('Cancelled.')}")
@@ -1337,8 +1343,9 @@ def cmd_chat(args: argparse.Namespace) -> int:
                     "range": "true|false",
                     "description": "Whether to stream responses (cloud providers default to true)",
                     "backends": {"all"},
-                    "agent_attr": None,  # handled at cmd_chat level, not on agent
-                    "note": "Read-only in /param — controlled by --stream flag at startup",
+                    "agent_attr": None,  # stashed on agent._runtime_kwargs; read by chat loop
+                    # Special: /param stream true/false updates args.stream
+                    "special_setter": "_set_stream",
                 },
             }
 
@@ -1509,6 +1516,14 @@ def cmd_chat(args: argparse.Namespace) -> int:
                 print(green(f"Set {name} = {value!r}  →  think={think_val}, reasoning_effort={effort_val}"))
                 continue
 
+            if spec.get("special_setter") == "_set_stream":
+                # /param stream true|false — override args.stream at runtime
+                agent._runtime_kwargs["stream"] = value
+                # Also update args.stream so the chat loop picks it up on next turn
+                args.stream = value
+                print(green(f"Set {name} = {value!r}  (takes effect on next message)"))
+                continue
+
             # Standard setter
             attr = spec.get("agent_attr")
             if attr:
@@ -1577,17 +1592,23 @@ def cmd_chat(args: argparse.Namespace) -> int:
             print()  # blank line before spinner
             spinner_t = _spinner_start()
         try:
-            # Enable streaming by default for cloud providers.
-            # (Earlier R06.3 draft disabled streaming when --thinking was
-            # enabled, suspecting a timeout. The actual cause was a 600MB
-            # ~/.agentnova_history file, now removed in R06.2. Streaming
-            # + thinking is fine — keep streaming on for cloud providers.)
+            # Enable streaming by default for cloud providers, but respect
+            # explicit --stream / --no-stream from the user.
+            #   --stream       → always stream (even for local backends)
+            #   --no-stream    → never stream (even for cloud providers)
+            #   (neither)      → stream for cloud providers, non-stream for local
             from .core.types import BackendType
             is_cloud_provider = (
                 hasattr(agent.backend, 'backend_type') and
                 agent.backend.backend_type in [BackendType.OPENROUTER, BackendType.ZAI]
             )
-            stream = getattr(args, 'stream', False) or is_cloud_provider
+            explicit_stream = getattr(args, 'stream', None)
+            if explicit_stream is True:
+                stream = True
+            elif explicit_stream is False:
+                stream = False
+            else:
+                stream = is_cloud_provider
             result = agent.run(user_input, stream=stream)
         except KeyboardInterrupt:
             print(f"\n{yellow('Cancelled.')}\n")

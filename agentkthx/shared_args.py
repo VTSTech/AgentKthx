@@ -272,6 +272,21 @@ def add_agent_args(
         help="Truncation behavior for context overflow (default: auto)",
     )
     parser.add_argument(
+        "--stream",
+        action="store_true",
+        default=None,
+        dest="stream",
+        help="Force streaming output. Cloud providers (zai/openrouter) stream by default; "
+             "use --no-stream to disable streaming for cloud providers.",
+    )
+    parser.add_argument(
+        "--no-stream",
+        action="store_false",
+        default=None,
+        dest="stream",
+        help="Disable streaming output (useful for cloud providers when streaming causes issues).",
+    )
+    parser.add_argument(
         "--thinking",
         choices=["off", "auto", "low", "medium", "high"],
         default="auto",

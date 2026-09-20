@@ -5,9 +5,17 @@ All notable changes to AgentKthx will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+
 ## [R06.3] - 2026-09-20 12:10:12 PM
 
+### 🐛 **Bug Fixes**
+- **`--stream` flag was only on `run` command, not `chat`**: `agentkthx chat ... --stream` failed with `unrecognized arguments: --stream`. The `--stream` argument was added only to `run_parser` (line 207 in cli.py), not to the shared `add_agent_args()`. Fixed by moving `--stream` into `add_agent_args()` (shared_args.py) so both `chat` and `run` (and any future command using `add_agent_args`) accept it. Also added `--no-stream` counterpart to allow disabling streaming on cloud providers (which stream by default).
+
+- **`/param stream` was incorrectly marked read-only**: The matrix entry for `stream` had `"note": "Read-only in /param — controlled by --stream flag at startup"` which was both misleading and limiting. Fixed: `/param stream true|false` now actually sets streaming at runtime via a special setter that updates `args.stream`. Takes effect on the next message (current message already started streaming or not).
+
 ### 🚀 **New Features**
+- **`--no-stream` flag**: Disables streaming for cloud providers (ZAI/OpenRouter) which stream by default. Useful when streaming causes issues (timeouts, partial responses, debug output interleaving).
+- **`/param stream true|false`**: Settable at runtime in chat mode. Takes effect on the next message.
 - **`/param` slash command in chat mode**: Show or set model generation parameters with per-backend support matrix. Parameters are filtered by what the current backend actually forwards to the API — e.g. `top_k` is settable on OpenRouter/Ollama but rejected on ZAI (ZAI's API doesn't accept it). Usage:
   ```
   /param                        — show all params, ✓/✗ for current backend
@@ -32,6 +40,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Max steps info in `/status`**: `/status` now also prints `Max steps: 25` so you can verify the agent loop budget at a glance.
 
 ### 🔧 **Changes**
+- **Stream default semantics clarified**: `args.stream` is now `None` by default (neither `--stream` nor `--no-stream` was passed). The chat/run loop interprets `None` as "use backend default" (true for cloud providers, false for local). `True` forces streaming, `False` forces non-streaming. Updated both `cmd_chat` and `cmd_run` to use this three-state logic.
+- **`--stream` removed from `run_parser`**: Now provided by `add_agent_args()` (shared_args.py). The `run_parser.add_argument("--stream", ...)` line was a duplicate that prevented `chat` from accepting the flag.
 - **Default `--max-steps` increased from 10 → 25**: The previous default of 10 was too low for non-trivial agent workflows. A codebase audit (which the user tried) needed ~9 steps just for file discovery + reading, leaving no room for the actual audit + final answer. 25 is a better default — enough for ~5-10 tool calls plus reasoning, without being so high that infinite loops burn tokens. Users can still override via `--max-steps N` or `AGENTNOVA_MAX_STEPS=N` env var. Updated in:
   - `agentkthx/agent.py` (`Agent.__init__` default)
   - `agentkthx/config.py` (`MAX_STEPS` env var default)
