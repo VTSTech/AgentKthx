@@ -4,12 +4,12 @@ AgentKthx Plugin System v0.1
 Provides a directory-scan-based plugin architecture for extending AgentKthx
 with backends, CLI commands, configuration, and feature hooks.
 
-Plugins are discovered from ``agentnova/plugins/`` directories that contain
+Plugins are discovered from ``agentkthx/plugins/`` directories that contain
 a ``plugin.json`` manifest.  Each plugin exposes ``register()`` and
 ``unregister()`` entrypoints that the PluginManager calls during lifecycle.
 
 Core (native) backends -- ollama and llama-server -- are never treated as
-plugins; they ship inside ``agentnova/backends/`` and are always available.
+plugins; they ship inside ``agentkthx/backends/`` and are always available.
 
 Usage::
 

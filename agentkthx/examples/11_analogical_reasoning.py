@@ -13,11 +13,11 @@ Tests ability to understand relationships and apply patterns:
 Usage:
   python examples/11_analogical_reasoning.py
   python examples/11_analogical_reasoning.py --model qwen2.5:0.5b --debug
-  agentnova test 11
+  agentkthx test 11
 
 Environment Variables:
   OLLAMA_BASE_URL     - Ollama server URL
-  AGENTNOVA_MODEL     - Default model
+  AGENTKTHX_MODEL     - Default model
 
 Written by VTSTech — https://www.vts-tech.org
 """

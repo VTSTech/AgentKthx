@@ -150,7 +150,7 @@ class TestArch01BackendInheritance:
         Verify by checking ZaiBackend correctly sets _base_url and _api_mode
         after construction, which only happens if BaseBackend.__init__ runs.
         """
-        from agentkthx.backends.zai import ZaiBackend
+        from agentkthx.plugins.zai.zai import ZaiBackend
         from agentkthx.core.types import ApiMode
 
         # Construct ZaiBackend with dummy key (env var already set)
@@ -162,7 +162,7 @@ class TestArch01BackendInheritance:
 
     def test_zai_backend_sets_base_url_correctly(self):
         """ZaiBackend stores base_url via the super().__init__ chain."""
-        from agentkthx.backends.zai import ZaiBackend
+        from agentkthx.plugins.zai.zai import ZaiBackend
 
         be = ZaiBackend()
         # Default should be ZAI_BASE_URL from config
@@ -171,7 +171,7 @@ class TestArch01BackendInheritance:
 
     def test_zai_backend_api_key_set(self):
         """ZaiBackend requires and stores API key."""
-        from agentkthx.backends.zai import ZaiBackend
+        from agentkthx.plugins.zai.zai import ZaiBackend
 
         be = ZaiBackend(api_key="sk-my-test-key-12345")
         assert be._api_key == "sk-my-test-key-12345"
@@ -179,7 +179,7 @@ class TestArch01BackendInheritance:
     def test_zai_backend_rejects_short_key(self):
         """ZaiBackend rejects API keys shorter than 8 chars."""
         import pytest
-        from agentkthx.backends.zai import ZaiBackend
+        from agentkthx.plugins.zai.zai import ZaiBackend
 
         # Save and clear env var, then restore
         old = os.environ.pop("ZAI_API_KEY", None)
@@ -245,7 +245,7 @@ class TestArch01BackendInheritance:
     def test_all_backends_have_base_url_and_api_mode(self):
         """Every concrete backend must expose _base_url and _api_mode."""
         from agentkthx.backends.ollama import OllamaBackend
-        from agentkthx.backends.zai import ZaiBackend
+        from agentkthx.plugins.zai.zai import ZaiBackend
         from agentkthx.backends.llama_server import LlamaServerBackend
         from agentkthx.backends.bitnet import BitNetBackend
 
@@ -449,21 +449,21 @@ class TestRob01FallbackWarnings:
 
     def test_falling_back_to_free_model_in_source(self):
         """The string 'falling back to free model' must appear in zai.py."""
-        import agentkthx.backends.zai as zai_module
+        import agentkthx.plugins.zai.zai as zai_module
         source = inspect.getsource(zai_module)
         assert "falling back to free model" in source.lower(), \
             "zai.py must contain 'falling back to free model' warning"
 
     def test_does_not_support_tools_warning_in_zai(self):
         """The 'does not support tools' warning path must exist in zai.py."""
-        import agentkthx.backends.zai as zai_module
+        import agentkthx.plugins.zai.zai as zai_module
         source = inspect.getsource(zai_module)
         assert "does not support tools" in source.lower(), \
             "zai.py must contain 'does not support tools' warning path"
 
     def test_fallback_warning_prints_to_stderr(self):
         """The fallback warning must print to sys.stderr for user visibility."""
-        import agentkthx.backends.zai as zai_module
+        import agentkthx.plugins.zai.zai as zai_module
         source = inspect.getsource(zai_module)
         # Check that sys.stderr is used in the warning path
         assert "sys.stderr" in source, \

@@ -14,11 +14,11 @@ Tests:
 Usage:
   python examples/03_reasoning_test.py
   python examples/03_reasoning_test.py --model qwen2.5:0.5b --debug
-  agentnova test 03
+  agentkthx test 03
 
 Environment Variables:
   OLLAMA_BASE_URL     - Ollama server URL
-  AGENTNOVA_MODEL     - Default model
+  AGENTKTHX_MODEL     - Default model
 
 Written by VTSTech — https://www.vts-tech.org
 """

@@ -14,12 +14,12 @@ Tests common failure modes:
 Usage:
   python examples/01_quick_diagnostic.py
   python examples/01_quick_diagnostic.py --model qwen2.5:0.5b --debug
-  agentnova test 01
+  agentkthx test 01
 
 Environment Variables:
   OLLAMA_BASE_URL     - Ollama server URL
-  AGENTNOVA_MODEL     - Default model
-  AGENTNOVA_BACKEND   - Backend to use (ollama/bitnet)
+  AGENTKTHX_MODEL     - Default model
+  AGENTKTHX_BACKEND   - Backend to use (ollama/bitnet)
 
 Written by VTSTech — https://www.vts-tech.org
 """
@@ -216,7 +216,7 @@ def main():
     
     # Enable debug output
     if args.debug:
-        os.environ["AGENTNOVA_DEBUG"] = "1"
+        os.environ["AGENTKTHX_DEBUG"] = "1"
     
     # Get model
     model = args.model or config.default_model

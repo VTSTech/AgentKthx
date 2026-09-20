@@ -152,14 +152,14 @@ class TestTurboStateVersioning:
 
     def test_turbo_state_has_version_field(self):
         """TurboState should have a _version field defaulting to 1."""
-        from agentkthx.turbo import TurboState, _TURBO_STATE_VERSION
+        from agentkthx.plugins.turboquant.turbo import TurboState, _TURBO_STATE_VERSION
         state = TurboState()
         assert state._version == 1
         assert _TURBO_STATE_VERSION == 1
 
     def test_to_dict_includes_version(self):
         """to_dict() must include _version key."""
-        from agentkthx.turbo import TurboState, _TURBO_STATE_VERSION
+        from agentkthx.plugins.turboquant.turbo import TurboState, _TURBO_STATE_VERSION
         state = TurboState(pid=1234, model_name="test-model")
         d = state.to_dict()
         assert "_version" in d
@@ -167,7 +167,7 @@ class TestTurboStateVersioning:
 
     def test_to_dict_all_fields_present(self):
         """to_dict() includes all expected state fields."""
-        from agentkthx.turbo import TurboState
+        from agentkthx.plugins.turboquant.turbo import TurboState
         state = TurboState(
             pid=1234, model_name="qwen2.5:7b", blob_path="/models/qwen.gguf",
             port=8764, ctx=8192, cache_type_k="turbo3", cache_type_v="turbo3",
@@ -183,7 +183,7 @@ class TestTurboStateVersioning:
 
     def test_from_dict_roundtrip(self):
         """from_dict(to_dict()) produces equivalent state."""
-        from agentkthx.turbo import TurboState
+        from agentkthx.plugins.turboquant.turbo import TurboState
         original = TurboState(pid=999, model_name="test", port=8080, ctx=4096)
         restored = TurboState.from_dict(original.to_dict())
         # _version is excluded from from_dict (it's a dataclass field filter)
@@ -194,7 +194,7 @@ class TestTurboStateVersioning:
 
     def test_from_dict_ignores_extra_keys(self):
         """from_dict() silently ignores unknown keys (forward-compatible)."""
-        from agentkthx.turbo import TurboState
+        from agentkthx.plugins.turboquant.turbo import TurboState
         data = {"pid": 1, "model_name": "m", "future_field": "should_be_ignored"}
         state = TurboState.from_dict(data)
         assert state.pid == 1
@@ -203,26 +203,26 @@ class TestTurboStateVersioning:
 
     def test_load_rejects_future_version(self, tmp_path, monkeypatch):
         """load() returns None when state file has version > current."""
-        from agentkthx.turbo import TurboState, _TURBO_STATE_VERSION
+        from agentkthx.plugins.turboquant.turbo import TurboState, _TURBO_STATE_VERSION
         # Simulate a future state file with version 99
         future_data = {"_version": 99, "pid": 1, "model_name": "future-model"}
         state_file = tmp_path / "turbo.state"
         state_file.write_text(json.dumps(future_data))
 
-        monkeypatch.setattr("agentkthx.turbo.TURBOQUANT_STATE_FILE", state_file)
+        monkeypatch.setattr("agentkthx.plugins.turboquant.turbo.TURBOQUANT_STATE_FILE", state_file)
         result = TurboState.load()
         assert result is None
 
     def test_load_accepts_current_version(self, tmp_path, monkeypatch):
         """load() succeeds when state file has current version."""
-        from agentkthx.turbo import TurboState, _TURBO_STATE_VERSION
+        from agentkthx.plugins.turboquant.turbo import TurboState, _TURBO_STATE_VERSION
         state = TurboState(pid=42, model_name="test", port=8764, ctx=8192)
         state_dict = state.to_dict()
         state_file = tmp_path / "turbo.state"
         state_file.write_text(json.dumps(state_dict))
 
-        monkeypatch.setattr("agentkthx.turbo.TURBOQUANT_STATE_FILE", state_file)
-        monkeypatch.setattr("agentkthx.turbo.TURBOQUANT_PID_FILE", tmp_path / "turbo.pid")
+        monkeypatch.setattr("agentkthx.plugins.turboquant.turbo.TURBOQUANT_STATE_FILE", state_file)
+        monkeypatch.setattr("agentkthx.plugins.turboquant.turbo.TURBOQUANT_PID_FILE", tmp_path / "turbo.pid")
         result = TurboState.load()
         assert result is not None
         assert result.pid == 42
@@ -230,33 +230,33 @@ class TestTurboStateVersioning:
 
     def test_load_returns_none_for_missing_file(self, tmp_path, monkeypatch):
         """load() returns None when state file doesn't exist."""
-        from agentkthx.turbo import TurboState
+        from agentkthx.plugins.turboquant.turbo import TurboState
         state_file = tmp_path / "nonexistent.state"
-        monkeypatch.setattr("agentkthx.turbo.TURBOQUANT_STATE_FILE", state_file)
+        monkeypatch.setattr("agentkthx.plugins.turboquant.turbo.TURBOQUANT_STATE_FILE", state_file)
         result = TurboState.load()
         assert result is None
 
     def test_load_handles_version_zero(self, tmp_path, monkeypatch):
         """State file with no _version key (version 0) should load successfully."""
-        from agentkthx.turbo import TurboState
+        from agentkthx.plugins.turboquant.turbo import TurboState
         # Old state file without _version
         old_data = {"pid": 10, "model_name": "old-model"}
         state_file = tmp_path / "turbo.state"
         state_file.write_text(json.dumps(old_data))
 
-        monkeypatch.setattr("agentkthx.turbo.TURBOQUANT_STATE_FILE", state_file)
-        monkeypatch.setattr("agentkthx.turbo.TURBOQUANT_PID_FILE", tmp_path / "turbo.pid")
+        monkeypatch.setattr("agentkthx.plugins.turboquant.turbo.TURBOQUANT_STATE_FILE", state_file)
+        monkeypatch.setattr("agentkthx.plugins.turboquant.turbo.TURBOQUANT_PID_FILE", tmp_path / "turbo.pid")
         result = TurboState.load()
         assert result is not None
         assert result.pid == 10
 
     def test_load_handles_corrupt_json(self, tmp_path, monkeypatch):
         """load() returns None for corrupted JSON (graceful degradation)."""
-        from agentkthx.turbo import TurboState
+        from agentkthx.plugins.turboquant.turbo import TurboState
         state_file = tmp_path / "turbo.state"
         state_file.write_text("NOT VALID JSON {{{")
 
-        monkeypatch.setattr("agentkthx.turbo.TURBOQUANT_STATE_FILE", state_file)
+        monkeypatch.setattr("agentkthx.plugins.turboquant.turbo.TURBOQUANT_STATE_FILE", state_file)
         result = TurboState.load()
         assert result is None
 

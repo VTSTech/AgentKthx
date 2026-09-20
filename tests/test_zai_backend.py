@@ -7,7 +7,7 @@ context sizing, and public API exports.
 
 Run:
     python -m pytest tests/test_zai_backend.py -v
-    AGENTNOVA_DEBUG=1 python -m pytest tests/test_zai_backend.py -v -s
+    AGENTKTHX_DEBUG=1 python -m pytest tests/test_zai_backend.py -v -s
 """
 
 from __future__ import annotations
@@ -38,31 +38,31 @@ class TestZaiBackendInit(unittest.TestCase):
 
     def test_import(self):
         """Verify ZaiBackend can be imported."""
-        from agentkthx.backends.zai import ZaiBackend
+        from agentkthx.plugins.zai.zai import ZaiBackend
         self.assertIsNotNone(ZaiBackend)
 
     def test_backend_type(self):
         """Verify backend_type returns ZAI."""
-        from agentkthx.backends.zai import ZaiBackend
+        from agentkthx.plugins.zai.zai import ZaiBackend
         backend = ZaiBackend()
         self.assertEqual(backend.backend_type.value, "zai")
 
     def test_default_base_url(self):
         """Verify default base URL is set from config."""
-        from agentkthx.backends.zai import ZaiBackend
+        from agentkthx.plugins.zai.zai import ZaiBackend
         backend = ZaiBackend()
         # Reads from ZAI_BASE_URL which defaults to https://api.z.ai
         self.assertEqual(backend.base_url, "https://api.z.ai")
 
     def test_custom_base_url(self):
         """Verify custom base URL overrides default."""
-        from agentkthx.backends.zai import ZaiBackend
+        from agentkthx.plugins.zai.zai import ZaiBackend
         backend = ZaiBackend(base_url="https://custom.api.example.com")
         self.assertEqual(backend.base_url, "https://custom.api.example.com")
 
     def test_api_key_from_config(self):
         """Verify API key is read from config module (which reads from env)."""
-        from agentkthx.backends.zai import ZaiBackend
+        from agentkthx.plugins.zai.zai import ZaiBackend
         from agentkthx.config import ZAI_API_KEY
         # ZaiBackend reads ZAI_API_KEY from config at import time
         backend = ZaiBackend()
@@ -70,13 +70,13 @@ class TestZaiBackendInit(unittest.TestCase):
 
     def test_api_key_explicit(self):
         """Verify explicit API key overrides env var."""
-        from agentkthx.backends.zai import ZaiBackend
+        from agentkthx.plugins.zai.zai import ZaiBackend
         backend = ZaiBackend(api_key="explicit-key")
         self.assertEqual(backend.api_key, "explicit-key")
 
     def test_api_key_empty_string(self):
         """Verify empty string API key is accepted (for testing)."""
-        from agentkthx.backends.zai import ZaiBackend
+        from agentkthx.plugins.zai.zai import ZaiBackend
         # Pass explicit empty key — should be accepted
         # Note: the constructor uses `api_key or ZAI_API_KEY` so empty string
         # falls through to env var. The class property correctly returns
@@ -87,7 +87,7 @@ class TestZaiBackendInit(unittest.TestCase):
 
     def test_force_openai_mode(self):
         """Verify ZAI always uses OPENAI API mode regardless of input."""
-        from agentkthx.backends.zai import ZaiBackend
+        from agentkthx.plugins.zai.zai import ZaiBackend
         from agentkthx.core.types import ApiMode
 
         # Even if user tries to set openre
@@ -104,7 +104,7 @@ class TestZaiBackendInit(unittest.TestCase):
 
     def test_repr_with_key(self):
         """Verify repr shows key status when configured."""
-        from agentkthx.backends.zai import ZaiBackend
+        from agentkthx.plugins.zai.zai import ZaiBackend
         backend = ZaiBackend(api_key="test-key")
         r = repr(backend)
         self.assertIn("ZaiBackend", r)
@@ -113,7 +113,7 @@ class TestZaiBackendInit(unittest.TestCase):
 
     def test_repr_without_key(self):
         """Verify repr shows NO KEY when no API key."""
-        from agentkthx.backends.zai import ZaiBackend
+        from agentkthx.plugins.zai.zai import ZaiBackend
         # When api_key="" is passed, the constructor reads from env var
         # due to `api_key or ZAI_API_KEY` logic. Test that repr works.
         backend = ZaiBackend(api_key="placeholder")
@@ -123,13 +123,13 @@ class TestZaiBackendInit(unittest.TestCase):
 
     def test_is_running_with_key(self):
         """Verify is_running returns True when API key is configured."""
-        from agentkthx.backends.zai import ZaiBackend
+        from agentkthx.plugins.zai.zai import ZaiBackend
         backend = ZaiBackend(api_key="test-key")
         self.assertTrue(backend.is_running())
 
     def test_is_running_without_key(self):
         """Verify is_running returns False when no API key."""
-        from agentkthx.backends.zai import ZaiBackend
+        from agentkthx.plugins.zai.zai import ZaiBackend
         # Empty string falls through to env var, so we need a clean
         # approach. Since env var is always set in test env, just verify
         # the logic works with an explicit check.
@@ -178,7 +178,7 @@ class TestZaiModelCatalog(unittest.TestCase):
 
     def test_list_models(self):
         """Verify list_models returns known ZAI models."""
-        from agentkthx.backends.zai import ZaiBackend
+        from agentkthx.plugins.zai.zai import ZaiBackend
 
         backend = ZaiBackend()
         models = backend.list_models()
@@ -193,7 +193,7 @@ class TestZaiModelCatalog(unittest.TestCase):
 
     def test_list_models_structure(self):
         """Verify list_models returns dicts with expected keys."""
-        from agentkthx.backends.zai import ZaiBackend
+        from agentkthx.plugins.zai.zai import ZaiBackend
 
         backend = ZaiBackend()
         models = backend.list_models()
@@ -205,7 +205,7 @@ class TestZaiModelCatalog(unittest.TestCase):
 
     def test_get_model_info_known(self):
         """Verify get_model_info returns metadata for known models."""
-        from agentkthx.backends.zai import ZaiBackend
+        from agentkthx.plugins.zai.zai import ZaiBackend
 
         backend = ZaiBackend()
         info = backend.get_model_info("glm-4-plus")
@@ -216,7 +216,7 @@ class TestZaiModelCatalog(unittest.TestCase):
 
     def test_get_model_info_unknown(self):
         """Verify get_model_info returns None for unknown models."""
-        from agentkthx.backends.zai import ZaiBackend
+        from agentkthx.plugins.zai.zai import ZaiBackend
 
         backend = ZaiBackend()
         info = backend.get_model_info("nonexistent-model")
@@ -224,7 +224,7 @@ class TestZaiModelCatalog(unittest.TestCase):
 
     def test_get_model_info_with_prefix(self):
         """Verify model name with provider prefix is handled."""
-        from agentkthx.backends.zai import ZaiBackend
+        from agentkthx.plugins.zai.zai import ZaiBackend
 
         backend = ZaiBackend()
         info = backend.get_model_info("zai/glm-4-flash")
@@ -233,7 +233,7 @@ class TestZaiModelCatalog(unittest.TestCase):
 
     def test_vision_models_in_catalog(self):
         """Verify vision models are included in catalog."""
-        from agentkthx.backends.zai import ZaiBackend
+        from agentkthx.plugins.zai.zai import ZaiBackend
 
         backend = ZaiBackend()
         names = [m["name"] for m in backend.list_models()]
@@ -246,7 +246,7 @@ class TestZaiContextSize(unittest.TestCase):
 
     def test_glm4_plus_context(self):
         """Verify GLM-4-Plus context size."""
-        from agentkthx.backends.zai import ZaiBackend
+        from agentkthx.plugins.zai.zai import ZaiBackend
 
         backend = ZaiBackend()
         ctx = backend.get_model_max_context("glm-4-plus")
@@ -254,7 +254,7 @@ class TestZaiContextSize(unittest.TestCase):
 
     def test_glm4_flash_context(self):
         """Verify GLM-4-Flash context size."""
-        from agentkthx.backends.zai import ZaiBackend
+        from agentkthx.plugins.zai.zai import ZaiBackend
 
         backend = ZaiBackend()
         ctx = backend.get_model_max_context("glm-4-flash")
@@ -262,7 +262,7 @@ class TestZaiContextSize(unittest.TestCase):
 
     def test_glm4_long_context(self):
         """Verify GLM-4-Long context size (1M)."""
-        from agentkthx.backends.zai import ZaiBackend
+        from agentkthx.plugins.zai.zai import ZaiBackend
 
         backend = ZaiBackend()
         ctx = backend.get_model_max_context("glm-4-long")
@@ -270,7 +270,7 @@ class TestZaiContextSize(unittest.TestCase):
 
     def test_runtime_context_fallback(self):
         """Verify runtime context defaults to max context for ZAI."""
-        from agentkthx.backends.zai import ZaiBackend
+        from agentkthx.plugins.zai.zai import ZaiBackend
 
         backend = ZaiBackend()
         ctx = backend.get_model_runtime_context("glm-4-air")
@@ -278,7 +278,7 @@ class TestZaiContextSize(unittest.TestCase):
 
     def test_unknown_model_context(self):
         """Verify unknown model gets default 128K context."""
-        from agentkthx.backends.zai import ZaiBackend
+        from agentkthx.plugins.zai.zai import ZaiBackend
 
         backend = ZaiBackend()
         ctx = backend.get_model_max_context("unknown-model")

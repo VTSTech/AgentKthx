@@ -1412,7 +1412,7 @@ AgentKthx implements ACP (Agent Control Panel) v1.0.6 for monitoring, control, a
 Group multiple activities into an atomic batch operation:
 
 ```python
-from agentkthx.acp_plugin import ACPPlugin
+from agentkthx.plugins.acp.acp_plugin import ACPPlugin
 
 acp = ACPPlugin(agent_name="CodeAssistant", base_url="http://localhost:8766")
 
@@ -1662,8 +1662,8 @@ Final Answer: 1024
 | `TURBOQUANT_SERVER_PATH` | `llama-server` | Path to llama-server binary |
 | `TURBOQUANT_PORT` | `8764` | TurboQuant listen port |
 | `TURBOQUANT_CTX` | `8192` | TurboQuant context window size |
-| `AGENTNOVA_RETRY_ON_ERROR` | `true` | Enable retry context injection (env var) |
-| `AGENTNOVA_MAX_TOOL_RETRIES` | `2` | Maximum retries per tool failure (env var) |
+| `AGENTKTHX_RETRY_ON_ERROR` | `true` | Enable retry context injection (env var) |
+| `AGENTKTHX_MAX_TOOL_RETRIES` | `2` | Maximum retries per tool failure (env var) |
 
 ### Model-Specific Configs
 
@@ -1714,8 +1714,8 @@ This tool has failed N times. Consider using a different tool or approach.
 
 | Control | CLI Flag | Env Var | Programmatic |
 |---------|----------|---------|-------------|
-| Enable/disable | `--no-retry` | `AGENTNOVA_RETRY_ON_ERROR` | `Agent(retry_on_error=...)` |
-| Max retries | `--max-retries N` | `AGENTNOVA_MAX_TOOL_RETRIES` | `Agent(max_tool_retries=...)` |
+| Enable/disable | `--no-retry` | `AGENTKTHX_RETRY_ON_ERROR` | `Agent(retry_on_error=...)` |
+| Max retries | `--max-retries N` | `AGENTKTHX_MAX_TOOL_RETRIES` | `Agent(max_tool_retries=...)` |
 
 **Dual-path support**:
 - **Native tool calls**: After `memory.add_tool_result()`, retry context is injected as a follow-up user message

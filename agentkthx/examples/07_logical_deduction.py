@@ -12,11 +12,11 @@ Tests logical reasoning abilities:
 Usage:
   python examples/07_logical_deduction.py
   python examples/07_logical_deduction.py --model qwen2.5:0.5b --debug
-  agentnova test 07
+  agentkthx test 07
 
 Environment Variables:
   OLLAMA_BASE_URL     - Ollama server URL
-  AGENTNOVA_MODEL     - Default model
+  AGENTKTHX_MODEL     - Default model
 
 Written by VTSTech — https://www.vts-tech.org
 """

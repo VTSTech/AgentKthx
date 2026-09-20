@@ -14,11 +14,11 @@ Usage:
   python examples/04_gsm8k_benchmark.py
   python examples/04_gsm8k_benchmark.py --model qwen2.5:0.5b
   python examples/04_gsm8k_benchmark.py --models all
-  agentnova test 04
+  agentkthx test 04
 
 Environment Variables:
   OLLAMA_BASE_URL     - Ollama server URL
-  AGENTNOVA_MODEL     - Default model
+  AGENTKTHX_MODEL     - Default model
 
 Written by VTSTech — https://www.vts-tech.org
 """

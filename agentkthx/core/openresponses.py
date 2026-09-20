@@ -53,7 +53,7 @@ def _should_show_openresponses_debug(debug: bool) -> bool:
     if not debug:
         return False
     # Suppress OpenResponses debug when using Chat-Completions mode
-    return os.environ.get("AGENTNOVA_API_MODE", "resp") != "comp"
+    return os.environ.get("AGENTKTHX_API_MODE", "resp") != "comp"
 
 
 # ============================================================================

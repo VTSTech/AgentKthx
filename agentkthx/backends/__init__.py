@@ -4,7 +4,7 @@ Backend implementations for different inference engines.
 
 Native backends (ollama, llama-server) ship here.  All other backends
 (bitnet, zai, ...) are registered dynamically via the plugin system in
-``agentnova/plugins/`` and are discovered by ``PluginManager``.
+``agentkthx/plugins/`` and are discovered by ``PluginManager``.
 
 Written by VTSTech — https://www.vts-tech.org
 """
@@ -14,7 +14,7 @@ from __future__ import annotations
 from .base import BaseBackend
 from .ollama import OllamaBackend
 from .llama_server import LlamaServerBackend
-from ..config import AGENTNOVA_BACKEND, OLLAMA_BASE_URL, LLAMA_SERVER_BASE_URL
+from ..config import AGENTKTHX_BACKEND, OLLAMA_BASE_URL, LLAMA_SERVER_BASE_URL
 from ..core.types import ApiMode
 
 
@@ -123,7 +123,7 @@ def get_default_backend(name: str | None = None, api_mode: ApiMode | str | None 
     """
     Get a default backend instance.
 
-    Uses AGENTNOVA_BACKEND env var if name not provided.
+    Uses AGENTKTHX_BACKEND env var if name not provided.
 
     Args:
         name: Backend name (optional, uses env var if not provided)
@@ -133,7 +133,7 @@ def get_default_backend(name: str | None = None, api_mode: ApiMode | str | None 
     Returns:
         Backend instance with default configuration
     """
-    backend_name = name or AGENTNOVA_BACKEND
+    backend_name = name or AGENTKTHX_BACKEND
     return get_backend(backend_name, api_mode=api_mode, timeout=timeout)
 
 

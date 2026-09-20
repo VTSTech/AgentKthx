@@ -13,11 +13,11 @@ Tests ability to understand and extract information from text:
 Usage:
   python examples/08_reading_comprehension.py
   python examples/08_reading_comprehension.py --model qwen2.5:0.5b --debug
-  agentnova test 08
+  agentkthx test 08
 
 Environment Variables:
   OLLAMA_BASE_URL     - Ollama server URL
-  AGENTNOVA_MODEL     - Default model
+  AGENTKTHX_MODEL     - Default model
 
 Written by VTSTech — https://www.vts-tech.org
 """

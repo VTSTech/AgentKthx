@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from .config import AGENTNOVA_BACKEND, DEFAULT_MODEL
+from .config import AGENTKTHX_BACKEND, DEFAULT_MODEL
 from .backends import get_backend, get_default_backend, BaseBackend
 
 
@@ -22,7 +22,7 @@ def get_client(backend: Optional[str] = None) -> BaseBackend:
     Parameters
     ----------
     backend : str, optional
-        "ollama" or "bitnet". Defaults to AGENTNOVA_BACKEND from config.
+        "ollama" or "bitnet". Defaults to AGENTKTHX_BACKEND from config.
 
     Returns
     -------
@@ -89,12 +89,12 @@ def get_models(backend: Optional[str] = None, client: Optional[BaseBackend] = No
     """
     Get list of available models from the specified or default backend.
 
-    This is the backend-agnostic version that respects AGENTNOVA_BACKEND.
+    This is the backend-agnostic version that respects AGENTKTHX_BACKEND.
 
     Parameters
     ----------
     backend : str, optional
-        "ollama" or "bitnet". Defaults to AGENTNOVA_BACKEND from config.
+        "ollama" or "bitnet". Defaults to AGENTKTHX_BACKEND from config.
     client : BaseBackend, optional
         Backend to use. Creates one if not provided.
 
@@ -105,7 +105,7 @@ def get_models(backend: Optional[str] = None, client: Optional[BaseBackend] = No
 
     Examples
     --------
-    >>> # Use default backend from AGENTNOVA_BACKEND env var
+    >>> # Use default backend from AGENTKTHX_BACKEND env var
     >>> models = get_models()
 
     >>> # Explicitly use Ollama
@@ -123,7 +123,7 @@ def get_models(backend: Optional[str] = None, client: Optional[BaseBackend] = No
         client = backend
         backend = None
 
-    backend_name = (backend or AGENTNOVA_BACKEND).lower()
+    backend_name = (backend or AGENTKTHX_BACKEND).lower()
 
     if client is None:
         try:

@@ -54,7 +54,7 @@ class SoulLoader:
         Search order:
         1. Absolute path (as-is)
         2. Relative to current working directory
-        3. Relative to agentnova package directory (souls/)
+        3. Relative to agentkthx package directory (souls/)
         4. As a built-in soul name (e.g., "nova-helper" -> souls/nova-helper)
         
         Returns:
@@ -71,11 +71,11 @@ class SoulLoader:
         if cwd_path.exists():
             return cwd_path
         
-        # 3. Try relative to agentnova package directory
+        # 3. Try relative to agentkthx package directory
         try:
             import agentkthx
-            if agentnova.__file__ is not None:
-                package_dir = Path(agentnova.__file__).parent
+            if agentkthx.__file__ is not None:
+                package_dir = Path(agentkthx.__file__).parent
                 package_path = package_dir / "souls" / path
                 if package_path.exists():
                     return package_path
@@ -89,7 +89,7 @@ class SoulLoader:
                 try:
                     import importlib.resources as resources
                     if hasattr(resources, 'files'):
-                        package_path = resources.files('agentnova') / 'souls' / path
+                        package_path = resources.files('agentkthx') / 'souls' / path
                         if package_path.is_dir():
                             return Path(str(package_path))
                 except (ImportError, TypeError, AttributeError):
@@ -100,8 +100,8 @@ class SoulLoader:
         # 4. Try as soul name in package souls directory
         try:
             import agentkthx
-            if agentnova.__file__ is not None:
-                package_dir = Path(agentnova.__file__).parent
+            if agentkthx.__file__ is not None:
+                package_dir = Path(agentkthx.__file__).parent
                 # Check if it's a simple name (no path separators)
                 soul_name = str(path).replace("/", "").replace("\\", "")
                 if soul_name == str(path):
@@ -119,7 +119,7 @@ class SoulLoader:
                     import importlib.resources as resources
                     soul_name = str(path).replace("/", "").replace("\\", "")
                     if soul_name == str(path) and hasattr(resources, 'files'):
-                        soul_path = resources.files('agentnova') / 'souls' / soul_name
+                        soul_path = resources.files('agentkthx') / 'souls' / soul_name
                         if soul_path.is_dir():
                             return Path(str(soul_path))
                 except (ImportError, TypeError, AttributeError):

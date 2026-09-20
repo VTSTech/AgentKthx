@@ -73,7 +73,7 @@ def test_api_mode_jev_parses_from_string():
 # ─────────────────────────────────────────────────────────────────────
 
 def test_cli_run_accepts_jev_choice():
-    """`agentnova run --api jev` should be a valid CLI invocation."""
+    """`agentkthx run --api jev` should be a valid CLI invocation."""
     import argparse
     from agentkthx.shared_args import add_agent_args
     parser = argparse.ArgumentParser()
@@ -83,7 +83,7 @@ def test_cli_run_accepts_jev_choice():
 
 
 def test_cli_test_accepts_jev_choice():
-    """`agentnova test --api jev` should be accepted."""
+    """`agentkthx test --api jev` should be accepted."""
     import argparse
     # Recreate the relevant parser fragment from cli.py
     parser = argparse.ArgumentParser()
@@ -94,7 +94,7 @@ def test_cli_test_accepts_jev_choice():
 
 
 def test_cli_models_accepts_jev_choice():
-    """`agentnova models --api jev` should be accepted."""
+    """`agentkthx models --api jev` should be accepted."""
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--api", choices=["openre", "openai", "jev"],

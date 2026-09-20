@@ -16,7 +16,7 @@ from unittest.mock import patch, MagicMock
 
 from agentkthx.plugins.openrouter.openrouter import OpenRouterBackend
 from agentkthx.core.models import Tool, ToolParam
-from agentkthx.core.types import ToolSupportLevel
+from agentkthx.core.types import ToolSupportLevel, ApiMode
 
 
 def _make_tool() -> Tool:
@@ -251,6 +251,8 @@ class TestGenerateFlow(unittest.TestCase):
         b.api_key = "test-key"
         from agentkthx.backends.base import BackendConfig
         b.config = BackendConfig()
+
+        b._api_mode = ApiMode.OPENAI  # bypassed __init__ needs explicit init
         return b
 
     @patch.object(OpenRouterBackend, "_make_api_request")
@@ -517,6 +519,8 @@ class TestTestToolSupport(unittest.TestCase):
         b.api_key = "test-key"
         from agentkthx.backends.base import BackendConfig
         b.config = BackendConfig()
+
+        b._api_mode = ApiMode.OPENAI  # bypassed __init__ needs explicit init
         return b
 
     def test_returns_native_without_api_call(self):

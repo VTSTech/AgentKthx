@@ -506,7 +506,9 @@ def is_safe_url(url: str, block_ssrf: bool = True) -> tuple[bool, str]:
     if not parsed.netloc:
         return False, "URL must have a network location"
 
-    hostname = parsed.netloc.split(":")[0].lower()
+    # parsed.hostname correctly handles IPv6 (e.g. "[::1]" -> "::1")
+    # while parsed.netloc.split(":")[0] would return "[" for IPv6 URLs.
+    hostname = (parsed.hostname or "").lower()
 
     # Check for blocked patterns
     if block_ssrf:

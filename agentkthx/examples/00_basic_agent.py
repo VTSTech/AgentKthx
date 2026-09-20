@@ -7,7 +7,7 @@ The simplest possible AgentKthx agent — no tools, just conversation.
 Usage:
   python examples/00_basic_agent.py
   python examples/00_basic_agent.py --model qwen3:0.6b
-  agentnova test 00
+  agentkthx test 00
 
 Written by VTSTech — https://www.vts-tech.org
 """
@@ -51,7 +51,7 @@ def main():
     args = parse_args()
     config = get_config()
     
-    # Get backend (respects AGENTNOVA_BACKEND env var)
+    # Get backend (respects AGENTKTHX_BACKEND env var)
     backend_name = args.backend or config.backend
     api_mode = getattr(args, 'api_mode', 'openre')
     timeout = getattr(args, 'timeout', None)

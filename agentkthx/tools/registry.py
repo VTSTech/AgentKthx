@@ -125,7 +125,7 @@ class ToolRegistry:
                 tools.append(tool)
             elif warn:
                 available = list(self._tools.keys())
-                if os.environ.get("AGENTNOVA_DEBUG"):
+                if os.environ.get("AGENTKTHX_DEBUG"):
                     print(f"[ToolRegistry] subset: '{name}' not found in registry "
                           f"(available: {available})")
         return ToolRegistry(tools)

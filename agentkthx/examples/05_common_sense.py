@@ -12,11 +12,11 @@ Tests everyday knowledge and common sense understanding:
 Usage:
   python examples/05_common_sense.py
   python examples/05_common_sense.py --model qwen2.5:0.5b --debug
-  agentnova test 05
+  agentkthx test 05
 
 Environment Variables:
   OLLAMA_BASE_URL     - Ollama server URL
-  AGENTNOVA_MODEL     - Default model
+  AGENTKTHX_MODEL     - Default model
 
 Written by VTSTech — https://www.vts-tech.org
 """

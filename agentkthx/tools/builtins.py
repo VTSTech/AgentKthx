@@ -24,16 +24,16 @@ from .registry import ToolRegistry
 # Audit Logging
 # ============================================================================
 
-def _get_agentnova_dir() -> Path:
-    """Get the AgentKthx data directory (~/.agentnova)."""
-    d = Path.home() / ".agentnova"
+def _get_agentkthx_dir() -> Path:
+    """Get the AgentKthx data directory (~/.agentkthx)."""
+    d = Path.home() / ".agentkthx"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
 
 def _audit_log(tool_name: str, args: dict, outcome: str, detail: str = "") -> None:
     """
-    Append an entry to the audit log at ~/.agentnova/audit.log.
+    Append an entry to the audit log at ~/.agentkthx/audit.log.
     
     Each line is a JSON object with: timestamp, tool, args, outcome, detail.
     outcome is one of: 'accepted', 'rejected', 'error'.
@@ -49,7 +49,7 @@ def _audit_log(tool_name: str, args: dict, outcome: str, detail: str = "") -> No
             "outcome": outcome,
             "detail": detail,
         }
-        log_path = _get_agentnova_dir() / "audit.log"
+        log_path = _get_agentkthx_dir() / "audit.log"
         with open(log_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, default=str) + "\n")
     except Exception:

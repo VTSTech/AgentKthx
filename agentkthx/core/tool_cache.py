@@ -21,13 +21,13 @@ from .types import ToolSupportLevel
 def get_cache_dir() -> Path:
     """Get the cache directory for AgentKthx."""
     if os.name == "nt":
-        # Windows: %LOCALAPPDATA%\agentnova\cache
+        # Windows: %LOCALAPPDATA%\agentkthx\cache
         base = os.environ.get("LOCALAPPDATA", os.path.expanduser("~"))
-        cache_dir = Path(base) / "agentnova" / "cache"
+        cache_dir = Path(base) / "agentkthx" / "cache"
     else:
-        # Unix: ~/.cache/agentnova
+        # Unix: ~/.cache/agentkthx
         base = os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache"))
-        cache_dir = Path(base) / "agentnova"
+        cache_dir = Path(base) / "agentkthx"
     
     cache_dir.mkdir(parents=True, exist_ok=True)
     return cache_dir
@@ -61,11 +61,11 @@ def load_tool_cache() -> dict:
                 if isinstance(data, dict):
                     return data
                 # Corrupted - not a dict
-                if os.environ.get("AGENTNOVA_DEBUG"):
+                if os.environ.get("AGENTKTHX_DEBUG"):
                     print(f"[ToolCache] Warning: Cache file corrupted (not a dict), ignoring")
                 return {}
         except json.JSONDecodeError as e:
-            if os.environ.get("AGENTNOVA_DEBUG"):
+            if os.environ.get("AGENTKTHX_DEBUG"):
                 print(f"[ToolCache] Warning: Cache file has invalid JSON: {e}")
             try:
                 cache_file.unlink()
@@ -73,7 +73,7 @@ def load_tool_cache() -> dict:
                 pass
             return {}
         except IOError as e:
-            if os.environ.get("AGENTNOVA_DEBUG"):
+            if os.environ.get("AGENTKTHX_DEBUG"):
                 print(f"[ToolCache] Warning: Could not read cache file: {e}")
     return {}
 

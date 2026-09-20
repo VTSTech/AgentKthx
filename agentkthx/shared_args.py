@@ -95,7 +95,7 @@ def add_shared_args(parser: argparse.ArgumentParser) -> None:
         "--model", "-m",
         default=None,
         metavar="MODEL",
-        help="Model to use (overrides AGENTNOVA_MODEL env var)",
+        help="Model to use (overrides AGENTKTHX_MODEL env var)",
     )
     parser.add_argument(
         "--debug",
@@ -111,7 +111,7 @@ def add_shared_args(parser: argparse.ArgumentParser) -> None:
         "--acp-url",
         default=None,
         metavar="URL",
-        help="ACP server URL (default: from AGENTNOVA_ACP_URL env var)",
+        help="ACP server URL (default: from AGENTKTHX_ACP_URL env var)",
     )
     parser.add_argument(
         "--num-ctx",
@@ -347,17 +347,17 @@ def parse_shared_args(args) -> SharedConfig:
         SharedConfig with values from args or env vars.
     """
     return SharedConfig(
-        force_react=getattr(args, "force_react", False) or os.environ.get("AGENTNOVA_FORCE_REACT", "0") == "1",
-        use_modelfile_system=getattr(args, "use_modelfile_system", False) or os.environ.get("AGENTNOVA_USE_MF_SYS", "0") == "1",
-        model=getattr(args, "model", None) or os.environ.get("AGENTNOVA_MODEL"),
-        debug=getattr(args, "debug", False) or os.environ.get("AGENTNOVA_DEBUG", "0") == "1",
-        acp=getattr(args, "acp", False) or os.environ.get("AGENTNOVA_ACP", "0") == "1",
-        acp_url=getattr(args, "acp_url", None) or os.environ.get("AGENTNOVA_ACP_URL"),
-        num_ctx=getattr(args, "num_ctx", None) or _env_int("AGENTNOVA_NUM_CTX"),
-        num_predict=getattr(args, "num_predict", None) or _env_int("AGENTNOVA_NUM_PREDICT"),
-        temperature=getattr(args, "temperature", None) or _env_float("AGENTNOVA_TEMPERATURE"),
-        top_p=getattr(args, "top_p", None) or _env_float("AGENTNOVA_TOP_P"),
-        fast=getattr(args, "fast", False) or os.environ.get("AGENTNOVA_FAST", "0") == "1",
+        force_react=getattr(args, "force_react", False) or os.environ.get("AGENTKTHX_FORCE_REACT", "0") == "1",
+        use_modelfile_system=getattr(args, "use_modelfile_system", False) or os.environ.get("AGENTKTHX_USE_MF_SYS", "0") == "1",
+        model=getattr(args, "model", None) or os.environ.get("AGENTKTHX_MODEL"),
+        debug=getattr(args, "debug", False) or os.environ.get("AGENTKTHX_DEBUG", "0") == "1",
+        acp=getattr(args, "acp", False) or os.environ.get("AGENTKTHX_ACP", "0") == "1",
+        acp_url=getattr(args, "acp_url", None) or os.environ.get("AGENTKTHX_ACP_URL"),
+        num_ctx=getattr(args, "num_ctx", None) or _env_int("AGENTKTHX_NUM_CTX"),
+        num_predict=getattr(args, "num_predict", None) or _env_int("AGENTKTHX_NUM_PREDICT"),
+        temperature=getattr(args, "temperature", None) or _env_float("AGENTKTHX_TEMPERATURE"),
+        top_p=getattr(args, "top_p", None) or _env_float("AGENTKTHX_TOP_P"),
+        fast=getattr(args, "fast", False) or os.environ.get("AGENTKTHX_FAST", "0") == "1",
     )
 
 

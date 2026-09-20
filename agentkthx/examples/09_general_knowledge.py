@@ -13,11 +13,11 @@ Tests factual knowledge across domains:
 Usage:
   python examples/09_general_knowledge.py
   python examples/09_general_knowledge.py --model qwen2.5:0.5b --debug
-  agentnova test 09
+  agentkthx test 09
 
 Environment Variables:
   OLLAMA_BASE_URL     - Ollama server URL
-  AGENTNOVA_MODEL     - Default model
+  AGENTKTHX_MODEL     - Default model
 
 Written by VTSTech — https://www.vts-tech.org
 """

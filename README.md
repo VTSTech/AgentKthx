@@ -10,7 +10,7 @@ Inspired by the architecture of OpenClaw, rebuilt from scratch for local-first o
 
 > **ℹ️ Renamed from `AgentNova` (R06.0)**
 >
-> This project was previously named `AgentNova`. As of R06.0, the package has been renamed to `AgentKthx` (PyPI: `agentkthx`, CLI: `agentkthx`). The old `agentnova` PyPI package still works as a redirect — existing scripts and env vars (`AGENTNOVA_*`) continue to work without changes. See the [Migration Guide](#migration-from-agentnova) section below.
+> This project was previously named `AgentNova`. As of R06.0, the package has been renamed to `AgentKthx` (PyPI: `agentkthx`, CLI: `agentkthx`). The old `agentnova` PyPI package still works as a redirect — existing scripts and env vars (`AGENTKTHX_*`) continue to work without changes. See the [Migration Guide](#migration-from-agentnova) section below.
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/VTSTech/AgentKthx/blob/main/AgentKthx.ipynb)
 [![GitHub commits](https://badgen.net/github/commits/VTSTech/AgentKthx)](https://GitHub.com/VTSTech/AgentKthx/commit/) [![GitHub latest commit](https://badgen.net/github/last-commit/VTSTech/AgentKthx)](https://GitHub.com/VTSTech/AgentKthx/commit/)
@@ -305,7 +305,7 @@ print(result.final_answer)  # Valid JSON string
 ### TurboQuant Server Management
 
 ```python
-from agentkthx.turbo import start_server, stop_server, get_status
+from agentkthx.plugins.turboquant.turbo import start_server, stop_server, get_status
 
 # Start TurboQuant server with an Ollama model
 state = start_server("qwen2.5:7b", ctx=8192)
@@ -538,14 +538,14 @@ TURBOQUANT_PORT=8764                               # TurboQuant server port
 TURBOQUANT_CTX=8192                                # Context window size
 
 # Agent settings
-AGENTNOVA_BACKEND=ollama      # Default backend: ollama, llama-server, bitnet, zai, ...
-AGENTNOVA_MODEL=qwen2.5:0.5b  # Default model
-AGENTNOVA_MAX_STEPS=10        # Maximum reasoning steps
-AGENTNOVA_DEBUG=false         # Enable debug output
+AGENTKTHX_BACKEND=ollama      # Default backend: ollama, llama-server, bitnet, zai, ...
+AGENTKTHX_MODEL=qwen2.5:0.5b  # Default model
+AGENTKTHX_MAX_STEPS=10        # Maximum reasoning steps
+AGENTKTHX_DEBUG=false         # Enable debug output
 
 # Retry settings
-AGENTNOVA_RETRY_ON_ERROR=true          # Retry failed tool calls with error feedback
-AGENTNOVA_MAX_TOOL_RETRIES=2           # Maximum retries per tool call failure
+AGENTKTHX_RETRY_ON_ERROR=true          # Retry failed tool calls with error feedback
+AGENTKTHX_MAX_TOOL_RETRIES=2           # Maximum retries per tool call failure
 ```
 
 Check current configuration:
@@ -709,7 +709,7 @@ R06.0 renamed the project from `AgentNova` → `AgentKthx`. The rename was drive
 
 - ✅ The `agentnova` CLI command still works (redirects to `agentkthx`)
 - ✅ `import agentnova` still works (re-exports from `agentkthx`, emits DeprecationWarning)
-- ✅ All `AGENTNOVA_*` env vars still work unchanged
+- ✅ All `AGENTKTHX_*` env vars still work unchanged
 - ✅ `localclaw` CLI command still works (redirects through to `agentkthx`)
 - ✅ All existing skills, souls, plugins, and configs continue to work
 - ✅ SQLite persistent memory sessions remain compatible

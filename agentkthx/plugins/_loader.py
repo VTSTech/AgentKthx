@@ -4,7 +4,7 @@ AgentKthx Plugin Loader v0.1
 Implements PluginManifest, Plugin, and the singleton PluginManager.
 
 Plugin discovery:
-  Scan ``agentnova/plugins/`` for subdirectories containing ``plugin.json``.
+  Scan ``agentkthx/plugins/`` for subdirectories containing ``plugin.json``.
   Subdirectories starting with ``_`` or ``.`` are skipped.
 
 Plugin types:

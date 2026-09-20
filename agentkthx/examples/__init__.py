@@ -16,6 +16,6 @@ Usage:
 Environment Variables:
   OLLAMA_BASE_URL     - Ollama server URL (default: http://localhost:11434)
   BITNET_BASE_URL     - BitNet server URL (default: http://localhost:8765)
-  AGENTNOVA_BACKEND   - Default backend: ollama or bitnet
-  AGENTNOVA_MODEL     - Default model name
+  AGENTKTHX_BACKEND   - Default backend: ollama or bitnet
+  AGENTKTHX_MODEL     - Default model name
 """

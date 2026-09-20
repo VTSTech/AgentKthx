@@ -18,8 +18,8 @@ Configuration:
 
 Usage:
   # CLI
-  agentnova chat --backend openrouter --model openai/gpt-4o
-  agentnova run "What is 15 * 8?" --backend openrouter --model deepseek/deepseek-chat
+  agentkthx chat --backend openrouter --model openai/gpt-4o
+  agentkthx run "What is 15 * 8?" --backend openrouter --model deepseek/deepseek-chat
 
   # Python API
   from agentkthx import Agent
@@ -310,11 +310,11 @@ class OpenRouterBackend(OllamaBackend):
         
         # Force model list to be loaded on initialization so cache is populated
         try:
-            if os.environ.get("AGENTNOVA_DEBUG"):
+            if os.environ.get("AGENTKTHX_DEBUG"):
                 print("  [OpenRouter Debug] Initializing: loading models into cache")
             self.list_models()
         except Exception as e:
-            if os.environ.get("AGENTNOVA_DEBUG"):
+            if os.environ.get("AGENTKTHX_DEBUG"):
                 print(f"  [OpenRouter Debug] Failed to initialize models: {e}")
 
     @property
@@ -421,7 +421,7 @@ class OpenRouterBackend(OllamaBackend):
             else:
                 self._model_cache = sorted(available_models, key=lambda x: x["name"])
             
-            if os.environ.get("AGENTNOVA_DEBUG"):
+            if os.environ.get("AGENTKTHX_DEBUG"):
                 print(f"  [OpenRouter Debug] Stored {len(self._model_cache)} models in cache:")
                 for model in self._model_cache:
                     print(f"    - {model['name']}")
@@ -515,7 +515,7 @@ class OpenRouterBackend(OllamaBackend):
         """
         # Try to get model from cache first
         if self._model_cache:
-            if os.environ.get("AGENTNOVA_DEBUG"):
+            if os.environ.get("AGENTKTHX_DEBUG"):
                 print(f"  [OpenRouter Debug] Looking for model '{model}' in cache with {len(self._model_cache)} models")
                 for cached_model in self._model_cache:
                     cached_name = cached_model["name"]
@@ -523,11 +523,11 @@ class OpenRouterBackend(OllamaBackend):
             for cached_model in self._model_cache:
                 cached_name = cached_model["name"]
                 if cached_name == model:
-                    if os.environ.get("AGENTNOVA_DEBUG"):
+                    if os.environ.get("AGENTKTHX_DEBUG"):
                         print(f"  [OpenRouter Debug] Found exact match: '{cached_name}'")
                     details = cached_model["details"]
                     max_tokens = details.get("max_completion_tokens", 4096)
-                    if os.environ.get("AGENTNOVA_DEBUG"):
+                    if os.environ.get("AGENTKTHX_DEBUG"):
                         print(f"  [OpenRouter Debug] Using max_tokens: {max_tokens}")
                     return {
                         "temperature": 0.7,  # Default temperature
@@ -535,16 +535,16 @@ class OpenRouterBackend(OllamaBackend):
                         "context_length": details.get("context_length", 128000),
                     }
                 elif model in cached_name or cached_name in model:
-                    if os.environ.get("AGENTNOVA_DEBUG"):
+                    if os.environ.get("AGENTKTHX_DEBUG"):
                         print(f"  [OpenRouter Debug] Partial match: '{cached_name}' (searching for '{model}')")
         
         # Fallback to catalog if not in cache
-        if os.environ.get("AGENTNOVA_DEBUG"):
+        if os.environ.get("AGENTKTHX_DEBUG"):
             print(f"  [OpenRouter Debug] Model not found in cache, falling back to catalog")
         model_info = self._get_model_info(model)
         
         max_tokens = model_info.get("max_tokens", 4096) if model_info else 4096
-        if os.environ.get("AGENTNOVA_DEBUG"):
+        if os.environ.get("AGENTKTHX_DEBUG"):
             print(f"  [OpenRouter Debug] Catalog max_tokens: {max_tokens}")
         
         defaults = {
@@ -622,7 +622,7 @@ class OpenRouterBackend(OllamaBackend):
                 retry_after = min(max(retry_after, 1), 60)
 
                 if attempt < self._MAX_429_RETRIES:
-                    if os.environ.get("AGENTNOVA_DEBUG"):
+                    if os.environ.get("AGENTKTHX_DEBUG"):
                         print(f"  [OpenRouter] 429 rate limited "
                               f"(attempt {attempt + 1}/{self._MAX_429_RETRIES + 1}): "
                               f"{error_msg}. Retrying in {retry_after}s...")
@@ -939,7 +939,7 @@ class OpenRouterBackend(OllamaBackend):
             **kwargs,
         )
 
-        if os.environ.get("AGENTNOVA_DEBUG"):
+        if os.environ.get("AGENTKTHX_DEBUG"):
             print(f"  [OpenRouter] POST chat/completions — "
                   f"tools={len(tools) if tools else 0}, "
                   f"tool_choice={kwargs.get('tool_choice', 'auto')}")
@@ -953,7 +953,7 @@ class OpenRouterBackend(OllamaBackend):
             # reject the `tools` field. Retry without it so the model can
             # emit text-format tool calls that the ToolParser handles.
             if tools and self._is_tools_not_supported_error(err_str):
-                if os.environ.get("AGENTNOVA_DEBUG"):
+                if os.environ.get("AGENTKTHX_DEBUG"):
                     print(f"  [OpenRouter] Model doesn't support tools — "
                           f"retrying without tools (ReAct fallback)")
                 body.pop("tools", None)
@@ -987,7 +987,7 @@ class OpenRouterBackend(OllamaBackend):
                 f"finish_reason={parsed['finish_reason']}"
             )
 
-        if os.environ.get("AGENTNOVA_DEBUG"):
+        if os.environ.get("AGENTKTHX_DEBUG"):
             print(f"  [OpenRouter] finish_reason={parsed['finish_reason']}, "
                   f"tool_calls={len(parsed['tool_calls'])}, "
                   f"content_len={len(parsed['content'])}")
@@ -1066,7 +1066,7 @@ class OpenRouterBackend(OllamaBackend):
                 # prompt — just the last user message as state, no system prompt.
                 err_lower = str(e).lower()
                 if "empty response" in err_lower or "no content" in err_lower:
-                    if os.environ.get("AGENTNOVA_DEBUG"):
+                    if os.environ.get("AGENTKTHX_DEBUG"):
                         print(f"  [OpenRouter.JEV] Empty response — retrying with simplified prompt")
                     # Simplify: strip the JEV system prompt, just send raw
                     simplified_messages = [

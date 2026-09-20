@@ -34,7 +34,7 @@ Features:
 Usage:
     from agentkthx import Agent
     from agentkthx.tools import make_builtin_registry
-    from agentkthx.acp_plugin import ACPPlugin
+    from agentkthx import ACPPlugin
 
     # Create plugin (uses config.py defaults)
     acp = ACPPlugin()

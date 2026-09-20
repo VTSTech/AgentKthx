@@ -29,7 +29,7 @@ Example Usage:
     agent = Agent(model="qwen2.5:0.5b", soul="/path/to/soul/package")
 """
 
-__version__ = "0.6.4"
+__version__ = "0.6.41"
 __author__ = "VTSTech"
 __status__ = "Alpha"
 
@@ -96,7 +96,7 @@ from .config import (
     ACP_USER,
     ACP_PASS,
     DEFAULT_MODEL,
-    AGENTNOVA_BACKEND,
+    AGENTKTHX_BACKEND,
 )
 from .model_discovery import (
     get_models, get_available_models, pick_best_model,
@@ -179,7 +179,7 @@ __all__ = [
     "ACP_USER",
     "ACP_PASS",
     "DEFAULT_MODEL",
-    "AGENTNOVA_BACKEND",
+    "AGENTKTHX_BACKEND",
     # Model Discovery
     "get_models",
     "get_available_models",

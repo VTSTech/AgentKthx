@@ -51,13 +51,13 @@ TURBOQUANT_DEFAULT_PORT = int(os.environ.get("TURBOQUANT_PORT", "8764"))
 TURBOQUANT_DEFAULT_CTX = int(os.environ.get("TURBOQUANT_CTX", "8192"))
 
 # PID file for tracking running server
-TURBOQUANT_PID_FILE = Path(os.path.expanduser("~/.agentnova/turbo.pid"))
+TURBOQUANT_PID_FILE = Path(os.path.expanduser("~/.agentkthx/turbo.pid"))
 
 # State file for tracking server config
-TURBOQUANT_STATE_FILE = Path(os.path.expanduser("~/.agentnova/turbo.state"))
+TURBOQUANT_STATE_FILE = Path(os.path.expanduser("~/.agentkthx/turbo.state"))
 
 # Server log file
-TURBOQUANT_LOG_FILE = Path(os.path.expanduser("~/.agentnova/turbo.log"))
+TURBOQUANT_LOG_FILE = Path(os.path.expanduser("~/.agentkthx/turbo.log"))
 
 # Current state file schema version
 _TURBO_STATE_VERSION = 1
@@ -672,7 +672,7 @@ def print_status(state: TurboState) -> None:
     # Show how to use with AgentKthx
     print(dim("  Usage with AgentKthx:"))
     usage1 = f'agentkthx run --backend llama-server --model {state.model_name} "<prompt>"'
-    usage2 = f'OLLAMA_BASE_URL=http://{state.host}:{state.port} agentnova run "<prompt>"'
+    usage2 = f'OLLAMA_BASE_URL=http://{state.host}:{state.port} agentkthx run "<prompt>"'
     print(f"    {cyan(usage1)}")
     print(f"    {cyan(usage2)}")
     print()

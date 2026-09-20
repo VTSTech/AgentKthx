@@ -12,7 +12,7 @@ Patched for Windows:
   3. Provides ASCII fallbacks for the few Unicode symbols used in the CLI
      (checkmark / circle / cross / filled dot) so a font without those
      glyphs still produces legible output.  Auto-fallback can be
-     overridden with the env var `AGENTNOVA_GLYPHS=unicode|ascii|auto`.
+     overridden with the env var `AGENTKTHX_GLYPHS=unicode|ascii|auto`.
 
 stdlib-only. No external deps (no colorama).
 
@@ -104,12 +104,12 @@ if os.name == "nt":
 #
 # We provide both the "real" Unicode glyphs and ASCII fallbacks.  The
 # choice is controlled by:
-#   AGENTNOVA_GLYPHS=auto  -- heuristically decide (default)
-#   AGENTNOVA_GLYPHS=unicode  -- force Unicode
-#   AGENTNOVA_GLYPHS=ascii   -- force ASCII fallback
+#   AGENTKTHX_GLYPHS=auto  -- heuristically decide (default)
+#   AGENTKTHX_GLYPHS=unicode  -- force Unicode
+#   AGENTKTHX_GLYPHS=ascii   -- force ASCII fallback
 # ---------------------------------------------------------------------------
 
-_GLYPH_MODE = os.environ.get("AGENTNOVA_GLYPHS", "auto").lower()
+_GLYPH_MODE = os.environ.get("AGENTKTHX_GLYPHS", "auto").lower()
 
 
 def _looks_unicode_capable() -> bool:

@@ -24,7 +24,7 @@ from .agent_mode import AgentMode
 from .orchestrator import Orchestrator, AgentCard
 from .tools import make_builtin_registry
 from .backends import get_backend, get_default_backend, get_backend_choices, OllamaBackend
-from .config import get_config, AGENTNOVA_BACKEND, OLLAMA_BASE_URL
+from .config import get_config, AGENTKTHX_BACKEND, OLLAMA_BASE_URL
 from . import __version__
 from .model_discovery import match_models, get_models
 from .core.types import ApiMode
@@ -361,7 +361,7 @@ def _init_acp(args: argparse.Namespace, config, agent_name: str = "AgentKthx") -
         return None, False
     
     try:
-        from .acp_plugin import ACPPlugin
+        from .plugins.acp.acp_plugin import ACPPlugin
         acp_url = getattr(args, 'acp_url', None) or config.acp_base_url
         acp = ACPPlugin(
             base_url=acp_url,
@@ -460,7 +460,7 @@ def _build_agent(args: argparse.Namespace, config) -> Agent:
         discovered = temp_backend.list_models()
         if discovered and discovered[0].get("name") and discovered[0]["name"] != "bitnet":
             model = discovered[0]["name"]
-            if os.environ.get("AGENTNOVA_DEBUG"):
+            if os.environ.get("AGENTKTHX_DEBUG"):
                 print(f"  [bitnet] Discovered model: {model}")
         else:
             model = "bitnet"
@@ -1089,7 +1089,7 @@ def cmd_chat(args: argparse.Namespace) -> int:
     # never left in a broken scroll-region state.
     _setup_footer_region()
     # In-memory last-message recall (R06.4): no history file.
-    # Previously used readline.read_history_file(~/.agentnova_history) +
+    # Previously used readline.read_history_file(~/.agentkthx_history) +
     # write_history_file() on every prompt, which grew unboundedly
     # (one user hit 600MB). Now we just track the last user_input in a
     # variable so UP arrow can recall it within the current session.
@@ -1788,13 +1788,13 @@ def _get_cache_dir() -> Path:
     """Get the cache directory for AgentKthx."""
     # Use platform-appropriate cache directory
     if os.name == "nt":
-        # Windows: %LOCALAPPDATA%\agentnova\cache
+        # Windows: %LOCALAPPDATA%\agentkthx\cache
         base = os.environ.get("LOCALAPPDATA", os.path.expanduser("~"))
-        cache_dir = Path(base) / "agentnova" / "cache"
+        cache_dir = Path(base) / "agentkthx" / "cache"
     else:
-        # Unix: ~/.cache/agentnova
+        # Unix: ~/.cache/agentkthx
         base = os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache"))
-        cache_dir = Path(base) / "agentnova"
+        cache_dir = Path(base) / "agentkthx"
     
     cache_dir.mkdir(parents=True, exist_ok=True)
     return cache_dir
@@ -1811,12 +1811,12 @@ def _load_tool_cache() -> dict:
                 if isinstance(data, dict):
                     return data
                 # Corrupted - not a dict
-                if os.environ.get("AGENTNOVA_DEBUG"):
+                if os.environ.get("AGENTKTHX_DEBUG"):
                     print(f"Warning: Cache file corrupted (not a dict), ignoring", file=sys.stderr)
                 return {}
         except json.JSONDecodeError as e:
             # Corrupted JSON - warn in debug mode
-            if os.environ.get("AGENTNOVA_DEBUG"):
+            if os.environ.get("AGENTKTHX_DEBUG"):
                 print(f"Warning: Cache file has invalid JSON: {e}", file=sys.stderr)
             # Try to remove corrupted file
             try:
@@ -1825,7 +1825,7 @@ def _load_tool_cache() -> dict:
                 pass
             return {}
         except IOError as e:
-            if os.environ.get("AGENTNOVA_DEBUG"):
+            if os.environ.get("AGENTKTHX_DEBUG"):
                 print(f"Warning: Could not read cache file: {e}", file=sys.stderr)
     return {}
 
@@ -2300,7 +2300,7 @@ def cmd_test(args: argparse.Namespace) -> int:
     acp = None
     if args.acp:
         try:
-            from .acp_plugin import ACPPlugin
+            from .plugins.acp.acp_plugin import ACPPlugin
             acp_url = args.acp_url or config.acp_base_url
             acp = ACPPlugin(
                 base_url=acp_url,
@@ -2323,11 +2323,11 @@ def cmd_test(args: argparse.Namespace) -> int:
     
     # Set environment for tests
     if args.debug:
-        os.environ["AGENTNOVA_DEBUG"] = "1"
+        os.environ["AGENTKTHX_DEBUG"] = "1"
     if args.backend:
-        os.environ["AGENTNOVA_BACKEND"] = args.backend
+        os.environ["AGENTKTHX_BACKEND"] = args.backend
     if getattr(args, 'num_ctx', None):
-        os.environ["AGENTNOVA_NUM_CTX"] = str(args.num_ctx)
+        os.environ["AGENTKTHX_NUM_CTX"] = str(args.num_ctx)
     
     # Reload config to pick up new env vars
     config = get_config(reload=True)
@@ -2384,7 +2384,7 @@ def cmd_test(args: argparse.Namespace) -> int:
         print(dim("═" * 50))
         
         # Set model env var for this run
-        os.environ["AGENTNOVA_MODEL"] = model
+        os.environ["AGENTKTHX_MODEL"] = model
         
         for tid in tests_to_run:
             info = TESTS[tid]
@@ -2574,7 +2574,7 @@ def cmd_version(args: argparse.Namespace) -> int:
 
 def cmd_turbo(args: argparse.Namespace) -> int:
     """TurboQuant server management commands."""
-    from .turbo import (
+    from .plugins.turboquant.turbo import (
         start_server, stop_server, get_status,
         print_model_list, print_status,
         TURBOQUANT_SERVER_PATH,
@@ -2685,7 +2685,7 @@ def cmd_turbo(args: argparse.Namespace) -> int:
             # Show how to use
             print(dim("  Use with AgentKthx:"))
             _cmd1 = f"agentkthx run --backend llama-server --model {args.model} \"<prompt>\""
-            _cmd2 = f"OLLAMA_BASE_URL=http://localhost:{state.port} agentnova run \"<prompt>\""
+            _cmd2 = f"OLLAMA_BASE_URL=http://localhost:{state.port} agentkthx run \"<prompt>\""
             print(f"    {cyan(_cmd1)}")
             print(f"    {cyan(_cmd2)}")
             print()
@@ -2731,7 +2731,7 @@ def cmd_config(args: argparse.Namespace) -> int:
         OPENROUTER_BASE_URL, OPENROUTER_API_KEY, OPENROUTER_DEFAULT_MODEL, OPENROUTER_FREE_ONLY,
         ACP_BASE_URL, ACP_USER, ACP_PASS,
         TURBOQUANT_SERVER_PATH, TURBOQUANT_PORT, TURBOQUANT_CTX,
-        AGENTNOVA_BACKEND, DEFAULT_MODEL, NUM_CTX,
+        AGENTKTHX_BACKEND, DEFAULT_MODEL, NUM_CTX,
         MAX_STEPS, DEBUG, VERBOSE,
         RETRY_ON_ERROR, MAX_TOOL_RETRIES,
     )
@@ -2755,7 +2755,7 @@ def cmd_config(args: argparse.Namespace) -> int:
         cfg = get_config()
         all_vars = {
             "Backend": [
-                ("AGENTNOVA_BACKEND", AGENTNOVA_BACKEND),
+                ("AGENTKTHX_BACKEND", AGENTKTHX_BACKEND),
                 ("DEFAULT_MODEL", DEFAULT_MODEL),
             ],
             "URLs": [
@@ -2818,7 +2818,7 @@ def cmd_config(args: argparse.Namespace) -> int:
 
     # ── Default: pretty summary ───────────────────────────────────────────
     _print_config_summary(
-        backend=AGENTNOVA_BACKEND,
+        backend=AGENTKTHX_BACKEND,
         model=DEFAULT_MODEL,
         num_ctx=NUM_CTX,
         max_steps=MAX_STEPS,
@@ -2932,21 +2932,21 @@ def _print_config_summary(
 
     # ── Environment variable reference ────────────────────────────────────
     env_vars = [
-        ("AGENTNOVA_BACKEND",       "Default backend (ollama|bitnet|llama-server|zai|openrouter)"),
-        ("AGENTNOVA_MODEL",         "Override default model"),
-        ("AGENTNOVA_MAX_STEPS",     "Max agent steps (default: 10)"),
-        ("AGENTNOVA_DEBUG",         "Enable debug output (1/true/yes)"),
-        ("AGENTNOVA_VERBOSE",       "Enable verbose output (1/true/yes)"),
+        ("AGENTKTHX_BACKEND",       "Default backend (ollama|bitnet|llama-server|zai|openrouter)"),
+        ("AGENTKTHX_MODEL",         "Override default model"),
+        ("AGENTKTHX_MAX_STEPS",     "Max agent steps (default: 10)"),
+        ("AGENTKTHX_DEBUG",         "Enable debug output (1/true/yes)"),
+        ("AGENTKTHX_VERBOSE",       "Enable verbose output (1/true/yes)"),
         ("OLLAMA_NUM_CTX",          "Ollama context window size"),
-        ("AGENTNOVA_NUM_CTX",       "Generic context window size (fallback)"),
-        ("AGENTNOVA_RETRY_ON_ERROR","Auto-retry failed tool calls (default: true)"),
-        ("AGENTNOVA_MAX_TOOL_RETRIES","Max retries per tool call (default: 2)"),
-        ("AGENTNOVA_FORCE_REACT",   "Force ReAct text-based tool calling"),
-        ("AGENTNOVA_USE_MF_SYS",    "Use Modelfile system prompt"),
-        ("AGENTNOVA_NUM_PREDICT",   "Max tokens to generate"),
-        ("AGENTNOVA_TEMPERATURE",   "Sampling temperature"),
-        ("AGENTNOVA_TOP_P",         "Nucleus sampling parameter"),
-        ("AGENTNOVA_FAST",          "Fast mode preset"),
+        ("AGENTKTHX_NUM_CTX",       "Generic context window size (fallback)"),
+        ("AGENTKTHX_RETRY_ON_ERROR","Auto-retry failed tool calls (default: true)"),
+        ("AGENTKTHX_MAX_TOOL_RETRIES","Max retries per tool call (default: 2)"),
+        ("AGENTKTHX_FORCE_REACT",   "Force ReAct text-based tool calling"),
+        ("AGENTKTHX_USE_MF_SYS",    "Use Modelfile system prompt"),
+        ("AGENTKTHX_NUM_PREDICT",   "Max tokens to generate"),
+        ("AGENTKTHX_TEMPERATURE",   "Sampling temperature"),
+        ("AGENTKTHX_TOP_P",         "Nucleus sampling parameter"),
+        ("AGENTKTHX_FAST",          "Fast mode preset"),
         ("OLLAMA_BASE_URL",         "Ollama server URL"),
         ("BITNET_BASE_URL",         "BitNet server URL"),
         ("BITNET_TUNNEL",           "BitNet remote tunnel URL"),
@@ -3261,7 +3261,7 @@ def cmd_sessions(args: argparse.Namespace) -> int:
 
         print()
         print(f"{bright_cyan('⚛ AgentKthx')} - Saved Sessions")
-        print(f"{dim('  DB:')} ~/.agentnova/memory.db")
+        print(f"{dim('  DB:')} ~/.agentkthx/memory.db")
         print(dim("-" * (4 + ID_W + MSGS_W + CREATED_W + UPDATED_W)))
         print(f"  {'Session':<{ID_W}} {'Msgs':>{MSGS_W}}  {'Created':<{CREATED_W}}  {'Updated':<{UPDATED_W}}")
         print(dim("-" * (4 + ID_W + MSGS_W + CREATED_W + UPDATED_W)))
@@ -3293,7 +3293,7 @@ def cmd_plugins(args: argparse.Namespace) -> int:
 
     if not manifests:
         print(yellow("No plugins found."))
-        print(dim("  Plugins should be in agentnova/plugins/<name>/plugin.json"))
+        print(dim("  Plugins should be in agentkthx/plugins/<name>/plugin.json"))
         return 0
 
     print(bold(bright_cyan("PLUGINS")))
@@ -3363,7 +3363,7 @@ def cmd_update(args: argparse.Namespace) -> int:
         # Show the installed version
         try:
             version_result = sp.run(
-                [sys.executable, "-m", "agentnova", "version"],
+                [sys.executable, "-m", "agentkthx", "version"],
                 capture_output=True,
                 text=True,
             )

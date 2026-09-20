@@ -163,7 +163,7 @@ class LlamaServerBackend(OllamaBackend):
                     import os.path as _osp
                     model_name = _osp.splitext(_osp.basename(model_path))[0]
 
-                if os.environ.get("AGENTNOVA_DEBUG"):
+                if os.environ.get("AGENTKTHX_DEBUG"):
                     print(f"  [bitnet] list_models: discovered model='{model_name}' via /props")
 
                 return [{
@@ -244,7 +244,7 @@ class LlamaServerBackend(OllamaBackend):
         except (urllib.error.HTTPError, urllib.error.URLError, json.JSONDecodeError):
             pass
 
-        if os.environ.get("AGENTNOVA_DEBUG"):
+        if os.environ.get("AGENTKTHX_DEBUG"):
             print(f"  [llama-server] list_models: /v1/models and /props both failed, returning default")
         return [{
             "name": "default",
@@ -326,7 +326,7 @@ class LlamaServerBackend(OllamaBackend):
 
         url = f"{self._base_url}/completion"
 
-        if os.environ.get("AGENTNOVA_DEBUG"):
+        if os.environ.get("AGENTKTHX_DEBUG"):
             label = "bitnet" if self._bitnet_mode else "llama-server"
             print(f"  [{label}] /completion mode: model={model!r} (config-only, not sent to server)")
 
@@ -355,7 +355,7 @@ class LlamaServerBackend(OllamaBackend):
             if ts not in stop_sequences:
                 stop_sequences.append(ts)
 
-        if os.environ.get("AGENTNOVA_DEBUG"):
+        if os.environ.get("AGENTKTHX_DEBUG"):
             print(f"  [{label}] stop_sequences={stop_sequences}")
 
         body = {
@@ -843,20 +843,20 @@ class LlamaServerBackend(OllamaBackend):
 
             # Native tool calls in the response → NATIVE support
             if tool_calls:
-                if os.environ.get("AGENTNOVA_DEBUG"):
+                if os.environ.get("AGENTKTHX_DEBUG"):
                     print(f"  [llama-server] Tool support: NATIVE (tool_calls={len(tool_calls)})")
                 cache_tool_support(model, ToolSupportLevel.NATIVE, family=family or "unknown", api_mode=api_mode)
                 return ToolSupportLevel.NATIVE
 
             # Check if content contains ReAct-style tool call pattern
             if content and any(kw in content.lower() for kw in ["action:", "action input:", "final answer:"]):
-                if os.environ.get("AGENTNOVA_DEBUG"):
+                if os.environ.get("AGENTKTHX_DEBUG"):
                     print(f"  [llama-server] Tool support: REACT (text-based tool pattern)")
                 cache_tool_support(model, ToolSupportLevel.REACT, family=family or "unknown", api_mode=api_mode)
                 return ToolSupportLevel.REACT
 
             # API accepted tools but model didn't use them — still REACT-capable
-            if os.environ.get("AGENTNOVA_DEBUG"):
+            if os.environ.get("AGENTKTHX_DEBUG"):
                 print(f"  [llama-server] Tool support: REACT (tools accepted, no tool calls)")
             cache_tool_support(model, ToolSupportLevel.REACT, family=family or "unknown", api_mode=api_mode)
             return ToolSupportLevel.REACT
@@ -867,21 +867,21 @@ class LlamaServerBackend(OllamaBackend):
 
             # If the server doesn't support the tools parameter, fall back to REACT
             if "does not support" in error_msg or "invalid" in error_msg:
-                if os.environ.get("AGENTNOVA_DEBUG"):
+                if os.environ.get("AGENTKTHX_DEBUG"):
                     print(f"  [llama-server] Tool support: REACT (server rejected tools param)")
                 cache_tool_support(model, ToolSupportLevel.REACT, family=family or "unknown",
                                    error=str(e), api_mode=api_mode)
                 return ToolSupportLevel.REACT
 
             # Other errors — assume REACT
-            if os.environ.get("AGENTNOVA_DEBUG"):
+            if os.environ.get("AGENTKTHX_DEBUG"):
                 print(f"  [llama-server] Tool support: REACT (HTTP {e.code})")
             cache_tool_support(model, ToolSupportLevel.REACT, family=family or "unknown",
                                error=str(e), api_mode=api_mode)
             return ToolSupportLevel.REACT
 
         except Exception as e:
-            if os.environ.get("AGENTNOVA_DEBUG"):
+            if os.environ.get("AGENTKTHX_DEBUG"):
                 print(f"  [llama-server] Tool support test failed: {e}")
             cache_tool_support(model, ToolSupportLevel.REACT, family=family or "unknown",
                                error=str(e), api_mode=api_mode)

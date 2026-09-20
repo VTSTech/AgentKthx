@@ -16,8 +16,8 @@ Configuration:
 
 Usage:
   # CLI
-  agentnova chat --backend zai --model glm-5.1 --tools calculator
-  agentnova run "What is 15 * 8?" --backend zai --model glm-4-flash
+  agentkthx chat --backend zai --model glm-5.1 --tools calculator
+  agentkthx run "What is 15 * 8?" --backend zai --model glm-4-flash
 
   # Python API
   from agentkthx import Agent
@@ -247,7 +247,7 @@ class ZaiBackend(OllamaBackend):
         elif api_mode == ApiMode.OPENAI:
             forced_mode = ApiMode.OPENAI
         else:
-            if os.environ.get("AGENTNOVA_DEBUG"):
+            if os.environ.get("AGENTKTHX_DEBUG"):
                 print(f"  [ZAI] API mode '{api_mode}' not supported — ZAI only supports OpenAI / JEV, forcing OPENAI")
             forced_mode = ApiMode.OPENAI
 
@@ -336,14 +336,14 @@ class ZaiBackend(OllamaBackend):
                     model_key = name.split("/")[-1] if "/" in name else name
                     api_model_keys.add(model_key)
 
-                if os.environ.get("AGENTNOVA_DEBUG"):
+                if os.environ.get("AGENTKTHX_DEBUG"):
                     print(f"  [ZAI] API returned {len(api_model_keys)} models")
 
         except (urllib.error.HTTPError, urllib.error.URLError) as e:
-            if os.environ.get("AGENTNOVA_DEBUG"):
+            if os.environ.get("AGENTKTHX_DEBUG"):
                 print(f"  [ZAI] Model discovery failed ({e}), using static catalog")
         except Exception as e:
-            if os.environ.get("AGENTNOVA_DEBUG"):
+            if os.environ.get("AGENTKTHX_DEBUG"):
                 print(f"  [ZAI] Model discovery error ({e}), using static catalog")
 
         # Build unified list: start with full static catalog
@@ -382,7 +382,7 @@ class ZaiBackend(OllamaBackend):
                     },
                 })
 
-        if os.environ.get("AGENTNOVA_DEBUG"):
+        if os.environ.get("AGENTKTHX_DEBUG"):
             catalog_only = len(models) - len(api_model_keys)
             print(f"  [ZAI] Total: {len(models)} models ({len(api_model_keys)} API + {catalog_only} catalog)")
 
@@ -484,7 +484,7 @@ class ZaiBackend(OllamaBackend):
         if max_tokens is None:
             max_tokens = defaults["max_tokens"]
             
-        if think is not None and os.environ.get("AGENTNOVA_DEBUG"):
+        if think is not None and os.environ.get("AGENTKTHX_DEBUG"):
             print(f"  [ZAI] 'think' parameter ignored — ZAI manages thinking internally")
 
         # ZAI_FREE_ONLY: reject paid models upfront
@@ -533,7 +533,7 @@ class ZaiBackend(OllamaBackend):
         # Apply ZAI_FREE_ONLY upfront — decisions should also respect it
         if ZAI_FREE_ONLY and not _is_free_model(model):
             fallback = ZAI_FREE_FALLBACK_MODEL
-            if os.environ.get("AGENTNOVA_DEBUG"):
+            if os.environ.get("AGENTKTHX_DEBUG"):
                 print(f"  [ZAI.JEV] FREE_ONLY mode — '{model}' is a paid model, switching to '{fallback}'")
             model = fallback
 
@@ -679,7 +679,7 @@ class ZaiBackend(OllamaBackend):
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
 
-        if os.environ.get("AGENTNOVA_DEBUG"):
+        if os.environ.get("AGENTKTHX_DEBUG"):
             print(f"  [ZAI] Request: model={model}, tools={len(tools) if tools else 0}")
 
         start_time = time.time()
@@ -709,7 +709,7 @@ class ZaiBackend(OllamaBackend):
                         f"falling back to free model '{fallback}'\033[0m",
                         file=sys.stderr,
                     )
-                    if os.environ.get("AGENTNOVA_DEBUG"):
+                    if os.environ.get("AGENTKTHX_DEBUG"):
                         print(f"  [ZAI] Insufficient credits for '{model}', falling back to '{fallback}'")
                     body_fallback = {**body, "model": fallback}
                     try:
@@ -735,7 +735,7 @@ class ZaiBackend(OllamaBackend):
                     f"retrying without tool definitions\033[0m",
                     file=sys.stderr,
                 )
-                if os.environ.get("AGENTNOVA_DEBUG"):
+                if os.environ.get("AGENTKTHX_DEBUG"):
                     print(f"  [ZAI] Model doesn't support tools, falling back to ReAct mode")
                 body_fallback = {k: v for k, v in body.items() if k != "tools"}
                 try:
@@ -794,7 +794,7 @@ class ZaiBackend(OllamaBackend):
                 "arguments": args,
             })
 
-        if os.environ.get("AGENTNOVA_DEBUG"):
+        if os.environ.get("AGENTKTHX_DEBUG"):
             print(f"  [ZAI] Content: {content[:1024] if content else '(empty)'}")
             print(f"  [ZAI] Tool calls: {parsed_tool_calls}")
             if reasoning_content:
@@ -842,7 +842,7 @@ class ZaiBackend(OllamaBackend):
 
         # Check API key before making a test call
         if not self._api_key:
-            if os.environ.get("AGENTNOVA_DEBUG"):
+            if os.environ.get("AGENTKTHX_DEBUG"):
                 print(f"  [ZAI] No API key configured — cannot test tool support")
             return ToolSupportLevel.UNTESTED
 
@@ -901,20 +901,20 @@ class ZaiBackend(OllamaBackend):
 
             # Native tool calls in response → NATIVE support
             if tool_calls:
-                if os.environ.get("AGENTNOVA_DEBUG"):
+                if os.environ.get("AGENTKTHX_DEBUG"):
                     print(f"  [ZAI] Tool support: NATIVE (tool_calls={len(tool_calls)})")
                 cache_tool_support(model, ToolSupportLevel.NATIVE, family=family or "glm", api_mode=api_mode)
                 return ToolSupportLevel.NATIVE
 
             # Check for ReAct-style text patterns
             if content and any(kw in content.lower() for kw in ["action:", "action input:", "final answer:"]):
-                if os.environ.get("AGENTNOVA_DEBUG"):
+                if os.environ.get("AGENTKTHX_DEBUG"):
                     print(f"  [ZAI] Tool support: REACT (text-based tool pattern)")
                 cache_tool_support(model, ToolSupportLevel.REACT, family=family or "glm", api_mode=api_mode)
                 return ToolSupportLevel.REACT
 
             # API accepted tools but model didn't use them — REACT-capable
-            if os.environ.get("AGENTNOVA_DEBUG"):
+            if os.environ.get("AGENTKTHX_DEBUG"):
                 print(f"  [ZAI] Tool support: REACT (tools accepted, no tool calls)")
             cache_tool_support(model, ToolSupportLevel.REACT, family=family or "glm", api_mode=api_mode)
             return ToolSupportLevel.REACT
@@ -924,20 +924,20 @@ class ZaiBackend(OllamaBackend):
             error_msg = error_body.lower()
 
             if "does not support" in error_msg or "invalid" in error_msg:
-                if os.environ.get("AGENTNOVA_DEBUG"):
+                if os.environ.get("AGENTKTHX_DEBUG"):
                     print(f"  [ZAI] Tool support: REACT (server rejected tools param)")
                 cache_tool_support(model, ToolSupportLevel.REACT, family=family or "glm",
                                    error=str(e), api_mode=api_mode)
                 return ToolSupportLevel.REACT
 
-            if os.environ.get("AGENTNOVA_DEBUG"):
+            if os.environ.get("AGENTKTHX_DEBUG"):
                 print(f"  [ZAI] Tool support: REACT (HTTP {e.code})")
             cache_tool_support(model, ToolSupportLevel.REACT, family=family or "glm",
                                error=str(e), api_mode=api_mode)
             return ToolSupportLevel.REACT
 
         except Exception as e:
-            if os.environ.get("AGENTNOVA_DEBUG"):
+            if os.environ.get("AGENTKTHX_DEBUG"):
                 print(f"  [ZAI] Tool support test failed: {e}")
             cache_tool_support(model, ToolSupportLevel.REACT, family=family or "glm",
                                error=str(e), api_mode=api_mode)

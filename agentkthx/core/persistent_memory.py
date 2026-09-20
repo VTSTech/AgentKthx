@@ -24,7 +24,7 @@ from typing import Optional
 from .memory import Memory, MemoryConfig, Message
 
 
-_DEFAULT_DB_DIR = os.path.join(os.path.expanduser("~"), ".agentnova")
+_DEFAULT_DB_DIR = os.path.join(os.path.expanduser("~"), ".agentkthx")
 _DEFAULT_DB_NAME = "memory.db"
 
 
@@ -116,7 +116,7 @@ class PersistentMemory(Memory):
             Call load() after init to restore messages from DB.
         db_path : str, optional
             Path to the SQLite database file. Defaults to
-            ~/.agentnova/memory.db.
+            ~/.agentkthx/memory.db.
         config : MemoryConfig, optional
             In-memory sliding window config (same as Memory).
         auto_save : bool

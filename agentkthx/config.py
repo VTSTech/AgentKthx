@@ -52,26 +52,26 @@ if _llama_server_env:
 # with defaults defined in each plugin's plugin.json manifest.
 # Kept here for backward compatibility — plugin code imports these.
 
-# BitNet plugin (agentnova/plugins/bitnet/)
+# BitNet plugin (agentkthx/plugins/bitnet/)
 BITNET_BASE_URL = os.environ.get("BITNET_TUNNEL") or os.environ.get("BITNET_BASE_URL", "http://localhost:8765")
 
-# ZAI plugin (agentnova/plugins/zai/)
+# ZAI plugin (agentkthx/plugins/zai/)
 ZAI_BASE_URL = os.environ.get("ZAI_BASE_URL", "https://api.z.ai")
 ZAI_API_KEY = os.environ.get("ZAI_API_KEY", "")
 ZAI_FREE_ONLY = os.environ.get("ZAI_FREE_ONLY", "").lower() in ("1", "true", "yes")
 ZAI_FREE_FALLBACK_MODEL = os.environ.get("ZAI_FREE_FALLBACK_MODEL", "glm-4.5-flash")
 
-# ACP plugin (agentnova/plugins/acp/)
+# ACP plugin (agentkthx/plugins/acp/)
 ACP_BASE_URL = os.environ.get("ACP_BASE_URL", "http://localhost:8766")
 ACP_USER = os.environ.get("ACP_USER", "admin")
 ACP_PASS = os.environ.get("ACP_PASS", "secret")
 
-# TurboQuant plugin (agentnova/plugins/turboquant/)
+# TurboQuant plugin (agentkthx/plugins/turboquant/)
 TURBOQUANT_SERVER_PATH = os.environ.get("TURBOQUANT_SERVER_PATH", "llama-server")
 TURBOQUANT_PORT = int(os.environ.get("TURBOQUANT_PORT", "8764"))
 TURBOQUANT_CTX = int(os.environ.get("TURBOQUANT_CTX", "8192"))
 
-# OpenRouter plugin (agentnova/plugins/openrouter/)
+# OpenRouter plugin (agentkthx/plugins/openrouter/)
 OPENROUTER_BASE_URL = os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 OPENROUTER_DEFAULT_MODEL = os.environ.get("OPENROUTER_DEFAULT_MODEL", "anthropic/claude-3.5-sonnet")
@@ -81,10 +81,10 @@ OPENROUTER_FREE_ONLY = os.environ.get("OPENROUTER_FREE_ONLY", "").lower() in ("1
 # ═══════════════════════════════════════════════════════════════════════════════
 # BACKEND SELECTION
 # ═══════════════════════════════════════════════════════════════════════════════
-# Set AGENTNOVA_BACKEND to select a backend.
+# Set AGENTKTHX_BACKEND to select a backend.
 # Accept any value — plugin backends are loaded lazily via PluginManager.
 # Default: "ollama"
-AGENTNOVA_BACKEND = os.environ.get("AGENTNOVA_BACKEND", "ollama").lower()
+AGENTKTHX_BACKEND = os.environ.get("AGENTKTHX_BACKEND", "ollama").lower()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -95,28 +95,28 @@ AGENTNOVA_BACKEND = os.environ.get("AGENTNOVA_BACKEND", "ollama").lower()
 # Ollama default: qwen2.5-coder:0.5b-instruct-q4_k_m
 # ZAI default: glm-5.1
 # OpenRouter default: anthropic/claude-3.5-sonnet
-if AGENTNOVA_BACKEND == "bitnet":
-    DEFAULT_MODEL = os.environ.get("AGENTNOVA_MODEL", "bitnet-b1.58-2b-4t")
-elif AGENTNOVA_BACKEND in ("llama-server", "llama_server"):
-    DEFAULT_MODEL = os.environ.get("AGENTNOVA_MODEL", "default")
-elif AGENTNOVA_BACKEND == "zai":
-    DEFAULT_MODEL = os.environ.get("AGENTNOVA_MODEL", "glm-5.1")
-elif AGENTNOVA_BACKEND == "openrouter":
-    DEFAULT_MODEL = os.environ.get("AGENTNOVA_MODEL", "anthropic/claude-3.5-sonnet")
+if AGENTKTHX_BACKEND == "bitnet":
+    DEFAULT_MODEL = os.environ.get("AGENTKTHX_MODEL", "bitnet-b1.58-2b-4t")
+elif AGENTKTHX_BACKEND in ("llama-server", "llama_server"):
+    DEFAULT_MODEL = os.environ.get("AGENTKTHX_MODEL", "default")
+elif AGENTKTHX_BACKEND == "zai":
+    DEFAULT_MODEL = os.environ.get("AGENTKTHX_MODEL", "glm-5.1")
+elif AGENTKTHX_BACKEND == "openrouter":
+    DEFAULT_MODEL = os.environ.get("AGENTKTHX_MODEL", "anthropic/claude-3.5-sonnet")
 else:
-    DEFAULT_MODEL = os.environ.get("AGENTNOVA_MODEL", "qwen2.5:0.5b")
+    DEFAULT_MODEL = os.environ.get("AGENTKTHX_MODEL", "qwen2.5:0.5b")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # AGENT SETTINGS
 # ═══════════════════════════════════════════════════════════════════════════════
-MAX_STEPS = int(os.environ.get("AGENTNOVA_MAX_STEPS", "25"))
-DEBUG = os.environ.get("AGENTNOVA_DEBUG", "").lower() in ("1", "true", "yes")
-VERBOSE = os.environ.get("AGENTNOVA_VERBOSE", "").lower() in ("1", "true", "yes")
+MAX_STEPS = int(os.environ.get("AGENTKTHX_MAX_STEPS", "25"))
+DEBUG = os.environ.get("AGENTKTHX_DEBUG", "").lower() in ("1", "true", "yes")
+VERBOSE = os.environ.get("AGENTKTHX_VERBOSE", "").lower() in ("1", "true", "yes")
 
 # Context window size (Ollama default is 2048)
-# Set OLLAMA_NUM_CTX or AGENTNOVA_NUM_CTX to override
-NUM_CTX = int(os.environ.get("OLLAMA_NUM_CTX") or os.environ.get("AGENTNOVA_NUM_CTX") or "0")
+# Set OLLAMA_NUM_CTX or AGENTKTHX_NUM_CTX to override
+NUM_CTX = int(os.environ.get("OLLAMA_NUM_CTX") or os.environ.get("AGENTKTHX_NUM_CTX") or "0")
 # 0 means use Ollama's default (2048)
 
 
@@ -124,10 +124,10 @@ NUM_CTX = int(os.environ.get("OLLAMA_NUM_CTX") or os.environ.get("AGENTNOVA_NUM_
 # ERROR RETRY SETTINGS
 # ═══════════════════════════════════════════════════════════════════════════════
 # Whether to automatically retry failed tool calls (default: enabled)
-RETRY_ON_ERROR = os.environ.get("AGENTNOVA_RETRY_ON_ERROR", "true").lower() in ("1", "true", "yes")
+RETRY_ON_ERROR = os.environ.get("AGENTKTHX_RETRY_ON_ERROR", "true").lower() in ("1", "true", "yes")
 
 # Maximum retries per tool call failure (default: 2)
-MAX_TOOL_RETRIES = int(os.environ.get("AGENTNOVA_MAX_TOOL_RETRIES") or "2")
+MAX_TOOL_RETRIES = int(os.environ.get("AGENTKTHX_MAX_TOOL_RETRIES") or "2")
 
 
 @dataclass
@@ -147,7 +147,7 @@ class Config:
     acp_pass: str = field(default_factory=lambda: ACP_PASS)
 
     # Backend selection
-    backend: str = field(default_factory=lambda: AGENTNOVA_BACKEND)
+    backend: str = field(default_factory=lambda: AGENTKTHX_BACKEND)
 
     # Default model
     default_model: str = field(default_factory=lambda: DEFAULT_MODEL)
@@ -210,7 +210,7 @@ class Config:
 
 def _get_num_ctx() -> int | None:
     """Get num_ctx from environment (reads fresh each time)."""
-    val = os.environ.get("OLLAMA_NUM_CTX") or os.environ.get("AGENTNOVA_NUM_CTX") or "0"
+    val = os.environ.get("OLLAMA_NUM_CTX") or os.environ.get("AGENTKTHX_NUM_CTX") or "0"
     num = int(val) if val else 0
     return num if num > 0 else None
 

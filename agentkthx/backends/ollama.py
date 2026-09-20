@@ -50,7 +50,7 @@ class OllamaBackend(BaseBackend):
         super().__init__(config=config, base_url=resolved_url, api_mode=api_mode)
 
         # Set environment variable so other components know the API mode
-        os.environ["AGENTNOVA_API_MODE"] = api_mode.value
+        os.environ["AGENTKTHX_API_MODE"] = api_mode.value
 
     @property
     def backend_type(self) -> BackendType:
@@ -135,7 +135,7 @@ class OllamaBackend(BaseBackend):
         """
         # Dispatch based on api_mode
         if self._api_mode == ApiMode.OPENAI:
-            if os.environ.get("AGENTNOVA_DEBUG"):
+            if os.environ.get("AGENTKTHX_DEBUG"):
                 print(f"  [Ollama] Dispatching to OpenAI-compatible API (mode={self._api_mode.value})")
             return self.generate_completions(
                 model=model,
@@ -204,7 +204,7 @@ class OllamaBackend(BaseBackend):
                 body["options"][key] = value
 
         # Debug output for request
-        if os.environ.get("AGENTNOVA_DEBUG"):
+        if os.environ.get("AGENTKTHX_DEBUG"):
             print(f"  [Ollama] Request: tools={len(tools) if tools else 0}, think={think}")
             # Show messages being sent (respect truncation setting)
             truncation_disabled = kwargs.get("truncation") == "disabled"
@@ -248,7 +248,7 @@ class OllamaBackend(BaseBackend):
             
             # Check if model doesn't support tools - fallback to no tools (ReAct mode)
             if "does not support tools" in error_msg and tools:
-                if os.environ.get("AGENTNOVA_DEBUG"):
+                if os.environ.get("AGENTKTHX_DEBUG"):
                     print(f"  [Ollama] Model doesn't support tools, falling back to ReAct mode")
                 # Retry without tools - let ReAct parsing handle tool calls
                 body_fallback = {k: v for k, v in body.items() if k != "tools"}
@@ -286,7 +286,7 @@ class OllamaBackend(BaseBackend):
         )
 
         # Debug output
-        if os.environ.get("AGENTNOVA_DEBUG"):
+        if os.environ.get("AGENTKTHX_DEBUG"):
             print(f"  [Ollama] Raw result keys: {list(result.keys())}")
             print(f"  [Ollama] Message keys: {list(message.keys())}")
             if kwargs.get("truncation") == "disabled":
@@ -454,7 +454,7 @@ class OllamaBackend(BaseBackend):
                     break
             else:
                 # No match — keep the model's output but flag it
-                if os.environ.get("AGENTNOVA_DEBUG"):
+                if os.environ.get("AGENTKTHX_DEBUG"):
                     print(f"  [JEV] Decision '{decision}' not in choices {choices}")
 
         return {
@@ -545,7 +545,7 @@ class OllamaBackend(BaseBackend):
             "total_tokens": usage_raw.get("total_tokens", 0),
         }
 
-        if os.environ.get("AGENTNOVA_DEBUG"):
+        if os.environ.get("AGENTKTHX_DEBUG"):
             print(f"  [JEV] parse_ok={parsed['_parse_ok']}")
             print(f"  [JEV] decision={parsed['decision']!r} p={parsed['probability']}")
             print(f"  [JEV] alternatives={parsed['alternatives']}")
@@ -590,7 +590,7 @@ class OllamaBackend(BaseBackend):
         if self._api_mode != ApiMode.JEV:
             return None
 
-        if os.environ.get("AGENTNOVA_DEBUG"):
+        if os.environ.get("AGENTKTHX_DEBUG"):
             print(f"  [{self.__class__.__name__}] Dispatching to JEV decision mode")
 
         # Treat the last user message as the "state".
@@ -769,7 +769,7 @@ class OllamaBackend(BaseBackend):
             body["reasoning_effort"] = reasoning_effort
 
         # Debug output for request
-        if os.environ.get("AGENTNOVA_DEBUG"):
+        if os.environ.get("AGENTKTHX_DEBUG"):
             print(f"  [OpenAI-Comp] Request: tools={len(tools) if tools else 0}, think={think}")
 
         # Make request
@@ -792,7 +792,7 @@ class OllamaBackend(BaseBackend):
             
             # Check if model doesn't support tools - fallback to no tools (ReAct mode)
             if "does not support tools" in error_msg and tools:
-                if os.environ.get("AGENTNOVA_DEBUG"):
+                if os.environ.get("AGENTKTHX_DEBUG"):
                     print(f"  [OpenAI-Comp] Model doesn't support tools, falling back to ReAct mode")
                 # Retry without tools - let ReAct parsing handle tool calls
                 body_fallback = {k: v for k, v in body.items() if k != "tools"}
@@ -890,7 +890,7 @@ class OllamaBackend(BaseBackend):
         reasoning_content = first_choice.get("reasoning_content", "") or ""
 
         # Debug output
-        if os.environ.get("AGENTNOVA_DEBUG"):
+        if os.environ.get("AGENTKTHX_DEBUG"):
             print(f"  [OpenAI-Comp] Choices: {num_choices}")
             if kwargs.get("truncation") == "disabled":
                 print(f"  [OpenAI-Comp] Content[0]: {content if content else '(empty)'}")
@@ -1022,7 +1022,7 @@ class OllamaBackend(BaseBackend):
         if reasoning_effort is not None:
             body["reasoning_effort"] = reasoning_effort
 
-        if os.environ.get("AGENTNOVA_DEBUG"):
+        if os.environ.get("AGENTKTHX_DEBUG"):
             print(f"  [OpenAI-Comp-Stream] Request: tools={len(tools) if tools else 0}, think={think}")
 
         try:

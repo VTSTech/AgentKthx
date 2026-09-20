@@ -18,11 +18,11 @@ Usage:
   python examples/02_tool_test.py                    # Both phases
   python examples/02_tool_test.py --tools-only       # Phase 1 only
   python examples/02_tool_test.py --model qwen2.5:0.5b --debug
-  agentnova test 02
+  agentkthx test 02
 
 Environment Variables:
   OLLAMA_BASE_URL     - Ollama server URL
-  AGENTNOVA_MODEL     - Default model
+  AGENTKTHX_MODEL     - Default model
 
 Written by VTSTech — https://www.vts-tech.org
 """
@@ -722,7 +722,7 @@ def run_phase1() -> tuple[int, int]:
     # Show backend info (Phase 1 includes HTTP tests that hit the network)
     try:
         config = get_config()
-        backend_name = os.environ.get('AGENTNOVA_BACKEND', config.backend)
+        backend_name = os.environ.get('AGENTKTHX_BACKEND', config.backend)
         print(f"   Backend: {backend_name}")
     except Exception:
         pass
