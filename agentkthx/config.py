@@ -110,7 +110,7 @@ else:
 # ═══════════════════════════════════════════════════════════════════════════════
 # AGENT SETTINGS
 # ═══════════════════════════════════════════════════════════════════════════════
-MAX_STEPS = int(os.environ.get("AGENTNOVA_MAX_STEPS", "10"))
+MAX_STEPS = int(os.environ.get("AGENTNOVA_MAX_STEPS", "25"))
 DEBUG = os.environ.get("AGENTNOVA_DEBUG", "").lower() in ("1", "true", "yes")
 VERBOSE = os.environ.get("AGENTNOVA_VERBOSE", "").lower() in ("1", "true", "yes")
 

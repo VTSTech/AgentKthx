@@ -383,32 +383,30 @@ def _init_acp(args: argparse.Namespace, config, agent_name: str = "AgentKthx") -
         return None, False
 
 
-def _load_skills_prompt(args: argparse.Namespace) -> str | None:
+def _load_skills_prompt(args: argparse.Namespace) -> tuple[str | None, list[str]]:
     """
-    Load skills specified via --skills flag and return the system prompt addition.
-    
-    Uses lazy import to avoid circular dependencies.
-    
-    Args:
-        args: Parsed CLI arguments (must have 'skills' attribute)
-        
+    Load skills specified via --skills flag.
+
     Returns:
-        System prompt addition string, or None if no skills specified
+        Tuple of (system_prompt_addition, loaded_skill_names).
+        Prompt is None if no skills specified or all failed to load.
+        loaded_skill_names is the list of skill names that loaded OK
+        (used by /skills and /status slash commands in chat mode).
     """
     skills_str = getattr(args, 'skills', None)
     if not skills_str:
-        return None
-    
+        return (None, [])
+
     try:
         from .skills import SkillLoader, SkillRegistry
     except ImportError:
         print(f"{yellow('Warning:')} Skills module not available, skipping --skills")
-        return None
-    
+        return (None, [])
+
     loader = SkillLoader()
     registry = SkillRegistry()
     skill_names = [s.strip() for s in skills_str.split(",") if s.strip()]
-    
+
     loaded = []
     failed = []
     for name in skill_names:
@@ -422,13 +420,13 @@ def _load_skills_prompt(args: argparse.Namespace) -> str | None:
         except Exception as e:
             failed.append(name)
             print(f"{yellow('Warning:')} Failed to load skill '{name}': {e}")
-    
+
     if loaded:
         prompt = registry.to_system_prompt_addition()
         if prompt:
-            return prompt
-    
-    return None
+            return (prompt, loaded)
+
+    return (None, loaded)
 
 
 def _build_agent(args: argparse.Namespace, config) -> Agent:
@@ -502,7 +500,7 @@ def _build_agent(args: argparse.Namespace, config) -> Agent:
         response_format = None
 
     # Load skills if requested
-    skills_prompt = _load_skills_prompt(args)
+    skills_prompt, loaded_skills = _load_skills_prompt(args)
 
     # Get catalog defaults for cloud providers
     catalog_defaults = _get_catalog_defaults(backend, model)
@@ -538,7 +536,7 @@ def _build_agent(args: argparse.Namespace, config) -> Agent:
     # --think flag controls DISPLAY of reasoning_content in CLI output
     show_reasoning = getattr(args, "show_reasoning", False)
 
-    return Agent(
+    agent = Agent(
         model=model,
         tools=tools,
         backend=backend,
@@ -557,13 +555,17 @@ def _build_agent(args: argparse.Namespace, config) -> Agent:
         response_format=response_format,
         session_id=getattr(args, "session", None),
         truncation=truncation,
-        max_steps=getattr(args, "max_steps", 10),
+        max_steps=getattr(args, "max_steps", 25),
         # Thinking controls
         thinking_level=thinking_level,
         think=think_param,
         reasoning_effort=reasoning_effort,
         show_reasoning=show_reasoning,
     )
+    # Stash loaded skill names on the agent so /skills and /status can show them
+    # (Agent itself doesn't track skill names — only the prompt gets injected)
+    agent._loaded_skills = loaded_skills
+    return agent
 
 
 def _get_catalog_defaults(backend, model: str) -> dict:
@@ -1127,7 +1129,8 @@ def cmd_chat(args: argparse.Namespace) -> int:
             print(f"  {cyan('/help')}       Show this help message")
             print(f"  {cyan('/model')}      Show or change the model (e.g. /model glm-4.7-flash)")
             print(f"  {cyan('/security')}   Show or set security mode (max|off)")
-            print(f"  {cyan('/status')}     Show model, backend, tools, and memory info")
+            print(f"  {cyan('/skills')}     Show loaded skills (and available skills if none loaded)")
+            print(f"  {cyan('/status')}     Show model, backend, tools, skills, and memory info")
             print(f"  {cyan('/system')}     Print the current system prompt")
             print(f"  {cyan('/tools')}      List available tools with descriptions")
             print(f"  {cyan('/quit')}       Exit AgentKthx")
@@ -1177,6 +1180,42 @@ def cmd_chat(args: argparse.Namespace) -> int:
                     print(f"  {cyan(t.name)}  {desc}")
             continue
 
+        if user_input == "/skills":
+            loaded = getattr(agent, '_loaded_skills', [])
+            if not loaded:
+                print(yellow("No skills loaded."))
+                print(dim(f"  Use --skills <name1,name2> at startup, e.g."))
+                print(dim(f"  agentkthx chat --skills codebase-audit --tools shell,read_file,write_file"))
+                # Also show available skills (read-only, doesn't load them)
+                try:
+                    from .skills import SkillLoader
+                    loader = SkillLoader()
+                    available = loader.list_skills()
+                    if available:
+                        print()
+                        print(dim(f"  Available skills:"))
+                        for name in available:
+                            print(f"    {magenta(name)}")
+                except Exception:
+                    pass
+            else:
+                print(f"{bold('Loaded skills:')}")
+                try:
+                    from .skills import SkillLoader
+                    loader = SkillLoader()
+                    for name in loaded:
+                        try:
+                            skill = loader.load(name)
+                            desc = skill.description[:60] + "..." if len(skill.description) > 60 else skill.description
+                            print(f"  {magenta(name):<20} {desc}")
+                        except Exception as e:
+                            print(f"  {magenta(name):<20} {red(f'Error: {e}')}")
+                except Exception:
+                    # Fallback if skills module unavailable — just show names
+                    for name in loaded:
+                        print(f"  {magenta(name)}")
+            continue
+
         if user_input == "/model":
             print(f"Current model: {cyan(agent.model)}")
             continue
@@ -1212,7 +1251,14 @@ def cmd_chat(args: argparse.Namespace) -> int:
             print(f"Tools: {yellow(str(agent.tools.names()))}")
             print(f"Tool choice: {yellow(agent.tool_choice.type.value)}")
             print(f"Security: {green('max') if get_security_mode() == 'max' else red('off')}")
+            print(f"Max steps: {yellow(str(agent.max_steps))}")
             print(f"Memory turns: {yellow(str(len(agent.memory)))}")
+            # Show loaded skills (R06.2+)
+            loaded_skills = getattr(agent, '_loaded_skills', [])
+            if loaded_skills:
+                print(f"Skills: {magenta(', '.join(loaded_skills))}")
+            else:
+                print(f"Skills: {dim('(none — use --skills <name> to load)')}")
             print(f"Debug: {green('ON') if agent.debug else red('OFF')}")
             if agent.soul:
                 print(f"Soul: {cyan(agent.soul.display_name)} v{agent.soul.version}")

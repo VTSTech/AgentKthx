@@ -107,7 +107,7 @@ class Agent:
         model: str,
         tools: ToolRegistry | list[str] | list[Tool] | None = None,
         backend: BaseBackend | str | None = None,
-        max_steps: int = 10,
+        max_steps: int = 25,
         memory_config: MemoryConfig | None = None,
         debug: bool = False,
         system_prompt: str | None = None,
@@ -161,7 +161,7 @@ class Agent:
         """
         # Ensure max_steps is never None (defensive fix)
         if max_steps is None:
-            max_steps = 10  # Default value
+            max_steps = 25  # Default value
         
         self.model = model
         self.max_steps = max_steps

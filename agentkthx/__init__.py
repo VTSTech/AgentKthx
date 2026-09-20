@@ -29,7 +29,7 @@ Example Usage:
     agent = Agent(model="qwen2.5:0.5b", soul="/path/to/soul/package")
 """
 
-__version__ = "0.6.2"
+__version__ = "0.6.3"
 __author__ = "VTSTech"
 __status__ = "Alpha"
 

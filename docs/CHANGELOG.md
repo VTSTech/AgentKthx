@@ -5,6 +5,40 @@ All notable changes to AgentKthx will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [R06.3] - 2026-09-20
+
+### 🚀 **New Features**
+- **`/skills` slash command in chat mode**: Lists loaded skills with descriptions. If no skills are loaded, also lists available skills (read-only) so you can see what to pass to `--skills`. Example output:
+  ```
+  Loaded skills:
+    codebase-audit       Perform a structured audit of a codebase...
+  ```
+
+- **Skills info in `/status`**: The `/status` slash command now shows loaded skill names (or `(none — use --skills <name> to load)` if no skills loaded).
+
+- **Max steps info in `/status`**: `/status` now also prints `Max steps: 25` so you can verify the agent loop budget at a glance.
+
+### 🔧 **Changes**
+- **Default `--max-steps` increased from 10 → 25**: The previous default of 10 was too low for non-trivial agent workflows. A codebase audit (which the user tried) needed ~9 steps just for file discovery + reading, leaving no room for the actual audit + final answer. 25 is a better default — enough for ~5-10 tool calls plus reasoning, without being so high that infinite loops burn tokens. Users can still override via `--max-steps N` or `AGENTNOVA_MAX_STEPS=N` env var. Updated in:
+  - `agentkthx/agent.py` (`Agent.__init__` default)
+  - `agentkthx/config.py` (`MAX_STEPS` env var default)
+  - `agentkthx/cli.py` (`_build_agent` fallback)
+  - `agentkthx/shared_args.py` (help text)
+
+### 🔧 **Internal Refactor**
+- **`_load_skills_prompt()` now returns a tuple**: Previously returned `str | None` (just the system prompt addition). Now returns `tuple[str | None, list[str]]` — the prompt AND the list of successfully-loaded skill names. Callers (just `_build_agent`) unpack both and stash the skill names on `agent._loaded_skills` so `/skills` and `/status` can display them.
+
+### ✅ **Verified**
+- 245/245 tests pass after changes.
+- `_load_skills_prompt(args)` returns `(['codebase-audit'], 9491-char prompt)` when given `--skills codebase-audit`.
+- `Agent._loaded_skills` attribute is settable and accessible.
+- Default `max_steps` is now 25 across all code paths.
+
+### 🔧 **Migration from R06.2**
+```bash
+pip install --upgrade agentkthx  # gets you to 0.6.3
+```
+
 ## [R06.2] - 2026-09-20
 
 ### 🐛 **Bug Fixes**
