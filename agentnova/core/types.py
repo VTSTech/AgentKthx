@@ -77,6 +77,15 @@ class ApiMode(Enum):
     
     - OPENRE: OpenResponses API (open spec for agentic workflows)
     - OPENAI: OpenAI Chat-Completions API
+    - JEV:    System-One decision mode (Jev-compatible shape)
+              Uses OpenAI Chat-Completions wire format under the hood,
+              but wraps the call with a constrained decision prompt
+              and parses JSON output into a {decision, probability,
+              alternatives} envelope. Works with any chat-capable
+              backend (Ollama, ZAI, OpenRouter, llama-server).
+              Native TypeSafe Jev (api.typesafe.ai/v1/systemone) is
+              NOT used — this mode emulates the Jev API shape using
+              free LLMs you already have access to.
     
     Ollama supports both endpoints:
     - /api/chat - OpenResponses format (default)
@@ -84,6 +93,7 @@ class ApiMode(Enum):
     """
     OPENRE = "openre"      # OpenResponses API (/api/chat)
     OPENAI = "openai"      # OpenAI Chat-Completions API (/v1/chat/completions)
+    JEV = "jev"            # System-One decision shape, powered by any LLM
 
 
 # Type aliases for clarity

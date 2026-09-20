@@ -181,10 +181,11 @@ def add_agent_args(
     )
     parser.add_argument(
         "--api",
-        choices=["openre", "openai"],
+        choices=["openre", "openai", "jev"],
         default="openai",
         dest="api_mode",
-        help="API mode: 'openre' (OpenResponses) or 'openai' (Chat-Completions)",
+        help="API mode: 'openre' (OpenResponses), 'openai' (Chat-Completions), "
+             "or 'jev' (System-One decision shape via any LLM)",
     )
     parser.add_argument("--debug", action="store_true", help="Enable debug output")
     parser.add_argument(

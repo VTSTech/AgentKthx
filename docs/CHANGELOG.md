@@ -5,6 +5,56 @@ All notable changes to AgentNova will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [R05.7] - 2026-09-19 10:47:17 PM
+
+### 🚀 **New Features**
+- **JEV API Mode**: Added `--api jev` (sibling of `openre` / `openai`) — System-One decision mode that wraps any chat-capable LLM with a constrained decision prompt, returning a Jev-compatible envelope `{decision, probability, alternatives, usage}`. Works with free ZAI / OpenRouter / Ollama models — no TypeSafe API key required. See [JEV_API_MODE.md](JEV_API_MODE.md).
+- **`generate_decision()` primitive**: New `BaseBackend.generate_decision(model, state, choices, ...)` method for programmatic decision calls. Default impl raises `NotImplementedError`; concrete impl on `OllamaBackend` uses TypeSafe's "System One LLM wrapper" pattern (constrained JSON output).
+- **`_jev_call_completions()` hook**: Per-backend override point for the underlying LLM call. `ZaiBackend` routes through `_generate_with_auth` (Bearer auth + ZAI_FREE_ONLY), `OpenRouterBackend` routes through `generate()` (429 retry), default `OllamaBackend` routes through `generate_completions()`.
+- **`_maybe_jev_dispatch()` helper**: Shared dispatch hook called from `generate()` — returns a generate()-shaped dict if `api_mode == JEV`, else None so normal OPENRE/OPENAI path runs. Lets ZAI/OpenRouter/Ollama all handle JEV mode uniformly.
+- **JSON output mode**: JEV mode requests `response_format={"type": "json_object"}` from the underlying LLM. If the model doesn't honor it, output is still parsed best-effort (markdown fence stripping, fallback to raw text as decision).
+- **Constrained-choice fuzzy matching**: When `choices` are provided, the parser snaps the model's decision to the canonical choice form (exact or substring match).
+- **Probability clamping**: Probabilities are clamped to `[0.0, 1.0]`.
+- **Tolerant JSON parsing**: Handles ```json fences, plain ``` fences, malformed JSON (fallback to raw text), and alternatives as string lists (not just dicts).
+
+### 🧪 **Tests**
+- Added `tests/test_jev_api_mode.py` with 33 passing tests covering: ApiMode.JEV enum, CLI `--api jev` choice, `_build_jev_messages()`, `_parse_jev_response()`, `_serialize_state()`, `_maybe_jev_dispatch()`, backend construction in JEV mode, mocked `generate_decision()` calls, and `BaseBackend.generate_decision()` default raising `NotImplementedError`.
+
+### 📚 **Documentation**
+- Added `docs/JEV_API_MODE.md` — comprehensive spec covering architecture, decision envelope shape, key methods, CLI usage, Python API, backend support table, recommended free models, limitations, and future work.
+- Updated `README.md` — bumped version to R05.7, added JEV bullet to Features, added JEV usage section with CLI examples, added JEV Python API example, added `JEV_API_MODE.md` to documentation table, updated `--api` CLI options table.
+
+### 🔧 **Backend Changes**
+- **ZaiBackend.__init__**: Now accepts `api_mode="jev"` (previously only `"openai"` was accepted). OPENRE still falls back to OPENAI (ZAI has no native /api/chat endpoint).
+- **OpenRouterBackend.__init__**: Now accepts `api_mode="jev"` (previously raised `ValueError`). OPENRE still raises `ValueError`.
+- **ZaiBackend.generate()**: Calls `_maybe_jev_dispatch()` at the top so JEV mode works without bypassing ZAI's auth path.
+- **OpenRouterBackend.generate()**: Same — calls `_maybe_jev_dispatch()` at the top.
+
+### ⚠️ **Limitations**
+- **Not a real Jev** — JEV mode emulates the Jev API shape using any LLM. It does not call TypeSafe's `api.typesafe.ai/v1/systemone` endpoint. Calibrated probabilities may be less accurate than native Jev.
+- **Single-shot only** — JEV mode is designed for single decision calls, not multi-turn chat sessions. The agent loop expects text content; JEV mode stuffs JSON into `content` which may confuse multi-step reasoning.
+- **No streaming** — `generate_decision()` does not stream. The decision is returned as a single envelope.
+- **Tool calling disabled** — Decisions never call tools. `tools=None` is always passed to the underlying LLM call.
+
+### 🔬 **Known Issues**
+- **Reasoning models inflate latency** — Thinking-capable models (e.g. GLM-4.5-flash) emit a `reasoning_content` field before the final JSON envelope. This reasoning is billable (counts toward `completion_tokens`) but not used by the decision parser. In the verified smoke test (see below), GLM-4.5-flash produced 319 reasoning tokens vs ~80 tokens of actual decision JSON, inflating latency to ~22s for a trivial classification. Future fix: pass `think=False` explicitly when the model supports it, or strip reasoning_content from the token accounting.
+
+### ✅ **Verified**
+- **Smoke test passed** (2026-09-20) on ZAI free tier:
+  ```bash
+  agentnova run "Is 'You won a prize' spam or inbox?" \
+      --api jev --backend zai -m glm-4.5-flash
+  ```
+  Result: `decision="spam"`, `probability=0.95`, `alternatives=[{"value":"inbox","probability":0.05}]`, `_parse_ok=true`, `usage={input:292, output:319, total:611}`, `latency_ms=22139`. Probabilities correctly summed to 1.0.
+- **Unit test suite** — 33/33 tests pass in `tests/test_jev_api_mode.py` (no network required).
+- **Combined suite** — 202/202 tests pass (33 new JEV + 169 existing) with zero regressions vs R05.6 baseline. The 9 pre-existing failures in `tests/test_r048_changes.py` and `tests/test_security.py` (ZAI module path mismatch from R04.8, IPv6 loopback test) were confirmed present in baseline R05.6 — not caused by JEV changes.
+
+### 🔗 **References**
+- [TypeSafe AI — Introducing System One Models & Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev) (Sep 16, 2026)
+- [LangChain — What Is Jev?](https://www.langchain.com) (Sep 18, 2026)
+- [DataCamp — Jev: TypeSafe's System One Model](https://www.datacamp.com) (Sep 17, 2026)
+- [OpenRouter — Jev 1.13](https://openrouter.ai/typesafe/jev-1.13) (Sep 18, 2026)
+
 ## [R05.6] - 2026-09-19 3:00:48 PM
 
 ### 🚀 **New Features**

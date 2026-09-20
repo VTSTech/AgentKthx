@@ -139,6 +139,87 @@ class BaseBackend(ABC):
         """
         pass
 
+    # ─────────────────────────────────────────────────────────────────────
+    # System-One Decision Mode (ApiMode.JEV)
+    # ─────────────────────────────────────────────────────────────────────
+    # generate_decision() is the System-One counterpart to generate().
+    # Instead of returning free-form text, it returns a structured
+    # decision envelope compatible with the Jev API shape:
+    #
+    #   {
+    #     "decision": str,                # chosen option (or generated answer)
+    #     "probability": float,           # 0.0-1.0 calibrated confidence
+    #     "alternatives": [               # ranked runner-ups
+    #       {"value": str, "probability": float}, ...
+    #     ],
+    #     "usage": {                      # token accounting
+    #       "input_tokens": int,
+    #       "output_tokens": int,
+    #       "total_tokens": int,
+    #     },
+    #     "latency_ms": float,
+    #     "raw": dict,                    # underlying LLM response (debug)
+    #     "_jev": True,                   # marker for downstream code
+    #   }
+    #
+    # The default implementation uses TypeSafe's "System One LLM wrapper"
+    # pattern: it wraps any chat-capable LLM with a constrained decision
+    # prompt + JSON output mode, then parses the JSON envelope.
+    #
+    # Backends that ship a native System-One model (e.g. a future Jev
+    # plugin hitting api.typesafe.ai/v1/systemone) may override this to
+    # skip the LLM wrapper and call the decision endpoint directly.
+    # ─────────────────────────────────────────────────────────────────────
+
+    def generate_decision(
+        self,
+        model: str,
+        state: str | dict,
+        choices: list[str] | None = None,
+        *,
+        question: str | None = None,
+        temperature: float = 0.1,
+        max_tokens: int = 512,
+        **kwargs,
+    ) -> dict:
+        """
+        Evaluate a state and return a typed decision + probability envelope.
+
+        This is the System-One primitive: fast, structured, calibrated.
+        Use it for routing, classification, scoring, threshold checks,
+        or any "just decide this" call site inside an agent pipeline.
+
+        Args:
+            model: Underlying LLM model name (e.g. "glm-4.5-flash").
+            state: The state to evaluate. Either a string (freeform
+                   description) or a dict (structured state — will be
+                   JSON-serialized in the prompt).
+            choices: Optional constrained choice set. When provided,
+                    the model MUST pick one of these. When omitted, the
+                    model generates a freeform decision.
+            question: Optional framing question. Defaults to "What is
+                      the best decision for this state?".
+            temperature: Low temperature (default 0.1) for calibrated
+                       decisions. Higher values give more varied
+                       alternatives.
+            max_tokens: Output budget (default 512). Decisions are
+                       short, so this can stay small.
+            **kwargs: Passed through to the underlying LLM call.
+
+        Returns:
+            Decision envelope dict (see class docstring above).
+
+        Raises:
+            NotImplementedError: If the backend has no chat-completions
+                               endpoint to wrap (e.g. a pure OPENRE
+                               backend that can't emit JSON).
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not implement generate_decision(). "
+            "ApiMode.JEV requires a backend that can emit JSON via OpenAI "
+            "Chat-Completions (ollama, zai, openrouter, llama-server)."
+        )
+
     def is_running(self) -> bool:
         """Check if the backend is running."""
         try:

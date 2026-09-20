@@ -277,11 +277,22 @@ class OpenRouterBackend(OllamaBackend):
         else:
             resolved_url = OPENROUTER_BASE_URL.rstrip("/")
 
-        # Set API mode (OpenRouter only supports OpenAI Chat-Completions)
+        # Set API mode. OpenRouter only exposes the OpenAI Chat-Completions
+        # endpoint, but JEV mode is accepted because it uses the same wire
+        # format under the hood (JEV is a wrapper that calls OpenAI
+        # chat-completions underneath).
         if isinstance(api_mode, str):
             api_mode = ApiMode(api_mode.lower())
-        if api_mode != ApiMode.OPENAI:
-            raise ValueError("OpenRouter backend only supports OpenAI Chat-Completions API mode")
+        if api_mode == ApiMode.JEV:
+            # accepted — _jev_call_completions routes through generate()
+            pass
+        elif api_mode == ApiMode.OPENAI:
+            pass
+        else:
+            raise ValueError(
+                "OpenRouter backend only supports OpenAI Chat-Completions "
+                "or JEV (System-One) API modes"
+            )
 
         # Call parent with shared state
         super().__init__(config=config, base_url=resolved_url, api_mode=api_mode)
@@ -894,6 +905,18 @@ class OpenRouterBackend(OllamaBackend):
             Dict with keys: content, tool_calls, finish_reason, usage,
             latency_ms, raw.
         """
+        # JEV dispatch — if api_mode is JEV, route through generate_decision()
+        # which wraps the underlying LLM call with a decision prompt.
+        jev_response = self._maybe_jev_dispatch(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens if max_tokens is not None else 8192,
+            **kwargs,
+        )
+        if jev_response is not None:
+            return jev_response
+
         # Use model defaults from catalog if not specified
         defaults = self._get_model_defaults(model)
         if temperature is None:
@@ -964,6 +987,55 @@ class OpenRouterBackend(OllamaBackend):
                   f"content_len={len(parsed['content'])}")
 
         return parsed
+
+    # ─────────────────────────────────────────────────────────────────────
+    # System-One Decision Mode (ApiMode.JEV)
+    # ─────────────────────────────────────────────────────────────────────
+
+    def _jev_call_completions(
+        self,
+        model: str,
+        messages: list[dict],
+        temperature: float = 0.1,
+        max_tokens: int = 512,
+        think: bool | None = None,
+        response_format: dict | None = None,
+        **kwargs,
+    ) -> dict:
+        """
+        JEV hook for OpenRouter: route the decision call through
+        OpenRouter's /chat/completions endpoint with full auth,
+        429 retry, and OPENROUTER_FREE_ONLY handling — all of which
+        live in self.generate().
+
+        ZAI / Ollama / llama-server backends override this same hook to
+        route through their own auth-injected path. The parent
+        OllamaBackend.generate_decision() handles the JEV wrapper
+        (prompt building, JSON parsing, alternatives, etc.).
+
+        The response shape returned by self.generate() already matches
+        what generate_decision() expects:
+            {content, tool_calls, usage, latency_ms, raw, finish_reason}
+        """
+        # Decisions never carry tools — pass tools=None explicitly so
+        # the ReAct fallback path in self.generate() doesn't trigger.
+        if response_format is not None:
+            kwargs["response_format"] = response_format
+
+        # OPENROUTER_FREE_ONLY is handled inside list_models() (the model
+        # cache is pre-filtered to :free models). If the user passes a
+        # paid model name, self.generate() will still attempt the call;
+        # OpenRouter will respond with a 429 or paid-tier error.
+        # We don't silently swap models here — the user picked the model.
+
+        return self.generate(
+            model=model,
+            messages=messages,
+            tools=None,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **kwargs,
+        )
 
     @staticmethod
     def _is_tools_not_supported_error(err_str: str) -> bool:

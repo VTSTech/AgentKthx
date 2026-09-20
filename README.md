@@ -1,4 +1,4 @@
-# ⚛️ AgentNova R05.6
+# ⚛️ AgentNova R05.7
 
 **Status: Alpha**
 
@@ -31,6 +31,7 @@ Inspired by the architecture of OpenClaw, rebuilt from scratch for local-first o
 | [CHANGELOG.md](https://github.com/VTSTech/AgentNova/blob/main/docs/CHANGELOG.md) | Version history and release notes (includes LocalClaw history) |
 | [TESTS.md](https://github.com/VTSTech/AgentNova/blob/main/docs/TESTS.md) | Benchmark results, model recommendations, and testing guide |
 | [PLUGIN_SPEC.md](https://github.com/VTSTech/AgentNova/blob/main/docs/PLUGIN_SPEC.md) | Plugin system specification (manifest format, API, lifecycle) |
+| [JEV_API_MODE.md](https://github.com/VTSTech/AgentNova/blob/main/docs/JEV_API_MODE.md) | JEV API mode — System-One decisions via any free LLM (Jev-compatible shape) |
 | [CREDITS.md](https://github.com/VTSTech/AgentNova/blob/main/docs/CREDITS.md) | Acknowledges every project, inspiration, API, model creator, and specification that makes AgentNova possible |
 
 ## Features
@@ -40,6 +41,7 @@ Inspired by the architecture of OpenClaw, rebuilt from scratch for local-first o
 - **Native + plugin backends** — Ollama built-in; OpenRouter, BitNet, ZAI, ACP, TurboQuant as plugins
 - **Multi-cloud support** — Access to 500+ models from OpenRouter, OpenAI, Anthropic, Google, Cohere
 - **Dual API support** — OpenResponses (`--api openre`) and OpenAI Chat-Completions (`--api openai`)
+- **JEV decision mode** — System-One decisions via any free LLM (`--api jev`) — Jev-compatible shape, no TypeSafe API key required
 - **Three-tier tool support** — Native, ReAct, or none (auto-detected)
 - **Small model optimized** — Fuzzy matching, argument normalization
 - **Built-in security** — Path validation, command blocklist, SSRF protection (toggleable via `--security max|off`)
@@ -132,6 +134,43 @@ agentnova chat -m glm-5.1 --backend zai                             # ZAI (paid,
 # Plugin management
 agentnova plugins                    # List discovered plugins
 ```
+
+### JEV API Mode — System-One Decisions
+
+JEV mode wraps any free chat-capable LLM with a constrained decision prompt,
+returning a Jev-compatible envelope `{decision, probability, alternatives}`.
+No TypeSafe API key or waitlist required — uses your existing ZAI / OpenRouter /
+Ollama free models.
+
+```bash
+# Classify an email using ZAI free model
+agentnova run "Email subject: 'You won a prize!' — classify as spam/inbox/promotions" \
+    --api jev --backend zai --model glm-4.5-flash
+
+# Route a ticket using free OpenRouter model
+agentnova run "Task: calculate 15 * 8 and save to file — route to math/file/general agent" \
+    --api jev --backend openrouter --model poolside/laguna-xs-2.1:free
+
+# Local Ollama model making a decision
+agentnova run "Is this a bug or feature request? 'App crashes on startup'" \
+    --api jev --backend ollama --model qwen2.5:0.5b
+```
+
+Output is a JSON decision envelope:
+
+```json
+{
+  "decision": "spam",
+  "probability": 0.92,
+  "alternatives": [
+    {"value": "promotions", "probability": 0.06},
+    {"value": "inbox", "probability": 0.02}
+  ]
+}
+```
+
+See [JEV_API_MODE.md](docs/JEV_API_MODE.md) for the full spec, Python API,
+and architecture details.
 
 ### Python API
 
@@ -270,6 +309,28 @@ for chunk in backend.generate_completions_stream(
     response_format={"type": "json_object"}
 ):
     print(chunk["delta"], end="", flush=True)
+```
+
+### JEV Decision Mode
+
+```python
+from agentnova.backends import get_backend
+
+# Get a JEV-mode backend (uses any free LLM underneath)
+backend = get_backend("zai", api_mode="jev")
+
+# Make a structured decision
+decision = backend.generate_decision(
+    model="glm-4.5-flash",
+    state="Email from unknown@xyz.com — subject: 'You won a prize!'",
+    choices=["spam", "inbox", "promotions"],
+    question="Where should this email be routed?",
+)
+
+print(decision["decision"])      # "spam"
+print(decision["probability"])   # 0.92
+print(decision["alternatives"])  # [{"value": "promotions", "probability": 0.06}, ...]
+print(decision["usage"])         # {"input_tokens": 100, "output_tokens": 20, ...}
 ```
 
 ### Skill License Validation
@@ -437,7 +498,7 @@ agentnova config --urls  # Show only URLs
 
 | Option | Description |
 |--------|-------------|
-| `--api openre\|openai` | API mode: OpenResponses (default) or OpenAI Chat-Completions |
+| `--api openre\|openai\|jev` | API mode: OpenResponses (default), OpenAI Chat-Completions, or JEV (System-One decisions via any LLM) |
 | `--response-format text\|json` | Response format (Chat-Completions mode) |
 | `--truncation auto\|disabled` | Truncation behavior for long responses |
 | `--soul <path>` | Load Soul Spec persona package |

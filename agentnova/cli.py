@@ -188,8 +188,8 @@ def create_parser() -> argparse.ArgumentParser:
     # Models command
     models_parser = subparsers.add_parser("models", help="List available models")
     models_parser.add_argument("--backend", choices=get_backend_choices(), default=None, help="Backend to use")
-    models_parser.add_argument("--api", choices=["openre", "openai"], default=None, dest="api_mode",
-                           help="API mode for tool support testing (default: test both)")
+    models_parser.add_argument("--api", choices=["openre", "openai", "jev"], default=None, dest="api_mode",
+                           help="API mode for tool support testing (default: test both openre/openai; 'jev' uses System-One decision mode)")
     models_parser.add_argument("--tool-support", action="store_true", help="Test tool calling support (skips already-cached models)")
     models_parser.add_argument("--no-cache", action="store_true", help="Ignore cached results and re-test all models")
     models_parser.add_argument("--acp", action="store_true", help="Enable ACP logging to Agent Control Panel")
@@ -235,8 +235,8 @@ def create_parser() -> argparse.ArgumentParser:
     test_parser.add_argument("-m", "--model", default=None, 
                              help="Model to test (supports patterns: 'qwen', 'g', ':0.5b')")
     test_parser.add_argument("--backend", choices=get_backend_choices(), default=None, help="Backend to use")
-    test_parser.add_argument("--api", choices=["openre", "openai"], default="openre", dest="api_mode",
-                           help="API mode: 'openre' (OpenResponses) or 'openai' (Chat-Completions)")
+    test_parser.add_argument("--api", choices=["openre", "openai", "jev"], default="openre", dest="api_mode",
+                           help="API mode: 'openre' (OpenResponses), 'openai' (Chat-Completions), or 'jev' (System-One decision mode)")
     test_parser.add_argument("--debug", action="store_true", help="Enable debug output")
     test_parser.add_argument("--list", action="store_true", help="List available tests")
     test_parser.add_argument("--acp", action="store_true", help="Enable ACP logging to Agent Control Panel")

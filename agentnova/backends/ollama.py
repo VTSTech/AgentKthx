@@ -146,7 +146,20 @@ class OllamaBackend(BaseBackend):
                 think=think,
                 **kwargs,
             )
-        
+
+        # JEV dispatch — shared by OllamaBackend, ZaiBackend, OpenRouterBackend.
+        # Returns a generate()-shaped dict if JEV mode is active, else None.
+        jev_response = self._maybe_jev_dispatch(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            think=think,
+            **kwargs,
+        )
+        if jev_response is not None:
+            return jev_response
+
         # Native Ollama /api/chat endpoint
         import urllib.request
         import urllib.error
@@ -290,6 +303,342 @@ class OllamaBackend(BaseBackend):
             "latency_ms": latency_ms,
             "raw": result,
         }
+
+    # ─────────────────────────────────────────────────────────────────────
+    # System-One Decision Mode (ApiMode.JEV)
+    # ─────────────────────────────────────────────────────────────────────
+
+    # Default system prompt used by generate_decision() to wrap any
+    # chat-capable LLM into a Jev-shaped decision model. This mirrors
+    # TypeSafe's "System One LLM wrapper" pattern: constrain output to
+    # JSON, ask for a calibrated probability + ranked alternatives.
+    _JEV_SYSTEM_PROMPT = (
+        "You are a System-One decision model. Evaluate the state and "
+        "return a single calibrated decision with a confidence "
+        "probability.\n\n"
+        "Rules:\n"
+        "- Respond with valid JSON only. No prose, no markdown fences.\n"
+        "- The JSON object MUST have these keys:\n"
+        "    \"decision\": <string>,\n"
+        "    \"probability\": <number 0.0-1.0>,\n"
+        "    \"alternatives\": <array of {\"value\": string, \"probability\": number}>\n"
+        "- If choices are provided, \"decision\" MUST be exactly one of them.\n"
+        "- If no choices are provided, generate a concise decision value.\n"
+        "- \"alternatives\" should contain 0-3 runner-up options, sorted by\n"
+        "  probability (highest first). Excluding the chosen decision.\n"
+        "- The probabilities should sum to ~1.0 across decision + alternatives.\n"
+        "- Be calibrated: probability reflects how confident you are that\n"
+        "  your decision is the best choice for this state."
+    )
+
+    @staticmethod
+    def _serialize_state(state: str | dict) -> str:
+        """Render state as a string for the prompt."""
+        if isinstance(state, str):
+            return state
+        try:
+            return json.dumps(state, ensure_ascii=False, indent=2)
+        except (TypeError, ValueError):
+            return str(state)
+
+    @staticmethod
+    def _build_jev_messages(
+        state: str | dict,
+        choices: list[str] | None,
+        question: str | None,
+    ) -> list[dict]:
+        """Build the message list for a Jev-shaped LLM call."""
+        state_text = OllamaBackend._serialize_state(state)
+        prompt_question = question or "What is the best decision for this state?"
+
+        user_lines = [f"Question: {prompt_question}", "", f"State:\n{state_text}"]
+        if choices:
+            user_lines += ["", "Choices (pick exactly one):"]
+            for i, c in enumerate(choices, 1):
+                user_lines.append(f"  {i}. {c}")
+        user_lines += [
+            "",
+            "Return JSON now: {\"decision\": ..., \"probability\": ..., \"alternatives\": [...]}",
+        ]
+        return [
+            {"role": "system", "content": OllamaBackend._JEV_SYSTEM_PROMPT},
+            {"role": "user", "content": "\n".join(user_lines)},
+        ]
+
+    @staticmethod
+    def _parse_jev_response(content: str, choices: list[str] | None) -> dict:
+        """Parse the LLM's JSON output into a Jev-shaped envelope.
+
+        Tolerates markdown fences, leading/trailing whitespace, partial
+        JSON, and missing fields. If parsing fails entirely, we still
+        return a valid envelope with decision = raw content.
+        """
+        text = content.strip()
+
+        # Strip markdown code fences if present
+        if text.startswith("```"):
+            # ```json\n...\n```  or  ```\n...\n```
+            lines = text.splitlines()
+            if lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].startswith("```"):
+                lines = lines[:-1]
+            text = "\n".join(lines).strip()
+
+        decision: str = ""
+        probability: float = 0.0
+        alternatives: list[dict] = []
+        parse_ok = False
+
+        try:
+            obj = json.loads(text)
+            if isinstance(obj, dict):
+                decision = str(obj.get("decision", "")).strip()
+                try:
+                    probability = float(obj.get("probability", 0.0))
+                except (TypeError, ValueError):
+                    probability = 0.0
+                # Clamp to [0, 1]
+                probability = max(0.0, min(1.0, probability))
+                raw_alts = obj.get("alternatives", []) or []
+                if isinstance(raw_alts, list):
+                    for alt in raw_alts:
+                        if isinstance(alt, dict):
+                            v = str(alt.get("value", "")).strip()
+                            try:
+                                p = float(alt.get("probability", 0.0))
+                            except (TypeError, ValueError):
+                                p = 0.0
+                            if v:
+                                alternatives.append({"value": v, "probability": max(0.0, min(1.0, p))})
+                        elif isinstance(alt, str):
+                            alternatives.append({"value": alt, "probability": 0.0})
+                parse_ok = True
+        except (json.JSONDecodeError, ValueError):
+            parse_ok = False
+
+        # Fallback: if JSON parsing failed, use raw text as decision
+        if not parse_ok:
+            decision = text[:500] if text else "(empty)"
+            probability = 0.0
+            alternatives = []
+
+        # Constrained-choice validation: snap decision to one of `choices`
+        # if a close match exists. This handles models that paraphrase.
+        if choices and decision:
+            decision_lower = decision.lower()
+            for c in choices:
+                if c.lower() == decision_lower:
+                    decision = c  # exact match — use canonical form
+                    break
+                if c.lower() in decision_lower or decision_lower in c.lower():
+                    decision = c  # fuzzy match — use canonical form
+                    break
+            else:
+                # No match — keep the model's output but flag it
+                if os.environ.get("AGENTNOVA_DEBUG"):
+                    print(f"  [JEV] Decision '{decision}' not in choices {choices}")
+
+        return {
+            "decision": decision,
+            "probability": probability,
+            "alternatives": alternatives,
+            "_parse_ok": parse_ok,
+        }
+
+    def generate_decision(
+        self,
+        model: str,
+        state: str | dict,
+        choices: list[str] | None = None,
+        *,
+        question: str | None = None,
+        temperature: float = 0.1,
+        max_tokens: int = 512,
+        think: bool | None = None,
+        **kwargs,
+    ) -> dict:
+        """
+        Evaluate a state and return a Jev-shaped decision envelope.
+
+        Wraps the underlying chat-completions call with a constrained
+        decision prompt and JSON output mode, then parses the response
+        into a {decision, probability, alternatives, usage} dict.
+
+        This is the System-One primitive. Use it directly from Python
+        for routing, classification, scoring inside agent pipelines.
+
+        The CLI's `--api jev` mode routes `generate()` calls here too,
+        stuffing the decision into the `content` field as JSON.
+
+        Args:
+            model: Model name (e.g. "glm-4.5-flash", "qwen2.5:0.5b").
+            state: State to evaluate. String or dict (dict → JSON-serialized).
+            choices: Optional constrained choice set. The model MUST
+                    pick one of these.
+            question: Optional framing question.
+            temperature: Low (0.1 default) for calibrated decisions.
+            max_tokens: Output budget (default 512).
+            think: Forwarded to underlying LLM for thinking models.
+            **kwargs: Passed through to _jev_call_completions().
+
+        Returns:
+            {
+                "decision": str,
+                "probability": float,
+                "alternatives": [{"value": str, "probability": float}, ...],
+                "usage": {"input_tokens": int, "output_tokens": int, "total_tokens": int},
+                "latency_ms": float,
+                "raw": dict,            # underlying LLM response
+                "_jev": True,
+            }
+        """
+        messages = self._build_jev_messages(state, choices, question)
+
+        # Force JSON output mode. Many OpenAI-compatible backends honor
+        # response_format={"type": "json_object"} and constrain the
+        # sampler accordingly. If the backend ignores it, our prompt
+        # still asks for JSON-only output.
+        response_format = kwargs.pop("response_format", None) or {"type": "json_object"}
+
+        # Always go through _jev_call_completions — JEV is a wrapper
+        # around the OpenAI Chat-Completions wire format. Subclasses
+        # (ZaiBackend, OpenRouterBackend) override _jev_call_completions
+        # to inject their own auth headers / retry logic.
+        start_time = time.time()
+        result = self._jev_call_completions(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            think=think,
+            response_format=response_format,
+            **kwargs,
+        )
+        latency_ms = (time.time() - start_time) * 1000
+
+        content = result.get("content", "")
+        parsed = self._parse_jev_response(content, choices)
+
+        usage_raw = result.get("usage", {})
+        usage = {
+            "input_tokens": usage_raw.get("prompt_tokens", 0),
+            "output_tokens": usage_raw.get("completion_tokens", 0),
+            "total_tokens": usage_raw.get("total_tokens", 0),
+        }
+
+        if os.environ.get("AGENTNOVA_DEBUG"):
+            print(f"  [JEV] parse_ok={parsed['_parse_ok']}")
+            print(f"  [JEV] decision={parsed['decision']!r} p={parsed['probability']}")
+            print(f"  [JEV] alternatives={parsed['alternatives']}")
+
+        return {
+            "decision": parsed["decision"],
+            "probability": parsed["probability"],
+            "alternatives": parsed["alternatives"],
+            "usage": usage,
+            "latency_ms": latency_ms,
+            "raw": result,
+            "_jev": True,
+            "_parse_ok": parsed["_parse_ok"],
+        }
+
+    def _maybe_jev_dispatch(
+        self,
+        model: str,
+        messages: list[dict],
+        temperature: float = 0.1,
+        max_tokens: int = 8192,
+        think: bool | None = None,
+        **kwargs,
+    ) -> dict | None:
+        """
+        Dispatch helper for JEV api_mode.
+
+        Returns a generate()-shaped dict (with the decision stuffed into
+        `content` as JSON) if self._api_mode == ApiMode.JEV, else None
+        so the caller can continue with its normal OPENRE/OPENAI path.
+
+        ZaiBackend.generate() and OpenRouterBackend.generate() both
+        call this at the top of their generate() so JEV mode works
+        uniformly across all backends without duplicating dispatch logic.
+        """
+        if self._api_mode != ApiMode.JEV:
+            return None
+
+        if os.environ.get("AGENTNOVA_DEBUG"):
+            print(f"  [{self.__class__.__name__}] Dispatching to JEV decision mode")
+
+        # Treat the last user message as the "state".
+        state_text = ""
+        for msg in reversed(messages):
+            if msg.get("role") == "user":
+                state_text = msg.get("content", "")
+                break
+
+        decision = self.generate_decision(
+            model=model,
+            state=state_text,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            think=think,
+            **kwargs,
+        )
+
+        # Stuff the decision envelope into a generate()-shaped response
+        # so the existing agent loop / CLI still sees a string where
+        # it expects one. Programmatic callers should use generate_decision()
+        # directly to get the structured dict.
+        return {
+            "content": json.dumps(decision, ensure_ascii=False),
+            "tool_calls": [],
+            "usage": {
+                "prompt_tokens": decision.get("usage", {}).get("input_tokens", 0),
+                "completion_tokens": decision.get("usage", {}).get("output_tokens", 0),
+                "total_tokens": decision.get("usage", {}).get("total_tokens", 0),
+            },
+            "latency_ms": decision.get("latency_ms", 0.0),
+            "raw": decision,
+            "_jev": True,
+        }
+
+    def _jev_call_completions(
+        self,
+        model: str,
+        messages: list[dict],
+        temperature: float = 0.1,
+        max_tokens: int = 512,
+        think: bool | None = None,
+        response_format: dict | None = None,
+        **kwargs,
+    ) -> dict:
+        """
+        Hook: underlying chat-completions call used by generate_decision().
+
+        Default implementation delegates to OllamaBackend.generate_completions(),
+        which hits the OpenAI-compatible /v1/chat/completions endpoint with
+        no auth headers.
+
+        Subclasses with custom auth or endpoint paths (ZaiBackend uses
+        /api/paas/v4/chat/completions with Bearer token, OpenRouterBackend
+        uses _make_api_request with 429 retry) override this method to
+        route through their own auth-injected path while keeping the
+        same response shape ({content, tool_calls, usage, latency_ms, raw}).
+        """
+        return self.generate_completions(
+            model=model,
+            messages=messages,
+            tools=None,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            think=think,
+            response_format=response_format,
+            **kwargs,
+        )
+
+    # ─────────────────────────────────────────────────────────────────────
+    # OpenAI Chat-Completions
+    # ─────────────────────────────────────────────────────────────────────
 
     def generate_completions(
         self,

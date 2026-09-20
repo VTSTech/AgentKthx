@@ -233,12 +233,23 @@ class ZaiBackend(OllamaBackend):
         else:
             resolved_url = ZAI_BASE_URL.rstrip("/")
 
-        # ZAI is OpenAI-compatible only — force OPENAI mode
-        if api_mode is not None:
-            if isinstance(api_mode, str) and api_mode.lower() != "openai":
-                if os.environ.get("AGENTNOVA_DEBUG"):
-                    print(f"  [ZAI] API mode '{api_mode}' ignored — ZAI only supports OpenAI Chat-Completions")
-        forced_mode = ApiMode.OPENAI
+        # ZAI is OpenAI-compatible. Both OPENAI and JEV modes use the
+        # same /v1/chat/completions endpoint underneath. JEV adds a
+        # decision-prompt wrapper on top, but the wire format is the
+        # same. Reject OPENRE (native /api/chat) since ZAI doesn't
+        # expose it.
+        if isinstance(api_mode, str):
+            api_mode = ApiMode(api_mode.lower())
+        if api_mode is None:
+            forced_mode = ApiMode.OPENAI
+        elif api_mode == ApiMode.JEV:
+            forced_mode = ApiMode.JEV  # accepted — generate_decision() handles the wrapper
+        elif api_mode == ApiMode.OPENAI:
+            forced_mode = ApiMode.OPENAI
+        else:
+            if os.environ.get("AGENTNOVA_DEBUG"):
+                print(f"  [ZAI] API mode '{api_mode}' not supported — ZAI only supports OpenAI / JEV, forcing OPENAI")
+            forced_mode = ApiMode.OPENAI
 
         # Call parent (OllamaBackend → BaseBackend) with resolved values.
         # This ensures any future shared init logic in OllamaBackend or
@@ -453,6 +464,19 @@ class ZaiBackend(OllamaBackend):
         Injects Bearer token authentication into every request.
         Supports ZAI_FREE_ONLY mode and auto-fallback on insufficient credits.
         """
+        # JEV dispatch — if api_mode is JEV, route through generate_decision()
+        # which wraps the underlying LLM call with a decision prompt.
+        jev_response = self._maybe_jev_dispatch(
+            model=model,
+            messages=messages,
+            temperature=temperature if temperature is not None else 0.7,
+            max_tokens=max_tokens if max_tokens is not None else 8192,
+            think=think,
+            **kwargs,
+        )
+        if jev_response is not None:
+            return jev_response
+
         # Use model defaults from catalog if not specified
         defaults = self._get_model_defaults(model)
         if temperature is None:
@@ -477,6 +501,51 @@ class ZaiBackend(OllamaBackend):
             tools=tools,
             temperature=temperature,
             max_tokens=max_tokens,
+            **kwargs,
+        )
+
+    # ─────────────────────────────────────────────────────────────────────
+    # System-One Decision Mode (ApiMode.JEV)
+    # ─────────────────────────────────────────────────────────────────────
+
+    def _jev_call_completions(
+        self,
+        model: str,
+        messages: list[dict],
+        temperature: float = 0.1,
+        max_tokens: int = 512,
+        think: bool | None = None,
+        response_format: dict | None = None,
+        **kwargs,
+    ) -> dict:
+        """
+        JEV hook for ZAI: route the decision call through ZAI's
+        Bearer-authenticated /api/paas/v4/chat/completions endpoint
+        via _generate_with_auth(), instead of the OllamaBackend's
+        default /v1/chat/completions.
+
+        This keeps ZAI's auth + ZAI_FREE_ONLY + fallback logic active
+        when running decisions through ZAI free models like glm-4.5-flash.
+
+        The response shape is normalized to match generate_completions():
+            {content, tool_calls, usage, latency_ms, raw}
+        """
+        # Apply ZAI_FREE_ONLY upfront — decisions should also respect it
+        if ZAI_FREE_ONLY and not _is_free_model(model):
+            fallback = ZAI_FREE_FALLBACK_MODEL
+            if os.environ.get("AGENTNOVA_DEBUG"):
+                print(f"  [ZAI.JEV] FREE_ONLY mode — '{model}' is a paid model, switching to '{fallback}'")
+            model = fallback
+
+        # _generate_with_auth() returns the same {content, tool_calls, usage, ...} shape
+        # that generate_completions() returns — it's a drop-in replacement.
+        return self._generate_with_auth(
+            model=model,
+            messages=messages,
+            tools=None,  # decisions never call tools
+            temperature=temperature,
+            max_tokens=max_tokens,
+            response_format=response_format,
             **kwargs,
         )
 
