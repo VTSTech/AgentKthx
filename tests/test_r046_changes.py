@@ -209,7 +209,7 @@ class TestTurboStateVersioning:
         state_file = tmp_path / "turbo.state"
         state_file.write_text(json.dumps(future_data))
 
-        monkeypatch.setattr("agentnova.turbo.TURBOQUANT_STATE_FILE", state_file)
+        monkeypatch.setattr("agentkthx.turbo.TURBOQUANT_STATE_FILE", state_file)
         result = TurboState.load()
         assert result is None
 
@@ -221,8 +221,8 @@ class TestTurboStateVersioning:
         state_file = tmp_path / "turbo.state"
         state_file.write_text(json.dumps(state_dict))
 
-        monkeypatch.setattr("agentnova.turbo.TURBOQUANT_STATE_FILE", state_file)
-        monkeypatch.setattr("agentnova.turbo.TURBOQUANT_PID_FILE", tmp_path / "turbo.pid")
+        monkeypatch.setattr("agentkthx.turbo.TURBOQUANT_STATE_FILE", state_file)
+        monkeypatch.setattr("agentkthx.turbo.TURBOQUANT_PID_FILE", tmp_path / "turbo.pid")
         result = TurboState.load()
         assert result is not None
         assert result.pid == 42
@@ -232,7 +232,7 @@ class TestTurboStateVersioning:
         """load() returns None when state file doesn't exist."""
         from agentkthx.turbo import TurboState
         state_file = tmp_path / "nonexistent.state"
-        monkeypatch.setattr("agentnova.turbo.TURBOQUANT_STATE_FILE", state_file)
+        monkeypatch.setattr("agentkthx.turbo.TURBOQUANT_STATE_FILE", state_file)
         result = TurboState.load()
         assert result is None
 
@@ -244,8 +244,8 @@ class TestTurboStateVersioning:
         state_file = tmp_path / "turbo.state"
         state_file.write_text(json.dumps(old_data))
 
-        monkeypatch.setattr("agentnova.turbo.TURBOQUANT_STATE_FILE", state_file)
-        monkeypatch.setattr("agentnova.turbo.TURBOQUANT_PID_FILE", tmp_path / "turbo.pid")
+        monkeypatch.setattr("agentkthx.turbo.TURBOQUANT_STATE_FILE", state_file)
+        monkeypatch.setattr("agentkthx.turbo.TURBOQUANT_PID_FILE", tmp_path / "turbo.pid")
         result = TurboState.load()
         assert result is not None
         assert result.pid == 10
@@ -256,7 +256,7 @@ class TestTurboStateVersioning:
         state_file = tmp_path / "turbo.state"
         state_file.write_text("NOT VALID JSON {{{")
 
-        monkeypatch.setattr("agentnova.turbo.TURBOQUANT_STATE_FILE", state_file)
+        monkeypatch.setattr("agentkthx.turbo.TURBOQUANT_STATE_FILE", state_file)
         result = TurboState.load()
         assert result is None
 

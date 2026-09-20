@@ -16,7 +16,7 @@ import json
 import os
 import unittest
 
-# Ensure ZAI env vars are set before any agentnova imports.
+# Ensure ZAI env vars are set before any agentkthx imports.
 # Must use os.environ directly (not setdefault) since config.py
 # may have already been imported and cached the value.
 os.environ["ZAI_API_KEY"] = "test-key-12345"

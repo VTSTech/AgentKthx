@@ -5,6 +5,25 @@ All notable changes to AgentKthx will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [R06.1] - 2026-09-20
+
+### 🐛 **Bug Fixes**
+- **Plugin loader hardcoded `agentnova.plugins` path**: `PluginManager.load()` was using `__import__("agentnova.plugins.<name>")` instead of `agentkthx.plugins.<name>`. This caused ALL plugins to fail loading with `ModuleNotFoundError: No module named 'agentnova.plugins'` — backends (bitnet, openrouter, zai) and feature plugins (acp, turboquant, test-plugin) were all silently unavailable after the R06.0 rename.
+- **CLI parser prog name was `agentnova`**: `argparse.ArgumentParser(prog="agentnova")` caused the help text to display `usage: agentnova [-h]` instead of `agentkthx [-h]`. Confusing for users since the binary is now `agentkthx`.
+- **Test module references**: `cli.py` had hardcoded `"agentnova.examples.00_basic_agent"` etc. strings used by `agentkthx test` command. Updated to `"agentkthx.examples.X"`.
+- **`test_r046_changes.py` monkeypatch paths**: Tests were using `monkeypatch.setattr("agentnova.turbo.TURBOQUANT_STATE_FILE", ...)` — would fail with `AttributeError: module 'agentnova.turbo' has no attribute ...` since the redirect stub doesn't expose turbo state. Updated to `agentkthx.turbo.X`.
+
+### ✅ **Verified**
+- All 6 plugins now load successfully on `agentkthx` startup: acp, bitnet, openrouter, test-plugin, turboquant, zai.
+- CLI parser `--help` now shows `usage: agentkthx [-h]` correctly.
+- All 245 existing tests pass after the fixes.
+
+### 🔧 **Migration from R06.0**
+If you already installed R06.0 and saw plugin load errors, upgrade:
+```bash
+pip install --upgrade agentkthx  # gets you to 0.6.1
+```
+
 ## [R06.0] - 2026-09-20
 
 ### 🚀 **Project Rename: AgentNova → AgentKthx**

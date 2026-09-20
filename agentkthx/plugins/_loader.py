@@ -292,7 +292,7 @@ class PluginManager:
             # which contains register()/unregister() that lazy-import the
             # actual backend/module code).
             module = __import__(
-                f"agentnova.plugins.{manifest.name}",
+                f"agentkthx.plugins.{manifest.name}",
                 fromlist=["register", "unregister"],
             )
 

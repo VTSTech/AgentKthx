@@ -164,7 +164,7 @@ def resolve_model_pattern(
 def create_parser() -> argparse.ArgumentParser:
     """Create the argument parser."""
     parser = argparse.ArgumentParser(
-        prog="agentnova",
+        prog="agentkthx",
         description="⚛️ AgentKthx - Autonomous agents with local LLMs (Alpha)",
     )
 
@@ -1776,62 +1776,62 @@ def cmd_test(args: argparse.Namespace) -> int:
         "00": {
             "name": "Basic Agent",
             "desc": "Simple conversation without tools",
-            "module": "agentnova.examples.00_basic_agent",
+            "module": "agentkthx.examples.00_basic_agent",
         },
         "01": {
             "name": "Quick Diagnostic",
             "desc": "5-question math reasoning test",
-            "module": "agentnova.examples.01_quick_diagnostic",
+            "module": "agentkthx.examples.01_quick_diagnostic",
         },
         "02": {
             "name": "Tool Tests",
             "desc": "Calculator, shell, datetime tools",
-            "module": "agentnova.examples.02_tool_test",
+            "module": "agentkthx.examples.02_tool_test",
         },
         "03": {
             "name": "Reasoning Test",
             "desc": "Multi-step reasoning challenges",
-            "module": "agentnova.examples.03_reasoning_test",
+            "module": "agentkthx.examples.03_reasoning_test",
         },
         "04": {
             "name": "GSM8K Benchmark",
             "desc": "Grade school math problems",
-            "module": "agentnova.examples.04_gsm8k_benchmark",
+            "module": "agentkthx.examples.04_gsm8k_benchmark",
         },
         "05": {
             "name": "Common Sense",
             "desc": "Everyday knowledge and reasoning (25 questions)",
-            "module": "agentnova.examples.05_common_sense",
+            "module": "agentkthx.examples.05_common_sense",
         },
         "06": {
             "name": "Causal Reasoning",
             "desc": "Cause and effect understanding (25 questions)",
-            "module": "agentnova.examples.06_causal_reasoning",
+            "module": "agentkthx.examples.06_causal_reasoning",
         },
         "07": {
             "name": "Logical Deduction",
             "desc": "Syllogisms and logic puzzles (25 questions)",
-            "module": "agentnova.examples.07_logical_deduction",
+            "module": "agentkthx.examples.07_logical_deduction",
         },
         "08": {
             "name": "Reading Comprehension",
             "desc": "Text understanding and inference (25 questions)",
-            "module": "agentnova.examples.08_reading_comprehension",
+            "module": "agentkthx.examples.08_reading_comprehension",
         },
         "09": {
             "name": "General Knowledge",
             "desc": "Geography, science, and facts (25 questions)",
-            "module": "agentnova.examples.09_general_knowledge",
+            "module": "agentkthx.examples.09_general_knowledge",
         },
         "10": {
             "name": "Implicit Reasoning",
             "desc": "Understanding implied meanings (25 questions)",
-            "module": "agentnova.examples.10_implicit_reasoning",
+            "module": "agentkthx.examples.10_implicit_reasoning",
         },
         "11": {
             "name": "Analogical Reasoning",
             "desc": "Pattern and relationship mapping (25 questions)",
-            "module": "agentnova.examples.11_analogical_reasoning",
+            "module": "agentkthx.examples.11_analogical_reasoning",
         },
     }
     
