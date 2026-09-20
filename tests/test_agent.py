@@ -1,5 +1,5 @@
 """
-⚛️ AgentNova — Agent Tests
+⚛️ AgentKthx — Agent Tests
 
 Written by VTSTech — https://www.vts-tech.org
 """

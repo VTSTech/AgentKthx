@@ -1,3 +1,3 @@
 """
-AgentNova Test Suite
+AgentKthx Test Suite
 """

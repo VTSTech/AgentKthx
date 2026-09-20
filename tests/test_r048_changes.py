@@ -1,5 +1,5 @@
 """
-AgentNova — R04.8 Medium-pass Audit Fixes Tests
+AgentKthx — R04.8 Medium-pass Audit Fixes Tests
 
 Unit tests for the five R04.8 audit findings:
   1. ARCH-01: Backend inheritance refactored (super().__init__ chain)
@@ -15,7 +15,7 @@ import inspect
 import os
 import sys
 
-# ── CRITICAL: Set ZAI_API_KEY before any AgentNova imports ──────────────
+# ── CRITICAL: Set ZAI_API_KEY before any AgentKthx imports ──────────────
 # ZaiBackend requires ZAI_API_KEY >= 8 chars. We use a dummy 20-char key
 # so validation passes but no real API calls are made.
 os.environ["ZAI_API_KEY"] = "test_dummy_key_12345"

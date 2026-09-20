@@ -1,5 +1,5 @@
 """
-AgentNova — Built-in Tool Tests
+AgentKthx — Built-in Tool Tests
 
 Unit tests for built-in tool functions: calculator sandbox limits,
 blocked shell commands, file system access restrictions, and

@@ -1,5 +1,5 @@
 """
-⚛️ AgentNova — Spec Compliance Tests
+⚛️ AgentKthx — Spec Compliance Tests
 Tests for OpenResponses API and Chat Completions API compliance.
 
 Written by VTSTech — https://www.vts-tech.org

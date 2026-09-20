@@ -1,5 +1,5 @@
 """
-AgentNova — R04.6 Quick Win Tests
+AgentKthx — R04.6 Quick Win Tests
 
 Unit tests for the three non-trivial R04.6 changes:
   1. check_compatibility() zero-dep tuple comparison (skills/loader.py)

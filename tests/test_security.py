@@ -1,5 +1,5 @@
 """
-AgentNova — Security Tests
+AgentKthx — Security Tests
 
 Adversarial edge-case tests for path validation, shell injection
 prevention, and SSRF protection.  Covers the security surface in

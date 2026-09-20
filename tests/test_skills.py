@@ -1,5 +1,5 @@
 """
-⚛️ AgentNova — Skill Loader & Registry Tests
+⚛️ AgentKthx — Skill Loader & Registry Tests
 
 Tests for the AgentSkills system: SkillLoader, SkillRegistry, Skill dataclass,
 SPDX validation, compatibility parsing, and system prompt generation.
@@ -418,7 +418,7 @@ class TestSkillRegistry:
 # ============================================================================
 
 class TestBuiltinSkills:
-    """Test loading of actual built-in skills shipped with AgentNova."""
+    """Test loading of actual built-in skills shipped with AgentKthx."""
 
     def test_builtin_skills_dir_exists(self):
         """The built-in skills directory should exist."""
