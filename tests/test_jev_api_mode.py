@@ -49,14 +49,14 @@ def _set_dummy_api_keys(monkeypatch):
 
 def test_api_mode_jev_exists():
     """ApiMode enum should include JEV."""
-    from agentnova.core.types import ApiMode
+    from agentkthx.core.types import ApiMode
     assert hasattr(ApiMode, "JEV")
     assert ApiMode.JEV.value == "jev"
 
 
 def test_api_mode_jev_distinct_from_openre_and_openai():
     """JEV should be a separate value from OPENRE and OPENAI."""
-    from agentnova.core.types import ApiMode
+    from agentkthx.core.types import ApiMode
     assert ApiMode.JEV != ApiMode.OPENRE
     assert ApiMode.JEV != ApiMode.OPENAI
     assert ApiMode.OPENRE != ApiMode.OPENAI
@@ -64,7 +64,7 @@ def test_api_mode_jev_distinct_from_openre_and_openai():
 
 def test_api_mode_jev_parses_from_string():
     """ApiMode('jev') should construct correctly."""
-    from agentnova.core.types import ApiMode
+    from agentkthx.core.types import ApiMode
     assert ApiMode("jev") == ApiMode.JEV
 
 
@@ -75,7 +75,7 @@ def test_api_mode_jev_parses_from_string():
 def test_cli_run_accepts_jev_choice():
     """`agentnova run --api jev` should be a valid CLI invocation."""
     import argparse
-    from agentnova.shared_args import add_agent_args
+    from agentkthx.shared_args import add_agent_args
     parser = argparse.ArgumentParser()
     add_agent_args(parser, tools_default="calculator")
     args = parser.parse_args(["--api", "jev"])
@@ -119,7 +119,7 @@ def test_cli_rejects_invalid_api_choice():
 
 def test_build_jev_messages_basic_dict_state():
     """Should accept dict state and serialize it into the prompt."""
-    from agentnova.backends.ollama import OllamaBackend
+    from agentkthx.backends.ollama import OllamaBackend
     state = {"task": "classify_email", "subject": "You won a prize!"}
     choices = ["spam", "inbox", "promotions"]
     msgs = OllamaBackend._build_jev_messages(state, choices, "Where should this go?")
@@ -138,7 +138,7 @@ def test_build_jev_messages_basic_dict_state():
 
 def test_build_jev_messages_string_state():
     """Should accept a plain string state."""
-    from agentnova.backends.ollama import OllamaBackend
+    from agentkthx.backends.ollama import OllamaBackend
     msgs = OllamaBackend._build_jev_messages("user is asking about refunds", None, None)
     assert msgs[1]["role"] == "user"
     assert "user is asking about refunds" in msgs[1]["content"]
@@ -148,7 +148,7 @@ def test_build_jev_messages_string_state():
 
 def test_build_jev_messages_no_choices():
     """Should work without a constrained choice set."""
-    from agentnova.backends.ollama import OllamaBackend
+    from agentkthx.backends.ollama import OllamaBackend
     msgs = OllamaBackend._build_jev_messages("state x", None, "decide")
     assert "decide" in msgs[1]["content"]
     assert "Choices" not in msgs[1]["content"]
@@ -160,7 +160,7 @@ def test_build_jev_messages_no_choices():
 
 def test_parse_jev_response_clean_json():
     """Should parse a clean JSON decision envelope."""
-    from agentnova.backends.ollama import OllamaBackend
+    from agentkthx.backends.ollama import OllamaBackend
     content = json.dumps({
         "decision": "spam",
         "probability": 0.92,
@@ -179,7 +179,7 @@ def test_parse_jev_response_clean_json():
 
 def test_parse_jev_response_markdown_fences():
     """Should strip ```json fences before parsing."""
-    from agentnova.backends.ollama import OllamaBackend
+    from agentkthx.backends.ollama import OllamaBackend
     inner = json.dumps({"decision": "yes", "probability": 0.7, "alternatives": []})
     fenced = f"```json\n{inner}\n```"
     parsed = OllamaBackend._parse_jev_response(fenced, None)
@@ -189,7 +189,7 @@ def test_parse_jev_response_markdown_fences():
 
 def test_parse_jev_response_plain_fences():
     """Should strip ``` fences (no language tag) before parsing."""
-    from agentnova.backends.ollama import OllamaBackend
+    from agentkthx.backends.ollama import OllamaBackend
     inner = json.dumps({"decision": "yes", "probability": 0.7, "alternatives": []})
     fenced = f"```\n{inner}\n```"
     parsed = OllamaBackend._parse_jev_response(fenced, None)
@@ -198,7 +198,7 @@ def test_parse_jev_response_plain_fences():
 
 def test_parse_jev_response_malformed_fallback():
     """Should fall back to raw text as decision when JSON is malformed."""
-    from agentnova.backends.ollama import OllamaBackend
+    from agentkthx.backends.ollama import OllamaBackend
     parsed = OllamaBackend._parse_jev_response("not really json", None)
     assert parsed["_parse_ok"] is False
     assert parsed["decision"] == "not really json"
@@ -208,7 +208,7 @@ def test_parse_jev_response_malformed_fallback():
 
 def test_parse_jev_response_probability_clamping_high():
     """Probability above 1.0 should be clamped to 1.0."""
-    from agentnova.backends.ollama import OllamaBackend
+    from agentkthx.backends.ollama import OllamaBackend
     content = json.dumps({"decision": "x", "probability": 1.5, "alternatives": []})
     parsed = OllamaBackend._parse_jev_response(content, None)
     assert parsed["probability"] == 1.0
@@ -216,7 +216,7 @@ def test_parse_jev_response_probability_clamping_high():
 
 def test_parse_jev_response_probability_clamping_low():
     """Probability below 0.0 should be clamped to 0.0."""
-    from agentnova.backends.ollama import OllamaBackend
+    from agentkthx.backends.ollama import OllamaBackend
     content = json.dumps({"decision": "x", "probability": -0.5, "alternatives": []})
     parsed = OllamaBackend._parse_jev_response(content, None)
     assert parsed["probability"] == 0.0
@@ -224,7 +224,7 @@ def test_parse_jev_response_probability_clamping_low():
 
 def test_parse_jev_response_constrained_exact_match():
     """When decision matches a choice exactly, use canonical form."""
-    from agentnova.backends.ollama import OllamaBackend
+    from agentkthx.backends.ollama import OllamaBackend
     choices = ["spam", "inbox", "promotions"]
     content = json.dumps({"decision": "spam", "probability": 0.9, "alternatives": []})
     parsed = OllamaBackend._parse_jev_response(content, choices)
@@ -233,7 +233,7 @@ def test_parse_jev_response_constrained_exact_match():
 
 def test_parse_jev_response_constrained_fuzzy_match():
     """When decision contains a choice as substring, snap to canonical form."""
-    from agentnova.backends.ollama import OllamaBackend
+    from agentkthx.backends.ollama import OllamaBackend
     choices = ["spam", "inbox", "promotions"]
     content = json.dumps({"decision": "I think this is spam", "probability": 0.8, "alternatives": []})
     parsed = OllamaBackend._parse_jev_response(content, choices)
@@ -242,7 +242,7 @@ def test_parse_jev_response_constrained_fuzzy_match():
 
 def test_parse_jev_response_constrained_no_match():
     """When decision doesn't match any choice, keep the model's output."""
-    from agentnova.backends.ollama import OllamaBackend
+    from agentkthx.backends.ollama import OllamaBackend
     choices = ["spam", "inbox", "promotions"]
     content = json.dumps({"decision": "totally_unrelated_thing", "probability": 0.5, "alternatives": []})
     parsed = OllamaBackend._parse_jev_response(content, choices)
@@ -251,7 +251,7 @@ def test_parse_jev_response_constrained_no_match():
 
 def test_parse_jev_response_alternatives_as_string_list():
     """Should accept alternatives as a list of strings (not just dicts)."""
-    from agentnova.backends.ollama import OllamaBackend
+    from agentkthx.backends.ollama import OllamaBackend
     content = json.dumps({"decision": "x", "probability": 0.7, "alternatives": ["y", "z"]})
     parsed = OllamaBackend._parse_jev_response(content, None)
     assert len(parsed["alternatives"]) == 2
@@ -265,13 +265,13 @@ def test_parse_jev_response_alternatives_as_string_list():
 
 def test_serialize_state_string_passthrough():
     """Strings should pass through unchanged."""
-    from agentnova.backends.ollama import OllamaBackend
+    from agentkthx.backends.ollama import OllamaBackend
     assert OllamaBackend._serialize_state("hello world") == "hello world"
 
 
 def test_serialize_state_dict_to_json():
     """Dicts should be JSON-serialized."""
-    from agentnova.backends.ollama import OllamaBackend
+    from agentkthx.backends.ollama import OllamaBackend
     serialized = OllamaBackend._serialize_state({"a": 1, "b": 2})
     assert '"a"' in serialized
     assert "1" in serialized
@@ -279,7 +279,7 @@ def test_serialize_state_dict_to_json():
 
 def test_serialize_state_non_serializable():
     """Non-JSON-serializable objects should fall back to str()."""
-    from agentnova.backends.ollama import OllamaBackend
+    from agentkthx.backends.ollama import OllamaBackend
     obj = object()
     serialized = OllamaBackend._serialize_state(obj)
     assert "object" in serialized.lower() or serialized  # at least non-empty
@@ -291,8 +291,8 @@ def test_serialize_state_non_serializable():
 
 def test_maybe_jev_dispatch_returns_none_when_not_jev():
     """When api_mode is OPENRE or OPENAI, _maybe_jev_dispatch returns None."""
-    from agentnova.core.types import ApiMode
-    from agentnova.backends.ollama import OllamaBackend
+    from agentkthx.core.types import ApiMode
+    from agentkthx.backends.ollama import OllamaBackend
 
     # Use a MagicMock to avoid hitting __init__ (which may try network calls)
     backend = MagicMock(spec=OllamaBackend)
@@ -312,24 +312,24 @@ def test_maybe_jev_dispatch_returns_none_when_not_jev():
 
 def test_zai_backend_accepts_jev_mode():
     """ZaiBackend should accept api_mode='jev'."""
-    from agentnova.core.types import ApiMode
-    from agentnova.plugins.zai.zai import ZaiBackend
+    from agentkthx.core.types import ApiMode
+    from agentkthx.plugins.zai.zai import ZaiBackend
     backend = ZaiBackend(api_mode="jev")
     assert backend.api_mode == ApiMode.JEV
 
 
 def test_openrouter_backend_accepts_jev_mode():
     """OpenRouterBackend should accept api_mode='jev'."""
-    from agentnova.core.types import ApiMode
-    from agentnova.plugins.openrouter.openrouter import OpenRouterBackend
+    from agentkthx.core.types import ApiMode
+    from agentkthx.plugins.openrouter.openrouter import OpenRouterBackend
     backend = OpenRouterBackend(api_mode="jev")
     assert backend.api_mode == ApiMode.JEV
 
 
 def test_zai_backend_rejects_openre_mode():
     """ZaiBackend should fall back to OPENAI when OPENRE is requested."""
-    from agentnova.core.types import ApiMode
-    from agentnova.plugins.zai.zai import ZaiBackend
+    from agentkthx.core.types import ApiMode
+    from agentkthx.plugins.zai.zai import ZaiBackend
     # OPENRE is not supported by ZAI — should fall back to OPENAI, not raise
     backend = ZaiBackend(api_mode="openre")
     assert backend.api_mode == ApiMode.OPENAI
@@ -337,16 +337,16 @@ def test_zai_backend_rejects_openre_mode():
 
 def test_openrouter_backend_rejects_openre_mode():
     """OpenRouterBackend should reject OPENRE with ValueError."""
-    from agentnova.plugins.openrouter.openrouter import OpenRouterBackend
+    from agentkthx.plugins.openrouter.openrouter import OpenRouterBackend
     with pytest.raises(ValueError):
         OpenRouterBackend(api_mode="openre")
 
 
 def test_backends_have_jev_hook():
     """All three backends should have _jev_call_completions and _maybe_jev_dispatch."""
-    from agentnova.backends.ollama import OllamaBackend
-    from agentnova.plugins.zai.zai import ZaiBackend
-    from agentnova.plugins.openrouter.openrouter import OpenRouterBackend
+    from agentkthx.backends.ollama import OllamaBackend
+    from agentkthx.plugins.zai.zai import ZaiBackend
+    from agentkthx.plugins.openrouter.openrouter import OpenRouterBackend
     for cls in (OllamaBackend, ZaiBackend, OpenRouterBackend):
         assert hasattr(cls, "_jev_call_completions"), f"{cls.__name__} missing _jev_call_completions"
         assert hasattr(cls, "_maybe_jev_dispatch"), f"{cls.__name__} missing _maybe_jev_dispatch"
@@ -355,7 +355,7 @@ def test_backends_have_jev_hook():
 
 def test_base_backend_generate_decision_default_raises():
     """BaseBackend.generate_decision() default should raise NotImplementedError."""
-    from agentnova.backends.base import BaseBackend, BackendConfig
+    from agentkthx.backends.base import BaseBackend, BackendConfig
 
     # BaseBackend is ABC; create a minimal concrete subclass that
     # implements only the abstract methods, leaving generate_decision()
@@ -363,7 +363,7 @@ def test_base_backend_generate_decision_default_raises():
     class _MinimalBackend(BaseBackend):
         @property
         def backend_type(self):
-            from agentnova.core.types import BackendType
+            from agentkthx.core.types import BackendType
             return BackendType.OLLAMA
 
         @property
@@ -380,7 +380,7 @@ def test_base_backend_generate_decision_default_raises():
             return []
 
         def test_tool_support(self, *a, **kw):
-            from agentnova.core.types import ToolSupportLevel
+            from agentkthx.core.types import ToolSupportLevel
             return ToolSupportLevel.NONE
 
     backend = _MinimalBackend(config=BackendConfig())
@@ -394,8 +394,8 @@ def test_base_backend_generate_decision_default_raises():
 
 def test_generate_decision_calls_jev_hook_and_parses():
     """generate_decision() should call _jev_call_completions and parse its output."""
-    from agentnova.core.types import ApiMode
-    from agentnova.backends.ollama import OllamaBackend
+    from agentkthx.core.types import ApiMode
+    from agentkthx.backends.ollama import OllamaBackend
 
     backend = MagicMock(spec=OllamaBackend)
     backend._api_mode = ApiMode.JEV
@@ -446,8 +446,8 @@ def test_generate_decision_calls_jev_hook_and_parses():
 
 def test_generate_decision_handles_malformed_llm_output():
     """generate_decision() should gracefully handle malformed LLM JSON."""
-    from agentnova.core.types import ApiMode
-    from agentnova.backends.ollama import OllamaBackend
+    from agentkthx.core.types import ApiMode
+    from agentkthx.backends.ollama import OllamaBackend
 
     backend = MagicMock(spec=OllamaBackend)
     backend._api_mode = ApiMode.JEV
@@ -479,8 +479,8 @@ def test_generate_decision_handles_malformed_llm_output():
 
 def test_maybe_jev_dispatch_in_jev_mode_returns_decision_envelope():
     """_maybe_jev_dispatch() should return a generate()-shaped dict in JEV mode."""
-    from agentnova.core.types import ApiMode
-    from agentnova.backends.ollama import OllamaBackend
+    from agentkthx.core.types import ApiMode
+    from agentkthx.backends.ollama import OllamaBackend
 
     backend = MagicMock(spec=OllamaBackend)
     backend._api_mode = ApiMode.JEV

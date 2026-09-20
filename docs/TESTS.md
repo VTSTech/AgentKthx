@@ -1,4 +1,4 @@
-# ⚛️ AgentNova R04.5
+# ⚛️ AgentKthx R04.5
 
 ## Test 01 Quick Diagnostic (5 Questions)
 
@@ -11,12 +11,12 @@ Test 01 is designed for rapid iteration and debugging. 5 targeted questions iden
 
 **Usage:**
 ```bash
-agentnova test 01 --model qwen2.5:0.5b
-agentnova test 01 --model qwen    # Fuzzy match: all qwen models
-agentnova test 01 --model g       # Fuzzy match: gemma, granite, functiongemma
-agentnova test 01 -m gemma3:270m --force-react --soul nova-helper  # With soul persona
-agentnova test 01 -m granite4:350m --api openai  # Chat Completions API
-agentnova test 01 -m qwen:0.5b --num-ctx 8192  # Custom context window
+agentkthx test 01 --model qwen2.5:0.5b
+agentkthx test 01 --model qwen    # Fuzzy match: all qwen models
+agentkthx test 01 --model g       # Fuzzy match: gemma, granite, functiongemma
+agentkthx test 01 -m gemma3:270m --force-react --soul nova-helper  # With soul persona
+agentkthx test 01 -m granite4:350m --api openai  # Chat Completions API
+agentkthx test 01 -m qwen:0.5b --num-ctx 8192  # Custom context window
 ```
 
 ---
@@ -147,10 +147,10 @@ Test 02 comprehensively evaluates tool calling across 6 categories. Phase 1 vali
 
 **Usage:**
 ```bash
-agentnova test 02 --soul nova-helper --num-ctx 8192 --num-predict 512 --temp 0.1
-agentnova test 02 --model-only -m granite4   # Phase 2 only, specific model
-agentnova test 02 --tools-only                 # Phase 1 only, no model needed
-agentnova test 02 --model-only -m qwen2.5:0.5b --debug
+agentkthx test 02 --soul nova-helper --num-ctx 8192 --num-predict 512 --temp 0.1
+agentkthx test 02 --model-only -m granite4   # Phase 2 only, specific model
+agentkthx test 02 --tools-only                 # Phase 1 only, no model needed
+agentkthx test 02 --model-only -m qwen2.5:0.5b --debug
 ```
 
 ### Test Structure
@@ -219,8 +219,8 @@ Test 03 evaluates pure reasoning capability across 8 categories (14 questions). 
 
 **Usage:**
 ```bash
-agentnova test 03 --model deepseek-r1:1.5b
-agentnova test 03 --model granite4:350m --timeout 9999
+agentkthx test 03 --model deepseek-r1:1.5b
+agentkthx test 03 --model granite4:350m --timeout 9999
 ```
 
 ### Test Structure
@@ -287,8 +287,8 @@ The `--soul` flag loads a focused persona that guides model behavior. The includ
 
 **Usage:**
 ```bash
-agentnova test 01 -m gemma3:270m --force-react --soul nova-helper
-agentnova test 01 -m dolphin --soul nova-helper --soul-level 3
+agentkthx test 01 -m gemma3:270m --force-react --soul nova-helper
+agentkthx test 01 -m dolphin --soul nova-helper --soul-level 3
 ```
 
 **nova-helper Soul Features:**
@@ -306,16 +306,16 @@ agentnova test 01 -m dolphin --soul nova-helper --soul-level 3
 ollama pull qwen2.5:0.5b
 
 # List all available examples
-agentnova test --list
+agentkthx test --list
 
 # Run GSM8K benchmark (50 math questions)
-agentnova test 04 --timeout 6400
+agentkthx test 04 --timeout 6400
 
 # Run with debug output
-agentnova test 08 --debug --num-ctx 4096
+agentkthx test 08 --debug --num-ctx 4096
 
 # Run with nova-helper SOUL.md, 16k context, ChatCompletions API, Debug Output and 9999 timeout
-agentnova test 01 --soul nova-helper --num-ctx 16384 --api openai --timeout 9999 --debug
+agentkthx test 01 --soul nova-helper --num-ctx 16384 --api openai --timeout 9999 --debug
 ```
 
 ---
@@ -324,14 +324,14 @@ agentnova test 01 --soul nova-helper --num-ctx 16384 --api openai --timeout 9999
 
 ```bash
 # Test all models for native tool support
-agentnova models --tool_support
+agentkthx models --tool_support
 
 # Results are saved to tested_models.json for future reference
 ```
 
 Example output (R04.5 — 12 models):
 ```
-⚛ AgentNova - Available Models
+⚛ AgentKthx - Available Models
   Backend: http://localhost:11434
 ----------------------------------------------------------------------------------------------------------
   Name                                     Size       Context        openre        openai  Family

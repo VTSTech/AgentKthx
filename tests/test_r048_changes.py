@@ -34,7 +34,7 @@ class TestArch01BackendInheritance:
 
     def test_base_backend_accepts_base_url_and_api_mode(self):
         """BaseBackend.__init__ must accept base_url and api_mode params."""
-        from agentnova.backends.base import BaseBackend, BackendConfig
+        from agentkthx.backends.base import BaseBackend, BackendConfig
 
         config = BackendConfig(timeout=60)
 
@@ -47,13 +47,13 @@ class TestArch01BackendInheritance:
 
     def test_base_backend_stores_base_url(self):
         """BaseBackend must strip trailing slash from base_url."""
-        from agentnova.backends.base import BaseBackend, BackendConfig
+        from agentkthx.backends.base import BaseBackend, BackendConfig
 
         # Create a concrete subclass to test BaseBackend.__init__
         class _MinimalBackend(BaseBackend):
             @property
             def backend_type(self):
-                from agentnova.core.types import BackendType
+                from agentkthx.core.types import BackendType
                 return BackendType.OLLAMA
 
             @property
@@ -70,7 +70,7 @@ class TestArch01BackendInheritance:
                 return []
 
             def test_tool_support(self, model, **kw):
-                from agentnova.core.types import ToolSupportLevel
+                from agentkthx.core.types import ToolSupportLevel
                 return ToolSupportLevel.UNTESTED
 
         be = _MinimalBackend(config=BackendConfig(), base_url="http://localhost:9999/")
@@ -82,12 +82,12 @@ class TestArch01BackendInheritance:
 
     def test_base_backend_stores_api_mode(self):
         """BaseBackend must store api_mode in self._api_mode."""
-        from agentnova.backends.base import BaseBackend, BackendConfig
+        from agentkthx.backends.base import BaseBackend, BackendConfig
 
         class _MinimalBackend(BaseBackend):
             @property
             def backend_type(self):
-                from agentnova.core.types import BackendType
+                from agentkthx.core.types import BackendType
                 return BackendType.OLLAMA
 
             @property
@@ -104,10 +104,10 @@ class TestArch01BackendInheritance:
                 return []
 
             def test_tool_support(self, model, **kw):
-                from agentnova.core.types import ToolSupportLevel
+                from agentkthx.core.types import ToolSupportLevel
                 return ToolSupportLevel.UNTESTED
 
-        from agentnova.core.types import ApiMode
+        from agentkthx.core.types import ApiMode
         be = _MinimalBackend(config=BackendConfig(), base_url="http://x", api_mode=ApiMode.OPENAI)
         assert be._api_mode == ApiMode.OPENAI
 
@@ -115,8 +115,8 @@ class TestArch01BackendInheritance:
 
     def test_ollama_backend_chains_super_init(self):
         """OllamaBackend must call super().__init__() with base_url and api_mode."""
-        from agentnova.backends.ollama import OllamaBackend
-        from agentnova.core.types import ApiMode
+        from agentkthx.backends.ollama import OllamaBackend
+        from agentkthx.core.types import ApiMode
 
         # Construct with explicit params — no network call here
         be = OllamaBackend(base_url="http://localhost:9999", api_mode="openai")
@@ -127,8 +127,8 @@ class TestArch01BackendInheritance:
 
     def test_ollama_backend_inherits_base_url_from_super(self):
         """OllamaBackend passes resolved base_url to parent via super().__init__."""
-        from agentnova.backends.ollama import OllamaBackend
-        from agentnova.core.types import ApiMode
+        from agentkthx.backends.ollama import OllamaBackend
+        from agentkthx.core.types import ApiMode
 
         be = OllamaBackend(host="192.168.1.1", port=8080)
         assert be._base_url == "http://192.168.1.1:8080"
@@ -136,8 +136,8 @@ class TestArch01BackendInheritance:
 
     def test_ollama_backend_default_api_mode(self):
         """OllamaBackend defaults to ApiMode.OPENRE."""
-        from agentnova.backends.ollama import OllamaBackend
-        from agentnova.core.types import ApiMode
+        from agentkthx.backends.ollama import OllamaBackend
+        from agentkthx.core.types import ApiMode
 
         be = OllamaBackend(base_url="http://localhost:1")
         assert be._api_mode == ApiMode.OPENRE
@@ -150,8 +150,8 @@ class TestArch01BackendInheritance:
         Verify by checking ZaiBackend correctly sets _base_url and _api_mode
         after construction, which only happens if BaseBackend.__init__ runs.
         """
-        from agentnova.backends.zai import ZaiBackend
-        from agentnova.core.types import ApiMode
+        from agentkthx.backends.zai import ZaiBackend
+        from agentkthx.core.types import ApiMode
 
         # Construct ZaiBackend with dummy key (env var already set)
         be = ZaiBackend(base_url="https://custom.z.ai/api")
@@ -162,16 +162,16 @@ class TestArch01BackendInheritance:
 
     def test_zai_backend_sets_base_url_correctly(self):
         """ZaiBackend stores base_url via the super().__init__ chain."""
-        from agentnova.backends.zai import ZaiBackend
+        from agentkthx.backends.zai import ZaiBackend
 
         be = ZaiBackend()
         # Default should be ZAI_BASE_URL from config
-        from agentnova.config import ZAI_BASE_URL
+        from agentkthx.config import ZAI_BASE_URL
         assert be._base_url == ZAI_BASE_URL.rstrip("/")
 
     def test_zai_backend_api_key_set(self):
         """ZaiBackend requires and stores API key."""
-        from agentnova.backends.zai import ZaiBackend
+        from agentkthx.backends.zai import ZaiBackend
 
         be = ZaiBackend(api_key="sk-my-test-key-12345")
         assert be._api_key == "sk-my-test-key-12345"
@@ -179,7 +179,7 @@ class TestArch01BackendInheritance:
     def test_zai_backend_rejects_short_key(self):
         """ZaiBackend rejects API keys shorter than 8 chars."""
         import pytest
-        from agentnova.backends.zai import ZaiBackend
+        from agentkthx.backends.zai import ZaiBackend
 
         # Save and clear env var, then restore
         old = os.environ.pop("ZAI_API_KEY", None)
@@ -195,8 +195,8 @@ class TestArch01BackendInheritance:
 
     def test_llama_server_backend_calls_super_init(self):
         """LlamaServerBackend must call super().__init__() correctly."""
-        from agentnova.backends.llama_server import LlamaServerBackend
-        from agentnova.core.types import ApiMode
+        from agentkthx.backends.llama_server import LlamaServerBackend
+        from agentkthx.core.types import ApiMode
 
         be = LlamaServerBackend(base_url="http://localhost:8764", api_mode="openai")
         assert be._base_url == "http://localhost:8764"
@@ -204,8 +204,8 @@ class TestArch01BackendInheritance:
 
     def test_llama_server_bitnet_mode_defaults(self):
         """LlamaServerBackend with bitnet_mode=True defaults to OPENRE."""
-        from agentnova.backends.llama_server import LlamaServerBackend
-        from agentnova.core.types import ApiMode
+        from agentkthx.backends.llama_server import LlamaServerBackend
+        from agentkthx.core.types import ApiMode
 
         be = LlamaServerBackend(bitnet_mode=True)
         assert be._bitnet_mode is True
@@ -213,8 +213,8 @@ class TestArch01BackendInheritance:
 
     def test_llama_server_backend_type_reflects_mode(self):
         """LlamaServerBackend.backend_type returns BITNET when bitnet_mode=True."""
-        from agentnova.backends.llama_server import LlamaServerBackend
-        from agentnova.core.types import BackendType
+        from agentkthx.backends.llama_server import LlamaServerBackend
+        from agentkthx.core.types import BackendType
 
         be_normal = LlamaServerBackend()
         assert be_normal.backend_type == BackendType.LLAMA_SERVER
@@ -226,8 +226,8 @@ class TestArch01BackendInheritance:
 
     def test_bitnet_backend_delegates_to_llama_server(self):
         """BitNetBackend delegates to LlamaServerBackend with bitnet_mode=True."""
-        from agentnova.backends.bitnet import BitNetBackend
-        from agentnova.core.types import BackendType, ApiMode
+        from agentkthx.backends.bitnet import BitNetBackend
+        from agentkthx.core.types import BackendType, ApiMode
 
         be = BitNetBackend(base_url="http://localhost:8765")
         assert be._bitnet_mode is True
@@ -237,17 +237,17 @@ class TestArch01BackendInheritance:
 
     def test_bitnet_backend_is_subclass_of_llama_server(self):
         """BitNetBackend must inherit from LlamaServerBackend."""
-        from agentnova.backends.bitnet import BitNetBackend
-        from agentnova.backends.llama_server import LlamaServerBackend
+        from agentkthx.backends.bitnet import BitNetBackend
+        from agentkthx.backends.llama_server import LlamaServerBackend
 
         assert issubclass(BitNetBackend, LlamaServerBackend)
 
     def test_all_backends_have_base_url_and_api_mode(self):
         """Every concrete backend must expose _base_url and _api_mode."""
-        from agentnova.backends.ollama import OllamaBackend
-        from agentnova.backends.zai import ZaiBackend
-        from agentnova.backends.llama_server import LlamaServerBackend
-        from agentnova.backends.bitnet import BitNetBackend
+        from agentkthx.backends.ollama import OllamaBackend
+        from agentkthx.backends.zai import ZaiBackend
+        from agentkthx.backends.llama_server import LlamaServerBackend
+        from agentkthx.backends.bitnet import BitNetBackend
 
         backends = [
             OllamaBackend(base_url="http://x:1"),
@@ -271,12 +271,12 @@ class TestMaint01TodoSessionIsolation:
 
     def test_set_todo_session_function_exists(self):
         """set_todo_session must exist in builtins module."""
-        from agentnova.tools.builtins import set_todo_session
+        from agentkthx.tools.builtins import set_todo_session
         assert callable(set_todo_session)
 
     def test_set_todo_session_updates_active_session(self):
         """set_todo_session changes _active_todo_session in builtins."""
-        from agentnova.tools import builtins as bi
+        from agentkthx.tools import builtins as bi
 
         original = bi._active_todo_session
         try:
@@ -291,7 +291,7 @@ class TestMaint01TodoSessionIsolation:
     def test_todo_add_isolated_between_sessions(self):
         """Todo items added in one session don't appear in another."""
         import uuid as _uuid
-        from agentnova.tools import builtins as bi
+        from agentkthx.tools import builtins as bi
 
         # Use unique session IDs that won't collide with any other test state
         uid_a = "iso_test_A_" + _uuid.uuid4().hex[:8]
@@ -325,7 +325,7 @@ class TestMaint01TodoSessionIsolation:
 
     def test_agent_creates_unique_session_id(self):
         """Each Agent instance gets a unique session_id."""
-        from agentnova.agent import Agent
+        from agentkthx.agent import Agent
 
         # We can't fully initialize agents without a backend, but we can
         # verify the session_id generation logic directly
@@ -336,7 +336,7 @@ class TestMaint01TodoSessionIsolation:
 
     def test_agent_wires_todo_session_on_init(self):
         """Agent.__init__ calls set_todo_session when todo tool is loaded."""
-        from agentnova.tools import builtins as bi
+        from agentkthx.tools import builtins as bi
 
         orig_session = bi._active_todo_session
         orig_stores = dict(bi._todo_stores)
@@ -345,10 +345,10 @@ class TestMaint01TodoSessionIsolation:
             bi._active_todo_session = "default"
 
             # Create an Agent with todo tool
-            from agentnova.agent import Agent
+            from agentkthx.agent import Agent
             # Agent requires a backend — we use a mock approach
-            from agentnova.backends.base import BaseBackend, BackendConfig
-            from agentnova.core.types import BackendType, ToolSupportLevel
+            from agentkthx.backends.base import BaseBackend, BackendConfig
+            from agentkthx.core.types import BackendType, ToolSupportLevel
 
             class _FakeBackend(BaseBackend):
                 @property
@@ -384,12 +384,12 @@ class TestMaint01TodoSessionIsolation:
 
     def test_todo_dispatch_function_exists(self):
         """_todo_dispatch function must exist and be callable."""
-        from agentnova.tools.builtins import _todo_dispatch
+        from agentkthx.tools.builtins import _todo_dispatch
         assert callable(_todo_dispatch)
 
     def test_todo_dispatch_routes_actions(self):
         """_todo_dispatch correctly routes to todo_add, todo_list, etc."""
-        from agentnova.tools import builtins as bi
+        from agentkthx.tools import builtins as bi
 
         orig_session = bi._active_todo_session
         orig_stores = dict(bi._todo_stores)
@@ -414,7 +414,7 @@ class TestMaint01TodoSessionIsolation:
 
     def test_todo_dispatch_respects_active_session(self):
         """_todo_dispatch uses the current active session."""
-        from agentnova.tools import builtins as bi
+        from agentkthx.tools import builtins as bi
 
         orig_session = bi._active_todo_session
         orig_stores = dict(bi._todo_stores)
@@ -449,21 +449,21 @@ class TestRob01FallbackWarnings:
 
     def test_falling_back_to_free_model_in_source(self):
         """The string 'falling back to free model' must appear in zai.py."""
-        import agentnova.backends.zai as zai_module
+        import agentkthx.backends.zai as zai_module
         source = inspect.getsource(zai_module)
         assert "falling back to free model" in source.lower(), \
             "zai.py must contain 'falling back to free model' warning"
 
     def test_does_not_support_tools_warning_in_zai(self):
         """The 'does not support tools' warning path must exist in zai.py."""
-        import agentnova.backends.zai as zai_module
+        import agentkthx.backends.zai as zai_module
         source = inspect.getsource(zai_module)
         assert "does not support tools" in source.lower(), \
             "zai.py must contain 'does not support tools' warning path"
 
     def test_fallback_warning_prints_to_stderr(self):
         """The fallback warning must print to sys.stderr for user visibility."""
-        import agentnova.backends.zai as zai_module
+        import agentkthx.backends.zai as zai_module
         source = inspect.getsource(zai_module)
         # Check that sys.stderr is used in the warning path
         assert "sys.stderr" in source, \
@@ -479,7 +479,7 @@ class TestSec01Calculator:
     """Verify the AST-based calculator: correctness, security, edge cases."""
 
     def _calc(self, expr: str) -> str:
-        from agentnova.tools.builtins import calculator
+        from agentkthx.tools.builtins import calculator
         return calculator(expr)
 
     # -- Basic arithmetic -----------------------------------------------
@@ -721,14 +721,14 @@ class TestTest01FooterPromptDisplay:
 
     def test_footer_references_custom_system_prompt(self):
         """The _footer_text function must reference '_custom_system_prompt'."""
-        import agentnova.cli as cli_module
+        import agentkthx.cli as cli_module
         source = inspect.getsource(cli_module)
         assert "_custom_system_prompt" in source, \
             "cli.py must reference '_custom_system_prompt' in the footer prompt display"
 
     def test_footer_has_e_prmpt_emoji(self):
         """The _e_prmpt emoji variable must be defined in the footer function."""
-        import agentnova.cli as cli_module
+        import agentkthx.cli as cli_module
         source = inspect.getsource(cli_module)
 
         # Find the _footer_text function
@@ -737,7 +737,7 @@ class TestTest01FooterPromptDisplay:
 
     def test_prompt_str_includes_chr_and_tok(self):
         """The prompt_str format string must include both 'chr' and 'tok'."""
-        import agentnova.cli as cli_module
+        import agentkthx.cli as cli_module
         source = inspect.getsource(cli_module)
 
         # Verify the prompt_str line includes "chr" and "tok"
@@ -746,14 +746,14 @@ class TestTest01FooterPromptDisplay:
 
     def test_footer_function_exists(self):
         """The _footer_text function must be defined inside cmd_chat."""
-        import agentnova.cli as cli_module
+        import agentkthx.cli as cli_module
         source = inspect.getsource(cli_module)
         assert "_footer_text" in source, \
             "cli.py must define '_footer_text' function for the status bar"
 
     def test_footer_uses_session_tokens(self):
         """The footer must reference session token tracking."""
-        import agentnova.cli as cli_module
+        import agentkthx.cli as cli_module
         source = inspect.getsource(cli_module)
         assert "_session_tokens" in source, \
             "cli.py footer must track session tokens (_session_tokens_in/_session_tokens_out)"

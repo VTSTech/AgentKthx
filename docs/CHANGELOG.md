@@ -1,11 +1,183 @@
 # CHANGELOG
 
-All notable changes to AgentNova will be documented in this file.
+All notable changes to AgentKthx will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [R05.7] - 2026-09-19 10:47:17 PM
+## [R06.0] - 2026-09-20
+
+### 🚀 **Project Rename: AgentNova → AgentKthx**
+
+This release renames the project from `AgentNova` to `AgentKthx`. The rename was driven by name collisions in the AI agent space — multiple other projects, Instagram accounts, and PyPI packages were using the "AgentNova" name, making it difficult for users to find this project.
+
+The new name `AgentKthx` honors the IRC-era slang "kthx" (OK, thanks), a callback to early internet culture. It's distinctive, memorable, and verified unused across PyPI, GitHub, and major social platforms as of September 2026.
+
+### 📦 **Package Changes**
+
+| Old | New |
+|-----|-----|
+| PyPI package: `agentnova` | `agentkthx` |
+| CLI command: `agentnova` | `agentkthx` |
+| Python import: `import agentnova` | `import agentkthx` |
+| GitHub repo: `VTSTech/AgentNova` | `VTSTech/AgentKthx` |
+| Source directory: `agentnova/` | `agentkthx/` |
+| All internal imports: `from agentnova.X` | `from agentkthx.X` |
+
+### ✅ **Backward Compatibility**
+
+The rename preserves full backward compatibility with existing user setups:
+
+- **CLI**: The `agentnova` command still works — it's installed by the `agentkthx` PyPI package as a redirect binary that calls `agentkthx` with a deprecation notice. Same for `localclaw`.
+- **Python imports**: `import agentnova` still works — emits `DeprecationWarning` and re-exports everything from `agentkthx`. Existing scripts continue to function without changes.
+- **Env vars**: All `AGENTNOVA_*` env vars (`AGENTNOVA_BACKEND`, `AGENTNOVA_MODEL`, `AGENTNOVA_DEBUG`, `AGENTNOVA_MAX_STEPS`, `AGENTNOVA_RETRY_ON_ERROR`, `AGENTNOVA_MAX_TOOL_RETRIES`, etc.) remain unchanged and continue to work.
+- **Filesystem paths**: User data directories `~/.agentnova/`, `~/.cache/agentnova/` remain unchanged — existing SQLite memory sessions, turbo state files, and tool support caches continue to work.
+- **PyPI redirect packages**: A new `agentnova-redirect/` package will be published to PyPI as a stub that depends on `agentkthx`. Same for `localclaw-redirect/` (updated to depend on `agentkthx`).
+
+### 🏗️ **Repository Structure**
+
+```
+AgentKthx/                              # repo root (renamed from AgentNova/)
+├── agentkthx/                          # main Python package (renamed from agentnova/)
+│   ├── __init__.py                     # exports __version__ = "0.6.0"
+│   ├── __main__.py
+│   ├── agent.py
+│   ├── cli.py
+│   ├── backends/
+│   ├── plugins/
+│   ├── core/
+│   └── ...
+├── agentnova/                          # redirect stub (re-exports from agentkthx)
+│   └── __init__.py
+├── localclaw/                          # redirect stub (re-exports from agentkthx)
+│   └── __init__.py
+├── agentnova-redirect/                 # standalone PyPI package for agentnova redirect
+│   ├── pyproject.toml
+│   ├── README.md
+│   └── agentnova/__init__.py
+├── localclaw-redirect/                 # standalone PyPI package for localclaw redirect
+│   ├── pyproject.toml
+│   ├── README.md
+│   └── localclaw/__init__.py
+├── pyproject.toml                      # main package (name="agentkthx", version="0.6.0")
+├── README.md
+└── docs/
+```
+
+### 🐛 **Bug Fixes**
+- **Fixed pre-existing `__all__` mismatch**: `agentkthx/__init__.py`'s `__all__` list referenced `OPENROUTER_BASE_URL`, `OPENROUTER_API_KEY`, `OPENROUTER_DEFAULT_MODEL` but they were never actually imported from `config`. Fixed by adding them to the import statement. This was a latent bug that only surfaced when the redirect stub did `from agentkthx import *`.
+
+### 🧪 **Tests**
+- All 245 existing tests pass after the rename with zero code changes to test logic.
+- Test files had their imports updated from `from agentnova` → `from agentkthx`.
+- Verified: `tests/test_jev_api_mode.py` (33 tests), `tests/test_thinking_args.py` (43 tests), `tests/test_agent.py`, `tests/test_builtins.py`, `tests/test_skills.py`, `tests/test_spec_compliance.py` — all green.
+
+### 📚 **Documentation**
+- Updated `README.md` — bumped version to R06.0, added "Renamed from AgentNova" notice at the top, added "Migration from AgentNova" section at the bottom with what changed, what stays the same, migration steps, and rationale.
+- Updated all `docs/*.md` files — replaced `AgentNova` → `AgentKthx` and `agentnova` → `agentkthx` throughout.
+- Updated all docstrings in `agentkthx/` source files.
+- Updated CLI command examples in docstrings (`agentnova run` → `agentkthx run`).
+- Preserved `AGENTNOVA_*` env var references in docs (backward compat).
+- Preserved filesystem path references (`~/.agentnova/`) in docs (backward compat with user data).
+
+### 🔧 **Technical Details**
+- Main `pyproject.toml`: name changed to `agentkthx`, version `0.6.0`. `[project.scripts]` now defines three CLI binaries: `agentkthx` (primary), `agentnova` (redirect), `localclaw` (redirect). `[tool.setuptools.packages.find]` includes `agentkthx`, `agentkthx.*`, `agentnova`, `localclaw` — all three packages ship in the same PyPI distribution.
+- `[project.entry-points."agentkthx.backends"]`: new entry point namespace. Old `agentnova.backends` entry point kept for backward compat with any external code that references it.
+- New `agentnova/` directory at repo root is a thin Python package (just `__init__.py`) that emits `DeprecationWarning` on import and re-exports everything from `agentkthx`. Mirrors the existing `localclaw/` redirect pattern.
+- New `agentnova-redirect/` directory contains a standalone PyPI package (separate `pyproject.toml`) that depends on `agentkthx>=0.6.0`. This is what gets published to PyPI as the `agentnova` package — it's a stub that just installs the redirect binary.
+- `localclaw-redirect/` updated: dependency changed from `agentnova>=0.0` to `agentkthx>=0.6.0`. CLI binary still emits the redirect notice.
+
+### ⚠️ **What's NOT Changed (Intentionally)**
+- **Env var names**: `AGENTNOVA_BACKEND`, `AGENTNOVA_MODEL`, `AGENTNOVA_DEBUG`, `AGENTNOVA_MAX_STEPS`, `AGENTNOVA_RETRY_ON_ERROR`, `AGENTNOVA_MAX_TOOL_RETRIES`, `AGENTNOVA_ACP`, `AGENTNOVA_ACP_URL`, `AGENTNOVA_BACKEND`, `AGENTNOVA_NUM_CTX`, `AGENTNOVA_NUM_PREDICT`, `AGENTNOVA_TEMPERATURE`, `AGENTNOVA_TOP_P`, `AGENTNOVA_FORCE_REACT`, `AGENTNOVA_USE_MF_SYS`, `AGENTNOVA_VERBOSE`, `AGENTNOVA_FAST`, `AGENTNOVA_API_MODE` — all unchanged. Users' existing env var configurations continue to work without any changes.
+- **Filesystem paths**: `~/.agentnova/` (SQLite memory sessions, turbo state, audit log), `~/.cache/agentnova/` (tool support cache) — all unchanged. Users' existing data continues to be used.
+- **Soul/skill file paths**: `agentkthx/souls/*/`, `agentkthx/skills/*/` — these are internal to the package, so they rename with the package, but user-created souls/skills outside the package continue to work.
+- **Plugin manifest format**: `plugin.json` schema unchanged — existing plugins continue to work.
+- **OpenResponses / OpenAI / JEV API modes**: All API modes work identically.
+- **Thinking controls**: `--thinking` and `--think` flags work identically.
+- **JEV decision envelope shape**: `{decision, probability, alternatives, usage, latency_ms, _jev}` unchanged.
+
+### 🔄 **Migration Path for Users**
+
+Most users need to do **nothing** — existing scripts, env vars, and CLI commands continue to work via the redirect stubs.
+
+For users who want to update to the new naming:
+
+```bash
+# Uninstall old (optional — both can coexist)
+pip uninstall agentnova
+
+# Install new
+pip install agentkthx
+
+# Update scripts (optional)
+# Old: from agentnova import Agent
+# New: from agentkthx import Agent
+
+# Update CLI invocations (optional)
+# Old: agentnova run "..."
+# New: agentkthx run "..."
+```
+
+### 🔗 **References**
+- PyPI: https://pypi.org/project/agentkthx/
+- GitHub: https://github.com/VTSTech/AgentKthx
+- Author: [VTSTech](https://www.vts-tech.org)
+
+## [R05.8] - 2026-09-20
+
+### 🚀 **New Features**
+- **`--thinking` CLI flag**: Added `--thinking off|auto|low|medium|high` to control model thinking behavior across all backends.
+  - `off` → `think=False` (disable thinking entirely — fastest, recommended for JEV decisions)
+  - `auto` → `think=None` (let model decide, default)
+  - `low`/`medium`/`high` → `think=True` + forward `reasoning_effort` to OpenAI-compatible thinking models (o-series, GLM-5.x, etc.)
+- **`--think` CLI flag**: Boolean flag to toggle display of `reasoning_content` (chain-of-thought) in CLI output. Off by default. When set, reasoning is printed under each step in a dim/indented style, visually distinct from the actual content.
+- **`ThinkingLevel` enum**: New enum in `core/types.py` with members `OFF`, `AUTO`, `LOW`, `MEDIUM`, `HIGH`.
+- **`parse_thinking_arg()` helper**: Maps a user-facing level string (or `ThinkingLevel` enum) to a `(think, reasoning_effort)` tuple. Used by `cli.py` to resolve `--thinking` before passing to `Agent()`. Tolerant — unknown values fall back to `AUTO` rather than raising.
+- **`reasoning_content` capture**: `OllamaBackend.generate()` (both native `/api/chat` and OpenAI `/v1/chat/completions` paths) now captures `reasoning_content` from the response message (also `thinking` key for Ollama-native format). Surfaced as `response["reasoning_content"]` for callers / CLI to consume.
+- **`StepResult.reasoning_content`**: New field on the `StepResult` dataclass carries the model's chain-of-thought for each step. Populated by the agent loop from `gen_response["reasoning_content"]`.
+- **Agent thinking params**: `Agent.__init__()` accepts `thinking_level`, `think`, `reasoning_effort`, and `show_reasoning` kwargs. Explicit `think` / `reasoning_effort` kwargs override what `thinking_level` would have resolved to — lets programmatic callers bypass CLI parsing.
+- **JEV decision envelope includes reasoning_content**: `generate_decision()` now surfaces `reasoning_content` on the returned dict, so `--think` works in JEV mode too.
+- **Backend forwarding of `reasoning_effort`**: All three paths in `OllamaBackend` (native `/api/chat`, OpenAI `/v1/chat/completions`, streaming) now forward `reasoning_effort` to the underlying API when set. Silently ignored by models that don't recognize it.
+
+### 🧪 **Tests**
+- Added `tests/test_thinking_args.py` with 43 passing tests covering:
+  - `ThinkingLevel` enum existence and values
+  - `parse_thinking_arg()` for all 5 levels + None/empty/unknown/enum inputs
+  - CLI `--thinking` accepts each valid value, rejects invalid, defaults to `auto`
+  - CLI `--think` boolean flag (default False, sets True when present)
+  - CLI `--thinking` and `--think` can combine
+  - `Agent.__init__()` accepts all new params, resolves `thinking_level` correctly
+  - Explicit `think` / `reasoning_effort` kwargs override `thinking_level`
+  - `StepResult.reasoning_content` field exists, defaults to empty, accepts value
+  - `_print_agent_steps()` accepts `show_reasoning` kwarg
+  - Source-level verification that `OllamaBackend.generate()`, `OllamaBackend.generate_completions()`, and `generate_decision()` reference `reasoning_content`
+  - End-to-end CLI → Agent flow tests for both `--thinking off` and `--thinking high`
+
+### 📚 **Documentation**
+- Updated `README.md` — bumped version to R05.8, added "Thinking controls" bullet to Features, added new "Thinking Controls" usage section with CLI examples and Python API, added `--thinking` and `--think` rows to CLI Options table.
+- Updated `docs/JEV_API_MODE.md` — updated limitation #6 (reasoning models inflate latency) to mention the new `--thinking off` workaround as the proper CLI-level fix (replacing the previous "pass `think=False` programmatically" workaround).
+
+### 🔧 **Backend Changes**
+- **OllamaBackend.generate() (native /api/chat)**: Captures `reasoning_content` (or `thinking` key) from response message. Forwards `reasoning_effort` as top-level body field. Excluded `reasoning_effort` from the `options` dict to avoid double-send.
+- **OllamaBackend.generate_completions() (OpenAI /v1/chat/completions)**: `_parse_choice()` now extracts `reasoning_content` from `message`. Response dict includes `reasoning_content` key. Forwards `reasoning_effort` to body when set.
+- **OllamaBackend streaming path**: Forwards `reasoning_effort` to body when set.
+- **OllamaBackend.generate_decision()**: Surfaces `reasoning_content` from underlying LLM response onto the decision envelope.
+- **OllamaBackend._maybe_jev_dispatch()**: Forwards `reasoning_content` from decision envelope onto the generate()-shaped response.
+- **Agent.__init__()**: Accepts and stores `thinking_level`, `think`, `reasoning_effort`, `show_reasoning` as instance attributes. Resolves `thinking_level` via `parse_thinking_arg()` with explicit kwargs taking precedence.
+- **Agent loop**: Both `backend_kwargs = {"think": think}` blocks now: (1) honor `self._think` first, (2) fall back to model-family no-think directive if not set, (3) forward `self._reasoning_effort` when set. Captures `reasoning_content` from `gen_response` and stores it on the `StepResult`.
+- **cli.py**: Resolves `--thinking` to `(think, reasoning_effort)` via `parse_thinking_arg()`. Passes both + `show_reasoning` to `Agent()`. `_print_agent_steps()` accepts `show_reasoning` kwarg and prints `reasoning_content` under each step when set.
+
+### ⚠️ **Limitations**
+- **Model compatibility** — `--thinking off` is honored by all thinking-capable models tested (GLM-4.5+, qwen3, deepseek-r1). `--thinking low/medium/high` (forwarded as `reasoning_effort`) is honored by OpenAI o-series and GLM-5.x. Other models silently ignore it. No error is raised in either case.
+- **Display only** — `--think` only controls whether `reasoning_content` is displayed in the CLI step summary. It does not affect what the model emits, what gets stored in memory, or what gets sent to ACP logging. Future work could add `reasoning_content` to the persistent memory and ACP log.
+- **Streaming** — When streaming, `reasoning_content` may arrive interleaved with content deltas. The current implementation captures it from the non-streaming `_generate()` path; streaming mode does not yet surface reasoning in real-time.
+
+### 🔗 **References**
+- [OpenAI Reasoning Models Documentation](https://platform.openai.com/docs/guides/reasoning) — `reasoning_effort` parameter spec
+- [ZAI GLM-4.5 Documentation](https://docs.z.ai) — `reasoning_content` response field
+- [Ollama Thinking Models](https://ollama.com/blog/thinking-models) — `think` parameter and `thinking` response field
+
+## [R05.7] - 2026-09-20
 
 ### 🚀 **New Features**
 - **JEV API Mode**: Added `--api jev` (sibling of `openre` / `openai`) — System-One decision mode that wraps any chat-capable LLM with a constrained decision prompt, returning a Jev-compatible envelope `{decision, probability, alternatives, usage}`. Works with free ZAI / OpenRouter / Ollama models — no TypeSafe API key required. See [JEV_API_MODE.md](JEV_API_MODE.md).
@@ -42,7 +214,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### ✅ **Verified**
 - **Smoke test passed** (2026-09-20) on ZAI free tier:
   ```bash
-  agentnova run "Is 'You won a prize' spam or inbox?" \
+  agentkthx run "Is 'You won a prize' spam or inbox?" \
       --api jev --backend zai -m glm-4.5-flash
   ```
   Result: `decision="spam"`, `probability=0.95`, `alternatives=[{"value":"inbox","probability":0.05}]`, `_parse_ok=true`, `usage={input:292, output:319, total:611}`, `latency_ms=22139`. Probabilities correctly summed to 1.0.
@@ -85,7 +257,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Help Output**: `--max-steps` now properly documented in CLI help
 - **Argument Parsing**: Fixed argument conflicts and improved parser stability
 - **Enhanced Terminal Input**: Integrated Python `readline` module for proper arrow key handling
-- **Message History Navigation**: UP/DOWN arrows now browse through previous user messages with persistent history storage in `~/.agentnova_history`
+- **Message History Navigation**: UP/DOWN arrows now browse through previous user messages with persistent history storage in `~/.agentkthx_history`
 
 ### 🔌 **Backend Improvements**
 - **ZAI Backend**: 
@@ -100,7 +272,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### 📖 **Documentation**
 - **ZAI API Reference**: Created complete technical implementation guide
-- **Developer Documentation**: Added implementation notes for AgentNova integration
+- **Developer Documentation**: Added implementation notes for AgentKthx integration
 - **API Documentation**: Enhanced with code examples and troubleshooting guides
 
 ### 🛠️ **Internal Changes**
@@ -235,7 +407,7 @@ Fixes a critical defect in the OpenRouter backend where native tool calls were n
   - New `SecurityMode` type (`Literal["max", "off"]`) and global `_security_mode` flag in `core/helpers.py`
   - `set_security_mode(mode)` / `get_security_mode()` API for programmatic access
   - `sanitize_command()`, `validate_path()`, and `is_safe_url()` all check the flag and skip ALL checks when mode is `"off"` (empty inputs are still rejected — that's input validation, not security)
-  - Exported from `agentnova.core.__init__` as part of the public API
+  - Exported from `agentkthx.core.__init__` as part of the public API
 - **CLI integration**:
   - New `/security` slash command in chat mode: `/security` (show current), `/security max`, `/security off`
   - New `--security max|off` CLI flag for startup (in `shared_args.py`, wired in `_build_agent()`)
@@ -276,19 +448,19 @@ Fixes a critical defect in the OpenRouter backend where native tool calls were n
 
 #### Refactored Request/Response Helpers
 - **`_build_openai_body()`** — new method that centralizes OpenAI Chat-Completions request body construction. Adds optional fields (`top_p`, `top_k`, `seed`, `n`, `presence_penalty`, `frequency_penalty`, `stop`, `response_format`, `tool_choice`) only when explicitly provided. Keeps `generate()` and `generate_stream()` in sync.
-- **`_parse_openai_response()`** — new static method that parses an OpenAI-format response into the dict shape AgentNova's agent loop expects (`content`, `tool_calls`, `finish_reason`, `usage`, `raw`). Handles arguments as JSON string (OpenAI spec) or object (some providers), with `_raw` fallback for malformed JSON.
+- **`_parse_openai_response()`** — new static method that parses an OpenAI-format response into the dict shape AgentKthx's agent loop expects (`content`, `tool_calls`, `finish_reason`, `usage`, `raw`). Handles arguments as JSON string (OpenAI spec) or object (some providers), with `_raw` fallback for malformed JSON.
 
 ### File Changes Summary
 
 | Action | File | Changes |
 |--------|------|:-------:|
 | Updated | `pyproject.toml` | Version: 0.5.3 → 0.5.4 |
-| Updated | `agentnova/__init__.py` | Version 0.5.3 → 0.5.4, docstring R05.3 → R05.4 |
-| Updated | `agentnova/cli.py` | Docstring R05.3 → R05.4, added `_print_agent_steps()` + 2-line scroll-region footer (`_setup_footer_region`, `_teardown_footer_region`, `_update_footer`, `_position_for_input`), wired into `cmd_chat` + `cmd_run`, added `RuntimeError` handler in `cmd_run`, added `/security` slash command, `--security` flag wiring in `_build_agent()`, `/status` shows security mode, empty-answer detection |
-| Updated | `agentnova/core/helpers.py` | Added `SecurityMode` type, `_security_mode` flag, `set_security_mode()` / `get_security_mode()` / `_security_enabled()`; `sanitize_command()`, `validate_path()`, `is_safe_url()` now skip checks when mode is "off" |
-| Updated | `agentnova/core/__init__.py` | Exported `set_security_mode`, `get_security_mode`, `SecurityMode` |
-| Updated | `agentnova/shared_args.py` | Added `--security max\|off` CLI argument |
-| Updated | `agentnova/plugins/openrouter/openrouter.py` | Rewrote `generate()` (sends tools, parses tool_calls, ReAct fallback, empty-response detection), rewrote `_make_api_request()` (429 retry with Retry-After, extracts upstream error messages), rewrote `_parse_openai_response()` (surfaces `error` field, raises on missing choices), simplified `test_tool_support()` (returns NATIVE without probe), added `_build_openai_body()` + `_is_tools_not_supported_error()` helpers |
+| Updated | `agentkthx/__init__.py` | Version 0.5.3 → 0.5.4, docstring R05.3 → R05.4 |
+| Updated | `agentkthx/cli.py` | Docstring R05.3 → R05.4, added `_print_agent_steps()` + 2-line scroll-region footer (`_setup_footer_region`, `_teardown_footer_region`, `_update_footer`, `_position_for_input`), wired into `cmd_chat` + `cmd_run`, added `RuntimeError` handler in `cmd_run`, added `/security` slash command, `--security` flag wiring in `_build_agent()`, `/status` shows security mode, empty-answer detection |
+| Updated | `agentkthx/core/helpers.py` | Added `SecurityMode` type, `_security_mode` flag, `set_security_mode()` / `get_security_mode()` / `_security_enabled()`; `sanitize_command()`, `validate_path()`, `is_safe_url()` now skip checks when mode is "off" |
+| Updated | `agentkthx/core/__init__.py` | Exported `set_security_mode`, `get_security_mode`, `SecurityMode` |
+| Updated | `agentkthx/shared_args.py` | Added `--security max\|off` CLI argument |
+| Updated | `agentkthx/plugins/openrouter/openrouter.py` | Rewrote `generate()` (sends tools, parses tool_calls, ReAct fallback, empty-response detection), rewrote `_make_api_request()` (429 retry with Retry-After, extracts upstream error messages), rewrote `_parse_openai_response()` (surfaces `error` field, raises on missing choices), simplified `test_tool_support()` (returns NATIVE without probe), added `_build_openai_body()` + `_is_tools_not_supported_error()` helpers |
 | Updated | `README.md` | Title R05.3 → R05.4, added security mode docs, `--security` CLI option, R05.4 feature list |
 | Added | `tests/test_openrouter_backend.py` | 39 tests for OpenRouter backend, CLI helper, and security mode |
 | Updated | `docs/CHANGELOG.md` | Added R05.4 entry |
@@ -307,8 +479,8 @@ Updates all documentation and version banners to reflect the completed OpenRoute
 #### Version Numbers and Banners
 - **pyproject.toml** — Updated version from `0.5.2` to `0.5.3` for release preparation
 - **README.md** — Updated title from "R05.2" to "R05.3" and enhanced OpenRouter documentation
-- **CLI Banner** — Updated `agentnova/cli.py` docstring to show "AgentNova R05.3" 
-- **Main Module** — Updated `agentnova/__init__.py` docstring and `__version__` to "0.5.3"
+- **CLI Banner** — Updated `agentkthx/cli.py` docstring to show "AgentKthx R05.3" 
+- **Main Module** — Updated `agentkthx/__init__.py` docstring and `__version__` to "0.5.3"
 
 #### Documentation Enhancements
 - **OpenRouter Examples** — Added comprehensive usage examples showing different model types (OpenAI, Anthropic, Google)
@@ -332,8 +504,8 @@ export OPENROUTER_FREE_ONLY="1"
 |--------|------|:-------:|
 | Updated | `pyproject.toml` | Version: 0.5.2 → 0.5.3 |
 | Updated | `README.md` | Title, OpenRouter docs, changelog link |
-| Updated | `agentnova/cli.py` | Banner docstring |
-| Updated | `agentnova/__init__.py` | Version and docs |
+| Updated | `agentkthx/cli.py` | Banner docstring |
+| Updated | `agentkthx/__init__.py` | Version and docs |
 | Updated | `docs/CHANGELOG.md` | Added R05.3 entry |
 | **Total** | **5 files** | **Version and documentation updates** |
 
@@ -357,7 +529,7 @@ Adds the OpenRouter cloud backend as a first-class alternative to Ollama, enabli
 - **Rate Limit Handling** — comprehensive 429 error detection with `Retry-After` header support and descriptive error messages showing recommended wait times. Gracefully handles upstream provider rate limits without hard failures.
 - **Authentication Errors** — 401 errors produce clear messages directing users to check their `OPENROUTER_API_KEY` environment variable.
 - **CLI Integration** — `--backend openrouter` works across all subcommands (`chat`, `run`, `agent`, `models`). Backend choices dynamically include OpenRouter when the plugin is loaded.
-- **Public API Export** — `OpenRouterBackend` exported from `agentnova.__init__` for use in Python applications.
+- **Public API Export** — `OpenRouterBackend` exported from `agentkthx.__init__` for use in Python applications.
 - **Configuration Variables** — `OPENROUTER_BASE_URL`, `OPENROUTER_API_KEY`, `OPENROUTER_DEFAULT_MODEL`, `OPENROUTER_FREE_ONLY` with environment variable fallbacks.
 - **Endpoints**: `GET /models` (model discovery), `POST /chat/completions` (generation).
 
@@ -374,7 +546,7 @@ Adds the OpenRouter cloud backend as a first-class alternative to Ollama, enabli
 #### API Mode Default for OpenRouter (`cli.py`)
 - **Issue**: OpenRouter backend required explicit `--api openai` flag, failing with confusing error when using default `--api openre`.
 - **Fix**: OpenRouter backend now automatically defaults to OpenAI API mode. The `OPENROUTER_API_KEY` environment variable is the only requirement for basic usage.
-- **Impact**: Users can now run `agentnova chat --backend openrouter --model poolside/laguna-xs-2.1:free` without specifying API mode.
+- **Impact**: Users can now run `agentkthx chat --backend openrouter --model poolside/laguna-xs-2.1:free` without specifying API mode.
 
 #### Backend Footer Display (`plugins/openrouter/openrouter.py`)
 - **Issue**: Footer incorrectly showed "🔌 zai" instead of "🔌 openrouter" for OpenRouter backends.
@@ -383,7 +555,7 @@ Adds the OpenRouter cloud backend as a first-class alternative to Ollama, enabli
 
 #### Response Parsing (`plugins/openrouter/openrouter.py`)
 - **Issue**: Custom `generate()` method returned raw OpenRouter API response, causing empty content display despite successful API calls.
-- **Fix**: Modified `generate()` method to parse OpenRouter response and extract content from `choices[0].message.content`, returning the response in AgentNova's expected format.
+- **Fix**: Modified `generate()` method to parse OpenRouter response and extract content from `choices[0].message.content`, returning the response in AgentKthx's expected format.
 - **Response Format**: Returns `dict` with `content`, `tool_calls`, `usage`, and `raw` fields matching OllamaBackend's `generate_completions()` output format.
 - **Impact**: Model responses now display correctly in chat mode with proper content extraction.
 
@@ -403,31 +575,31 @@ Adds the OpenRouter cloud backend as a first-class alternative to Ollama, enabli
 #### Usage Examples
 ```bash
 # Basic chat with OpenRouter
-agentnova chat --backend openrouter --model poolside/laguna-xs-2.1:free
+agentkthx chat --backend openrouter --model poolside/laguna-xs-2.1:free
 
 # Chat with different model
-agentnova chat --backend openrouter --model openai/gpt-4o
+agentkthx chat --backend openrouter --model openai/gpt-4o
 
 # Run command
-agentnova run "What is 15 * 8?" --backend openrouter --model deepseek/deepseek-chat
+agentkthx run "What is 15 * 8?" --backend openrouter --model deepseek/deepseek-chat
 
 # List available models
-agentnova models --backend openrouter
+agentkthx models --backend openrouter
 
 # Free models only
-OPENROUTER_FREE_ONLY=1 agentnova models --backend openrouter
+OPENROUTER_FREE_ONLY=1 agentkthx models --backend openrouter
 ```
 
 ### File Changes Summary
 
 | Action | File | Changes |
 |--------|------|:-------:|
-| Created | `agentnova/plugins/openrouter/__init__.py` | +23 |
-| Created | `agentnova/plugins/openrouter/plugin.json` | +25 |
-| Created | `agentnova/plugins/openrouter/openrouter.py` | +678 |
-| Updated | `agentnova/shared_args.py` | +1 −1 |
-| Updated | `agentnova/cli.py` | +2 −0 |
-| Updated | `agentnova/__init__.py` | +1 −0 |
+| Created | `agentkthx/plugins/openrouter/__init__.py` | +23 |
+| Created | `agentkthx/plugins/openrouter/plugin.json` | +25 |
+| Created | `agentkthx/plugins/openrouter/openrouter.py` | +678 |
+| Updated | `agentkthx/shared_args.py` | +1 −1 |
+| Updated | `agentkthx/cli.py` | +2 −0 |
+| Updated | `agentkthx/__init__.py` | +1 −0 |
 | **Total** | **4 files** | **+730 −2** |
 
 ---
@@ -448,11 +620,11 @@ The largest architectural change since R04.0. Introduces a full plugin system wi
 
 #### Plugin System (`plugins/_loader.py`, `plugins/__init__.py`)
 - **`PluginManager`** — central singleton registry for plugin discovery, loading, dependency resolution, backend registration, CLI extension, and config aggregation. Plugin backends, CLI commands, and config defaults are all registered through the manager and merged transparently with native functionality.
-- **Manifest-based discovery** — each plugin ships a `plugin.json` with name, version, type, entrypoint, dependencies, config defaults, and capabilities (`provides.backends`, `provides.cli_commands`, `provides.cli_flags`). Plugins are discovered by scanning `agentnova/plugins/` for subdirectories containing a manifest.
+- **Manifest-based discovery** — each plugin ships a `plugin.json` with name, version, type, entrypoint, dependencies, config defaults, and capabilities (`provides.backends`, `provides.cli_commands`, `provides.cli_flags`). Plugins are discovered by scanning `agentkthx/plugins/` for subdirectories containing a manifest.
 - **Topological dependency resolution** — the `depends` field in plugin.json is respected via Kahn's algorithm. Missing hard dependencies cause the dependent plugin to be skipped with a warning. Circular dependencies are detected and rejected.
 - **Lazy loading** — plugins are loaded on first use. The `_ensure_plugin()` function in `backends/__init__.py` resolves backend names to plugin directories via manifest scan (e.g. `test-backend` maps to `test-plugin`), then loads only the required plugin.
 - **`register_backend(name, cls)`** — plugins register backend classes that integrate seamlessly with `get_backend()` and `--backend` CLI choices. Backend name is independent of plugin directory name, enabling a single plugin to provide multiple backends.
-- **`register_cli_command(name, handler, setup_parser)`** — plugins add subcommands to the `agentnova` CLI. Commands are wired into argparse at runtime in `main()` via the stashed `_SubParsersAction`, and plugin commands are marked with a `*` suffix in `--help` output.
+- **`register_cli_command(name, handler, setup_parser)`** — plugins add subcommands to the `agentkthx` CLI. Commands are wired into argparse at runtime in `main()` via the stashed `_SubParsersAction`, and plugin commands are marked with a `*` suffix in `--help` output.
 - **`register_config_defaults(env_prefix, defaults)`** — plugins contribute default environment variable values that are aggregated by the PluginManager for framework-wide access.
 - **`find_plugin_for_backend(backend_name)`** — reverse-maps a backend name to its plugin directory by scanning manifest `provides.backends`, solving the case where the backend name differs from the plugin directory name.
 - **Plugin types** — `backend` (registers inference backends), `feature` (extends framework with CLI commands, config), `tools` (future), `hook` (future). Lifecycle: `discover()` → `load(name)` → `register(manager)` → `[active]` → `unregister()` → `unload()`.
@@ -538,36 +710,36 @@ The largest architectural change since R04.0. Introduces a full plugin system wi
 | Action | File | Changes |
 |--------|------|:-------:|
 | Moved | `TESTS.md` → `docs/TESTS.md` | — |
-| Created | `agentnova/plugins/__init__.py` | +40 |
-| Created | `agentnova/plugins/_loader.py` | +563 |
-| Created | `agentnova/plugins/bitnet/__init__.py` | +20 |
-| Created | `agentnova/plugins/bitnet/bitnet.py` | +63 |
-| Created | `agentnova/plugins/bitnet/plugin.json` | +31 |
-| Created | `agentnova/plugins/zai/__init__.py` | +20 |
-| Created | `agentnova/plugins/zai/zai.py` | +835 |
-| Created | `agentnova/plugins/zai/plugin.json` | +33 |
-| Created | `agentnova/plugins/acp/__init__.py` | +31 |
-| Created | `agentnova/plugins/acp/acp_plugin.py` | +2397 |
-| Created | `agentnova/plugins/acp/plugin.json` | +28 |
-| Created | `agentnova/plugins/turboquant/__init__.py` | +36 |
-| Created | `agentnova/plugins/turboquant/turbo.py` | +694 |
-| Created | `agentnova/plugins/turboquant/plugin.json` | +28 |
-| Created | `agentnova/plugins/test-plugin/__init__.py` | +92 |
-| Created | `agentnova/plugins/test-plugin/plugin.json` | +31 |
-| Created | `agentnova/plugins/test-plugin/test_backend.py` | +52 |
+| Created | `agentkthx/plugins/__init__.py` | +40 |
+| Created | `agentkthx/plugins/_loader.py` | +563 |
+| Created | `agentkthx/plugins/bitnet/__init__.py` | +20 |
+| Created | `agentkthx/plugins/bitnet/bitnet.py` | +63 |
+| Created | `agentkthx/plugins/bitnet/plugin.json` | +31 |
+| Created | `agentkthx/plugins/zai/__init__.py` | +20 |
+| Created | `agentkthx/plugins/zai/zai.py` | +835 |
+| Created | `agentkthx/plugins/zai/plugin.json` | +33 |
+| Created | `agentkthx/plugins/acp/__init__.py` | +31 |
+| Created | `agentkthx/plugins/acp/acp_plugin.py` | +2397 |
+| Created | `agentkthx/plugins/acp/plugin.json` | +28 |
+| Created | `agentkthx/plugins/turboquant/__init__.py` | +36 |
+| Created | `agentkthx/plugins/turboquant/turbo.py` | +694 |
+| Created | `agentkthx/plugins/turboquant/plugin.json` | +28 |
+| Created | `agentkthx/plugins/test-plugin/__init__.py` | +92 |
+| Created | `agentkthx/plugins/test-plugin/plugin.json` | +31 |
+| Created | `agentkthx/plugins/test-plugin/test_backend.py` | +52 |
 | Created | `docs/PLUGIN_SPEC.md` | +462 |
 | Moved | `ARCH.md` → `docs/ARCH.md` | +12 |
 | Moved | `CREDITS.md` → `docs/CREDITS.md` | — |
 | Moved | `audit.md` → `docs/audit.md` | — |
 | Moved | `brief.md` → `docs/brief.md` | — |
-| Updated | `agentnova/__init__.py` | +14 −8 |
-| Updated | `agentnova/agent.py` | +68 −4 |
-| Updated | `agentnova/agent_mode.py` | +8 −0 |
-| Updated | `agentnova/backends/__init__.py` | +121 −46 |
-| Updated | `agentnova/cli.py` | +146 −8 |
-| Updated | `agentnova/config.py` | +89 −62 |
-| Updated | `agentnova/core/openresponses.py` | +8 −0 |
-| Updated | `agentnova/shared_args.py` | +3 −1 |
+| Updated | `agentkthx/__init__.py` | +14 −8 |
+| Updated | `agentkthx/agent.py` | +68 −4 |
+| Updated | `agentkthx/agent_mode.py` | +8 −0 |
+| Updated | `agentkthx/backends/__init__.py` | +121 −46 |
+| Updated | `agentkthx/cli.py` | +146 −8 |
+| Updated | `agentkthx/config.py` | +89 −62 |
+| Updated | `agentkthx/core/openresponses.py` | +8 −0 |
+| Updated | `agentkthx/shared_args.py` | +3 −1 |
 | Updated | `pyproject.toml` | +5 −1 |
 | Updated | `README.md` | +6 −2 |
 | Updated | `docs/CHANGELOG.md` | changelog entry |

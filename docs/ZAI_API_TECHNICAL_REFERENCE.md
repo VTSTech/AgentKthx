@@ -1,9 +1,9 @@
-# Z.AI API Technical Reference for AgentNova Implementation
+# Z.AI API Technical Reference for AgentKthx Implementation
 
 > **Technical Implementation Guide**  
 > **Generated from**: https://docs.z.ai  
 > **Last Updated**: 2026-09-19 3:00:48 PM
-> **Target Audience**: AgentNova Developers
+> **Target Audience**: AgentKthx Developers
 
 ## Table of Contents
 
@@ -15,7 +15,7 @@
 6. [Error Codes & Recovery](#error-codes--recovery)
 7. [Rate Limiting & Concurrency](#rate-limiting--concurrency)
 8. [Multimodal Content Handling](#multimodal-content-handling)
-9. [Implementation Notes for AgentNova](#implementation-notes-for-agentnova)
+9. [Implementation Notes for AgentKthx](#implementation-notes-for-agentkthx)
 10. [Troubleshooting Matrix](#troubleshooting-matrix)
 
 ---
@@ -268,7 +268,7 @@ class ZaiToolHandler:
         self.api_key = api_key
         
     def convert_to_zai_tools(self, agent_tools: list) -> list:
-        """Convert AgentNova tools to ZAI format"""
+        """Convert AgentKthx tools to ZAI format"""
         zai_tools = []
         for tool in agent_tools:
             if hasattr(tool, 'to_openai_schema'):
@@ -807,7 +807,7 @@ class ZaiMultimodalRequestBuilder:
 
 ---
 
-## Implementation Notes for AgentNova
+## Implementation Notes for AgentKthx
 
 ### 1. Backend Integration Points
 
@@ -910,8 +910,8 @@ def auto_detect_model_config(model_name: str) -> dict:
 ### 3. Tool Schema Compatibility
 
 ```python
-def convert_agentnova_tools_to_zai(tools: list) -> list:
-    """Convert AgentNova tool schema to ZAI format"""
+def convert_agentkthx_tools_to_zai(tools: list) -> list:
+    """Convert AgentKthx tool schema to ZAI format"""
     zai_tools = []
     
     for tool in tools:
@@ -922,7 +922,7 @@ def convert_agentnova_tools_to_zai(tools: list) -> list:
                 "function": tool.to_openai_schema()
             })
         else:
-            # Convert AgentNova format
+            # Convert AgentKthx format
             zai_tools.append({
                 "type": "function",
                 "function": {
@@ -1163,4 +1163,4 @@ class ZaiPerformanceMonitor:
 
 ---
 
-This technical reference provides the detailed implementation information needed to improve AgentNova's ZAI backend integration, focusing on practical implementation details rather than basic API documentation.
+This technical reference provides the detailed implementation information needed to improve AgentKthx's ZAI backend integration, focusing on practical implementation details rather than basic API documentation.

@@ -1,13 +1,13 @@
-# AgentNova Plugin Specification v0.1
+# AgentKthx Plugin Specification v0.1
 
 ## Overview
 
-AgentNova plugins extend the framework without modifying core code. Plugins can provide inference backends, CLI commands, configuration defaults, and tools. Discovery is done via directory scanning — no pip installation required (for now).
+AgentKthx plugins extend the framework without modifying core code. Plugins can provide inference backends, CLI commands, configuration defaults, and tools. Discovery is done via directory scanning — no pip installation required (for now).
 
 ## Directory Layout
 
 ```
-agentnova/plugins/
+agentkthx/plugins/
 ├── __init__.py          # Plugin types, exports
 ├── _loader.py           # PluginManager singleton
 ├── bitnet/              # Example: backend plugin
@@ -22,7 +22,7 @@ agentnova/plugins/
 ```
 
 **Rules:**
-- Each plugin lives in its own subdirectory under `agentnova/plugins/`
+- Each plugin lives in its own subdirectory under `agentkthx/plugins/`
 - Directories starting with `_` or `.` are skipped during discovery
 - Every plugin directory must contain a `plugin.json` manifest
 - The `plugin.json` file must be listed in `pyproject.toml` package-data
@@ -57,7 +57,7 @@ agentnova/plugins/
     }
   },
   "compatibility": {
-    "agentnova": ">=0.5.0"
+    "agentkthx": ">=0.5.0"
   }
 }
 ```
@@ -68,7 +68,7 @@ agentnova/plugins/
 |-------|------|----------|---------|-------------|
 | `name` | `string` | **Yes** | — | Unique plugin identifier (lowercase, hyphens ok). Must match the directory name. |
 | `version` | `string` | **Yes** | `"0.0.0"` | Semver version string. |
-| `display_name` | `string` | No | `name` | Human-readable name shown in `agentnova plugins`. |
+| `display_name` | `string` | No | `name` | Human-readable name shown in `agentkthx plugins`. |
 | `description` | `string` | **Yes** | `""` | Short description of what the plugin does. |
 | `author` | `string` | No | `""` | Plugin author. |
 | `license` | `string` | No | `""` | SPDX license identifier. |
@@ -99,7 +99,7 @@ Registers an inference backend class that can be selected via `--backend <name>`
 }
 ```
 
-The backend class must be a subclass of `BaseBackend` (defined in `agentnova/backends/base.py`).
+The backend class must be a subclass of `BaseBackend` (defined in `agentkthx/backends/base.py`).
 
 ### `feature`
 
@@ -179,7 +179,7 @@ Maps backend names to class paths (relative to the plugin directory). The class 
 }
 ```
 
-Lists CLI subcommand names that the plugin registers. These appear in `agentnova --help`.
+Lists CLI subcommand names that the plugin registers. These appear in `agentkthx --help`.
 
 ### `cli_flags`
 
@@ -217,19 +217,19 @@ Extends the valid values for CLI flags. Currently supports `"--backend"` to add 
 ```json
 {
   "compatibility": {
-    "agentnova": ">=0.5.0"
+    "agentkthx": ">=0.5.0"
   }
 }
 ```
 
-Declares the minimum AgentNova version required (future: enforced at load time).
+Declares the minimum AgentKthx version required (future: enforced at load time).
 
 ## PluginManager API
 
 The `PluginManager` is a singleton accessed via `get_plugin_manager()`.
 
 ```python
-from agentnova.plugins import get_plugin_manager
+from agentkthx.plugins import get_plugin_manager
 
 pm = get_plugin_manager()
 ```
@@ -327,11 +327,11 @@ The PluginManager resolves dependencies using **topological sort** (Kahn's algor
 
 ## Packaging
 
-Plugins are included in the AgentNova wheel via `pyproject.toml`:
+Plugins are included in the AgentKthx wheel via `pyproject.toml`:
 
 ```toml
 [tool.setuptools.package-data]
-agentnova = [
+agentkthx = [
     "py.typed",
     "skills/*/SKILL.md",
     "souls/*/soul.json",
@@ -340,7 +340,7 @@ agentnova = [
 ]
 ```
 
-Both the Python modules and `plugin.json` files are shipped. The Python modules are automatically included because `agentnova.*` is in the package find pattern.
+Both the Python modules and `plugin.json` files are shipped. The Python modules are automatically included because `agentkthx.*` is in the package find pattern.
 
 ## Writing a Plugin — Step by Step
 
@@ -349,7 +349,7 @@ Both the Python modules and `plugin.json` files are shipped. The Python modules 
 **1. Create the directory:**
 
 ```
-agentnova/plugins/my-backend/
+agentkthx/plugins/my-backend/
 ```
 
 **2. Create `plugin.json`:**
@@ -388,7 +388,7 @@ def unregister(manager) -> None:
 **4. Create `backend.py`:**
 
 ```python
-from agentnova.backends.base import BaseBackend, BackendConfig
+from agentkthx.backends.base import BaseBackend, BackendConfig
 
 
 class MyBackend(BaseBackend):
@@ -409,8 +409,8 @@ class MyBackend(BaseBackend):
 **5. Verify:**
 
 ```bash
-agentnova plugins          # Should list my-backend
-agentnova --backend my-backend run "Hello"
+agentkthx plugins          # Should list my-backend
+agentkthx --backend my-backend run "Hello"
 ```
 
 ### Minimal Feature Plugin (CLI Command)
@@ -448,12 +448,12 @@ def unregister(manager) -> None:
 
 | Component | Location | Loaded By |
 |-----------|----------|-----------|
-| Ollama backend | `agentnova/backends/ollama.py` | Core — always available |
-| llama-server backend | `agentnova/backends/llama_server.py` | Core — always available |
-| BitNet backend | `agentnova/plugins/bitnet/` | Plugin — loaded on demand |
-| ZAI backend | `agentnova/plugins/zai/` | Plugin — loaded on demand |
-| TurboQuant | `agentnova/plugins/turboquant/` | Plugin — loaded on demand |
-| ACP integration | `agentnova/plugins/acp/` | Plugin — loaded on demand |
+| Ollama backend | `agentkthx/backends/ollama.py` | Core — always available |
+| llama-server backend | `agentkthx/backends/llama_server.py` | Core — always available |
+| BitNet backend | `agentkthx/plugins/bitnet/` | Plugin — loaded on demand |
+| ZAI backend | `agentkthx/plugins/zai/` | Plugin — loaded on demand |
+| TurboQuant | `agentkthx/plugins/turboquant/` | Plugin — loaded on demand |
+| ACP integration | `agentkthx/plugins/acp/` | Plugin — loaded on demand |
 
 Core backends cannot be removed or overridden by plugins. Plugin backends are additive.
 

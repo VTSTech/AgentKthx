@@ -14,9 +14,9 @@ import sys
 import unittest
 from unittest.mock import patch, MagicMock
 
-from agentnova.plugins.openrouter.openrouter import OpenRouterBackend
-from agentnova.core.models import Tool, ToolParam
-from agentnova.core.types import ToolSupportLevel
+from agentkthx.plugins.openrouter.openrouter import OpenRouterBackend
+from agentkthx.core.models import Tool, ToolParam
+from agentkthx.core.types import ToolSupportLevel
 
 
 def _make_tool() -> Tool:
@@ -249,7 +249,7 @@ class TestGenerateFlow(unittest.TestCase):
     def _backend(self):
         b = OpenRouterBackend.__new__(OpenRouterBackend)
         b.api_key = "test-key"
-        from agentnova.backends.base import BackendConfig
+        from agentkthx.backends.base import BackendConfig
         b.config = BackendConfig()
         return b
 
@@ -419,44 +419,44 @@ class TestSecurityMode(unittest.TestCase):
 
     def setUp(self):
         """Reset to 'max' before each test so tests don't bleed into each other."""
-        from agentnova.core.helpers import set_security_mode
+        from agentkthx.core.helpers import set_security_mode
         set_security_mode("max")
 
     def tearDown(self):
         """Reset to 'max' after each test for safety."""
-        from agentnova.core.helpers import set_security_mode
+        from agentkthx.core.helpers import set_security_mode
         set_security_mode("max")
 
     def test_default_mode_is_max(self):
-        from agentnova.core.helpers import get_security_mode
+        from agentkthx.core.helpers import get_security_mode
         self.assertEqual(get_security_mode(), "max")
 
     def test_set_mode_off(self):
-        from agentnova.core.helpers import set_security_mode, get_security_mode
+        from agentkthx.core.helpers import set_security_mode, get_security_mode
         set_security_mode("off")
         self.assertEqual(get_security_mode(), "off")
 
     def test_set_mode_max(self):
-        from agentnova.core.helpers import set_security_mode, get_security_mode
+        from agentkthx.core.helpers import set_security_mode, get_security_mode
         set_security_mode("off")
         set_security_mode("max")
         self.assertEqual(get_security_mode(), "max")
 
     def test_invalid_mode_raises(self):
-        from agentnova.core.helpers import set_security_mode
+        from agentkthx.core.helpers import set_security_mode
         with self.assertRaises(ValueError):
             set_security_mode("strict")  # not a valid mode
 
     def test_sanitize_command_max_mode_rejects_injection(self):
         """In max mode, && is rejected as a shell injection pattern."""
-        from agentnova.core.helpers import sanitize_command
+        from agentkthx.core.helpers import sanitize_command
         safe, err, _ = sanitize_command("echo hi && pwd")
         self.assertFalse(safe)
         self.assertIn("injection", err.lower())
 
     def test_sanitize_command_off_mode_allows_injection(self):
         """In off mode, && is allowed (no checks performed)."""
-        from agentnova.core.helpers import set_security_mode, sanitize_command
+        from agentkthx.core.helpers import set_security_mode, sanitize_command
         set_security_mode("off")
         safe, err, cmd = sanitize_command("echo hi && pwd")
         self.assertTrue(safe)
@@ -465,7 +465,7 @@ class TestSecurityMode(unittest.TestCase):
 
     def test_sanitize_command_off_mode_allows_pipes(self):
         """In off mode, pipe | is allowed."""
-        from agentnova.core.helpers import set_security_mode, sanitize_command
+        from agentkthx.core.helpers import set_security_mode, sanitize_command
         set_security_mode("off")
         safe, _, cmd = sanitize_command("ls -la | grep test")
         self.assertTrue(safe)
@@ -473,7 +473,7 @@ class TestSecurityMode(unittest.TestCase):
 
     def test_sanitize_command_off_mode_still_rejects_empty(self):
         """Empty command is rejected even in off mode (it's not a security check)."""
-        from agentnova.core.helpers import set_security_mode, sanitize_command
+        from agentkthx.core.helpers import set_security_mode, sanitize_command
         set_security_mode("off")
         safe, err, _ = sanitize_command("")
         self.assertFalse(safe)
@@ -481,14 +481,14 @@ class TestSecurityMode(unittest.TestCase):
 
     def test_validate_path_max_mode_rejects_traversal(self):
         """In max mode, path traversal (../) is rejected."""
-        from agentnova.core.helpers import validate_path
+        from agentkthx.core.helpers import validate_path
         safe, err = validate_path("../../../etc/passwd")
         self.assertFalse(safe)
         self.assertIn("traversal", err.lower())
 
     def test_validate_path_off_mode_allows_traversal(self):
         """In off mode, path traversal is allowed."""
-        from agentnova.core.helpers import set_security_mode, validate_path
+        from agentkthx.core.helpers import set_security_mode, validate_path
         set_security_mode("off")
         safe, err = validate_path("../../../etc/passwd")
         self.assertTrue(safe)
@@ -496,14 +496,14 @@ class TestSecurityMode(unittest.TestCase):
 
     def test_is_safe_url_max_mode_rejects_localhost(self):
         """In max mode, localhost is blocked by SSRF protection."""
-        from agentnova.core.helpers import is_safe_url
+        from agentkthx.core.helpers import is_safe_url
         safe, err = is_safe_url("http://127.0.0.1:8080/admin")
         self.assertFalse(safe)
         self.assertIn("ssrf", err.lower())
 
     def test_is_safe_url_off_mode_allows_localhost(self):
         """In off mode, localhost is allowed."""
-        from agentnova.core.helpers import set_security_mode, is_safe_url
+        from agentkthx.core.helpers import set_security_mode, is_safe_url
         set_security_mode("off")
         safe, _ = is_safe_url("http://127.0.0.1:8080/admin")
         self.assertTrue(safe)
@@ -515,7 +515,7 @@ class TestTestToolSupport(unittest.TestCase):
     def _backend(self):
         b = OpenRouterBackend.__new__(OpenRouterBackend)
         b.api_key = "test-key"
-        from agentnova.backends.base import BackendConfig
+        from agentkthx.backends.base import BackendConfig
         b.config = BackendConfig()
         return b
 
@@ -543,8 +543,8 @@ class TestPrintAgentSteps(unittest.TestCase):
 
     def _make_run(self, steps):
         """Build a minimal AgentRun-like object with the given steps."""
-        from agentnova.core.models import AgentRun, StepResult, ToolCall
-        from agentnova.core.types import StepResultType
+        from agentkthx.core.models import AgentRun, StepResult, ToolCall
+        from agentkthx.core.types import StepResultType
         return AgentRun(
             final_answer="done",
             steps=steps,
@@ -555,8 +555,8 @@ class TestPrintAgentSteps(unittest.TestCase):
         )
 
     def _make_tool_step(self, name, args, result):
-        from agentnova.core.models import StepResult, ToolCall
-        from agentnova.core.types import StepResultType
+        from agentkthx.core.models import StepResult, ToolCall
+        from agentkthx.core.types import StepResultType
         return StepResult(
             type=StepResultType.TOOL_CALL,
             tool_call=ToolCall(name=name, arguments=args),
@@ -576,7 +576,7 @@ class TestPrintAgentSteps(unittest.TestCase):
 
     def test_prints_tool_calls_when_present(self):
         """A run with tool calls should print each call + truncated result."""
-        from agentnova.cli import _print_agent_steps
+        from agentkthx.cli import _print_agent_steps
         run = self._make_run([
             self._make_tool_step("shell", {"command": "echo hi"}, "hi\n"),
             self._make_tool_step("read_file", {"file_path": "/tmp/x"}, "file contents"),
@@ -590,7 +590,7 @@ class TestPrintAgentSteps(unittest.TestCase):
 
     def test_prints_nothing_in_debug_mode(self):
         """In debug mode the agent already prints verbose output — skip."""
-        from agentnova.cli import _print_agent_steps
+        from agentkthx.cli import _print_agent_steps
         run = self._make_run([
             self._make_tool_step("shell", {"command": "echo hi"}, "hi"),
         ])
@@ -599,9 +599,9 @@ class TestPrintAgentSteps(unittest.TestCase):
 
     def test_prints_nothing_when_no_tool_calls(self):
         """A run with no tool calls (just text answer) prints nothing."""
-        from agentnova.cli import _print_agent_steps
-        from agentnova.core.models import StepResult
-        from agentnova.core.types import StepResultType
+        from agentkthx.cli import _print_agent_steps
+        from agentkthx.core.models import StepResult
+        from agentkthx.core.types import StepResultType
         run = self._make_run([
             StepResult(type=StepResultType.FINAL_ANSWER, content="answer"),
         ])
@@ -610,7 +610,7 @@ class TestPrintAgentSteps(unittest.TestCase):
 
     def test_truncates_long_tool_results(self):
         """Tool results longer than 200 chars are truncated for display."""
-        from agentnova.cli import _print_agent_steps
+        from agentkthx.cli import _print_agent_steps
         long_result = "x" * 500
         run = self._make_run([
             self._make_tool_step("shell", {"command": "cat big"}, long_result),
@@ -623,7 +623,7 @@ class TestPrintAgentSteps(unittest.TestCase):
 
     def test_truncates_long_args(self):
         """Tool args JSON longer than 120 chars are truncated."""
-        from agentnova.cli import _print_agent_steps
+        from agentkthx.cli import _print_agent_steps
         long_arg = "y" * 200
         run = self._make_run([
             self._make_tool_step("shell", {"command": long_arg}, "ok"),

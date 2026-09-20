@@ -7,15 +7,15 @@ Written by VTSTech — https://www.vts-tech.org
 
 import pytest
 from unittest.mock import Mock, patch, MagicMock
-from agentnova.core.types import StepResultType, ApiMode
-from agentnova.core.models import Tool, ToolParam
-from agentnova.core.openresponses import (
+from agentkthx.core.types import StepResultType, ApiMode
+from agentkthx.core.models import Tool, ToolParam
+from agentkthx.core.openresponses import (
     Response, ResponseStatus, ItemStatus,
     ToolChoice, ToolChoiceType,
     MessageItem, FunctionCallItem, FunctionCallOutputItem,
     stream_response_events, EventType,
 )
-from agentnova.backends.ollama import OllamaBackend
+from agentkthx.backends.ollama import OllamaBackend
 
 
 class TestOpenResponsesStreaming:
@@ -235,14 +235,14 @@ class TestToolChoiceEnforcement:
 
     def test_tool_choice_required_enforcement(self):
         """Test that tool_choice='required' enforces tool usage."""
-        from agentnova.core.openresponses import ToolChoice, ToolChoiceType
+        from agentkthx.core.openresponses import ToolChoice, ToolChoiceType
         
         tc = ToolChoice("required")
         assert tc.type == ToolChoiceType.REQUIRED
 
     def test_tool_choice_none_enforcement(self):
         """Test that tool_choice='none' blocks tools."""
-        from agentnova.core.openresponses import ToolChoice, ToolChoiceType
+        from agentkthx.core.openresponses import ToolChoice, ToolChoiceType
         
         tc = ToolChoice("none")
         assert tc.type == ToolChoiceType.NONE
@@ -336,7 +336,7 @@ class TestResponseItems:
 
     def test_message_item_creation(self):
         """Test MessageItem creation."""
-        from agentnova.core.openresponses import create_message_item, OutputText
+        from agentkthx.core.openresponses import create_message_item, OutputText
         
         item = create_message_item("assistant", "Hello!")
         
@@ -348,7 +348,7 @@ class TestResponseItems:
 
     def test_function_call_item_creation(self):
         """Test FunctionCallItem creation."""
-        from agentnova.core.openresponses import create_function_call_item
+        from agentkthx.core.openresponses import create_function_call_item
         
         item = create_function_call_item("calculator", {"expr": "2+2"})
         
@@ -358,7 +358,7 @@ class TestResponseItems:
 
     def test_function_call_output_item_creation(self):
         """Test FunctionCallOutputItem creation."""
-        from agentnova.core.openresponses import create_function_call_output
+        from agentkthx.core.openresponses import create_function_call_output
         
         item = create_function_call_output("call_123", "4")
         
@@ -368,7 +368,7 @@ class TestResponseItems:
 
     def test_response_output_items(self):
         """Test adding items to Response output."""
-        from agentnova.core.openresponses import create_message_item
+        from agentkthx.core.openresponses import create_message_item
         
         response = Response(model="test")
         

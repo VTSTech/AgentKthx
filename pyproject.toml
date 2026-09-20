@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "agentnova"
-version = "0.5.7"
-description = "⚛️ AgentNova - A minimal, hackable agentic framework for local LLM inference"
+name = "agentkthx"
+version = "0.6.0"
+description = "⚛️ AgentKthx - A minimal, hackable agentic framework for local LLM inference"
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
@@ -25,6 +25,8 @@ keywords = [
     "autonomous",
     "agentic",
     "ai-agent",
+    "kthx",
+    "agentkthx",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -54,22 +56,30 @@ dev = [
 
 [project.urls]
 Homepage = "https://www.vts-tech.org"
-Documentation = "https://github.com/VTSTech/AgentNova#readme"
-Repository = "https://github.com/VTSTech/AgentNova"
-Issues = "https://github.com/VTSTech/AgentNova/issues"
+Documentation = "https://github.com/VTSTech/AgentKthx#readme"
+Repository = "https://github.com/VTSTech/AgentKthx"
+Issues = "https://github.com/VTSTech/AgentKthx/issues"
 
 [project.scripts]
-agentnova = "agentnova.cli:main"
+# Primary CLI binary
+agentkthx = "agentkthx.cli:main"
+# Backward-compat redirects (still installed by this package)
+agentnova = "agentnova:main"
 localclaw = "localclaw:main"
 
+[project.entry-points."agentkthx.backends"]
+ollama = "agentkthx.backends.ollama:OllamaBackend"
+
+# Backward-compat entry point name (so existing agentnova-based installs
+# still register the ollama backend entry point).
 [project.entry-points."agentnova.backends"]
-ollama = "agentnova.backends.ollama:OllamaBackend"
+ollama = "agentkthx.backends.ollama:OllamaBackend"
 
 [tool.setuptools.packages.find]
-include = ["agentnova", "agentnova.*", "localclaw"]
+include = ["agentkthx", "agentkthx.*", "agentnova", "localclaw"]
 
 [tool.setuptools.package-data]
-agentnova = ["py.typed", "skills/*/SKILL.md", "souls/*/soul.json", "souls/*/*.md", "plugins/*/plugin.json"]
+agentkthx = ["py.typed", "skills/*/SKILL.md", "souls/*/soul.json", "souls/*/*.md", "plugins/*/plugin.json"]
 
 [tool.black]
 line-length = 100

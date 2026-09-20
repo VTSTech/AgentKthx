@@ -51,19 +51,19 @@ via ZAI, free OpenRouter models, local Ollama models, etc.).
 
 ```bash
 # Free ZAI model + JEV mode
-agentnova run "Classify this email: 'You won a prize!'" \
+agentkthx run "Classify this email: 'You won a prize!'" \
     --api jev \
     --backend zai \
     --model glm-4.5-flash
 
 # Free OpenRouter model + JEV mode
-agentnova run "Is this a bug or feature request?" \
+agentkthx run "Is this a bug or feature request?" \
     --api jev \
     --backend openrouter \
     --model poolside/laguna-xs-2.1:free
 
 # Local Ollama model + JEV mode
-agentnova run "Route this ticket to math, file, or general agent" \
+agentkthx run "Route this ticket to math, file, or general agent" \
     --api jev \
     --backend ollama \
     --model qwen2.5:0.5b
@@ -74,7 +74,7 @@ Output is a JSON decision envelope (printed as the `content` field).
 ### Python API — direct decision call
 
 ```python
-from agentnova.backends import get_backend
+from agentkthx.backends import get_backend
 
 # ZAI free model
 backend = get_backend("zai", api_mode="jev")
@@ -94,7 +94,7 @@ print(decision["alternatives"])  # [{"value": "promotions", "probability": 0.06}
 ### Python API — within an agent pipeline
 
 ```python
-from agentnova import Agent, Orchestrator, AgentCard
+from agentkthx import Agent, Orchestrator, AgentCard
 
 # Use JEV for routing decisions inside an orchestrator
 router = get_backend("openrouter", api_mode="jev")
@@ -129,7 +129,7 @@ if confidence < 0.5:
 ### Architecture
 
 ```
-agentnova run "..." --api jev --backend zai -m glm-4.5-flash
+agentkthx run "..." --api jev --backend zai -m glm-4.5-flash
                             │
                             ▼
               ZaiBackend(api_mode="jev")
@@ -282,14 +282,32 @@ export OPENROUTER_FREE_ONLY=1                # restrict to :free models
    GLM-4.5-flash producing 319 reasoning tokens vs ~80 tokens of actual
    decision JSON, inflating latency to ~22s for a trivial classification.
 
-   **Workaround**: For models that support it, pass `think=False`:
+   **Workaround** (R05.8+): Use `--thinking off` to disable thinking entirely
+   at the CLI level. This drops GLM-4.5-flash latency from ~22s to ~2-3s on
+   trivial decisions:
+
+   ```bash
+   agentkthx run "Is this spam?" \
+       --api jev --backend zai -m glm-4.5-flash --thinking off
+   ```
+
+   Programmatic callers can pass `think=False` directly:
+
    ```python
    decision = backend.generate_decision(
        model="glm-4.5-flash",
        state="...",
        choices=["a", "b"],
-       think=False,  # disable reasoning
+       think=False,  # disable reasoning for fast decisions
    )
+   ```
+
+   To inspect the reasoning_content (when you DO want to see what the
+   model was thinking), use `--think` to display it in CLI output:
+
+   ```bash
+   agentkthx run "Is this spam?" \
+       --api jev --backend zai -m glm-4.5-flash --think
    ```
 
 ## Testing
@@ -299,7 +317,7 @@ export OPENROUTER_FREE_ONLY=1                # restrict to :free models
 python -m pytest tests/test_jev_api_mode.py -v
 
 # Quick smoke test (requires ZAI API key)
-agentnova run "Is 15 * 8 = 120? Answer yes or no." \
+agentkthx run "Is 15 * 8 = 120? Answer yes or no." \
     --api jev --backend zai -m glm-4.5-flash
 ```
 
@@ -308,7 +326,7 @@ agentnova run "Is 15 * 8 = 120? Answer yes or no." \
 **Smoke test** — 2026-09-20, ZAI free tier (GLM-4.5-flash):
 
 ```bash
-$ agentnova run "Is 'You won a prize' spam or inbox?" \
+$ agentkthx run "Is 'You won a prize' spam or inbox?" \
     --api jev --backend zai -m glm-4.5-flash
 ```
 
@@ -330,7 +348,7 @@ succeeded on the first attempt — no markdown fence stripping needed.
 
 ## Future work
 
-- **Native Jev plugin** — A future `agentnova/plugins/jev/` plugin could
+- **Native Jev plugin** — A future `agentkthx/plugins/jev/` plugin could
   hit TypeSafe's real `/v1/systemone` endpoint for users who want to pay
   for native calibrated decisions. This would override `generate_decision()`
   to skip the LLM wrapper and call the decision endpoint directly.

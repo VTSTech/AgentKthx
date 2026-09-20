@@ -1,4 +1,4 @@
-# Codebase Intelligence Brief: AgentNova
+# Codebase Intelligence Brief: AgentKthx
 
 > Generated: 2026-04-15 | Auditor: Super-Z | Commit: 91bc48e (R04.7)
 
@@ -10,10 +10,10 @@
 |-------|-------|
 | **Purpose** | Minimal, hackable agentic framework for running AI agents with Ollama, BitNet, llama-server/TurboQuant, or ZAI cloud backends. Includes TurboQuant server lifecycle management, Ollama model registry, and a skill/soul persona system. |
 | **Tech Stack** | Python 3.9+, zero runtime dependencies (stdlib only: urllib, json, subprocess, dataclasses, threading, sqlite3, ast, mmap, struct, concurrent.futures) |
-| **Entry Point** | `agentnova/cli.py:main` (CLI) or `from agentnova import Agent` (Python API) |
+| **Entry Point** | `agentkthx/cli.py:main` (CLI) or `from agentkthx import Agent` (Python API) |
 | **Build/Run** | `pip install -e ".[dev]"` (dev: pytest, black, ruff) |
-| **Test Command** | `pytest` (unit) or `python -m agentnova.examples.01_quick_diagnostic` (integration) |
-| **Package** | PyPI: `agentnova` · CLI entry points: `agentnova` + `localclaw` (backward-compat) |
+| **Test Command** | `pytest` (unit) or `python -m agentkthx.examples.01_quick_diagnostic` (integration) |
+| **Package** | PyPI: `agentkthx` · CLI entry points: `agentkthx` + `localclaw` (backward-compat) |
 | **Version** | 0.4.7 (R04.7) · Status: Alpha |
 
 ---
@@ -21,7 +21,7 @@
 ## Architecture Map
 
 ```
-agentnova/
+agentkthx/
 ├── core/           → Data types, models, memory, tool parsing, security helpers, OpenResponses spec, persistent memory (SQLite), model family config
 ├── tools/          → Tool registry (decorator-based), 17 built-in tools, sandboxed Python REPL
 ├── backends/       → LLM inference backends (Ollama, LlamaServer, ZAI cloud) with dual API (OpenResponses + OpenAI Chat-Completions)
@@ -48,7 +48,7 @@ model_discovery.py  → Ollama model listing, fuzzy model name matching, benchma
 - `localclaw/`, `localclaw-redirect/` — legacy backward-compat redirects, just re-exports
 - `audit/` — contains audit page images, not code
 - `tests/` — standard pytest unit tests, not critical for framework understanding
-- `.git/`, `AgentNova.ipynb` — Colab notebook, not core code
+- `.git/`, `AgentKthx.ipynb` — Colab notebook, not core code
 - `patches/` — TurboQuant patches for external projects
 - All `__pycache__/` directories
 
@@ -56,7 +56,7 @@ model_discovery.py  → Ollama model listing, fuzzy model name matching, benchma
 
 ## Critical Files Index
 
-### `agentnova/agent.py` — Core Agentic Loop (~1608 lines)
+### `agentkthx/agent.py` — Core Agentic Loop (~1608 lines)
 - **Purpose**: Implements the entire agentic loop. Every tool call, Final Answer extraction, error recovery, and tool_choice enforcement flows through here.
 - **Blast radius**: Imported by `cli.py`, `orchestrator.py`, `agent_mode.py`. Every CLI command creates an Agent instance.
 - **Key signatures**:
@@ -74,7 +74,7 @@ model_discovery.py  → Ollama model listing, fuzzy model name matching, benchma
 - **R04.7 fix**: When `_is_comp_mode` is True AND model has native tool support, ReAct format instructions (`Action:/Action Input:`) are suppressed in both the default prompt path and soul loader path. This was a critical bug — native-capable models (e.g. glm-4.5-flash) were forced into text ReAct by system prompt injection, losing parallel tool calls and structured argument typing.
 - **Gotchas**: `tools` param accepts 4 types (`ToolRegistry | list[str] | list[Tool] | None`). `response_format` and tools are **mutually exclusive** (lines 232-236). BitNet detection checks MODEL FAMILY via `detect_family(model)`, NOT backend type. Non-BitNet models on the BitNet backend get full context/prompts.
 
-### `agentnova/backends/zai.py` — ZAI Cloud Backend (814 lines) **[NEW in R04.6, expanded R04.7]**
+### `agentkthx/backends/zai.py` — ZAI Cloud Backend (814 lines) **[NEW in R04.6, expanded R04.7]**
 - **Purpose**: Cloud backend for ZAI API (api.z.ai). OpenAI Chat-Completions compatible with Bearer auth, dynamic model discovery, free-only mode, and auto-fallback on credit exhaustion.
 - **Blast radius**: Imported by `backends/__init__.py` (registered as `"zai"`), `__init__.py` (public export), `cli.py` (all subcommands).
 - **Inheritance quirk**: Calls `super(OllamaBackend, self).__init__()` — skips Ollama's init, goes straight to `BaseBackend`. Reuses OpenAI completion logic from parent without Ollama server setup.
@@ -91,84 +91,84 @@ model_discovery.py  → Ollama model listing, fuzzy model name matching, benchma
 - **Always OPENAI mode**: Forces `ApiMode.OPENAI`, ignores `--api openre`.
 - **Endpoints**: `POST /api/paas/v4/chat/completions`, `GET /api/paas/v4/models`.
 
-### `agentnova/turbo.py` — TurboQuant Server Lifecycle Manager (694 lines) **[R04.5, updated R04.6]**
+### `agentkthx/turbo.py` — TurboQuant Server Lifecycle Manager (694 lines) **[R04.5, updated R04.6]**
 - **Purpose**: End-to-end lifecycle management for llama-cpp-turboquant server. Detached subprocess management, persistent state, auto KV cache detection.
-- **R04.6 additions**: TurboState schema versioning (`_version: int = 1`). `load()` rejects files from newer AgentNova versions. Forward-compatible: ignores unknown keys. Server logs now append to `~/.agentnova/turbo.log` (was DEVNULL).
+- **R04.6 additions**: TurboState schema versioning (`_version: int = 1`). `load()` rejects files from newer AgentKthx versions. Forward-compatible: ignores unknown keys. Server logs now append to `~/.agentkthx/turbo.log` (was DEVNULL).
 - **Blast radius**: Imported by `cli.py` (cmd_turbo). Standalone module.
 - **Gotchas**: Server starts detached (`start_new_session=True`). Health check polls `/health` endpoint. Reads Ollama manifests directly from `~/.ollama/models/`. No dependency on Ollama being running.
 
-### `agentnova/backends/ollama_registry.py` — Ollama Model Registry (481 lines) **[R04.5]**
+### `agentkthx/backends/ollama_registry.py` — Ollama Model Registry (481 lines) **[R04.5]**
 - **Purpose**: Discovers Ollama models by reading manifest files, resolves GGUF blob paths, reads binary headers via `mmap`. Provides TurboQuant compatibility checking and recommended KV cache configuration.
 - **Blast radius**: Imported by `turbo.py` (primary consumer). Standalone module.
 - **Gotchas**: `_GGUF_MAGIC = 0x46554747` (little-endian "GGUF"). `_parse_ollama_name()` handles `library/repo:tag` format. `_filename_heuristic()` has 47 candidate patterns. `_TURBO_D = 128` (TurboQuant head_dim minimum).
 
-### `agentnova/core/tool_parse.py` — Tool Call Extraction (688 lines)
+### `agentkthx/core/tool_parse.py` — Tool Call Extraction (688 lines)
 - **Purpose**: Parses tool calls from model text output in 4+ formats. Central to how ReAct tool calling works.
 - **Blast radius**: Only imported by `agent.py`, but critical to it.
 - **Supported formats**: Plain ReAct, JSON-wrapped ReAct, Markdown code block JSON, simultaneous tool call + Final Answer.
 - **R04.4 change**: Added `ast.literal_eval` fallback for single-quote Python dicts.
 - **Gotchas**: If model outputs both a tool call AND `Final Answer:`, the Final Answer takes priority.
 
-### `agentnova/core/helpers.py` — Fuzzy Matching, Arg Normalization, Security
+### `agentkthx/core/helpers.py` — Fuzzy Matching, Arg Normalization, Security
 - **Purpose**: God-module for small model support. Fuzzy tool name matching, argument normalization, security utilities, repetition detection.
 - **Blast radius**: Imported by `builtins.py`, `tool_parse.py`, `agent.py`, and transitively everything.
 - **Gotchas**: `sanitize_command()` returns the ORIGINAL command unmodified — security is purely rejection-based. `validate_path()` allows `/tmp`, `/home`, and system temp dirs.
 
-### `agentnova/core/model_family_config.py` — Unified Model Family Configuration (530 lines)
+### `agentkthx/core/model_family_config.py` — Unified Model Family Configuration (530 lines)
 - **Purpose**: Single source of truth for all model-family-specific settings: stop tokens, prompt formatting, tool format, temperature, thinking modes. 10 families: gemma3, granite, granitemoe, qwen2, qwen3, qwen35, llama, dolphin, deepseek-r1, deepseek.
 - **Blast radius**: Imported by `agent.py`, `backends/ollama.py`, `backends/llama_server.py`, `core/tool_parse.py`.
 - **Gotchas**: `detect_family()` returns most specific family string (e.g. "qwen2.5") but `FAMILY_CONFIGS` stores base families. `get_family_config()` bridges via partial matching. Family alias: `bitnet → llama`.
 
-### `agentnova/core/prompts.py` — System Prompt Templates (386 lines)
+### `agentkthx/core/prompts.py` — System Prompt Templates (386 lines)
 - **Purpose**: Tool argument aliases (~100+), few-shot examples, system prompt builders.
 - **R04.7 change**: `get_tool_prompt(tools, tool_support, family)` — the `tool_support` parameter is now **functional**. When `tool_support` is `"native"` or `"openai"`, ReAct format instructions and `FEW_SHOT_COMPACT` examples are skipped. Tool reference table still included.
 - **Gotchas**: `TOOL_ARG_ALIASES` maps natural language to canonical param names. `CONTEXTUAL_ALIASES` applied only when no real params matched.
 
-### `agentnova/soul/loader.py` — Soul Loader (1067 lines)
+### `agentkthx/soul/loader.py` — Soul Loader (1067 lines)
 - **Purpose**: ClawSouls Soul Spec v0.5 parser. Progressive disclosure (3 levels), dynamic tool injection into system prompts.
 - **R04.7 change**: `build_system_prompt_with_tools()` accepts `native_tools` parameter. When True, emits tool reference table without `Action:/Action Input:` format block and skips `_build_dynamic_examples()`.
 - **Gotchas**: `_build_dynamic_examples()` generates 9 tool-type-specific example flows. `_parse_frontmatter()` is a hand-rolled YAML parser (no PyYAML). Path resolution checks 5 locations including `importlib.resources` for Windows pip.
 
-### `agentnova/backends/ollama.py` — Primary Local Backend
+### `agentkthx/backends/ollama.py` — Primary Local Backend
 - **Purpose**: Dual API backend supporting OpenResponses (`/api/chat`) and OpenAI Chat-Completions (`/v1/chat/completions`).
 - **Blast radius**: Parent class of `LlamaServerBackend` and `ZaiBackend`. Instantiated by `get_backend()` in cli.py and orchestrator.py.
-- **Gotchas**: Tool support detection is per-model (NOT per-family). Cache: `~/.cache/agentnova/tool_support.json`.
+- **Gotchas**: Tool support detection is per-model (NOT per-family). Cache: `~/.cache/agentkthx/tool_support.json`.
 
-### `agentnova/backends/llama_server.py` — llama-server / BitNet Backend
+### `agentkthx/backends/llama_server.py` — llama-server / BitNet Backend
 - **Purpose**: `LlamaServerBackend(OllamaBackend)` for llama.cpp / TurboQuant. BitNetBackend is a 63-line thin wrapper.
 - **R04.6 change**: `BackendType.LLAMA_SERVER` (was `CUSTOM`). `_is_actual_bitnet` checks `detect_family(model)`, not `self._bitnet_mode`.
 - **Gotchas**: Default port `8764` (changed from 8080 in R04.5). Non-BitNet models on BitNet backend receive full context and family-correct formatting.
 
-### `agentnova/tools/builtins.py` — All 17 Built-in Tools (~1170 lines)
+### `agentkthx/tools/builtins.py` — All 17 Built-in Tools (~1170 lines)
 - **Purpose**: calculator, shell, read_file, write_file, edit_file, list_directory, http_get, python_repl, web_search, parse_json, count_words, count_chars, read_file_lines, find_files, get_time, get_date, todo.
 - **R04.6 change**: Per-session todo isolation — `_todo_stores: dict[str, list[dict]]` keyed by session_id.
 - **R04.6 GOTCHA**: Per-session isolation **not wired up** — `_get_todo_store(session_id)` accepts session_id but no caller passes one. All operations use `"default"` store.
 - **Security**: Calculator uses `eval()` with `{"__builtins__": {}}`. Shell uses `shell=True` with `sanitize_command()`. File ops use `validate_path()`. HTTP uses `is_safe_url()`. Python REPL runs in sandboxed subprocess. Response limits: files 512KB, HTTP 256KB.
-- **Audit logging**: `shell()`, `write_file()`, `edit_file()` log to `~/.agentnova/audit.log` (JSON-lines, fire-and-forget).
+- **Audit logging**: `shell()`, `write_file()`, `edit_file()` log to `~/.agentkthx/audit.log` (JSON-lines, fire-and-forget).
 - **Dangerous flag**: `shell`, `write_file`, `edit_file` have `dangerous=True`. Enforced by `confirm_dangerous` callback.
 
-### `agentnova/cli.py` — Full CLI (2143 lines)
+### `agentkthx/cli.py` — Full CLI (2143 lines)
 - **Commands**: run, chat, agent, config, models, modelfile, sessions, skills, soul, test, tools, turbo, update, version.
 - **R04.7 chat UX overhaul**: 8 slash commands (/help, /status, /system, /tools, /model, /debug, /clear, /quit), braille spinner on stderr, persistent emoji status footer bar with token counting, grey `You:` prompt, response spacing, /status crash fix, /help reformatted to two-column layout.
 - **R04.7 chat footer**: `⚛️ R04.7 🧠 glm-4.5-flash 📦 125K 💬 8K 🌡️ 0.1 🔌 zai 📈 ↑1.2k ↓0.8k`. Shows version, model, context, max tokens, temperature, backend, cumulative session token usage.
 - **R04.7 token tracking**: Accumulates `_session_tokens_in`/`_session_tokens_out` using ~60/40 split on `step.tokens_used`.
 - **Gotchas**: Footer version string is hardcoded (`'R04.7'`), not derived from `__version__`. `cmd_models()` checks tool support cache before testing; `--no-cache` forces re-test.
 
-### `agentnova/config.py` — Central Configuration (265 lines)
+### `agentkthx/config.py` — Central Configuration (265 lines)
 - **Purpose**: Single source of truth for all URLs, defaults, security settings, ACP + ZAI credentials, TurboQuant config.
 - **Key defaults**: `OLLAMA_BASE_URL` (localhost:11434), `ZAI_BASE_URL` (api.z.ai), `LLAMA_SERVER_BASE_URL` (localhost:8764), `BITNET_BASE_URL` (localhost:8765), `DEFAULT_MODEL` (backend-dependent: qwen2.5:0.5b for Ollama, glm-5.1 for ZAI).
 - **ZAI env vars**: `ZAI_API_KEY` (required), `ZAI_FREE_ONLY` (default false), `ZAI_FREE_FALLBACK_MODEL` (default glm-4.5-flash).
 - **Gotchas**: Module-level constants set at import time, but `Config` dataclass fields use `default_factory` for dynamic re-evaluation. `get_config(reload=True)` forces fresh read.
 
-### `agentnova/core/persistent_memory.py` — SQLite-Backed Persistent Memory
+### `agentkthx/core/persistent_memory.py` — SQLite-Backed Persistent Memory
 - **Purpose**: `PersistentMemory(Memory)` subclass. WAL mode. Session management. Same sliding-window behavior as in-memory `Memory`.
 - **Gotchas**: `close()` must be called on exit or Ctrl+C to flush WAL. CLI handles this. Python API users MUST call `agent.memory.close()`.
 
-### `agentnova/orchestrator.py` — Multi-Agent Orchestration (488 lines)
+### `agentkthx/orchestrator.py` — Multi-Agent Orchestration (488 lines)
 - **Modes**: Router (keyword/LLM), Pipeline (sequential), Parallel (ThreadPoolExecutor).
 - **Gotchas**: `_select_agent_with_llm()` hardcodes `get_backend("ollama")`. Pipeline appends `[Previous output: ...]` as plain text.
 
-### `agentnova/agent_mode.py` — Autonomous Agent Mode (855 lines)
+### `agentkthx/agent_mode.py` — Autonomous Agent Mode (855 lines)
 - **State machine**: IDLE → WORKING → PAUSED → STOPPING with pause/resume/rollback.
 - **Gotchas**: `reset_memory_between_steps` parameter (default False). `_inject_context()` prepends `[Step N of M] Goal: ...` headers.
 
@@ -302,9 +302,9 @@ acp_plugin.py ← referenced by cli.py (optional import)                │
 ```
 # ReAct format is ONLY suppressed when api_mode == ApiMode.OPENAI
 # Using --api openre with a native-capable model still gets ReAct instructions
-agentnova chat --backend zai --model glm-4.5-flash   # OK: ZAI forces OPENAI
-agentnova chat --backend ollama --model llama3 --api openai  # OK: comp mode
-agentnova chat --backend ollama --model llama3 --api openre  # BUG: ReAct overrides native
+agentkthx chat --backend zai --model glm-4.5-flash   # OK: ZAI forces OPENAI
+agentkthx chat --backend ollama --model llama3 --api openai  # OK: comp mode
+agentkthx chat --backend ollama --model llama3 --api openre  # BUG: ReAct overrides native
 ```
 
 ### ZAI auto-fallback silently swaps models

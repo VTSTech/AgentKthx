@@ -17,7 +17,7 @@ import os
 import sys
 import pytest
 
-from agentnova.core.helpers import validate_path, sanitize_command, is_safe_url
+from agentkthx.core.helpers import validate_path, sanitize_command, is_safe_url
 
 
 # ============================================================================

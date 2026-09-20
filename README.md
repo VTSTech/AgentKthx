@@ -1,4 +1,4 @@
-# ⚛️ AgentNova R05.7
+# ⚛️ AgentKthx R06.0
 
 **Status: Alpha**
 
@@ -6,14 +6,18 @@ A minimal, hackable agentic framework for autonomous AI agents. Runs **locally**
 
 Inspired by the architecture of OpenClaw, rebuilt from scratch for local-first operation.
 
-**Written by [VTSTech](https://www.vts-tech.org)** · [GitHub](https://github.com/VTSTech/AgentNova) [Discord](https://discord.gg/vSK3Ba2aQ)
+**Written by [VTSTech](https://www.vts-tech.org)** · [GitHub](https://github.com/VTSTech/AgentKthx) [Discord](https://discord.gg/vSK3Ba2aQ)
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/VTSTech/AgentNova/blob/main/AgentNova.ipynb)
-[![GitHub commits](https://badgen.net/github/commits/VTSTech/AgentNova)](https://GitHub.com/VTSTech/AgentNova/commit/) [![GitHub latest commit](https://badgen.net/github/last-commit/VTSTech/AgentNova)](https://GitHub.com/VTSTech/AgentNova/commit/)
+> **ℹ️ Renamed from `AgentNova` (R06.0)**
+>
+> This project was previously named `AgentNova`. As of R06.0, the package has been renamed to `AgentKthx` (PyPI: `agentkthx`, CLI: `agentkthx`). The old `agentnova` PyPI package still works as a redirect — existing scripts and env vars (`AGENTNOVA_*`) continue to work without changes. See the [Migration Guide](#migration-from-agentnova) section below.
 
-[![pip - agentnova](https://img.shields.io/badge/pip-agentnova-2ea44f?logo=PyPi)](https://pypi.org/project/agentnova/) [![PyPI version fury.io](https://badge.fury.io/py/agentnova.svg)](https://pypi.org/project/agentnova/) [![PyPI download month](https://img.shields.io/pypi/dm/agentnova.svg)](https://pypi.org/project/agentnova/) [![PyPI download day](https://img.shields.io/pypi/dd/agentnova.svg)](https://pypi.org/project/agentnova/)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/VTSTech/AgentKthx/blob/main/AgentKthx.ipynb)
+[![GitHub commits](https://badgen.net/github/commits/VTSTech/AgentKthx)](https://GitHub.com/VTSTech/AgentKthx/commit/) [![GitHub latest commit](https://badgen.net/github/last-commit/VTSTech/AgentKthx)](https://GitHub.com/VTSTech/AgentKthx/commit/)
 
-[![License](https://img.shields.io/badge/License-MIT-blue)](#license) [![Go to Python website](https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2FVTSTech%2FAgentNova%2Frefs%2Fheads%2Fmain%2Fpyproject.toml&query=project.requires-python&label=python&logo=python&logoColor=white)](https://python.org)
+[![pip - agentkthx](https://img.shields.io/badge/pip-agentkthx-2ea44f?logo=PyPi)](https://pypi.org/project/agentkthx/) [![PyPI version fury.io](https://badge.fury.io/py/agentkthx.svg)](https://pypi.org/project/agentkthx/) [![PyPI download month](https://img.shields.io/pypi/dm/agentkthx.svg)](https://pypi.org/project/agentkthx/) [![PyPI download day](https://img.shields.io/pypi/dd/agentkthx.svg)](https://pypi.org/project/agentkthx/)
+
+[![License](https://img.shields.io/badge/License-MIT-blue)](#license) [![Go to Python website](https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2FVTSTech%2FAgentKthx%2Frefs%2Fheads%2Fmain%2Fpyproject.toml&query=project.requires-python&label=python&logo=python&logoColor=white)](https://python.org)
 
 <img width="1041" height="607" alt="image" src="https://github.com/user-attachments/assets/9a8f79e5-eefc-452a-b620-d67f98a77df5" />
 <img width="873" height="576" alt="image" src="https://github.com/user-attachments/assets/567c6b71-0930-4c7c-802f-140175cc6f6c" />
@@ -27,12 +31,12 @@ Inspired by the architecture of OpenClaw, rebuilt from scratch for local-first o
 
 | Document | Description |
 |----------|-------------|
-| [ARCH.md](https://github.com/VTSTech/AgentNova/blob/main/docs/ARCH.md) | Technical documentation for developers (directory structure, core design, orchestrator modes) |
-| [CHANGELOG.md](https://github.com/VTSTech/AgentNova/blob/main/docs/CHANGELOG.md) | Version history and release notes (includes LocalClaw history) |
-| [TESTS.md](https://github.com/VTSTech/AgentNova/blob/main/docs/TESTS.md) | Benchmark results, model recommendations, and testing guide |
-| [PLUGIN_SPEC.md](https://github.com/VTSTech/AgentNova/blob/main/docs/PLUGIN_SPEC.md) | Plugin system specification (manifest format, API, lifecycle) |
-| [JEV_API_MODE.md](https://github.com/VTSTech/AgentNova/blob/main/docs/JEV_API_MODE.md) | JEV API mode — System-One decisions via any free LLM (Jev-compatible shape) |
-| [CREDITS.md](https://github.com/VTSTech/AgentNova/blob/main/docs/CREDITS.md) | Acknowledges every project, inspiration, API, model creator, and specification that makes AgentNova possible |
+| [ARCH.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/ARCH.md) | Technical documentation for developers (directory structure, core design, orchestrator modes) |
+| [CHANGELOG.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/CHANGELOG.md) | Version history and release notes (includes LocalClaw history) |
+| [TESTS.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/TESTS.md) | Benchmark results, model recommendations, and testing guide |
+| [PLUGIN_SPEC.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/PLUGIN_SPEC.md) | Plugin system specification (manifest format, API, lifecycle) |
+| [JEV_API_MODE.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/JEV_API_MODE.md) | JEV API mode — System-One decisions via any free LLM (Jev-compatible shape) |
+| [CREDITS.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/CREDITS.md) | Acknowledges every project, inspiration, API, model creator, and specification that makes AgentKthx possible |
 
 ## Features
 
@@ -42,6 +46,7 @@ Inspired by the architecture of OpenClaw, rebuilt from scratch for local-first o
 - **Multi-cloud support** — Access to 500+ models from OpenRouter, OpenAI, Anthropic, Google, Cohere
 - **Dual API support** — OpenResponses (`--api openre`) and OpenAI Chat-Completions (`--api openai`)
 - **JEV decision mode** — System-One decisions via any free LLM (`--api jev`) — Jev-compatible shape, no TypeSafe API key required
+- **Thinking controls** — `--thinking off|auto|low|medium|high` to control model reasoning effort, `--think` flag to display reasoning_content (chain-of-thought) in CLI output
 - **Three-tier tool support** — Native, ReAct, or none (auto-detected)
 - **Small model optimized** — Fuzzy matching, argument normalization
 - **Built-in security** — Path validation, command blocklist, SSRF protection (toggleable via `--security max|off`)
@@ -56,7 +61,7 @@ Inspired by the architecture of OpenClaw, rebuilt from scratch for local-first o
 - **Audit logging** — Automatic JSON-lines logging of shell, write, and edit operations
 - **Argument normalization** — ~100+ tool argument aliases for small model compatibility
 - **JSON structured output** — `--response-format json` for structured JSON responses
-- **Self-update** — `agentnova update` to update to latest version from GitHub
+- **Self-update** — `agentkthx update` to update to latest version from GitHub
 - **Persistent status footer** — 2-line terminal footer with live model/backend/token info (R05.4, scroll-region based)
 - **OpenRouter 429 retry** — Automatic retry with `Retry-After` header support for rate-limited providers (R05.4)
 - **Tool-call visibility** — Tool calls and results displayed in chat mode (R05.4)
@@ -65,10 +70,10 @@ Inspired by the architecture of OpenClaw, rebuilt from scratch for local-first o
 
 ```bash
 # Latest Development Release
-pip install git+https://github.com/VTSTech/AgentNova.git --force-reinstall
+pip install git+https://github.com/VTSTech/AgentKthx.git --force-reinstall
 
 # Last Stable (as stable as Alpha can be) Release
-pip install agentnova
+pip install agentkthx
 ```
 
 ## Quick Start
@@ -77,62 +82,62 @@ pip install agentnova
 
 ```bash
 # Run a single prompt
-agentnova run "What is 15 * 8?" --tools calculator
+agentkthx run "What is 15 * 8?" --tools calculator
 
 # Interactive chat
-agentnova chat -m qwen2.5:0.5b --tools calculator,shell
+agentkthx chat -m qwen2.5:0.5b --tools calculator,shell
 
 # Autonomous agent mode
-agentnova agent -m qwen2.5:7b --tools calculator,shell,write_file
+agentkthx agent -m qwen2.5:7b --tools calculator,shell,write_file
 
 # Use OpenAI Chat-Completions API
-agentnova chat -m qwen2.5:0.5b --api openai
+agentkthx chat -m qwen2.5:0.5b --api openai
 
 # List available models
-agentnova models
+agentkthx models
 
 # List available tools
-agentnova tools
+agentkthx tools
 
 # Resume a previous session
-agentnova chat -m qwen2.5:0.5b --session my-session
+agentkthx chat -m qwen2.5:0.5b --session my-session
 
 # Dangerous tool confirmation
-agentnova agent -m qwen2.5:7b --tools shell,write_file --confirm
+agentkthx agent -m qwen2.5:7b --tools shell,write_file --confirm
 
 # Force ReAct mode
-agentnova run "What is 15 * 8?" --tools calculator --force-react
+agentkthx run "What is 15 * 8?" --tools calculator --force-react
 
 # List persistent memory sessions
-agentnova sessions
+agentkthx sessions
 
 # TurboQuant server management
-agentnova turbo list
-agentnova turbo start qwen2.5:7b
-agentnova turbo status
-agentnova turbo stop
+agentkthx turbo list
+agentkthx turbo start qwen2.5:7b
+agentkthx turbo status
+agentkthx turbo stop
 
 # Self-update
-agentnova update
+agentkthx update
 ```
 
 ### Backend Options
 
 ```bash
 # Native backends (always available)
-agentnova chat -m qwen2.5:0.5b --backend ollama         # Ollama (default)
-agentnova chat -m qwen2.5:7b --backend llama-server      # llama.cpp / TurboQuant
+agentkthx chat -m qwen2.5:0.5b --backend ollama         # Ollama (default)
+agentkthx chat -m qwen2.5:7b --backend llama-server      # llama.cpp / TurboQuant
 
 # Plugin backends (loaded on demand)
-agentnova chat -m poolside/laguna-xs-2.1:free --backend openrouter     # OpenRouter (free tier, plugin)
-agentnova chat -m openai/gpt-4o --backend openrouter                # OpenRouter (OpenAI models)
-agentnova chat -m anthropic/claude-3.5-sonnet --backend openrouter   # OpenRouter (Anthropic models)
-agentnova chat -m bitnet-b1.58-2b-4t --backend bitnet              # BitNet (plugin)
-agentnova chat -m glm-4.5-flash --backend zai                       # ZAI (free tier, plugin)
-agentnova chat -m glm-5.1 --backend zai                             # ZAI (paid, plugin)
+agentkthx chat -m poolside/laguna-xs-2.1:free --backend openrouter     # OpenRouter (free tier, plugin)
+agentkthx chat -m openai/gpt-4o --backend openrouter                # OpenRouter (OpenAI models)
+agentkthx chat -m anthropic/claude-3.5-sonnet --backend openrouter   # OpenRouter (Anthropic models)
+agentkthx chat -m bitnet-b1.58-2b-4t --backend bitnet              # BitNet (plugin)
+agentkthx chat -m glm-4.5-flash --backend zai                       # ZAI (free tier, plugin)
+agentkthx chat -m glm-5.1 --backend zai                             # ZAI (paid, plugin)
 
 # Plugin management
-agentnova plugins                    # List discovered plugins
+agentkthx plugins                    # List discovered plugins
 ```
 
 ### JEV API Mode — System-One Decisions
@@ -144,15 +149,15 @@ Ollama free models.
 
 ```bash
 # Classify an email using ZAI free model
-agentnova run "Email subject: 'You won a prize!' — classify as spam/inbox/promotions" \
+agentkthx run "Email subject: 'You won a prize!' — classify as spam/inbox/promotions" \
     --api jev --backend zai --model glm-4.5-flash
 
 # Route a ticket using free OpenRouter model
-agentnova run "Task: calculate 15 * 8 and save to file — route to math/file/general agent" \
+agentkthx run "Task: calculate 15 * 8 and save to file — route to math/file/general agent" \
     --api jev --backend openrouter --model poolside/laguna-xs-2.1:free
 
 # Local Ollama model making a decision
-agentnova run "Is this a bug or feature request? 'App crashes on startup'" \
+agentkthx run "Is this a bug or feature request? 'App crashes on startup'" \
     --api jev --backend ollama --model qwen2.5:0.5b
 ```
 
@@ -172,11 +177,65 @@ Output is a JSON decision envelope:
 See [JEV_API_MODE.md](docs/JEV_API_MODE.md) for the full spec, Python API,
 and architecture details.
 
+### Thinking Controls
+
+Two CLI flags give you fine-grained control over thinking-capable models
+(GLM-4.5+, OpenAI o-series, deepseek-r1, qwen3 in thinking mode, etc.):
+
+- **`--thinking off|auto|low|medium|high`** — controls model thinking behavior
+  - `off` → disable thinking entirely (fastest, recommended for JEV decisions)
+  - `auto` → let the model decide (default)
+  - `low`/`medium`/`high` → forward `reasoning_effort` to OpenAI-compatible models
+- **`--think`** — display the model's `reasoning_content` (chain-of-thought)
+  in the CLI output under each step. Off by default.
+
+```bash
+# Fast JEV decision — disable thinking entirely
+# (drops GLM-4.5-flash latency from ~22s to ~2-3s on trivial classifications)
+agentkthx run "Is this spam?" --api jev --backend zai -m glm-4.5-flash --thinking off
+
+# Heavy reasoning — for hard problems where you want maximum thinking
+agentkthx run "Prove that the sum of two odds is even." --thinking high
+
+# Inspect what the model was thinking
+agentkthx run "What is 15 * 8?" --think
+
+# Combine: heavy thinking + show the chain-of-thought
+agentkthx run "Design a load balancer for 10k RPS" --thinking high --think
+```
+
+**Python API:**
+
+```python
+from agentkthx import Agent
+from agentkthx.core.types import parse_thinking_arg
+
+# Parse a level string → (think, reasoning_effort) tuple
+think, effort = parse_thinking_arg("high")  # (True, "high")
+
+agent = Agent(
+    model="glm-5.1",
+    backend="zai",
+    thinking_level="high",       # or pass think=True, reasoning_effort="high"
+    show_reasoning=True,         # equivalent to --think
+)
+
+# Decisions also respect --thinking off (fixes JEV latency)
+from agentkthx.backends import get_backend
+backend = get_backend("zai", api_mode="jev")
+decision = backend.generate_decision(
+    model="glm-4.5-flash",
+    state="...",
+    choices=["a", "b"],
+    think=False,  # disable thinking for fast decisions
+)
+```
+
 ### Python API
 
 ```python
-from agentnova import Agent
-from agentnova.tools import make_builtin_registry
+from agentkthx import Agent
+from agentkthx.tools import make_builtin_registry
 
 # Create tools
 tools = make_builtin_registry().subset(["calculator", "shell"])
@@ -197,7 +256,7 @@ print(f"Completed in {result.total_ms:.0f}ms")
 ### Persistent Memory
 
 ```python
-from agentnova import Agent
+from agentkthx import Agent
 
 # Create agent with session persistence
 agent = Agent(
@@ -245,7 +304,7 @@ print(result.final_answer)  # Valid JSON string
 ### TurboQuant Server Management
 
 ```python
-from agentnova.turbo import start_server, stop_server, get_status
+from agentkthx.turbo import start_server, stop_server, get_status
 
 # Start TurboQuant server with an Ollama model
 state = start_server("qwen2.5:7b", ctx=8192)
@@ -276,29 +335,29 @@ export OPENROUTER_FREE_ONLY="1"                                 # Optional (filt
 
 ```bash
 # Basic usage with free model
-agentnova chat --backend openrouter --model poolside/laguna-xs-2.1:free
+agentkthx chat --backend openrouter --model poolside/laguna-xs-2.1:free
 
 # OpenAI models via OpenRouter
-agentnova chat --backend openrouter --model openai/gpt-4o
+agentkthx chat --backend openrouter --model openai/gpt-4o
 
 # Anthropic models via OpenRouter
-agentnova chat --backend openrouter --model anthropic/claude-3.5-sonnet
+agentkthx chat --backend openrouter --model anthropic/claude-3.5-sonnet
 
 # Google models via OpenRouter
-agentnova chat --backend openrouter --model google/gemini-flash
+agentkthx chat --backend openrouter --model google/gemini-flash
 
 # List available models
-agentnova models --backend openrouter
+agentkthx models --backend openrouter
 
 # Free models only
-OPENROUTER_FREE_ONLY=1 agentnova models --backend openrouter
+OPENROUTER_FREE_ONLY=1 agentkthx models --backend openrouter
 ```
 
 ### Chat-Completions Streaming
 
 ```python
-from agentnova.backends import get_backend
-from agentnova.core.types import ApiMode
+from agentkthx.backends import get_backend
+from agentkthx.core.types import ApiMode
 
 # Use Chat-Completions mode with streaming
 backend = get_backend("ollama", api_mode=ApiMode.OPENAI)
@@ -314,7 +373,7 @@ for chunk in backend.generate_completions_stream(
 ### JEV Decision Mode
 
 ```python
-from agentnova.backends import get_backend
+from agentkthx.backends import get_backend
 
 # Get a JEV-mode backend (uses any free LLM underneath)
 backend = get_backend("zai", api_mode="jev")
@@ -336,7 +395,7 @@ print(decision["usage"])         # {"input_tokens": 100, "output_tokens": 20, ..
 ### Skill License Validation
 
 ```python
-from agentnova.skills import validate_spdx_license, parse_compatibility
+from agentkthx.skills import validate_spdx_license, parse_compatibility
 
 # Validate SPDX license identifier
 valid, msg = validate_spdx_license("MIT")  # (True, "Valid SPDX identifier: MIT")
@@ -350,7 +409,7 @@ compat = parse_compatibility("python>=3.8, ollama")
 ### Multi-Agent Orchestration
 
 ```python
-from agentnova import Agent, Orchestrator, AgentCard
+from agentkthx import Agent, Orchestrator, AgentCard
 
 orchestrator = Orchestrator(mode="router")
 
@@ -375,20 +434,20 @@ result = orchestrator.run("Calculate 15 * 8 and save to file")
 
 ## Tool Support Levels
 
-AgentNova supports three levels of tool use:
+AgentKthx supports three levels of tool use:
 
 1. **Native** — Models with built-in function calling (qwen2.5, llama3.1+, mistral, granite, functiongemma)
 2. **ReAct** — Text-based tool use via reasoning prompts (qwen2.5-coder, qwen3)
 3. **None** — Pure reasoning without tools
 
-Tool support is auto-detected by running `agentnova models --tool-support`. Results are cached in `~/.cache/agentnova/tool_support.json`.
+Tool support is auto-detected by running `agentkthx models --tool-support`. Results are cached in `~/.cache/agentkthx/tool_support.json`.
 
 ```bash
 # Test and cache tool support for all models
-agentnova models --tool-support
+agentkthx models --tool-support
 
 # Re-test (ignore cache)
-agentnova models --tool-support --no-cache
+agentkthx models --tool-support --no-cache
 ```
 
 You can also force ReAct mode:
@@ -399,7 +458,7 @@ agent = Agent(model="qwen2.5:0.5b", force_react=True)
 
 ```bash
 # Force ReAct mode via CLI
-agentnova run "What is 15 * 8?" --tools calculator --force-react
+agentkthx run "What is 15 * 8?" --tools calculator --force-react
 ```
 
 ## Model Families
@@ -429,15 +488,15 @@ Built-in security for safe operation, with a runtime-toggleable mode:
 - **SSRF protection** — Blocks requests to local/internal URLs
 - **Injection detection** — Detects shell injection patterns (`&&`, `||`, `|`, `;`, `$()`, backticks, etc.)
 - **Dangerous tool confirmation** — `--confirm` flag requires interactive approval before shell, write, or edit operations
-- **Audit logging** — Shell, write, and edit operations logged to `~/.agentnova/audit.log`
+- **Audit logging** — Shell, write, and edit operations logged to `~/.agentkthx/audit.log`
 - **Response size limits** — Files capped at 512KB, HTTP responses at 256KB
 
 ```bash
 # Default — all security checks enabled
-agentnova chat --backend openrouter --tools shell,python_repl
+agentkthx chat --backend openrouter --tools shell,python_repl
 
 # Disable all security checks (use with caution — model can run any command)
-agentnova chat --backend openrouter --tools shell,python_repl --security off
+agentkthx chat --backend openrouter --tools shell,python_repl --security off
 ```
 
 In chat mode, toggle at runtime:
@@ -490,8 +549,8 @@ AGENTNOVA_MAX_TOOL_RETRIES=2           # Maximum retries per tool call failure
 
 Check current configuration:
 ```bash
-agentnova config
-agentnova config --urls  # Show only URLs
+agentkthx config
+agentkthx config --urls  # Show only URLs
 ```
 
 ### CLI Options (run, chat, agent)
@@ -499,6 +558,8 @@ agentnova config --urls  # Show only URLs
 | Option | Description |
 |--------|-------------|
 | `--api openre\|openai\|jev` | API mode: OpenResponses (default), OpenAI Chat-Completions, or JEV (System-One decisions via any LLM) |
+| `--thinking off\|auto\|low\|medium\|high` | Thinking / reasoning effort: `off` (fastest, recommended for JEV), `auto` (default), or `low`/`medium`/`high` (forwarded as `reasoning_effort` for thinking-capable models) |
+| `--think` | Display reasoning_content (chain-of-thought) in CLI output when the model emits it. Off by default. |
 | `--response-format text\|json` | Response format (Chat-Completions mode) |
 | `--truncation auto\|disabled` | Truncation behavior for long responses |
 | `--soul <path>` | Load Soul Spec persona package |
@@ -525,49 +586,49 @@ The `localclaw` command is provided for backward compatibility:
 ```bash
 # Both work identically
 localclaw run "What is 2+2?"
-agentnova run "What is 2+2?"
+agentkthx run "What is 2+2?"
 ```
 
 ## Tests & Examples
 
-AgentNova includes a comprehensive suite of tests for validating agent capabilities across reasoning, knowledge, and tool usage:
+AgentKthx includes a comprehensive suite of tests for validating agent capabilities across reasoning, knowledge, and tool usage:
 
 ```bash
 # Basic agent test (no tools)
-python -m agentnova.examples.00_basic_agent
+python -m agentkthx.examples.00_basic_agent
 
 # Quick 5-question diagnostic
-python -m agentnova.examples.01_quick_diagnostic
+python -m agentkthx.examples.01_quick_diagnostic
 
 # Tool usage tests (calculator, shell, datetime, file, python_repl)
-python -m agentnova.examples.02_tool_test
+python -m agentkthx.examples.02_tool_test
 
 # Logic and reasoning tests (BBH-style)
-python -m agentnova.examples.03_reasoning_test
+python -m agentkthx.examples.03_reasoning_test
 
 # GSM8K math benchmark (50 questions)
-python -m agentnova.examples.04_gsm8k_benchmark
+python -m agentkthx.examples.04_gsm8k_benchmark
 
 # Common sense reasoning (BIG-bench)
-python -m agentnova.examples.05_common_sense
+python -m agentkthx.examples.05_common_sense
 
 # Causal reasoning (BIG-bench)
-python -m agentnova.examples.06_causal_reasoning
+python -m agentkthx.examples.06_causal_reasoning
 
 # Logical deduction (BIG-bench)
-python -m agentnova.examples.07_logical_deduction
+python -m agentkthx.examples.07_logical_deduction
 
 # Reading comprehension
-python -m agentnova.examples.08_reading_comprehension
+python -m agentkthx.examples.08_reading_comprehension
 
 # General knowledge (BIG-bench)
-python -m agentnova.examples.09_general_knowledge
+python -m agentkthx.examples.09_general_knowledge
 
 # Implicit reasoning
-python -m agentnova.examples.10_implicit_reasoning
+python -m agentkthx.examples.10_implicit_reasoning
 
 # Analogical reasoning
-python -m agentnova.examples.11_analogical_reasoning
+python -m agentkthx.examples.11_analogical_reasoning
 ```
 
 ### Test Categories
@@ -610,8 +671,8 @@ pip install -e ".[dev]"
 pytest
 
 # Format code
-black agentnova
-ruff check agentnova
+black agentkthx
+ruff check agentkthx
 ```
 
 ## License
@@ -628,4 +689,44 @@ Contributions welcome!
 
 ## Changelog
 
-See [docs/CHANGELOG.md](https://github.com/VTSTech/AgentNova/blob/main/docs/CHANGELOG.md) for detailed version history and release notes.
+See [docs/CHANGELOG.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/CHANGELOG.md) for detailed version history and release notes.
+
+## Migration from AgentNova
+
+R06.0 renamed the project from `AgentNova` → `AgentKthx`. The rename was driven by name collisions in the AI agent space (multiple projects, Instagram accounts, etc. were using the AgentNova name).
+
+### What changed
+
+| Old | New |
+|-----|-----|
+| PyPI package: `agentnova` | `agentkthx` |
+| CLI command: `agentnova` | `agentkthx` |
+| Python import: `import agentnova` | `import agentkthx` |
+| GitHub repo: `VTSTech/AgentNova` | `VTSTech/AgentKthx` |
+
+### What stays the same (backward compat)
+
+- ✅ The `agentnova` CLI command still works (redirects to `agentkthx`)
+- ✅ `import agentnova` still works (re-exports from `agentkthx`, emits DeprecationWarning)
+- ✅ All `AGENTNOVA_*` env vars still work unchanged
+- ✅ `localclaw` CLI command still works (redirects through to `agentkthx`)
+- ✅ All existing skills, souls, plugins, and configs continue to work
+- ✅ SQLite persistent memory sessions remain compatible
+
+### Migration steps (recommended but not required)
+
+```bash
+# Uninstall old package (optional — both can coexist)
+pip uninstall agentnova
+
+# Install new package
+pip install agentkthx
+
+# Update your scripts (optional — old imports still work with a warning)
+# Old: from agentnova import Agent
+# New: from agentkthx import Agent
+```
+
+### Why "AgentKthx"?
+
+The name honors the IRC-era slang "kthx" (OK, thanks) — a callback to early internet culture. It's distinctive, memorable, and (most importantly) completely unused by any other AI agent project as of September 2026. The CLI binary `agentkthx` is short and easy to type.

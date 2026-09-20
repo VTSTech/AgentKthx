@@ -1,6 +1,6 @@
 ## Architecture
 
-AgentNova is a modular agent framework designed for local LLMs with tool-calling capabilities. It implements the OpenResponses specification for multi-provider, interoperable LLM interfaces.
+AgentKthx is a modular agent framework designed for local LLMs with tool-calling capabilities. It implements the OpenResponses specification for multi-provider, interoperable LLM interfaces.
 
 **Specification Compliance**: 100% (R03.5+) -- R04.1, R04.2, R04.3, R04.4, R04.5, R04.6, R04.7, R05.0
 
@@ -13,7 +13,7 @@ AgentNova is a modular agent framework designed for local LLMs with tool-calling
 - Plugin Spec v0.1: 100%
 
 ```
-agentnova/
+agentkthx/
 ├── core/
 │   ├── types.py              # Enum types (StepResultType, BackendType, ApiMode.OPENRE/OPENAI, ToolSupportLevel)
 │   ├── models.py             # Data models (Tool, ToolParam, StepResult, AgentRun)
@@ -183,8 +183,8 @@ Multi-agent orchestration with three execution modes (enhanced in R03.6):
 - **Result merging** - Strategies: `concat`, `first`, `vote`, `best`
 
 ```python
-from agentnova import Orchestrator, AgentCard, Agent
-from agentnova.tools import make_builtin_registry
+from agentkthx import Orchestrator, AgentCard, Agent
+from agentkthx.tools import make_builtin_registry
 
 # Create specialized agents
 tools = make_builtin_registry()
@@ -261,8 +261,8 @@ Items: in_progress → completed/failed/incomplete
 | `ToolChoice.allowed_tools([...])` | Restrict to tool list |
 
 ```python
-from agentnova import Agent
-from agentnova.core.openresponses import ToolChoice
+from agentkthx import Agent
+from agentkthx.core.openresponses import ToolChoice
 
 # Default: model decides
 agent = Agent(model="qwen2.5:0.5b", tools=["calculator"])
@@ -342,7 +342,7 @@ deepseek-r1:1.5b         → ReAct only ○ (reasoning model, no native tools)
            │
            ▼
     ┌──────────────┐
-    │ Check Cache  │ ──→ ~/.cache/agentnova/tool_support.json
+    │ Check Cache  │ ──→ ~/.cache/agentkthx/tool_support.json
     └──────┬───────┘
            │
      ┌─────┴─────┐
@@ -356,14 +356,14 @@ deepseek-r1:1.5b         → ReAct only ○ (reasoning model, no native tools)
 
 **Cache Module API**:
 ```python
-from agentnova.core.tool_cache import (
+from agentkthx.core.tool_cache import (
     get_cached_tool_support,    # Get cached level or None
     cache_tool_support,          # Save detection result
     clear_tool_cache,            # Clear cache file
     load_tool_cache,             # Load full cache dict
     save_tool_cache,             # Save full cache dict
 )
-from agentnova.core.types import ToolSupportLevel
+from agentkthx.core.types import ToolSupportLevel
 
 # Check if model has cached support level
 support = get_cached_tool_support("qwen2.5-coder:0.5b")
@@ -383,20 +383,20 @@ clear_tool_cache()
 **CLI Usage**:
 ```bash
 # List models with cached tool support (or "? untested")
-agentnova models
+agentkthx models
 
 # Test and cache tool support for all models
-agentnova models --tool-support
+agentkthx models --tool-support
 
 # Ignore cache
-agentnova models --tool-support --no-cache
+agentkthx models --tool-support --no-cache
 ```
 
 **ToolSupportLevel Values**:
 | Level | Meaning | Display |
 |-------|---------|---------|
 | `NATIVE` | API returns `tool_calls` structure | native |
-| `REACT` | Model outputs JSON as text, parsed by AgentNova | react |
+| `REACT` | Model outputs JSON as text, parsed by AgentKthx | react |
 | `NONE` | Model explicitly rejects tools (HTTP 400) | none |
 | `UNTESTED` | Not yet tested | untested |
 
@@ -427,7 +427,7 @@ The static tool reference in SOUL.md is replaced with actual available tools at 
 
 **Cache Management**:
 ```python
-from agentnova.soul import clear_soul_cache, load_soul
+from agentkthx.soul import clear_soul_cache, load_soul
 
 # Clear cache after modifying soul files
 clear_soul_cache()
@@ -442,7 +442,7 @@ soul = load_soul("nova-helper", reload=True)
 
 ### Architecture (R05.0)
 
-AgentNova uses a two-tier backend architecture:
+AgentKthx uses a two-tier backend architecture:
 
 1. **Native backends** -- Ollama and llama-server are built-in, always available, zero overhead.
 2. **Plugin backends** -- BitNet, ZAI, and any future backends are loaded on demand via the plugin system. Plugins register their backend classes through `register_backend(name, cls)` and are lazily loaded by `_ensure_plugin()` when first requested.
@@ -544,28 +544,28 @@ The ZAI backend is a plugin providing `ZaiBackend`, connecting to the ZAI cloud 
 **Usage**:
 ```bash
 # Free model (no credits needed)
-agentnova chat --backend zai --model glm-4.5-flash
+agentkthx chat --backend zai --model glm-4.5-flash
 
 # Paid model with free-only mode (auto-swaps to free)
 export ZAI_FREE_ONLY=true
-agentnova chat --backend zai --model glm-5.1
+agentkthx chat --backend zai --model glm-5.1
 
 # Credit-exhaustion fallback (auto-retries on 429)
-agentnova chat --backend zai --model glm-5.1
+agentkthx chat --backend zai --model glm-5.1
 ```
 
 ---
 
 ## Plugin System (R05.0)
 
-The plugin system enables extending AgentNova with additional backends, CLI commands, and configuration without modifying the core framework. See `docs/PLUGIN_SPEC.md` for the full specification.
+The plugin system enables extending AgentKthx with additional backends, CLI commands, and configuration without modifying the core framework. See `docs/PLUGIN_SPEC.md` for the full specification.
 
 ### PluginManager (`plugins/_loader.py`)
 
 Central singleton registry for all plugin operations:
 
 ```python
-from agentnova.plugins import get_plugin_manager
+from agentkthx.plugins import get_plugin_manager
 
 pm = get_plugin_manager()
 manifests = pm.discover()           # Scan plugins/ for plugin.json manifests
@@ -597,7 +597,7 @@ Each plugin ships a `plugin.json` manifest:
 
 ### Key Features
 
-- **Manifest-based discovery** -- Scan `agentnova/plugins/` for subdirectories containing `plugin.json`
+- **Manifest-based discovery** -- Scan `agentkthx/plugins/` for subdirectories containing `plugin.json`
 - **Topological dependency resolution** -- `depends` field respected via Kahn's algorithm
 - **Lazy loading** -- Plugins loaded on first use via `_ensure_plugin()` in `backends/__init__.py`
 - **Backend name independence** -- Backend name (e.g. `test-backend`) differs from plugin directory name (e.g. `test-plugin`)
@@ -620,7 +620,7 @@ Each plugin ships a `plugin.json` manifest:
 discover() → load(name) → register(manager) → [active] → unregister() → unload()
 ```
 
-Plugins are discovered by scanning `agentnova/plugins/` for subdirectories containing `plugin.json`. The entrypoint module (always `__init__`) must export `register(manager)` and `unregister(manager)` functions. The `register()` function is called with the PluginManager instance, where the plugin registers its backends, CLI commands, and config defaults.
+Plugins are discovered by scanning `agentkthx/plugins/` for subdirectories containing `plugin.json`. The entrypoint module (always `__init__`) must export `register(manager)` and `unregister(manager)` functions. The `register()` function is called with the PluginManager instance, where the plugin registers its backends, CLI commands, and config defaults.
 
 ---
 
@@ -642,14 +642,14 @@ Graceful Ctrl+C handling at three layers of the agent execution stack:
 
 **Features**:
 - SQLite storage with WAL journal mode for safe concurrent access
-- Database stored at `~/.agentnova/memory.db`
+- Database stored at `~/.agentkthx/memory.db`
 - Session management: `list_sessions()`, `delete_session()`
 - Activated via `--session <name>` CLI flag or `session_id` parameter on `Agent`
 - Implements the same `Memory` API: `add()`, `get_history()`, `clear()`
 - **Must call `agent.memory.close()` on exit** to flush WAL to disk
 
 ```python
-from agentnova import Agent
+from agentkthx import Agent
 
 agent = Agent(
     model="qwen2.5:0.5b",
@@ -664,11 +664,11 @@ agent.memory.close()  # Required for clean shutdown
 
 ```bash
 # Activate via CLI
-agentnova chat -m qwen2.5:0.5b --session my-session
+agentkthx chat -m qwen2.5:0.5b --session my-session
 
 # Manage sessions
-agentnova sessions list
-agentnova sessions delete my-session
+agentkthx sessions list
+agentkthx sessions delete my-session
 ```
 
 ---
@@ -749,7 +749,7 @@ Three core functions:
 
 ## TurboQuant Server Management (`plugins/turboquant/`) (R04.5, plugin in R05.0)
 
-The TurboQuant plugin provides the `agentnova turbo` CLI command for managing llama.cpp inference servers. Lazy-loaded on first use.
+The TurboQuant plugin provides the `agentkthx turbo` CLI command for managing llama.cpp inference servers. Lazy-loaded on first use.
 
 `plugins/turboquant/turbo.py` manages the lifecycle of a TurboQuant (llama.cpp) inference server for running quantized models.
 
@@ -764,7 +764,7 @@ class TurboState:
     status: str                # "running", "stopped", "unknown"
 ```
 
-State is persisted to `~/.agentnova/turbo_state.json`.
+State is persisted to `~/.agentkthx/turbo_state.json`.
 
 ### Key Functions
 
@@ -792,10 +792,10 @@ Uses `ollama_registry.discover_models()` to find Ollama-compatible models, then:
 ### CLI
 
 ```bash
-agentnova turbo list        # List TurboQuant-compatible models
-agentnova turbo start MODEL # Start server with model
-agentnova turbo stop        # Stop running server
-agentnova turbo status      # Show server status
+agentkthx turbo list        # List TurboQuant-compatible models
+agentkthx turbo start MODEL # Start server with model
+agentkthx turbo stop        # Stop running server
+agentkthx turbo status      # Show server status
 ```
 
 ---
@@ -849,7 +849,7 @@ Tools marked `dangerous=True` require explicit confirmation before execution.
 
 ```bash
 # Enable confirmation prompt (interactive y/N)
-agentnova chat --confirm
+agentkthx chat --confirm
 ```
 
 The `Agent` class accepts a `confirm_dangerous` callback that is invoked before executing any dangerous tool. The callback receives the tool name and arguments and returns `True` to proceed or `False` to abort.
@@ -858,7 +858,7 @@ The `Agent` class accepts a `confirm_dangerous` callback that is invoked before 
 
 ## Audit Logging (R04.2)
 
-`_audit_log()` writes structured JSON-lines to `~/.agentnova/audit.log` tracking outcomes of dangerous tool executions.
+`_audit_log()` writes structured JSON-lines to `~/.agentkthx/audit.log` tracking outcomes of dangerous tool executions.
 
 **Audited tools**: `shell`, `write_file`, `edit_file`
 
@@ -879,7 +879,7 @@ The skills loader implements the AgentSkills specification with full validation 
 The `Skill` dataclass validates all fields during initialization:
 
 ```python
-from agentnova.skills import Skill
+from agentkthx.skills import Skill
 
 skill = Skill(
     name="my-skill",                    # 1-64 chars, lowercase, hyphens only
@@ -902,7 +902,7 @@ skill = Skill(
 Validates license identifiers against the SPDX license list:
 
 ```python
-from agentnova.skills import validate_spdx_license, SPDX_LICENSES
+from agentkthx.skills import validate_spdx_license, SPDX_LICENSES
 
 # Validate a license
 valid, msg = validate_spdx_license("MIT")
@@ -924,15 +924,15 @@ print(SPDX_LICENSES)
 Parses skill compatibility requirements into structured data:
 
 ```python
-from agentnova.skills import parse_compatibility
+from agentkthx.skills import parse_compatibility
 
 # Python version requirement
 compat = parse_compatibility("python>=3.8")
 # Returns: {"python": ">=3.8", "runtimes": [], "frameworks": []}
 
 # Multiple requirements
-compat = parse_compatibility("python>=3.8, ollama, agentnova>=1.0")
-# Returns: {"python": ">=3.8", "runtimes": ["ollama"], "frameworks": ["agentnova>=1.0"]}
+compat = parse_compatibility("python>=3.8, ollama, agentkthx>=1.0")
+# Returns: {"python": ">=3.8", "runtimes": ["ollama"], "frameworks": ["agentkthx>=1.0"]}
 ```
 
 ### Skill Compatibility Checking
@@ -940,7 +940,7 @@ compat = parse_compatibility("python>=3.8, ollama, agentnova>=1.0")
 Check if a skill is compatible with the current environment:
 
 ```python
-from agentnova.skills import Skill
+from agentkthx.skills import Skill
 
 skill = Skill(
     name="web-search",
@@ -1161,7 +1161,7 @@ The model MUST explicitly format tool calls.
 
 ## Dual API Support
 
-AgentNova supports both OpenResponses and OpenAI Chat-Completions API endpoints through Ollama and LlamaServer. This allows flexibility for different integration scenarios.
+AgentKthx supports both OpenResponses and OpenAI Chat-Completions API endpoints through Ollama and LlamaServer. This allows flexibility for different integration scenarios.
 
 ### API Modes
 
@@ -1176,7 +1176,7 @@ AgentNova supports both OpenResponses and OpenAI Chat-Completions API endpoints 
 - Default mode for Ollama-native deployments
 - Full OpenResponses specification compliance
 - Detailed item tracking with `[OpenResponses]` debug output
-- Recommended for AgentNova-specific applications
+- Recommended for AgentKthx-specific applications
 
 **OpenAI Chat-Completions (`--api openai`)**:
 - OpenAI-compatible endpoint for cross-platform tools
@@ -1208,26 +1208,26 @@ AgentNova supports both OpenResponses and OpenAI Chat-Completions API endpoints 
 
 ```bash
 # Default: OpenResponses API
-agentnova chat -m qwen2.5:0.5b
+agentkthx chat -m qwen2.5:0.5b
 
 # OpenAI Chat-Completions API
-agentnova chat -m qwen2.5:0.5b --api openai
+agentkthx chat -m qwen2.5:0.5b --api openai
 
 # LlamaServer backend (uses OpenAI endpoint by default)
-agentnova chat -m qwen2.5:0.5b --backend llama-server
+agentkthx chat -m qwen2.5:0.5b --backend llama-server
 
 # BitNet backend
-agentnova chat -m bitnet-1.58b --backend bitnet
+agentkthx chat -m bitnet-1.58b --backend bitnet
 
 # With debug output
-agentnova test 01 --api openai --debug
+agentkthx test 01 --api openai --debug
 ```
 
 ### Implementation Details
 
 ```python
-from agentnova.backends import get_backend
-from agentnova.core.types import ApiMode
+from agentkthx.backends import get_backend
+from agentkthx.core.types import ApiMode
 
 # Ollama - OpenResponses mode (default)
 backend = get_backend("ollama", api_mode=ApiMode.OPENRE)
@@ -1249,8 +1249,8 @@ Both modes use ReAct prompting - tool definitions are not passed to the API. The
 The Chat-Completions mode supports SSE (Server-Sent Events) streaming for real-time output:
 
 ```python
-from agentnova.backends import get_backend
-from agentnova.core.types import ApiMode
+from agentkthx.backends import get_backend
+from agentkthx.core.types import ApiMode
 
 backend = get_backend("ollama", api_mode=ApiMode.OPENAI)
 
@@ -1398,7 +1398,7 @@ This ensures the model always knows what action to take next, preventing common 
 
 ## ACP Integration (`acp_plugin.py`)
 
-AgentNova implements ACP (Agent Control Panel) v1.0.6 for monitoring, control, and activity logging.
+AgentKthx implements ACP (Agent Control Panel) v1.0.6 for monitoring, control, and activity logging.
 
 ### Features
 
@@ -1412,7 +1412,7 @@ AgentNova implements ACP (Agent Control Panel) v1.0.6 for monitoring, control, a
 Group multiple activities into an atomic batch operation:
 
 ```python
-from agentnova.acp_plugin import ACPPlugin
+from agentkthx.acp_plugin import ACPPlugin
 
 acp = ACPPlugin(agent_name="CodeAssistant", base_url="http://localhost:8766")
 
@@ -1445,10 +1445,10 @@ with acp.batch_context("Refactor operation") as batch:
 
 ```bash
 # Enable ACP logging
-agentnova chat --acp
+agentkthx chat --acp
 
 # With custom ACP server
-agentnova agent --acp --acp-url https://tunnel.example.com
+agentkthx agent --acp --acp-url https://tunnel.example.com
 ```
 
 ---
@@ -1536,13 +1536,13 @@ This ensures BitNet models (which report `"bitnet"` as their architecture in GGU
 
 ```bash
 # List models with cached tool support status
-agentnova models
+agentkthx models
 
 # Test tool support for all models (caches results)
-agentnova models --tool-support
+agentkthx models --tool-support
 
 # Re-test ignoring cache
-agentnova models --tool-support --no-cache
+agentkthx models --tool-support --no-cache
 ```
 
 ---

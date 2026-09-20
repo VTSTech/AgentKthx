@@ -12,7 +12,7 @@ import tempfile
 import pytest
 from pathlib import Path
 
-from agentnova.skills import (
+from agentkthx.skills import (
     SkillLoader,
     Skill,
     SkillRegistry,
@@ -422,7 +422,7 @@ class TestBuiltinSkills:
 
     def test_builtin_skills_dir_exists(self):
         """The built-in skills directory should exist."""
-        from agentnova.skills.loader import SkillLoader
+        from agentkthx.skills.loader import SkillLoader
         # Use the default skills dir
         default = Path(__file__).parent.parent / "skills"
         if default.exists():
@@ -430,7 +430,7 @@ class TestBuiltinSkills:
 
     def test_load_acp_skill(self):
         """ACP skill should load successfully."""
-        from agentnova.skills.loader import SkillLoader
+        from agentkthx.skills.loader import SkillLoader
         skills_dir = Path(__file__).parent.parent / "skills"
         if not skills_dir.exists():
             pytest.skip("Built-in skills directory not found")
@@ -442,7 +442,7 @@ class TestBuiltinSkills:
 
     def test_load_skill_creator_skill(self):
         """skill-creator skill should load successfully."""
-        from agentnova.skills.loader import SkillLoader
+        from agentkthx.skills.loader import SkillLoader
         skills_dir = Path(__file__).parent.parent / "skills"
         if not skills_dir.exists():
             pytest.skip("Built-in skills directory not found")
@@ -453,7 +453,7 @@ class TestBuiltinSkills:
 
     def test_removed_skills_not_present(self):
         """datetime and web-search skills should NOT be present."""
-        from agentnova.skills.loader import SkillLoader
+        from agentkthx.skills.loader import SkillLoader
         skills_dir = Path(__file__).parent.parent / "skills"
         if not skills_dir.exists():
             pytest.skip("Built-in skills directory not found")
@@ -472,23 +472,23 @@ class TestWebSearchTool:
 
     def test_import(self):
         """web_search should be importable from builtins."""
-        from agentnova.tools.builtins import web_search
+        from agentkthx.tools.builtins import web_search
         assert callable(web_search)
 
     def test_web_search_in_registry(self):
         """web-search tool should be registered in the builtin registry."""
-        from agentnova.tools.builtins import BUILTIN_REGISTRY
+        from agentkthx.tools.builtins import BUILTIN_REGISTRY
         assert BUILTIN_REGISTRY.get("web-search") is not None
 
     def test_web_search_description(self):
         """web-search tool should have a meaningful description."""
-        from agentnova.tools.builtins import BUILTIN_REGISTRY
+        from agentkthx.tools.builtins import BUILTIN_REGISTRY
         tool = BUILTIN_REGISTRY.get("web-search")
         assert "search" in tool.description.lower() or "search" in tool.description.lower()
 
     def test_web_search_params(self):
         """web-search tool should have query and num_results params."""
-        from agentnova.tools.builtins import BUILTIN_REGISTRY
+        from agentkthx.tools.builtins import BUILTIN_REGISTRY
         tool = BUILTIN_REGISTRY.get("web-search")
         param_names = [p.name for p in tool.params]
         assert "query" in param_names

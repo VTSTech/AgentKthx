@@ -1,8 +1,8 @@
 """
-⚛️ LocalClaw → AgentNova Redirect
+⚛️ LocalClaw → AgentKthx Redirect
 
-This package has been renamed to AgentNova.
-All functionality is now available under the 'agentnova' package.
+This package has been renamed to AgentKthx.
+All functionality is now available under the 'agentkthx' package.
 
 Status: Alpha
 
@@ -13,12 +13,12 @@ Migration Guide:
     from localclaw import Agent
     
     # New (recommended)
-    from agentnova import Agent
+    from agentkthx import Agent
 
 CLI:
     # Both commands work identically
     localclaw run "What is 2+2?"
-    agentnova run "What is 2+2?"
+    agentkthx run "What is 2+2?"
 """
 
 import sys
@@ -26,21 +26,21 @@ import warnings
 
 # Issue deprecation warning
 warnings.warn(
-    "The 'localclaw' package has been renamed to 'agentnova'. "
-    "Please update your imports: 'from agentnova import ...' instead of 'from localclaw import ...'",
+    "The 'localclaw' package has been renamed to 'agentkthx'. "
+    "Please update your imports: 'from agentkthx import ...' instead of 'from localclaw import ...'",
     DeprecationWarning,
     stacklevel=2
 )
 
-# Re-export everything from agentnova
-from agentnova import *
-from agentnova import __version__, __author__, __status__
+# Re-export everything from agentkthx
+from agentkthx import *
+from agentkthx import __version__, __author__, __status__
 
 
 def main():
     """Entry point for localclaw CLI command."""
-    from agentnova.cli import main as agentnova_main
-    return agentnova_main()
+    from agentkthx.cli import main as agentkthx_main
+    return agentkthx_main()
 
 
 __all__ = [

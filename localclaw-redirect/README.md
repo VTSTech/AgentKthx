@@ -1,8 +1,8 @@
 # localclaw - DEPRECATED
 
-> ⚠️ **This package has been renamed to [agentnova](https://pypi.org/project/agentnova/)**
+> ⚠️ **This package has been renamed to [agentkthx](https://pypi.org/project/agentkthx/)**
 
-`localclaw` is now `agentnova`. This package exists only for backward compatibility.
+`localclaw` is now `agentkthx`. This package exists only for backward compatibility.
 
 ## Migration
 
@@ -11,7 +11,7 @@
 pip uninstall localclaw
 
 # Install new
-pip install agentnova
+pip install agentkthx
 ```
 
 ```python
@@ -19,7 +19,7 @@ pip install agentnova
 import localclaw
 
 # New
-import agentnova
+import agentkthx
 ```
 
 ```bash
@@ -27,15 +27,15 @@ import agentnova
 localclaw run "prompt"
 
 # New CLI
-agentnova run "prompt"
+agentkthx run "prompt"
 ```
 
 ## Why the rename?
 
-The name "LocalClaw" was used by multiple projects. We renamed to "AgentNova" for better uniqueness and branding.
+The name "LocalClaw" was used by multiple projects. We renamed to "AgentNova" first, then to "AgentKthx" for better uniqueness and branding.
 
 ## Links
 
-- **New Package**: https://pypi.org/project/agentnova/
-- **Repository**: https://github.com/VTSTech/AgentNova
+- **New Package**: https://pypi.org/project/agentkthx/
+- **Repository**: https://github.com/VTSTech/AgentKthx
 - **Author**: [VTSTech](https://www.vts-tech.org)

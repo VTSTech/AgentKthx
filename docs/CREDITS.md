@@ -1,6 +1,6 @@
 # CREDITS.md
 
-AgentNova is built upon the work of many open-source projects, model creators, API designers, and community specifications. This document acknowledges every project, inspiration, API, model creator, and specification that makes AgentNova possible.
+AgentKthx is built upon the work of many open-source projects, model creators, API designers, and community specifications. This document acknowledges every project, inspiration, API, model creator, and specification that makes AgentKthx possible.
 
 ---
 
@@ -14,42 +14,42 @@ Licensed under the **MIT License**. Copyright (c) 2026 Nigel Todman.
 
 ## Inference Backends
 
-These projects provide the runtime environments that AgentNova connects to for local LLM inference.
+These projects provide the runtime environments that AgentKthx connects to for local LLM inference.
 
 | Project | Description | Link |
 |---------|-------------|------|
 | **Ollama** | Local LLM inference server supporting a vast ecosystem of open-weight models with native tool calling and OpenAI-compatible APIs | [https://ollama.com](https://ollama.com) |
 | **BitNet** | Microsoft's 1-bit quantized LLM inference engine optimized for extreme CPU efficiency | [https://github.com/microsoft/BitNet](https://github.com/microsoft/BitNet) |
-| **llama.cpp (TurboQuant)** | CPU-optimized LLM inference server with TurboQuant KV cache compression, enabling sub-4K context workloads with minimal memory. AgentNova's `turbo` subcommand discovers Ollama models and manages the llama-server lifecycle. | [https://github.com/TheTom/llama-cpp-turboquant](https://github.com/TheTom/llama-cpp-turboquant) |
-| **ZAI** | Cloud-hosted LLM inference API providing GLM series models with an OpenAI Chat-Completions compatible endpoint. Offers free-tier models (GLM-4.5-Flash, GLM-4.7-Flash) and paid models with up to 128K context. AgentNova includes free-only mode and automatic credit-exhaustion fallback. | [https://api.z.ai](https://api.z.ai) |
+| **llama.cpp (TurboQuant)** | CPU-optimized LLM inference server with TurboQuant KV cache compression, enabling sub-4K context workloads with minimal memory. AgentKthx's `turbo` subcommand discovers Ollama models and manages the llama-server lifecycle. | [https://github.com/TheTom/llama-cpp-turboquant](https://github.com/TheTom/llama-cpp-turboquant) |
+| **ZAI** | Cloud-hosted LLM inference API providing GLM series models with an OpenAI Chat-Completions compatible endpoint. Offers free-tier models (GLM-4.5-Flash, GLM-4.7-Flash) and paid models with up to 128K context. AgentKthx includes free-only mode and automatic credit-exhaustion fallback. | [https://api.z.ai](https://api.z.ai) |
 
 ---
 
 ## Architectural Inspirations
 
-AgentNova draws design philosophy and patterns from several influential projects and research.
+AgentKthx draws design philosophy and patterns from several influential projects and research.
 
 ### OpenClaw
 
-AgentNova was **inspired by the architecture of OpenClaw**, rebuilt from scratch for local-first operation. The original OpenClaw project served as the conceptual foundation upon which AgentNova was designed, with a focus on stripping away cloud dependencies and enabling fully local agentic workflows.
+AgentKthx was **inspired by the architecture of OpenClaw**, rebuilt from scratch for local-first operation. The original OpenClaw project served as the conceptual foundation upon which AgentKthx was designed, with a focus on stripping away cloud dependencies and enabling fully local agentic workflows.
 
 ### ReAct (Reasoning + Acting)
 
-The core agentic loop in AgentNova implements the **ReAct paradigm** — a framework where language models interleave reasoning traces (Thought) with action execution (Action/Action Input), observe results (Observation), and produce final answers. This pattern, introduced in the paper *"ReAct: Synergizing Reasoning and Acting in Language Models"* (Yao et al., 2022), is the backbone of how AgentNova orchestrates tool-calling with models that lack native function calling support. The unified ReAct prompting system, enhanced observation formatting, and few-shot examples for small models all stem from this research.
+The core agentic loop in AgentKthx implements the **ReAct paradigm** — a framework where language models interleave reasoning traces (Thought) with action execution (Action/Action Input), observe results (Observation), and produce final answers. This pattern, introduced in the paper *"ReAct: Synergizing Reasoning and Acting in Language Models"* (Yao et al., 2022), is the backbone of how AgentKthx orchestrates tool-calling with models that lack native function calling support. The unified ReAct prompting system, enhanced observation formatting, and few-shot examples for small models all stem from this research.
 
 ### ATLAS-Autonomous
 
-The **retry-with-error-feedback** feature introduced in R04.1 was inspired by the [ATLAS-Autonomous](https://github.com/itigges22/ATLAS) benchmark infrastructure. The ATLAS project demonstrated that giving models a chance to correct failed tool calls before the agent gives up significantly improves success rates on error-prone tasks. AgentNova adopted this concept, implementing it as configurable retry context injection that works across both native tool-calling and ReAct text-based paths.
+The **retry-with-error-feedback** feature introduced in R04.1 was inspired by the [ATLAS-Autonomous](https://github.com/itigges22/ATLAS) benchmark infrastructure. The ATLAS project demonstrated that giving models a chance to correct failed tool calls before the agent gives up significantly improves success rates on error-prone tasks. AgentKthx adopted this concept, implementing it as configurable retry context injection that works across both native tool-calling and ReAct text-based paths.
 
 ### Pi Coding Agent
 
-The **Pi Coding Agent** ([pi-mono](https://github.com/pi-mono)) is a coding-focused AI assistant that demonstrated the practical value of cloud-hosted LLM APIs — specifically the ZAI platform — for agentic workflows. Experience building with and using the Pi Coding Agent on ZAI inspired the addition of cloud backend support in AgentNova R04.6, marking the project's first step beyond purely local inference. The ZAI backend's design — OpenAI Chat-Completions compatibility, Bearer token authentication, free-tier awareness, and credit-exhaustion fallback — draws directly from lessons learned working with ZAI through the Pi Coding Agent ecosystem.
+The **Pi Coding Agent** ([pi-mono](https://github.com/pi-mono)) is a coding-focused AI assistant that demonstrated the practical value of cloud-hosted LLM APIs — specifically the ZAI platform — for agentic workflows. Experience building with and using the Pi Coding Agent on ZAI inspired the addition of cloud backend support in AgentKthx R04.6, marking the project's first step beyond purely local inference. The ZAI backend's design — OpenAI Chat-Completions compatibility, Bearer token authentication, free-tier awareness, and credit-exhaustion fallback — draws directly from lessons learned working with ZAI through the Pi Coding Agent ecosystem.
 
 ---
 
 ## Development History
 
-AgentNova's origins are a testament to the power of rapid, iterative AI-assisted development — or as the kids call it, **vibe coding**.
+AgentKthx's origins are a testament to the power of rapid, iterative AI-assisted development — or as the kids call it, **vibe coding**.
 
 ### LocalClaw Era — Vibe Coding with DeepSeek and Gemini
 
@@ -57,19 +57,19 @@ The project began life as **LocalClaw**, a local-first reimagining of the OpenCl
 
 This vibe coding process proved remarkably effective for a project of this nature. The agentic loop, tool-calling infrastructure, ReAct prompt parsing, security layer, and multi-backend architecture all emerged from these freeform coding sessions. DeepSeek excelled at generating the initial scaffolding and handling the more complex algorithmic components like the tool parser and error recovery system, while Gemini contributed to architectural decisions, the spec compliance layer, and the soul/skills system design. The result was a working agentic framework that, despite its unconventional genesis, maintained clean code quality, comprehensive test coverage, and strong architectural principles throughout.
 
-### The Pivot to AgentNova R00 — GLM-5 and Super-Z
+### The Pivot to AgentKthx R00 — GLM-5 and Super-Z
 
-By the time the project reached its **R00 release milestone** and was renamed from LocalClaw to **AgentNova**, the development workflow shifted exclusively to **GLM-5** and its agentic platform persona, **Super-Z**. This transition marked a significant evolution in both the project's identity and its development methodology. Where the earlier vibe coding sessions were exploratory and multi-model, the AgentNova era brought a focused, sustained development relationship with a single AI pair-programmer that understood the full project context, architectural decisions, and design philosophy.
+By the time the project reached its **R00 release milestone** and was renamed from LocalClaw to **AgentKthx**, the development workflow shifted exclusively to **GLM-5** and its agentic platform persona, **Super-Z**. This transition marked a significant evolution in both the project's identity and its development methodology. Where the earlier vibe coding sessions were exploratory and multi-model, the AgentKthx era brought a focused, sustained development relationship with a single AI pair-programmer that understood the full project context, architectural decisions, and design philosophy.
 
 Under the GLM-5/Super-Z collaboration, the project underwent substantial maturation: the OpenResponses specification was implemented with full compliance, the ACP integration reached v1.0.5, the Soul Spec v0.5 persona system was designed and shipped, the AgentSkills packaging format was defined, and the multi-agent orchestrator with router, pipeline, and parallel modes was built out. The comprehensive test suite — spanning reasoning benchmarks, tool-calling validation, security audits, and spec compliance checks — was also largely developed and maintained through this partnership.
 
-The progression from LocalClaw's freewheeling vibe coding origins to AgentNova's disciplined development under GLM-5 demonstrates that AI-assisted development can scale from rapid prototyping to production-grade software engineering. The entire codebase — thousands of lines of carefully structured Python with zero external dependencies, 600+ tests, and multi-spec compliance — stands as evidence that vibe coding is not just a meme but a legitimate and powerful development methodology when paired with the right AI collaborator.
+The progression from LocalClaw's freewheeling vibe coding origins to AgentKthx's disciplined development under GLM-5 demonstrates that AI-assisted development can scale from rapid prototyping to production-grade software engineering. The entire codebase — thousands of lines of carefully structured Python with zero external dependencies, 600+ tests, and multi-spec compliance — stands as evidence that vibe coding is not just a meme but a legitimate and powerful development methodology when paired with the right AI collaborator.
 
 ---
 
 ## Specifications & Standards
 
-AgentNova implements and complies with several open specifications and standards. These define how the framework handles API interactions, tool calling, persona management, agent monitoring, and skill packaging.
+AgentKthx implements and complies with several open specifications and standards. These define how the framework handles API interactions, tool calling, persona management, agent monitoring, and skill packaging.
 
 | Specification | Version | Compliance | Description | Link |
 |---------------|:-------:|:----------:|-------------|------|
@@ -80,7 +80,7 @@ AgentNova implements and complies with several open specifications and standards
 | **AgentSkills** | — | 100% | Skill packaging specification defining SKILL.md with YAML frontmatter (name, description, license, compatibility, allowed-tools), scripts/references/assets directories, SPDX license validation, and environment compatibility checking | [https://agentskills.io/](https://agentskills.io/) |
 | **JSON-RPC 2.0** | 2.0 | Full | Remote procedure call protocol used for A2A (Agent-to-Agent) messaging between agents and the ACP server | [https://www.jsonrpc.org/specification](https://www.jsonrpc.org/specification) |
 | **Server-Sent Events (SSE)** | — | Full | Streaming protocol for real-time delivery of OpenResponses lifecycle events (response.queued, response.in_progress, response.output_item.added, response.output_text.delta, etc.) | [W3C Specification](https://html.spec.whatwg.org/multipage/server-sent-events.html) |
-| **SPDX License Identifiers** | 3.x | Subset | Standardized license identifier format used for skill license validation. AgentNova validates skill licenses against a curated set of common SPDX identifiers (MIT, Apache-2.0, GPL-3.0, BSD-3-Clause, etc.) including WITH exception support (e.g., "Apache-2.0 WITH LLVM-exception") | [https://spdx.org/licenses/](https://spdx.org/licenses/) |
+| **SPDX License Identifiers** | 3.x | Subset | Standardized license identifier format used for skill license validation. AgentKthx validates skill licenses against a curated set of common SPDX identifiers (MIT, Apache-2.0, GPL-3.0, BSD-3-Clause, etc.) including WITH exception support (e.g., "Apache-2.0 WITH LLVM-exception") | [https://spdx.org/licenses/](https://spdx.org/licenses/) |
 | **IANA Time Zone Database** | — | Used | Standardized timezone identifiers (e.g., "America/New_York", "Europe/London", "UTC") used by the `get_time` tool via Python's `zoneinfo` module | [IANA Time Zone Database](https://www.iana.org/time-zones) |
 | **Keep a Changelog** | 1.0.0 | Used | Changelog formatting standard used for CHANGELOG.md | [https://keepachangelog.com/en/1.0.0/](https://keepachangelog.com/en/1.0.0/) |
 
@@ -88,17 +88,17 @@ AgentNova implements and complies with several open specifications and standards
 
 ## Model Creators & Supported Models
 
-AgentNova is optimized to run efficiently on small, local LLMs. The framework includes family-specific configurations (prompting style, stop tokens, tool format, temperature defaults, thinking mode handling) for the following model families and their creators.
+AgentKthx is optimized to run efficiently on small, local LLMs. The framework includes family-specific configurations (prompting style, stop tokens, tool format, temperature defaults, thinking mode handling) for the following model families and their creators.
 
 ### Alibaba Cloud — Qwen Series
 
-The **Qwen** family from Alibaba Cloud is the most extensively configured and tested model family in AgentNova. Multiple model sizes and variants are supported with native tool calling.
+The **Qwen** family from Alibaba Cloud is the most extensively configured and tested model family in AgentKthx. Multiple model sizes and variants are supported with native tool calling.
 
 | Model | Parameters | Tool Support | Notes |
 |-------|:----------:|:------------:|-------|
 | **Qwen 2.5** (`qwen2.5`) | 0.5B – 72B | Native (XML) | ChatML format (`<\|im_start\|>`/`<\|im_end\|>`). Primary development target. Excellent performance at all sizes. |
 | **Qwen 2.5 Coder** (`qwen2.5-coder`) | 0.5B – 32B | ReAct | Same family as Qwen 2.5 but different template — uses ReAct text parsing instead of native tool calling. |
-| **Qwen 3** (`qwen3`) | 0.6B – 235B | Native (openre) / ReAct (openai) | Extended thinking mode with `<think/>` tags. Native tool calling on openre only; ReAct on openai. AgentNova sends `/no_think` directive by default for tool-calling workflows. |
+| **Qwen 3** (`qwen3`) | 0.6B – 235B | Native (openre) / ReAct (openai) | Extended thinking mode with `<think/>` tags. Native tool calling on openre only; ReAct on openai. AgentKthx sends `/no_think` directive by default for tool-calling workflows. |
 | **Qwen 3.5** (`qwen35`) | 0.8B – TBD | Native (openai) / ReAct (openre) | Successor to Qwen 3. Native tool calling on openai only; ReAct text parsing on openre. Does NOT have thinking mode (simpler template than Qwen 3). |
 | **Qwen 2** (`qwen2`) | 0.5B – 72B | ReAct | Earlier generation. ReAct text parsing (no native tool calling on either API mode). |
 | **Qwen** (base) | 0.5B – 7B | ReAct | Base Qwen model. Falls back to ReAct text parsing. |
@@ -121,7 +121,7 @@ Google's **Gemma** models offer compact, efficient inference with specific handl
 
 | Model | Parameters | Tool Support | Notes |
 |-------|:----------:|:------------:|-------|
-| **Gemma 3** (`gemma3`) | 270M – 27B | None (ReAct) | Requires first-user system prompt style. No native tool calling — AgentNova uses ReAct prompting. Special `no_tools_system_prompt` for pure reasoning. |
+| **Gemma 3** (`gemma3`) | 270M – 27B | None (ReAct) | Requires first-user system prompt style. No native tool calling — AgentKthx uses ReAct prompting. Special `no_tools_system_prompt` for pure reasoning. |
 | **Gemma 2** (`gemma2`) | 2B – 27B | None (ReAct) | Similar behavior to Gemma 3. |
 | **FunctionGemma** | 270M | Native | Specialized function-calling variant. Native tool support on both openre and openai API modes. |
 
@@ -132,7 +132,7 @@ IBM's **Granite** models are well-suited for enterprise and tool-calling tasks.
 | Model | Parameters | Tool Support | Notes |
 |-------|:----------:|:------------:|-------|
 | **Granite 4** (`granite4`) | 350M | Native (XML) | Excellent tool-calling performance. Native on both openre and openai. Achieved 100% on diagnostic benchmarks at just 350M parameters. Best sub-500M model tested (88% on tool tests). |
-| **Granite 3.1 MoE** (`granitemoe`) | 1B (active) | Native (XML) | Mixture-of-Experts architecture. Has known schema dump issue and JSON truncation — AgentNova includes specific workarounds. |
+| **Granite 3.1 MoE** (`granitemoe`) | 1B (active) | Native (XML) | Mixture-of-Experts architecture. Has known schema dump issue and JSON truncation — AgentKthx includes specific workarounds. |
 | **Granite** (base) | Various | Native (XML) | Base Granite family with IBM-specific role token format (`<\|start_of_role\|>`). |
 
 ### DeepSeek
@@ -141,7 +141,7 @@ IBM's **Granite** models are well-suited for enterprise and tool-calling tasks.
 
 | Model | Parameters | Tool Support | Notes |
 |-------|:----------:|:------------:|-------|
-| **DeepSeek-R1** (`deepseek-r1`) | 1.5B – 671B | Native | Reasoning model with extended thinking via `<think/>` tags. AgentNova strips think tags by default. |
+| **DeepSeek-R1** (`deepseek-r1`) | 1.5B – 671B | Native | Reasoning model with extended thinking via `<think/>` tags. AgentKthx strips think tags by default. |
 | **DeepSeek** (standard) | Various | Native | Standard DeepSeek models including coder variants. |
 | **DeepSeek Coder** | 1.3B – 33B | Varies | Code-specialized models. Tool support depends on specific variant. |
 
@@ -160,7 +160,7 @@ IBM's **Granite** models are well-suited for enterprise and tool-calling tasks.
 
 ### Zhipu AI — GLM Series (ZAI)
 
-**Zhipu AI**'s **GLM** models are accessed through the ZAI cloud API. AgentNova supports the full GLM lineup with native tool calling via the OpenAI Chat-Completions compatible endpoint.
+**Zhipu AI**'s **GLM** models are accessed through the ZAI cloud API. AgentKthx supports the full GLM lineup with native tool calling via the OpenAI Chat-Completions compatible endpoint.
 
 | Model | Parameters | Tool Support | Pricing | Notes |
 |-------|:----------:|:------------:|---------|-------|
@@ -178,7 +178,7 @@ IBM's **Granite** models are well-suited for enterprise and tool-calling tasks.
 | **GLM 4.5** | TBD | Native | $0.60/$2.20 | Standard GLM 4.5. |
 | **GLM 4 32B** | 32B | Native | $0.10/$0.10 | Legacy model. 128K context window. |
 
-Pricing shown as input/output per 1M tokens. Free models require no credits. AgentNova auto-detects insufficient credits (HTTP 429, error code 1113) and falls back to a free model.
+Pricing shown as input/output per 1M tokens. Free models require no credits. AgentKthx auto-detects insufficient credits (HTTP 429, error code 1113) and falls back to a free model.
 
 ### Community Fine-tunes
 
@@ -197,11 +197,11 @@ The built-in `web_search` tool uses **DuckDuckGo Lite** (`https://lite.duckduckg
 
 ### OpenAI Chat Completions API
 
-AgentNova implements the **OpenAI Chat Completions API** format through Ollama's `/v1/chat/completions` endpoint. This enables integration with any tool or middleware that expects the OpenAI request/response format, including `tool_choice`, `response_format`, `logprobs`, `stop`, `presence_penalty`, `frequency_penalty`, `top_p`, and `n` parameters.
+AgentKthx implements the **OpenAI Chat Completions API** format through Ollama's `/v1/chat/completions` endpoint. This enables integration with any tool or middleware that expects the OpenAI request/response format, including `tool_choice`, `response_format`, `logprobs`, `stop`, `presence_penalty`, `frequency_penalty`, `top_p`, and `n` parameters.
 
 ### Ollama API
 
-AgentNova communicates with Ollama through two API endpoints:
+AgentKthx communicates with Ollama through two API endpoints:
 
 - **`/api/chat`** — Ollama's native chat API (OpenResponses mode). Supports native tool calling, model listing (`/api/tags`), model inspection (`/api/show`), and streaming.
 - **`/v1/chat/completions`** — OpenAI-compatible endpoint (Chat Completions mode). Supports SSE streaming, tool calling, and the full OpenAI parameter set.
@@ -219,22 +219,22 @@ The llama-server backend (including TurboQuant builds) communicates through two 
 
 The BitNet backend communicates through a simple completion endpoint:
 
-- **`/completion`** — Text completion API with `prompt`, `n_predict`, `temperature`, and `stop` parameters. No native tool calling support — AgentNova uses ReAct text parsing.
+- **`/completion`** — Text completion API with `prompt`, `n_predict`, `temperature`, and `stop` parameters. No native tool calling support — AgentKthx uses ReAct text parsing.
 
 ### ZAI API
 
 The ZAI backend communicates through two endpoints:
 
-- **`/api/paas/v4/chat/completions`** — OpenAI Chat-Completions compatible endpoint with Bearer token authentication. Supports native tool calling, streaming (SSE), and the full OpenAI parameter set. Used exclusively by AgentNova's ZAI backend (no native/openre mode — always Chat-Completions).
-- **`/api/paas/v4/models`** — Model discovery endpoint. Returns available models dynamically. AgentNova merges API results with a static catalog to include flash variants and other models not returned by the endpoint.
+- **`/api/paas/v4/chat/completions`** — OpenAI Chat-Completions compatible endpoint with Bearer token authentication. Supports native tool calling, streaming (SSE), and the full OpenAI parameter set. Used exclusively by AgentKthx's ZAI backend (no native/openre mode — always Chat-Completions).
+- **`/api/paas/v4/models`** — Model discovery endpoint. Returns available models dynamically. AgentKthx merges API results with a static catalog to include flash variants and other models not returned by the endpoint.
 
 ---
 
 ## Benchmarks & Evaluation Frameworks
 
-AgentNova's test suite draws on and adapts questions from established evaluation benchmarks to measure reasoning, tool-calling, and knowledge capabilities.
+AgentKthx's test suite draws on and adapts questions from established evaluation benchmarks to measure reasoning, tool-calling, and knowledge capabilities.
 
-| Benchmark | Source | Usage in AgentNova |
+| Benchmark | Source | Usage in AgentKthx |
 |-----------|--------|-------------------|
 | **GSM8K** | [Cobbe et al., 2021](https://arxiv.org/abs/2110.14168) | 50 math word problems adapted for calculator tool-calling evaluation (`test 04_gsm8k_benchmark`) |
 | **BIG-bench** | [Srivastava et al., 2022](https://arxiv.org/abs/2210.09261) | Common sense reasoning (25 Q), causal reasoning (25 Q), logical deduction (25 Q), general knowledge (25 Q), and implicit reasoning (25 Q) questions adapted for local LLM evaluation |
@@ -255,21 +255,21 @@ AgentNova's test suite draws on and adapts questions from established evaluation
 
 ## Python Standard Library
 
-AgentNova proudly uses **zero external dependencies** at runtime. The entire framework — HTTP requests, JSON parsing, tool execution, security validation, streaming, and all backend communication — relies exclusively on the Python standard library (`urllib`, `json`, `subprocess`, `math`, `datetime`, `re`, `os`, `pathlib`, `time`, `uuid`, `collections`, `itertools`, `zoneinfo`, `platform`). This design choice ensures maximum portability, minimal attack surface, and ease of installation.
+AgentKthx proudly uses **zero external dependencies** at runtime. The entire framework — HTTP requests, JSON parsing, tool execution, security validation, streaming, and all backend communication — relies exclusively on the Python standard library (`urllib`, `json`, `subprocess`, `math`, `datetime`, `re`, `os`, `pathlib`, `time`, `uuid`, `collections`, `itertools`, `zoneinfo`, `platform`). This design choice ensures maximum portability, minimal attack surface, and ease of installation.
 
 ---
 
 ## Additional Acknowledgments
 
-- **Google Colab** — AgentNova provides a [Jupyter notebook](https://colab.research.google.com/github/VTSTech/AgentNova/blob/main/AgentNova.ipynb) for cloud-based experimentation.
-- **PyPI** — Package distribution at [https://pypi.org/project/agentnova/](https://pypi.org/project/agentnova/).
+- **Google Colab** — AgentKthx provides a [Jupyter notebook](https://colab.research.google.com/github/VTSTech/AgentKthx/blob/main/AgentKthx.ipynb) for cloud-based experimentation.
+- **PyPI** — Package distribution at [https://pypi.org/project/agentkthx/](https://pypi.org/project/agentkthx/).
 - **badgen** and **shields.io** — Badge services used in the README for download counts, license, and commit tracking.
-- **TheTom** — Author of [llama-cpp-turboquant](https://github.com/TheTom/llama-cpp-turboquant), the TurboQuant KV cache compression fork of llama.cpp that AgentNova's `turbo` subcommand manages. The `recommended_turbo_config()` mapping (symmetric vs asymmetric KV based on weight quantization) is based on TheTom's turboquant_plus research findings.
+- **TheTom** — Author of [llama-cpp-turboquant](https://github.com/TheTom/llama-cpp-turboquant), the TurboQuant KV cache compression fork of llama.cpp that AgentKthx's `turbo` subcommand manages. The `recommended_turbo_config()` mapping (symmetric vs asymmetric KV based on weight quantization) is based on TheTom's turboquant_plus research findings.
 - The broader **local LLM community** — including the Ollama, Hugging Face, and open-source AI communities — whose collective work makes running powerful models locally possible.
 
 ---
 
-*Last updated: 2026-04-15 (AgentNova R04.6)*
+*Last updated: 2026-04-15 (AgentKthx R04.6)*
 
 *Development history section added: 2026-03-30*
 *TurboQuant backend, Ollama registry, and tool support data updated: 2026-04-04*

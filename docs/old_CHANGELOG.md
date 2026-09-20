@@ -2,13 +2,13 @@
 
 ### Codebase Audit: Easy & Medium Pass, Chat UX Improvements & Config Overhaul
 
-Audit-driven release addressing 9 of 16 findings from the R04.7 codebase audit report. Easy pass (4 Low-severity: MAINT-02, MAINT-03, SEC-03, ARCH-03) and Medium pass (5 Medium-severity: ARCH-01, MAINT-01, ROB-01, SEC-01, TEST-01) resolved. Adds prompt budget visibility to the chat status bar, AST-based safe calculator, user-visible model fallback warnings, per-session todo isolation, and a fully overhauled `agentnova config` subcommand. Includes codebase audit and intelligence brief artifacts. Version bumped to 0.4.8-dev.
+Audit-driven release addressing 9 of 16 findings from the R04.7 codebase audit report. Easy pass (4 Low-severity: MAINT-02, MAINT-03, SEC-03, ARCH-03) and Medium pass (5 Medium-severity: ARCH-01, MAINT-01, ROB-01, SEC-01, TEST-01) resolved. Adds prompt budget visibility to the chat status bar, AST-based safe calculator, user-visible model fallback warnings, per-session todo isolation, and a fully overhauled `agentkthx config` subcommand. Includes codebase audit and intelligence brief artifacts. Version bumped to 0.4.8-dev.
 
 ### Fixed
 
 #### [Low] Footer Version String Hardcoded (`cli.py`)
 - **Bug**: Chat mode footer bar displayed the version as a hardcoded string `cyan('R04.7')` instead of deriving it dynamically from `__version__`. Other parts of the CLI (like `print_banner()`) correctly derived the version, but the footer used a literal string. On every subsequent release, the footer would show a stale version while the banner showed the correct one.
-- **Fix**: Imported `__version__` from `agentnova.__init__` and replaced the hardcoded `'R04.7'` with `__version__`. The footer now always reflects the current version regardless of release cadence.
+- **Fix**: Imported `__version__` from `agentkthx.__init__` and replaced the hardcoded `'R04.7'` with `__version__`. The footer now always reflects the current version regardless of release cadence.
 - **Impact**: Footer version stays in sync across releases without manual updates.
 
 #### [Low] ZAI API Key No Format Validation (`backends/zai.py`)
@@ -43,7 +43,7 @@ Audit-driven release addressing 9 of 16 findings from the R04.7 codebase audit r
 
 #### Orchestrator Router Backend Configurable (`orchestrator.py`)
 - **`router_backend` parameter** added to `Orchestrator.__init__()`. When set, the LLM-based routing mode (`_select_agent_with_llm`) uses the specified backend instead of hardcoding `get_backend("ollama")`. When unset, falls back to `get_default_backend()`, which respects the user's configured backend (`AGENTNOVA_BACKEND` env var or `--backend` CLI flag).
-- **Impact**: LLM-based routing in the orchestrator now works with any backend (ZAI, llama-server, BitNet) — not just Ollama. Users running AgentNova with `--backend zai` can now use LLM routing without also running Ollama.
+- **Impact**: LLM-based routing in the orchestrator now works with any backend (ZAI, llama-server, BitNet) — not just Ollama. Users running AgentKthx with `--backend zai` can now use LLM routing without also running Ollama.
 
 #### Chat Status Bar: Prompt Budget Display (`cli.py`)
 - **Prompt size indicator** added to the footer bar between the model name and context window fields. Shows system prompt length as both character count and approximate token count (`~4 chars/token` heuristic) with memo emoji prefix (`📝`).
@@ -53,7 +53,7 @@ Audit-driven release addressing 9 of 16 findings from the R04.7 codebase audit r
 - **Impact**: Users can monitor prompt budget usage at a glance — critical for small models with tight context windows where prompt size directly affects available response space.
 
 #### `config` Subcommand Overhauled (`cli.py`)
-- **Default mode** (`agentnova config`) now displays: active backend with `*` marker beside its URL, all 5 backend URLs (Ollama, BitNet, llama-server, ZAI, ACP), ZAI API settings with masked key display, ACP credentials (masked), TurboQuant settings, error handling configuration, DEBUG/VERBOSE flags, and all 29 supported environment variables with descriptions. Previously showed only 3 URLs and 6 env vars.
+- **Default mode** (`agentkthx config`) now displays: active backend with `*` marker beside its URL, all 5 backend URLs (Ollama, BitNet, llama-server, ZAI, ACP), ZAI API settings with masked key display, ACP credentials (masked), TurboQuant settings, error handling configuration, DEBUG/VERBOSE flags, and all 29 supported environment variables with descriptions. Previously showed only 3 URLs and 6 env vars.
 - **`--urls` flag** expanded from 3 to 5 backend URLs (added `LLAMA_SERVER_BASE_URL` and `ZAI_BASE_URL`).
 - **`--full` flag** added — dumps every configuration variable including `Config` dataclass defaults (temperature, max_tokens, memory limits, security settings, allowed_paths).
 - **`_mask_key()` helper** — masks secrets showing only first/last 4 characters (e.g., `ghit****xyzw`). Displays `(not set)` for empty keys. Secrets are always masked in all output modes.
@@ -79,16 +79,16 @@ Audit-driven release addressing 9 of 16 findings from the R04.7 codebase audit r
 |--------|------|:-------:|
 | Created | `audit.md` | +309 |
 | Created | `tests/test_r048_changes.py` | +767 |
-| Updated | `agentnova/cli.py` | +253 −14 |
-| Updated | `agentnova/backends/base.py` | +9 −0 |
-| Updated | `agentnova/backends/ollama.py` | +17 −6 |
-| Updated | `agentnova/backends/zai.py` | +52 −9 |
-| Updated | `agentnova/backends/llama_server.py` | +23 −10 |
-| Updated | `agentnova/agent.py` | +11 −0 |
-| Updated | `agentnova/tools/builtins.py` | +150 −9 |
-| Updated | `agentnova/orchestrator.py` | +8 −2 |
+| Updated | `agentkthx/cli.py` | +253 −14 |
+| Updated | `agentkthx/backends/base.py` | +9 −0 |
+| Updated | `agentkthx/backends/ollama.py` | +17 −6 |
+| Updated | `agentkthx/backends/zai.py` | +52 −9 |
+| Updated | `agentkthx/backends/llama_server.py` | +23 −10 |
+| Updated | `agentkthx/agent.py` | +11 −0 |
+| Updated | `agentkthx/tools/builtins.py` | +150 −9 |
+| Updated | `agentkthx/orchestrator.py` | +8 −2 |
 | Updated | `ARCH.md` | +14 −7 |
-| Updated | `agentnova/__init__.py` | +2 −1 |
+| Updated | `agentkthx/__init__.py` | +2 −1 |
 | Updated | `pyproject.toml` | +2 −1 |
 | Updated | `README.md` | +2 −1 |
 | Updated | `brief.md` | +317 −241 |
@@ -135,8 +135,8 @@ Fixes the critical bug where native tool-calling-capable models (e.g. glm-4.5-fl
 - **Free models**: `glm-4.5-flash`, `glm-4.7-flash` (pricing 0.0/0.0).
 
 #### ZaiBackend Public API Export (`__init__.py`, `backends/__init__.py`)
-- **`ZaiBackend`** exported from `agentnova.__init__` and `agentnova.backends.__init__`.
-- **`ZAI_BASE_URL`** exported from `agentnova.__init__`.
+- **`ZaiBackend`** exported from `agentkthx.__init__` and `agentkthx.backends.__init__`.
+- **`ZAI_BASE_URL`** exported from `agentkthx.__init__`.
 - **Backend registry** — `"zai"` added to `_BACKENDS` dict with `ZAI_BASE_URL` routing in `get_backend()`.
 
 ### Changed
@@ -170,17 +170,17 @@ Fixes the critical bug where native tool-calling-capable models (e.g. glm-4.5-fl
 
 | Action | File | Changes |
 |--------|------|:-------:|
-| Created | `agentnova/backends/zai.py` | +813 |
+| Created | `agentkthx/backends/zai.py` | +813 |
 | Created | `tests/test_zai_backend.py` | +343 |
-| Updated | `agentnova/agent.py` | +21 −1 |
-| Updated | `agentnova/core/prompts.py` | +20 −12 |
-| Updated | `agentnova/soul/loader.py` | +25 −2 |
-| Updated | `agentnova/config.py` | +27 −1 |
-| Updated | `agentnova/backends/__init__.py` | +7 −1 |
-| Updated | `agentnova/__init__.py` | +5 −1 |
-| Updated | `agentnova/cli.py` | +132 −8 |
-| Updated | `agentnova/shared_args.py` | +1 −1 |
-| Updated | `agentnova/core/types.py` | +1 −0 |
+| Updated | `agentkthx/agent.py` | +21 −1 |
+| Updated | `agentkthx/core/prompts.py` | +20 −12 |
+| Updated | `agentkthx/soul/loader.py` | +25 −2 |
+| Updated | `agentkthx/config.py` | +27 −1 |
+| Updated | `agentkthx/backends/__init__.py` | +7 −1 |
+| Updated | `agentkthx/__init__.py` | +5 −1 |
+| Updated | `agentkthx/cli.py` | +132 −8 |
+| Updated | `agentkthx/shared_args.py` | +1 −1 |
+| Updated | `agentkthx/core/types.py` | +1 −0 |
 | **Total** | **12 files** | **+1352 −27** |
 
 ---
@@ -199,7 +199,7 @@ The largest R04.x release to date. Adds the ZAI API as a first-class cloud backe
 - **Static model catalog** — `ZAI_MODELS` dict with context_length and default parameters for known models (glm-4.5, glm-4.6, glm-4.7, glm-5, glm-5-turbo, glm-5.1). Used for enrichment and fallback.
 - **API key authentication** — `ZAI_API_KEY` environment variable (required). Injected as `Authorization: Bearer <key>` header in every request. `is_running()` checks for key presence rather than probing a health endpoint.
 - **Always OpenAI mode** — ZAI only supports Chat-Completions (`OPENAI` api_mode). If a user passes `--api openre`, the backend silently overrides to `OPENAI` with a debug warning.
-- **Native tool support testing** — `test_tool_support()` sends a live API call with a `get_weather` tool definition. Detects native function calling (tool_calls in response), ReAct text patterns, or rejection. Results cached to `~/.cache/agentnova/tool_support.json`.
+- **Native tool support testing** — `test_tool_support()` sends a live API call with a `get_weather` tool definition. Detects native function calling (tool_calls in response), ReAct text patterns, or rejection. Results cached to `~/.cache/agentkthx/tool_support.json`.
 - **Standalone generation** — `_generate_with_auth()` is a self-contained OpenAI Chat-Completions implementation with Bearer auth, tool fallback (retries without tools if server rejects them), latency tracking, and full response parsing. Does not delegate to parent's `generate_completions()` because the parent lacks auth header support.
 - **`BackendType.ZAI = "zai"`** added to the `BackendType` enum.
 - **`ZAI_BASE_URL`** and **`ZAI_API_KEY`** added to `config.py` with env var overrides. `"zai"` added to backend validation whitelist.
@@ -207,7 +207,7 @@ The largest R04.x release to date. Adds the ZAI API as a first-class cloud backe
 - **CLI integration** — `--backend zai` works across all subcommands (`chat`, `run`, `agent`, `models`, `test`). Backend choices updated in `shared_args.py` and `cli.py`.
 - **Public API export** — `ZaiBackend` and `ZAI_BASE_URL` exported from `__init__.py`.
 - **Endpoints**: `POST /api/paas/v4/chat/completions` (generation), `GET /api/paas/v4/models` (discovery).
-- **Usage**: `agentnova chat --backend zai --model glm-4.5-flash --tools shell,read_file --api openai`
+- **Usage**: `agentkthx chat --backend zai --model glm-4.5-flash --tools shell,read_file --api openai`
 - **Tests**: `tests/test_zai_backend.py` — unit tests for construction, API key handling, model discovery, and catalog enrichment.
 
 #### Nova-Trading Soul Spec (`souls/nova-trading/`)
@@ -255,10 +255,10 @@ The largest R04.x release to date. Adds the ZAI API as a first-class cloud backe
 - **`_version: int = 1`** field added to `TurboState` dataclass. `to_dict()` includes `_version`. `load()` rejects files from newer versions (returns `None`).
 
 #### TurboQuant Server Logging to File (`turbo.py`)
-- **`TURBOQUANT_LOG_FILE`** constant — `~/.agentnova/turbo.log`. `start_server()` now appends stdout/stderr to log file instead of `DEVNULL`.
+- **`TURBOQUANT_LOG_FILE`** constant — `~/.agentkthx/turbo.log`. `start_server()` now appends stdout/stderr to log file instead of `DEVNULL`.
 
 #### `--quick` Test Runner Flag (`cli.py`, `examples/02_tool_test.py`)
-- **`agentnova test <id> --quick`** — runs only the 5 fastest tests per test module for rapid iteration during development. Useful for smoke-testing changes without waiting for the full suite.
+- **`agentkthx test <id> --quick`** — runs only the 5 fastest tests per test module for rapid iteration during development. Useful for smoke-testing changes without waiting for the full suite.
 - **`02_tool_test.py`** — restructured to support `--quick` mode with a curated subset of representative tests.
 
 #### CLI BOM Removal (`cli.py`)
@@ -280,25 +280,25 @@ The largest R04.x release to date. Adds the ZAI API as a first-class cloud backe
 
 | Action | File | Changes |
 |--------|------|:-------:|
-| Created | `agentnova/backends/zai.py` | +640 |
+| Created | `agentkthx/backends/zai.py` | +640 |
 | Created | `tests/test_zai_backend.py` | +265 |
 | Created | `tests/test_r046_changes.py` | +265 |
-| Created | `agentnova/souls/nova-trading/` (6 files) | +622 |
-| Created | `agentnova/skills/codebase-audit/` (3 files) | +333 |
+| Created | `agentkthx/souls/nova-trading/` (6 files) | +622 |
+| Created | `agentkthx/skills/codebase-audit/` (3 files) | +333 |
 | Created | `patches/fix_turbo_v_padding.patch` | +34 |
 | Created | `patches/fix_turbo_v_padding.py` | +74 |
 | Created | `patches/fix_turboquant_v_unpadding_gqa.patch` | +52 |
-| Updated | `agentnova/core/types.py` | +5 −3 |
-| Updated | `agentnova/config.py` | +12 −0 |
-| Updated | `agentnova/backends/__init__.py` | +8 −0 |
-| Updated | `agentnova/backends/llama_server.py` | +1 −1 |
-| Updated | `agentnova/shared_args.py` | +2 −0 |
-| Updated | `agentnova/cli.py` | +8 −2 |
-| Updated | `agentnova/__init__.py` | +2 −1 |
-| Updated | `agentnova/skills/loader.py` | +4 −6 |
-| Updated | `agentnova/tools/builtins.py` | +43 −18 |
-| Updated | `agentnova/turbo.py` | +20 −4 |
-| Updated | `agentnova/examples/02_tool_test.py` | +700 −5 |
+| Updated | `agentkthx/core/types.py` | +5 −3 |
+| Updated | `agentkthx/config.py` | +12 −0 |
+| Updated | `agentkthx/backends/__init__.py` | +8 −0 |
+| Updated | `agentkthx/backends/llama_server.py` | +1 −1 |
+| Updated | `agentkthx/shared_args.py` | +2 −0 |
+| Updated | `agentkthx/cli.py` | +8 −2 |
+| Updated | `agentkthx/__init__.py` | +2 −1 |
+| Updated | `agentkthx/skills/loader.py` | +4 −6 |
+| Updated | `agentkthx/tools/builtins.py` | +43 −18 |
+| Updated | `agentkthx/turbo.py` | +20 −4 |
+| Updated | `agentkthx/examples/02_tool_test.py` | +700 −5 |
 | Updated | `tests/test_builtins.py` | +101 −14 |
 | Updated | `tests/test_agent.py` | +1 −0 |
 | Updated | `ARCH.md` | +513 −54 |
@@ -313,26 +313,26 @@ The largest R04.x release to date. Adds the ZAI API as a first-class cloud backe
 
 ### TurboQuant Server Manager & Ollama Model Registry
 
-TurboQuant server lifecycle management added end-to-end: `agentnova turbo list/start/stop/status` discovers Ollama models by reading their manifests, resolves GGUF blob paths, reads model metadata directly from the binary headers (architecture, head_dim, quantization), and starts/stops a llama-cpp-turboquant server. Zero conversion needed — Ollama blobs are used directly as GGUF model files. The Ollama model registry uses `mmap` for fast binary header parsing, extracting weight quantization and TurboQuant compatibility metadata (head_dim ≥ 128 required for KV block alignment).
+TurboQuant server lifecycle management added end-to-end: `agentkthx turbo list/start/stop/status` discovers Ollama models by reading their manifests, resolves GGUF blob paths, reads model metadata directly from the binary headers (architecture, head_dim, quantization), and starts/stops a llama-cpp-turboquant server. Zero conversion needed — Ollama blobs are used directly as GGUF model files. The Ollama model registry uses `mmap` for fast binary header parsing, extracting weight quantization and TurboQuant compatibility metadata (head_dim ≥ 128 required for KV block alignment).
 
 ### Added
 
 #### TurboQuant Server Manager (`turbo.py`, `cli.py`)
-- **`TurboState` dataclass** — persistent server state (PID, model, port, KV cache config, uptime) saved to `~/.agentnova/turbo.state` and `~/.agentnova/turbo.pid`. `load()`, `save()`, `clear()` methods for lifecycle management. Survives across CLI invocations.
+- **`TurboState` dataclass** — persistent server state (PID, model, port, KV cache config, uptime) saved to `~/.agentkthx/turbo.state` and `~/.agentkthx/turbo.pid`. `load()`, `save()`, `clear()` methods for lifecycle management. Survives across CLI invocations.
 - **`start_server()`** — launches llama-server as a detached subprocess with full TurboQuant configuration: KV cache types (q8_0, q4_0, turbo2, turbo3, turbo4, f16), flash attention, sparse V decoding sparsity, thread count, and arbitrary passthrough args. Validates model compatibility (head_dim ≥ 128 for turbo KV), auto-detects recommended KV cache config from weight quantization, and polls `/health` endpoint for readiness. Raises `RuntimeError` if a server is already running.
 - **`stop_server()`** — graceful SIGTERM shutdown with 10-second wait, then SIGKILL fallback. Reports model name, PID, signal, and uptime.
 - **`get_status()`** — returns `TurboState` if server is running (checks PID liveness), `None` otherwise.
 - **`print_model_list()`** — formatted table of discovered Ollama models showing name, size, weight quantization, and TurboQuant compatibility with recommended KV cache config per model.
-- **`print_status()`** — formatted server status with health check, uptime, KV cache config, and AgentNova usage examples.
+- **`print_status()`** — formatted server status with health check, uptime, KV cache config, and AgentKthx usage examples.
 - **`_build_command()`** — constructs llama-server command line from config (model path, port, ctx, cache types, flash attention, sparsity, threads, extra args).
 - **`_check_server_health()`** — HTTP GET to `/health` with 3s timeout.
 - **`_is_process_alive()`** — signal 0 PID check for cross-platform process liveness.
 - **Environment variables**: `TURBOQUANT_SERVER_PATH` (default: `llama-server`), `TURBOQUANT_PORT` (default: `8764`), `TURBOQUANT_CTX` (default: `8192`).
-- **`agentnova turbo list`** — lists Ollama models with `--all` flag for missing blobs, `--ollama-dir` override.
-- **`agentnova turbo start <model>`** — starts TurboQuant server with `--server`, `--port`, `--ctx`, `--turbo-k`, `--turbo-v`, `--flash-attn`, `--sparsity`, `--threads`, `--no-wait`, `--timeout`, `--` (extra args passthrough).
-- **`agentnova turbo stop [--force]`** — stops server with optional SIGKILL.
-- **`agentnova turbo status`** — shows running server info or startup hints.
-- **`agentnova turbo`** (bare) — shows status if running, help otherwise.
+- **`agentkthx turbo list`** — lists Ollama models with `--all` flag for missing blobs, `--ollama-dir` override.
+- **`agentkthx turbo start <model>`** — starts TurboQuant server with `--server`, `--port`, `--ctx`, `--turbo-k`, `--turbo-v`, `--flash-attn`, `--sparsity`, `--threads`, `--no-wait`, `--timeout`, `--` (extra args passthrough).
+- **`agentkthx turbo stop [--force]`** — stops server with optional SIGKILL.
+- **`agentkthx turbo status`** — shows running server info or startup hints.
+- **`agentkthx turbo`** (bare) — shows status if running, help otherwise.
 
 #### Ollama Model Registry (`backends/ollama_registry.py`)
 - **`OllamaModel` dataclass** — represents a discovered Ollama model with name, repo, tag, blob path, size, weight quant, manifest path, digest, architecture, head_dim, n_heads, n_layers, context_length. Properties: `turbo_compatible` (head_dim ≥ 128), `turbo_note`, `size_human`, `exists`.
@@ -362,21 +362,21 @@ TurboQuant server lifecycle management added end-to-end: `agentnova turbo list/s
 - `LLAMA_SERVER_BASE_URL` default changed from `http://localhost:8080` to `http://localhost:8764` to align with TurboQuant's default port, reducing configuration friction when switching between Ollama and TurboQuant backends.
 
 #### `--tool-support` Skips Cached Models (`cli.py`)
-- **`cmd_models()`** — `--tool-support` now checks the tool support cache (`~/.cache/agentnova/tool_support.json`) before testing each model. Models with a cached result for the requested API mode are skipped, and the cached value is used directly. Previously, `--tool-support` always called `test_tool_support(force_test=True)` for every model regardless of cache state, making repeated scans slow on CPU-only environments.
+- **`cmd_models()`** — `--tool-support` now checks the tool support cache (`~/.cache/agentkthx/tool_support.json`) before testing each model. Models with a cached result for the requested API mode are skipped, and the cached value is used directly. Previously, `--tool-support` always called `test_tool_support(force_test=True)` for every model regardless of cache state, making repeated scans slow on CPU-only environments.
 - **`--no-cache`** now becomes the explicit "re-test all" override — when passed alongside `--tool-support`, all models are force-tested regardless of cache (same as the old default behavior).
 - **Help text updated**: `--tool-support` description changed from "Force re-test tool calling support" to "Test tool calling support (skips already-cached models)". `--no-cache` description updated to "Ignore cached results and re-test all models".
-- **Behavior summary**: `agentnova models --tool-support` tests only untested models (fast); `agentnova models --tool-support --no-cache` re-tests everything (old behavior); `agentnova models` reads cache only, never tests (unchanged).
+- **Behavior summary**: `agentkthx models --tool-support` tests only untested models (fast); `agentkthx models --tool-support --no-cache` re-tests everything (old behavior); `agentkthx models` reads cache only, never tests (unchanged).
 
 ### File Changes Summary
 
 | Action | File | Changes |
 |--------|------|:-------:|
-| Created | `agentnova/turbo.py` | +661 |
-| Created | `agentnova/backends/ollama_registry.py` | +481 |
-| Updated | `agentnova/cli.py` | +129 −4 |
-| Updated | `agentnova/config.py` | +14 −1 |
-| Updated | `agentnova/backends/llama_server.py` | +1 −1 |
-| Updated | `agentnova/__init__.py` | +1 −1 |
+| Created | `agentkthx/turbo.py` | +661 |
+| Created | `agentkthx/backends/ollama_registry.py` | +481 |
+| Updated | `agentkthx/cli.py` | +129 −4 |
+| Updated | `agentkthx/config.py` | +14 −1 |
+| Updated | `agentkthx/backends/llama_server.py` | +1 −1 |
+| Updated | `agentkthx/__init__.py` | +1 −1 |
 | Updated | `pyproject.toml` | +1 −1 |
 | Updated | `README.md` | +1 −1 |
 | **Total** | **8 files** | **+1289 −8** |
@@ -397,7 +397,7 @@ Critical stop token regression fixed when `--backend bitnet` defaults model name
   1. **`/props` model path extraction** (`llama_server.py`): BitNet's llama-server fork returns the model path at `default_generation_settings.model`, not at the top-level `model_path`. Added fallback check for the nested location in both `list_models()` (bitnet_mode path) and the llama-server fallback path. Now correctly discovers `bitnet_2b_i2_s` from the full GGUF path.
   2. **Family detection** (`model_family_config.py`): Added `"bitnet"` to `detect_family()` families list and `_FAMILY_ALIASES` dict mapping `"bitnet" → "llama"`. BitNet 1.58 uses the LLaMA 3 tokenizer (128,256 vocab, confirmed via model card), so it inherits llama's stop tokens (`<|eot_id|>`, `<|end_of_text|>`) and ChatML-style formatting.
   3. **Dead `<|im_sep|>` removed** (`llama_server.py`): The hardcoded `<|im_sep|>` stop token in BitNet mode was a Qwen-specific token not present in the LLaMA 3 vocabulary. Removed from both `_generate_completion()` and `_stream_completion()`. BitNet mode now uses the same family-config safety net as llama-server mode — no separate stop token path needed.
-- **Impact**: `agentnova run --backend bitnet` now resolves correct stop tokens end-to-end: `stops=['<|eot_id|>', '<|end_of_text|>']` in agent.py → `stop_sequences=['<|eot_id|>', '<|end_of_text|>', '\nUser: ', '\nAssistant:']` at the /completion endpoint.
+- **Impact**: `agentkthx run --backend bitnet` now resolves correct stop tokens end-to-end: `stops=['<|eot_id|>', '<|end_of_text|>']` in agent.py → `stop_sequences=['<|eot_id|>', '<|end_of_text|>', '\nUser: ', '\nAssistant:']` at the /completion endpoint.
 
 #### [Critical] ReAct Parser Fails on Single-Quote Python Dicts (`core/tool_parse.py`)
 - **Bug**: When the model outputs tool arguments as Python dict literals with single quotes — `Action Input: {'expression': '15 + 27'}` — the ReAct parser's `json.loads()` call fails (single quotes are not valid JSON). The fallback regex also missed this pattern because it only matched `"expression"` (double-quoted keys). The parser fell through to wrapping the entire string as `{"input": "{'expression': '15 + 27'}"}`, passing garbage to the tool. The calculator received a dict with key `"input"` instead of `"expression"` and returned a name error.
@@ -410,16 +410,16 @@ Critical stop token regression fixed when `--backend bitnet` defaults model name
 - **Impact**: Repetition loops eliminated. `finish_reason: stop` now fires cleanly after the model's first `Final Answer:`.
 
 #### [Critical] DEFAULT_MODEL Frozen at Module Import Time (`config.py`, `cli.py`)
-- **Bug**: `DEFAULT_MODEL` was a module-level constant evaluated at import time when `AGENTNOVA_BACKEND` defaults to `"ollama"`. The CLI `cmd_test()` sets `os.environ["AGENTNOVA_BACKEND"] = "bitnet"` after import, then calls `get_config(reload=True)`. While `reload=True` re-instantiates the `Config` dataclass, the `default_factory=lambda: DEFAULT_MODEL` still referenced the frozen constant `qwen2.5:0.5b` from import time. The BitNet backend path never saw its own default — it always got the Ollama default. Debug output confirmed: `Model: qwen2.5:0.5b` when running `agentnova test 01 --backend bitnet` without `--model`.
+- **Bug**: `DEFAULT_MODEL` was a module-level constant evaluated at import time when `AGENTNOVA_BACKEND` defaults to `"ollama"`. The CLI `cmd_test()` sets `os.environ["AGENTNOVA_BACKEND"] = "bitnet"` after import, then calls `get_config(reload=True)`. While `reload=True` re-instantiates the `Config` dataclass, the `default_factory=lambda: DEFAULT_MODEL` still referenced the frozen constant `qwen2.5:0.5b` from import time. The BitNet backend path never saw its own default — it always got the Ollama default. Debug output confirmed: `Model: qwen2.5:0.5b` when running `agentkthx test 01 --backend bitnet` without `--model`.
 - **Fix**: Replaced the module-level constant with a `_get_default_model()` function that re-reads `AGENTNOVA_BACKEND` and `AGENTNOVA_MODEL` from the environment on each call. Changed `Config.default_model` field from `field(default_factory=lambda: DEFAULT_MODEL)` to `field(default_factory=_get_default_model)`. Now when `Config` is re-instantiated via `get_config(reload=True)`, the `default_factory` calls `_get_default_model()` fresh, picking up the backend switch.
-- **Impact**: `agentnova test 01 --backend bitnet` (no `--model`) now correctly defaults to the BitNet model placeholder, which is then resolved via `/props` discovery.
+- **Impact**: `agentkthx test 01 --backend bitnet` (no `--model`) now correctly defaults to the BitNet model placeholder, which is then resolved via `/props` discovery.
 
 #### [Critical] BitNet Constraints Applied to Non-BitNet Models on BitNet Backend (`agent.py`, `backends/llama_server.py`)
 - **Bug**: BitNet-specific constraints — prompt budgeting (1024 chars), markdown sanitization, conversation exchange cap (4), tight memory (max_messages=6, keep_recent=4), lean default prompt — were gated on `self._bitnet_mode` (backend type) or `self._is_bitnet` (backend type check). A non-BitNet model (e.g., qwen2.5:0.5b) running on the BitNet llama-server fork received all these constraints despite having a proper tokenizer and full context window. This caused system prompt truncation, tool description loss, and memory starvation for models that didn't need them.
 - **Fix** (two-part):
   1. **`agent.py`**: Changed `self._is_bitnet` detection from checking only `backend_type == BackendType.BITNET` to also verifying `detect_family(model) == "bitnet"`. BitNet memory tightening (max_messages=6, keep_recent=4) and lean default prompt now only apply when the model family is actually `bitnet`.
   2. **`llama_server.py` `_messages_to_prompt()`**: Introduced `_is_actual_bitnet` local variable that checks `detect_family(model)` instead of `self._bitnet_mode`. Prompt budgeting, sanitization, exchange cap, and tool example generation now only apply when the model is actually BitNet. Family-specific prompt formatting (start_tokens for qwen2, llama, etc.) and stop token resolution now apply to ALL non-BitNet models regardless of backend type, so a qwen2.5 model on the BitNet server gets proper `<|im_start|>` formatting.
-- **Impact**: Non-BitNet models on the BitNet backend receive full system prompts, no truncation, family-correct formatting, and standard memory limits. BitNet-specific constraints are reserved for actual BitNet models. Verified: `agentnova test 01 --backend bitnet --soul nova-helper` shows `<9384 chars>` system prompt (full, not truncated) for `bitnet-b1.58-2B-4T`.
+- **Impact**: Non-BitNet models on the BitNet backend receive full system prompts, no truncation, family-correct formatting, and standard memory limits. BitNet-specific constraints are reserved for actual BitNet models. Verified: `agentkthx test 01 --backend bitnet --soul nova-helper` shows `<9384 chars>` system prompt (full, not truncated) for `bitnet-b1.58-2B-4T`.
 
 ### Added
 
@@ -488,13 +488,13 @@ Critical stop token regression fixed when `--backend bitnet` defaults model name
 
 | Action | File | Changes |
 |--------|------|:-------:|
-| Updated | `agentnova/backends/llama_server.py` | +105 −34 |
-| Updated | `agentnova/core/model_family_config.py` | +24 −2 |
-| Updated | `agentnova/core/tool_parse.py` | +15 −2 |
-| Updated | `agentnova/core/prompts.py` | +1 −0 |
-| Updated | `agentnova/agent.py` | +74 −1 |
-| Updated | `agentnova/config.py` | +28 −3 |
-| Updated | `agentnova/cli.py` | +37 −2 |
+| Updated | `agentkthx/backends/llama_server.py` | +105 −34 |
+| Updated | `agentkthx/core/model_family_config.py` | +24 −2 |
+| Updated | `agentkthx/core/tool_parse.py` | +15 −2 |
+| Updated | `agentkthx/core/prompts.py` | +1 −0 |
+| Updated | `agentkthx/agent.py` | +74 −1 |
+| Updated | `agentkthx/config.py` | +28 −3 |
+| Updated | `agentkthx/cli.py` | +37 −2 |
 | **Total** | **7 files** | **+284 −44** |
 
 ---
@@ -518,7 +518,7 @@ BitNet backend merged into LlamaServerBackend, eliminating ~170 lines of duplica
   - `backend_type` returns `BackendType.BITNET` instead of `BackendType.CUSTOM`
   - Error messages use "bitnet" label instead of "llama-server"
 - **`backends/__init__.py`** — `get_backend("bitnet")` routes to `LlamaServerBackend` with `bitnet_mode=True` and `BITNET_BASE_URL` via `_BITNET_ALIASES` set. No changes to `_BACKENDS` registry — `BitNetBackend` still importable for backward compatibility.
-- **Full backward compatibility preserved**: `--backend bitnet`, `from agentnova.backends.bitnet import BitNetBackend`, and `get_backend("bitnet")` all work unchanged. No changes to `config.py`, `core/types.py`, `cli.py`, or any example scripts.
+- **Full backward compatibility preserved**: `--backend bitnet`, `from agentkthx.backends.bitnet import BitNetBackend`, and `get_backend("bitnet")` all work unchanged. No changes to `config.py`, `core/types.py`, `cli.py`, or any example scripts.
 
 #### TESTS.md Restructured
 - Header updated to R04.4
@@ -532,9 +532,9 @@ BitNet backend merged into LlamaServerBackend, eliminating ~170 lines of duplica
 
 | Action | File | Changes |
 |--------|------|:-------:|
-| Updated | `agentnova/backends/llama_server.py` | +30 -15 |
-| Updated | `agentnova/backends/bitnet.py` | -171 |
-| Updated | `agentnova/backends/__init__.py` | +15 -8 |
+| Updated | `agentkthx/backends/llama_server.py` | +30 -15 |
+| Updated | `agentkthx/backends/bitnet.py` | -171 |
+| Updated | `agentkthx/backends/__init__.py` | +15 -8 |
 | Updated | `docs/TESTS.md` | Restructured |
 | **Total** | **4 files** | **+45 -194** |
 
@@ -550,7 +550,7 @@ JSON structured output mode wired end-to-end from CLI to backend, SQLite-backed 
 ### Added
 
 #### Persistent Memory (`core/persistent_memory.py`, `agent.py`, `cli.py`, `shared_args.py`)
-- **`PersistentMemory` class** — SQLite-backed `Memory` subclass that persists all conversation messages to `~/.agentnova/memory.db`, surviving across process restarts and CLI invocations
+- **`PersistentMemory` class** — SQLite-backed `Memory` subclass that persists all conversation messages to `~/.agentkthx/memory.db`, surviving across process restarts and CLI invocations
 - Extends `Memory` with identical sliding-window behavior (same `MemoryConfig`, same `_prune_if_needed`), so the model context window is managed identically to in-memory mode while retaining full history in the database
 - **Auto-save**: every `add()`, `add_tool_call()`, and `add_tool_result()` call writes to SQLite immediately (configurable via `auto_save=False` for bulk operations with manual `save()`)
 - **`load()`** — restores messages from DB into memory, including the system prompt which is re-injected into the agent after load (agent.py line 375)
@@ -568,10 +568,10 @@ JSON structured output mode wired end-to-end from CLI to backend, SQLite-backed 
 - **Session header** — displays `Session: <name>` in chat/agent mode headers when persistent memory is active
 - Exported from `__init__.py` with graceful import (returns `None` if sqlite3 unavailable)
 
-#### `agentnova sessions` CLI Command (`cli.py`)
-- **`agentnova sessions`** — lists all saved sessions in a formatted table showing session name, message count, creation time, and last-updated time
-- **`agentnova sessions --delete <name>`** — deletes a specific session and all its messages from the database
-- Displays the database path (`~/.agentnova/memory.db`) for user reference
+#### `agentkthx sessions` CLI Command (`cli.py`)
+- **`agentkthx sessions`** — lists all saved sessions in a formatted table showing session name, message count, creation time, and last-updated time
+- **`agentkthx sessions --delete <name>`** — deletes a specific session and all its messages from the database
+- Displays the database path (`~/.agentkthx/memory.db`) for user reference
 - Shows usage hints for resuming (`--session <name>`) and deleting sessions
 - Wires into `PersistentMemory.list_sessions()` and `PersistentMemory.delete_session()` static methods
 
@@ -600,12 +600,12 @@ JSON structured output mode wired end-to-end from CLI to backend, SQLite-backed 
 
 | Action | File | Changes |
 |--------|------|:-------:|
-| Created | `agentnova/core/persistent_memory.py` | +442 |
-| Updated | `agentnova/agent.py` | +40 −0 |
-| Updated | `agentnova/agent_mode.py` | +15 −0 |
-| Updated | `agentnova/cli.py` | +40 −0 |
-| Updated | `agentnova/shared_args.py` | +4 −0 |
-| Updated | `agentnova/__init__.py` | +6 −0 |
+| Created | `agentkthx/core/persistent_memory.py` | +442 |
+| Updated | `agentkthx/agent.py` | +40 −0 |
+| Updated | `agentkthx/agent_mode.py` | +15 −0 |
+| Updated | `agentkthx/cli.py` | +40 −0 |
+| Updated | `agentkthx/shared_args.py` | +4 −0 |
+| Updated | `agentkthx/__init__.py` | +6 −0 |
 | **Total** | **6 files** | **+547 −0** |
 
 ---
@@ -614,7 +614,7 @@ JSON structured output mode wired end-to-end from CLI to backend, SQLite-backed 
 
 ### New Tools, AgentMode Context, Audit Logging, Confirmation Mode, CLI Deduplication & Self-Update
 
-Two new code navigation tools (`read_file_lines`, `find_files`), AgentMode context injection across multi-step tasks, shell/file audit logging to `~/.agentnova/audit.log`, dangerous-tool confirmation mode (`--confirm`), CLI argument deduplication via shared helper module, git commit hash in version strings, and a self-update CLI subcommand.
+Two new code navigation tools (`read_file_lines`, `find_files`), AgentMode context injection across multi-step tasks, shell/file audit logging to `~/.agentkthx/audit.log`, dangerous-tool confirmation mode (`--confirm`), CLI argument deduplication via shared helper module, git commit hash in version strings, and a self-update CLI subcommand.
 
 ### Added
 
@@ -637,12 +637,12 @@ Two new code navigation tools (`read_file_lines`, `find_files`), AgentMode conte
 - Each step now receives a system-level reminder of the original task and progress
 
 #### Audit Logging (`tools/builtins.py`)
-- **`_audit_log()` function** — fire-and-forget JSON-lines logger to `~/.agentnova/audit.log`
+- **`_audit_log()` function** — fire-and-forget JSON-lines logger to `~/.agentkthx/audit.log`
 - Each entry: `ts` (ISO 8601 UTC), `tool`, `args`, `outcome` (`accepted`/`rejected`/`error`), `detail`
 - Hooked into `shell()`, `write_file()`, and `edit_file()` handlers
 - Logs all outcomes: successful executions, security rejections, timeouts, permission errors
 - Failures in the audit logger itself are silently caught — never disrupts the agentic loop
-- Audit log directory (`~/.agentnova/`) is created automatically on first write
+- Audit log directory (`~/.agentkthx/`) is created automatically on first write
 
 #### Dangerous Tool Confirmation Mode (`agent.py`, `cli.py`)
 - **`confirm_dangerous` callback** on `Agent.__init__()` — when set, any tool with `dangerous=True` must be approved before execution
@@ -667,7 +667,7 @@ Two new code navigation tools (`read_file_lines`, `find_files`), AgentMode conte
 - All three parsers (`run`, `chat`, `agent`) now call `add_agent_args()` with a single line each
 
 #### Update CLI Subcommand (`cli.py`)
-- **`agentnova update`** — runs `pip install git+https://github.com/VTSTech/AgentNova.git --force-reinstall`
+- **`agentkthx update`** — runs `pip install git+https://github.com/VTSTech/AgentKthx.git --force-reinstall`
 - Shows current version before updating, displays branded output with status messages
 - Shows the ASCII banner on completion with the new version
 
@@ -681,13 +681,13 @@ Two new code navigation tools (`read_file_lines`, `find_files`), AgentMode conte
 
 | Action | File | Changes |
 |--------|------|:-------:|
-| Updated | `agentnova/__init__.py` | +38 −1 |
-| Updated | `agentnova/agent.py` | +19 −3 |
-| Updated | `agentnova/agent_mode.py` | +30 −5 |
-| Updated | `agentnova/cli.py` | +143 −226 |
-| Updated | `agentnova/tools/builtins.py` | +120 −8 |
-| Updated | `agentnova/souls/nova-helper/soul.json` | +2 −1 |
-| Created | `agentnova/shared_args.py` | +339 |
+| Updated | `agentkthx/__init__.py` | +38 −1 |
+| Updated | `agentkthx/agent.py` | +19 −3 |
+| Updated | `agentkthx/agent_mode.py` | +30 −5 |
+| Updated | `agentkthx/cli.py` | +143 −226 |
+| Updated | `agentkthx/tools/builtins.py` | +120 −8 |
+| Updated | `agentkthx/souls/nova-helper/soul.json` | +2 −1 |
+| Created | `agentkthx/shared_args.py` | +339 |
 | **Total** | **7 files** | **+671 −238** |
 
 ---
@@ -749,7 +749,7 @@ Two new built-in tools (edit_file, todo), a codebase-audit skill with brief temp
 - **New `LlamaServerBackend` class** — subclasses `OllamaBackend`, inherits full OpenAI Chat Completions pipeline
 - **OpenAI mode** (`--api openai`): Uses `/v1/chat/completions` — full tool calling, SSE streaming — all inherited from `OllamaBackend` with zero code duplication
 - **OpenRE mode** (`--api openre`): Uses llama.cpp native `/completion` endpoint — ReAct-mode inference with tools embedded in prompt, with streaming support
-- **Model discovery** via `GET /v1/models` — adapted to AgentNova's model list format; returns stub when server is unreachable
+- **Model discovery** via `GET /v1/models` — adapted to AgentKthx's model list format; returns stub when server is unreachable
 - **Tool support detection** via live test on `/v1/chat/completions` — always tests via OpenAI endpoint regardless of configured `api_mode`; results cached with `openai` namespace
 - **Health check** via `GET /health` — with fallback to root URL probe
 - **`llama-server` and `llama_server` registry aliases** — both resolve to `LlamaServerBackend`
@@ -779,22 +779,22 @@ Two new built-in tools (edit_file, todo), a codebase-audit skill with brief temp
 
 | Action | File | Changes |
 |--------|------|:-------:|
-| Created | `agentnova/backends/llama_server.py` | +350 |
-| Created | `agentnova/skills/codebase-audit/SKILL.md` | +172 |
-| Created | `agentnova/skills/codebase-audit/references/brief-template.md` | +154 |
-| Created | `agentnova/souls/nova-helper/AGENTS.md` | +98 |
-| Created | `agentnova/souls/nova-skills/AGENTS.md` | +112 |
+| Created | `agentkthx/backends/llama_server.py` | +350 |
+| Created | `agentkthx/skills/codebase-audit/SKILL.md` | +172 |
+| Created | `agentkthx/skills/codebase-audit/references/brief-template.md` | +154 |
+| Created | `agentkthx/souls/nova-helper/AGENTS.md` | +98 |
+| Created | `agentkthx/souls/nova-skills/AGENTS.md` | +112 |
 | Created | `brief.md` | +500 |
-| Updated | `agentnova/tools/builtins.py` | +281 −203 |
-| Updated | `agentnova/acp_plugin.py` | +99 −2 |
-| Updated | `agentnova/core/prompts.py` | +39 −22 |
-| Updated | `agentnova/souls/nova-helper/soul.json` | +4 −1 |
-| Updated | `agentnova/souls/nova-skills/soul.json` | +5 −1 |
-| Updated | `agentnova/backends/__init__.py` | +9 −4 |
-| Updated | `agentnova/config.py` | +12 −2 |
-| Updated | `agentnova/cli.py` | +6 −6 |
-| Updated | `agentnova/__init__.py` | +1 −1 |
-| Updated | `agentnova/examples/*.py` (12 files) | +12 −12 |
+| Updated | `agentkthx/tools/builtins.py` | +281 −203 |
+| Updated | `agentkthx/acp_plugin.py` | +99 −2 |
+| Updated | `agentkthx/core/prompts.py` | +39 −22 |
+| Updated | `agentkthx/souls/nova-helper/soul.json` | +4 −1 |
+| Updated | `agentkthx/souls/nova-skills/soul.json` | +5 −1 |
+| Updated | `agentkthx/backends/__init__.py` | +9 −4 |
+| Updated | `agentkthx/config.py` | +12 −2 |
+| Updated | `agentkthx/cli.py` | +6 −6 |
+| Updated | `agentkthx/__init__.py` | +1 −1 |
+| Updated | `agentkthx/examples/*.py` (12 files) | +12 −12 |
 | Updated | `pyproject.toml` | +1 −1 |
 | Updated | `README.md` | +1 −1 |
 | **Total** | **23 files** | **+1856 −256** |
@@ -855,14 +855,14 @@ Retry-with-error-feedback, inspired by the [ATLAS-Autonomous](https://github.com
 
 | Action | File | Changes |
 |--------|------|:-------:|
-| Updated | `agentnova/core/error_recovery.py` | +44 |
-| Updated | `agentnova/agent.py` | +23 −23 |
-| Updated | `agentnova/backends/ollama.py` | +9 −17 |
-| Updated | `agentnova/backends/bitnet.py` | −15 |
-| Updated | `agentnova/cli.py` | −9 |
-| Updated | `agentnova/config.py` | −13 |
-| Updated | `agentnova/backends/base.py` | −1 |
-| Updated | `agentnova/__init__.py` | +1 −1 |
+| Updated | `agentkthx/core/error_recovery.py` | +44 |
+| Updated | `agentkthx/agent.py` | +23 −23 |
+| Updated | `agentkthx/backends/ollama.py` | +9 −17 |
+| Updated | `agentkthx/backends/bitnet.py` | −15 |
+| Updated | `agentkthx/cli.py` | −9 |
+| Updated | `agentkthx/config.py` | −13 |
+| Updated | `agentkthx/backends/base.py` | −1 |
+| Updated | `agentkthx/__init__.py` | +1 −1 |
 | Created | `CREDITS.md` | +228 |
 | Updated | `CHANGELOG.md` | +50 |
 | **Total** | **10 files** | **+355 −79** |
@@ -941,18 +941,18 @@ Major update adding full CLI integration for the AgentSkills system, a built-in 
 
 | Action | File | Changes |
 |--------|------|:-------:|
-| Updated | `agentnova/cli.py` | +71 −1 |
-| Updated | `agentnova/agent.py` | +9 |
-| Updated | `agentnova/tools/builtins.py` | +164 |
-| Created | `agentnova/skills/test-harness/SKILL.md` | +122 |
-| Created | `agentnova/souls/nova-skills/SOUL.md` | +26 |
-| Created | `agentnova/souls/nova-skills/IDENTITY.md` | +14 |
-| Created | `agentnova/souls/nova-skills/STYLE.md` | +21 |
-| Created | `agentnova/souls/nova-skills/soul.json` | +30 |
+| Updated | `agentkthx/cli.py` | +71 −1 |
+| Updated | `agentkthx/agent.py` | +9 |
+| Updated | `agentkthx/tools/builtins.py` | +164 |
+| Created | `agentkthx/skills/test-harness/SKILL.md` | +122 |
+| Created | `agentkthx/souls/nova-skills/SOUL.md` | +26 |
+| Created | `agentkthx/souls/nova-skills/IDENTITY.md` | +14 |
+| Created | `agentkthx/souls/nova-skills/STYLE.md` | +21 |
+| Created | `agentkthx/souls/nova-skills/soul.json` | +30 |
 | Created | `tests/test_skills.py` | +530 |
-| Deleted | `agentnova/skills/datetime/SKILL.md` | −25 |
-| Deleted | `agentnova/skills/web-search/SKILL.md` | −74 |
-| Deleted | `agentnova/skills/acp/SKILL.md` | −328 |
+| Deleted | `agentkthx/skills/datetime/SKILL.md` | −25 |
+| Deleted | `agentkthx/skills/web-search/SKILL.md` | −74 |
+| Deleted | `agentkthx/skills/acp/SKILL.md` | −328 |
 | **Total** | **12 files** | **+987 −428** |
 
 ---
@@ -1009,14 +1009,14 @@ Resolved 4 critical and 1 moderate issue identified in the external Tool Detecti
 
 | Action | File | Changes |
 |--------|------|:-------:|
-| Updated | `agentnova/agent.py` | +18 −12 |
-| Updated | `agentnova/core/tool_parse.py` | +2 −23 |
-| Updated | `agentnova/core/models.py` | +4 −1 |
-| Updated | `agentnova/core/__init__.py` | +4 −3 |
-| Updated | `agentnova/core/model_family_config.py` | +40 −8 |
-| Updated | `agentnova/core/model_config.py` | +22 −239 |
-| Updated | `agentnova/tools/builtins.py` | +1 −8 |
-| Updated | `agentnova/tools/registry.py` | +1 −1 |
+| Updated | `agentkthx/agent.py` | +18 −12 |
+| Updated | `agentkthx/core/tool_parse.py` | +2 −23 |
+| Updated | `agentkthx/core/models.py` | +4 −1 |
+| Updated | `agentkthx/core/__init__.py` | +4 −3 |
+| Updated | `agentkthx/core/model_family_config.py` | +40 −8 |
+| Updated | `agentkthx/core/model_config.py` | +22 −239 |
+| Updated | `agentkthx/tools/builtins.py` | +1 −8 |
+| Updated | `agentkthx/tools/registry.py` | +1 −1 |
 | **Total** | **8 files** | **+92 −295** |
 
 ### Issue Resolution Summary
@@ -1080,12 +1080,12 @@ Resolved 6 additional issues identified in the Tool Detection, Support & Prompti
 
 | Action | File | Changes |
 |--------|------|:-------:|
-| Updated | `agentnova/core/tool_parse.py` | +44 −6 |
-| Updated | `agentnova/core/prompts.py` | +12 −1 |
-| Updated | `agentnova/core/helpers.py` | +38 −3 |
-| Updated | `agentnova/agent.py` | +5 −1 |
-| Updated | `agentnova/backends/ollama.py` | +31 −4 |
-| Updated | `agentnova/tools/registry.py` | +12 −1 |
+| Updated | `agentkthx/core/tool_parse.py` | +44 −6 |
+| Updated | `agentkthx/core/prompts.py` | +12 −1 |
+| Updated | `agentkthx/core/helpers.py` | +38 −3 |
+| Updated | `agentkthx/agent.py` | +5 −1 |
+| Updated | `agentkthx/backends/ollama.py` | +31 −4 |
+| Updated | `agentkthx/tools/registry.py` | +12 −1 |
 | **Total** | **6 files** | **+142 −16** |
 
 ### Issue Resolution Summary
@@ -1110,7 +1110,7 @@ Dual API mode tool-support testing, context display cleanup, ACP integration for
 ### Added
 
 #### `--acp` / `--acp-url` on Models Command (`cli.py`)
-- **`--acp` flag** — Enables ACP logging when running `agentnova models --tool-support`
+- **`--acp` flag** — Enables ACP logging when running `agentkthx models --tool-support`
 - **`--acp-url` flag** — Custom ACP server URL (falls back to config default)
 - Uses existing `_init_acp()` helper for consistent bootstrap behavior
 - Shows `ACP: ✓ Connected (url)` in the header when active
@@ -1119,7 +1119,7 @@ Dual API mode tool-support testing, context display cleanup, ACP integration for
 - After each model's tool-support test, logs a user/assistant CHAT pair to ACP:
   - `User: Testing tool support...`
   - `Assistant: openre=native openai=react | 0.96 GB | ctx 262144`
-- Sets `acp.model_name = name` before each log so the ACP feed shows the tested model (e.g., `AgentNova-Models · qwen3.5:0.8b`) instead of the default agent model
+- Sets `acp.model_name = name` before each log so the ACP feed shows the tested model (e.g., `AgentKthx-Models · qwen3.5:0.8b`) instead of the default agent model
 - Logs a summary message at the end: `"Tool-support scan complete: N models tested"`
 - Calls `a2a_unregister()` for clean shutdown
 
@@ -1135,7 +1135,7 @@ Dual API mode tool-support testing, context display cleanup, ACP integration for
 
 | Action | File | Changes |
 |--------|------|:-------:|
-| Updated | `agentnova/cli.py` | +25 −14 |
+| Updated | `agentkthx/cli.py` | +25 −14 |
 
 ---
 
@@ -1211,12 +1211,12 @@ Resolved 9 issues identified in the R03.7 Spec Compliance Audit (30 FAIL + 55 WA
 
 | Action | File | Changes |
 |--------|------|:-------:|
-| Updated | `agentnova/agent.py` | +247 −3 |
-| Updated | `agentnova/core/helpers.py` | +58 −10 |
-| Updated | `agentnova/soul/loader.py` | +16 −2 |
-| Updated | `agentnova/acp_plugin.py` | +4 |
-| Updated | `agentnova/tools/sandboxed_repl.py` | −3 |
-| Updated | `agentnova/skills/skill-creator/SKILL.md` | +1 |
+| Updated | `agentkthx/agent.py` | +247 −3 |
+| Updated | `agentkthx/core/helpers.py` | +58 −10 |
+| Updated | `agentkthx/soul/loader.py` | +16 −2 |
+| Updated | `agentkthx/acp_plugin.py` | +4 |
+| Updated | `agentkthx/tools/sandboxed_repl.py` | −3 |
+| Updated | `agentkthx/skills/skill-creator/SKILL.md` | +1 |
 | Updated | `docs/TESTS.md` | +1 |
 | **Total** | **6 files** | **+326 −18** |
 
@@ -1239,7 +1239,7 @@ Resolved 5 additional WARN/INFO findings identified in the R03.8 Spec Compliance
 ### Fixed
 
 #### [W-06] ACP `_format_target()` Uses Wrong Key for File Tools (`acp_plugin.py`)
-- **Bug**: `_format_target()` used `"path"` as the argument key for `read_file`, `write_file`, and `edit_file` tools, but the AgentNova tool definitions use `"file_path"` as the primary key. This caused ACP activity targets to show `"unknown"` instead of the actual file path.
+- **Bug**: `_format_target()` used `"path"` as the argument key for `read_file`, `write_file`, and `edit_file` tools, but the AgentKthx tool definitions use `"file_path"` as the primary key. This caused ACP activity targets to show `"unknown"` instead of the actual file path.
 - **Fix**: Changed to check `file_path` first with `path` as a fallback for backward compatibility.
 - **Impact**: ACP activity log now correctly displays file paths for all file-tool operations
 
@@ -1261,16 +1261,16 @@ Resolved 5 additional WARN/INFO findings identified in the R03.8 Spec Compliance
 #### [W-14] CLI `--stream` Flag Parsed but Silently Ignored (`cli.py`)
 - **Bug**: The `run` command accepted `--stream` as a CLI argument but never passed it to `agent.run()`. Users passing `--stream` expected streaming output but always received buffered output.
 - **Fix**: `cmd_run()` now passes `stream=getattr(args, 'stream', False)` to `agent.run()`, wiring the CLI flag to the agent's streaming capability.
-- **Impact**: `agentnova run --stream "prompt"` now correctly enables streaming mode
+- **Impact**: `agentkthx run --stream "prompt"` now correctly enables streaming mode
 
 ### File Changes Summary
 
 | Action | File | Changes |
 |--------|------|:-------:|
-| Updated | `agentnova/acp_plugin.py` | +3 −3 |
-| Updated | `agentnova/skills/loader.py` | +4 −2 |
-| Updated | `agentnova/tools/sandboxed_repl.py` | +2 −1 |
-| Updated | `agentnova/cli.py` | +1 −1 |
+| Updated | `agentkthx/acp_plugin.py` | +3 −3 |
+| Updated | `agentkthx/skills/loader.py` | +4 −2 |
+| Updated | `agentkthx/tools/sandboxed_repl.py` | +2 −1 |
+| Updated | `agentkthx/cli.py` | +1 −1 |
 | **Total** | **4 files** | **+10 −7** |
 
 ### Updated Audit Status
@@ -1299,7 +1299,7 @@ Resolved 3 additional findings: a runtime crash in CLI, an unwired CLI flag, and
 #### [W-15] `--response-format` CLI Flag Not Wired to Backend (`agent.py`)
 - **Bug**: The `--response-format` flag was parsed by `run`, `chat`, and `agent` commands and passed to `_create_agent()`, but the `Agent.__init__()` did not accept a `response_format` parameter. Even though the value was absorbed by `**kwargs`, it was silently discarded — the backend `_generate()` method never received it.
 - **Fix**: Added `response_format` parameter to `Agent.__init__()`, stored as `self._response_format`, and forwarded to `backend_kwargs` in `_generate()`. String values like `"json"` are converted to `{"type": "json_object"}` automatically; `"text"` is treated as the default (no override).
-- **Impact**: `agentnova run --response-format json "prompt"` now correctly enables JSON mode in the backend API
+- **Impact**: `agentkthx run --response-format json "prompt"` now correctly enables JSON mode in the backend API
 
 #### [F-01/F-02] Missing `test_security.py` and `test_builtins.py` (`tests/`)
 - **Bug**: The CHANGELOG claimed that `tests/test_security.py` and `tests/test_builtins.py` existed with 79 tests (40 security + 40 builtins − 1 xfail), but neither file was present in the repository.
@@ -1313,8 +1313,8 @@ Resolved 3 additional findings: a runtime crash in CLI, an unwired CLI flag, and
 
 | Action | File | Changes |
 |--------|------|:-------:|
-| Updated | `agentnova/cli.py` | +2 −2 |
-| Updated | `agentnova/agent.py` | +15 −1 |
+| Updated | `agentkthx/cli.py` | +2 −2 |
+| Updated | `agentkthx/agent.py` | +15 −1 |
 | Created | `tests/test_security.py` | +397 |
 | Created | `tests/test_builtins.py` | +283 |
 | Updated | `Architecture.md` | +1 −1 |
@@ -1410,7 +1410,7 @@ backend = get_default_backend(backend_name, api_mode=api_mode, timeout=timeout)
   - Useful for verifying tool registry is working without a running model
 - **`--model-only` flag** — Only run Phase 2 (model tool calling tests)
   - Useful when tools are already verified and only model behavior is needed
-- Both flags added to `agentnova test 02` command and forwarded via argv
+- Both flags added to `agentkthx test 02` command and forwarded via argv
 
 ### Fixed
 
@@ -1436,22 +1436,22 @@ backend = get_default_backend(backend_name, api_mode=api_mode, timeout=timeout)
 
 ```bash
 # Before (R03.6):
-agentnova chat --api resp           # OpenResponses
-agentnova chat --api comp           # Chat-Completions
+agentkthx chat --api resp           # OpenResponses
+agentkthx chat --api comp           # Chat-Completions
 
 # After (R03.7):
-agentnova chat --api openre         # OpenResponses
-agentnova chat --api openai         # Chat-Completions
+agentkthx chat --api openre         # OpenResponses
+agentkthx chat --api openai         # Chat-Completions
 ```
 
 ```python
 # Before (R03.6):
-from agentnova.core.types import ApiMode
+from agentkthx.core.types import ApiMode
 backend = get_backend("ollama", api_mode=ApiMode.RESPONSES)   # OpenResponses
 backend = get_backend("ollama", api_mode=ApiMode.COMPLETIONS)  # Chat-Completions
 
 # After (R03.7):
-from agentnova.core.types import ApiMode
+from agentkthx.core.types import ApiMode
 backend = get_backend("ollama", api_mode=ApiMode.OPENRE)       # OpenResponses
 backend = get_backend("ollama", api_mode=ApiMode.OPENAI)       # Chat-Completions
 
@@ -1474,24 +1474,24 @@ backend = get_default_backend("ollama", api_mode="openre", timeout=300)
 
 | Action | File | Lines Changed |
 |--------|------|---------------|
-| Updated | `agentnova/__init__.py` | +1 -1 |
-| Updated | `agentnova/core/types.py` | +5 -5 |
-| Updated | `agentnova/agent.py` | +1 -1 |
-| Updated | `agentnova/backends/__init__.py` | +4 -3 |
-| Updated | `agentnova/backends/ollama.py` | +3 -3 |
-| Updated | `agentnova/cli.py` | +20 -22 |
-| Updated | `agentnova/examples/00_basic_agent.py` | +8 -3 |
-| Updated | `agentnova/examples/01_quick_diagnostic.py` | +10 -8 |
-| Updated | `agentnova/examples/02_tool_test.py` | +60 -30 |
-| Updated | `agentnova/examples/03_reasoning_test.py` | +8 -3 |
-| Updated | `agentnova/examples/04_gsm8k_benchmark.py` | +8 -3 |
-| Updated | `agentnova/examples/05_common_sense.py` | +8 -3 |
-| Updated | `agentnova/examples/06_causal_reasoning.py` | +8 -3 |
-| Updated | `agentnova/examples/07_logical_deduction.py` | +8 -3 |
-| Updated | `agentnova/examples/08_reading_comprehension.py` | +8 -3 |
-| Updated | `agentnova/examples/09_general_knowledge.py` | +8 -3 |
-| Updated | `agentnova/examples/10_implicit_reasoning.py` | +8 -3 |
-| Updated | `agentnova/examples/11_analogical_reasoning.py` | +8 -3 |
+| Updated | `agentkthx/__init__.py` | +1 -1 |
+| Updated | `agentkthx/core/types.py` | +5 -5 |
+| Updated | `agentkthx/agent.py` | +1 -1 |
+| Updated | `agentkthx/backends/__init__.py` | +4 -3 |
+| Updated | `agentkthx/backends/ollama.py` | +3 -3 |
+| Updated | `agentkthx/cli.py` | +20 -22 |
+| Updated | `agentkthx/examples/00_basic_agent.py` | +8 -3 |
+| Updated | `agentkthx/examples/01_quick_diagnostic.py` | +10 -8 |
+| Updated | `agentkthx/examples/02_tool_test.py` | +60 -30 |
+| Updated | `agentkthx/examples/03_reasoning_test.py` | +8 -3 |
+| Updated | `agentkthx/examples/04_gsm8k_benchmark.py` | +8 -3 |
+| Updated | `agentkthx/examples/05_common_sense.py` | +8 -3 |
+| Updated | `agentkthx/examples/06_causal_reasoning.py` | +8 -3 |
+| Updated | `agentkthx/examples/07_logical_deduction.py` | +8 -3 |
+| Updated | `agentkthx/examples/08_reading_comprehension.py` | +8 -3 |
+| Updated | `agentkthx/examples/09_general_knowledge.py` | +8 -3 |
+| Updated | `agentkthx/examples/10_implicit_reasoning.py` | +8 -3 |
+| Updated | `agentkthx/examples/11_analogical_reasoning.py` | +8 -3 |
 | Updated | `pyproject.toml` | +1 -1 |
 
 ### Technical Details
@@ -1543,7 +1543,7 @@ Major refactoring to eliminate code duplication and reduce repository size.
 ### Changed
 
 #### Color Functions Consolidated into Shared Module (`colors.py`)
-- **New module**: `agentnova/colors.py` - Centralized ANSI color utilities
+- **New module**: `agentkthx/colors.py` - Centralized ANSI color utilities
   - `Color` class with all ANSI codes (basic, bright, styles)
   - Color functions: `c`, `dim`, `bold`, `cyan`, `green`, `yellow`, `red`, `magenta`, `blue`
   - Bright variants: `bright_cyan`, `bright_green`, `bright_yellow`, `bright_magenta`, `bright_red`
@@ -1576,7 +1576,7 @@ Major refactoring to eliminate code duplication and reduce repository size.
 - **Test modules now use `get_backend(timeout=...)`** - Examples create backend with the specified timeout
 - **Added `--warmup` flag** - Sends a simple request before testing to load model into memory
   - Avoids cold start timeout on first question
-  - Usage: `agentnova test 01 --warmup --timeout 300`
+  - Usage: `agentkthx test 01 --warmup --timeout 300`
 - **Updated quick diagnostic example** to accept `--timeout`, `--warmup`, `--num-ctx` arguments
 
 ### Removed
@@ -1592,18 +1592,18 @@ Major refactoring to eliminate code duplication and reduce repository size.
 **Model Generation Parameters** - New CLI arguments and Agent parameters:
 ```bash
 # CLI usage with generation parameters
-agentnova run "What is 15 + 27?" --temperature 0.3 --top-p 0.95 --num-predict 512
-agentnova chat --temperature 0.7 --num-ctx 8192
+agentkthx run "What is 15 + 27?" --temperature 0.3 --top-p 0.95 --num-predict 512
+agentkthx chat --temperature 0.7 --num-ctx 8192
 
 # Environment variables
 export AGENTNOVA_TEMPERATURE=0.5
 export AGENTNOVA_TOP_P=0.9
-agentnova run "Hello"
+agentkthx run "Hello"
 ```
 
 ```python
 # Python API usage
-from agentnova import Agent
+from agentkthx import Agent
 
 agent = Agent(
     model="qwen2.5:0.5b",
@@ -1618,16 +1618,16 @@ agent = Agent(
 **Color Functions** - No changes needed for external usage:
 ```python
 # Internal imports updated, external API unchanged
-from agentnova import Agent  # Still works
+from agentkthx import Agent  # Still works
 
 # Colors module now available for direct use
-from agentnova.colors import green, yellow, cyan, is_color_enabled
+from agentkthx.colors import green, yellow, cyan, is_color_enabled
 print(green("Success!"))
 ```
 
 **Orchestrator** - Enhanced features now in main module:
 ```python
-from agentnova import Orchestrator, AgentCard
+from agentkthx import Orchestrator, AgentCard
 
 # New AgentCard fields (all optional)
 card = AgentCard(
@@ -1659,13 +1659,13 @@ print(f"Total time: {result.total_ms:.0f}ms")
 
 | Action | File | Lines Changed |
 |--------|------|---------------|
-| Created | `agentnova/colors.py` | +160 |
-| Updated | `agentnova/cli.py` | -100 |
-| Updated | `agentnova/agent.py` | +30 |
-| Updated | `agentnova/shared_args.py` | +25 |
-| Updated | `agentnova/agent_mode.py` | -20 |
-| Merged | `agentnova/orchestrator.py` | +400 |
-| Deleted | `agentnova/orchestrator_enhanced.py` | -394 |
+| Created | `agentkthx/colors.py` | +160 |
+| Updated | `agentkthx/cli.py` | -100 |
+| Updated | `agentkthx/agent.py` | +30 |
+| Updated | `agentkthx/shared_args.py` | +25 |
+| Updated | `agentkthx/agent_mode.py` | -20 |
+| Merged | `agentkthx/orchestrator.py` | +400 |
+| Deleted | `agentkthx/orchestrator_enhanced.py` | -394 |
 | Deleted | `audit/` (40 PNG files) | - |
 
 ### Technical Details
@@ -1680,7 +1680,7 @@ print(f"Total time: {result.total_ms:.0f}ms")
 
 **Consolidated Color Module Structure**:
 ```python
-# agentnova/colors.py
+# agentkthx/colors.py
 class Color:
     RESET, BLACK, RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN, WHITE
     BRIGHT_BLACK, BRIGHT_RED, BRIGHT_GREEN, BRIGHT_YELLOW, ...
@@ -1749,13 +1749,13 @@ New module for persistent caching of tool support detection results:
 - **`cache_tool_support(model, support, family, error)`** → Saves detection result
 - **`load_tool_cache()` / `save_tool_cache()`** → Low-level cache access
 - **`clear_tool_cache()`** → Clears the cache file
-- **Cache location**: `~/.cache/agentnova/tool_support.json`
+- **Cache location**: `~/.cache/agentkthx/tool_support.json`
 - **Atomic writes** to prevent corruption in containerized environments
 
 #### Cache CLI Integration (`cli.py`)
-- **`agentnova models`** - Shows cached tool support or "? untested"
-- **`agentnova models --tool-support`** - Tests each model and caches results
-- **`agentnova models --no-cache`** - Ignores cached results
+- **`agentkthx models`** - Shows cached tool support or "? untested"
+- **`agentkthx models --tool-support`** - Tests each model and caches results
+- **`agentkthx models --no-cache`** - Ignores cached results
 
 ### Removed
 
@@ -1776,8 +1776,8 @@ New module for persistent caching of tool support detection results:
 **After (runtime detection)**:
 ```python
 # Check cache or test at runtime
-from agentnova.core.tool_cache import get_cached_tool_support, cache_tool_support
-from agentnova.core.types import ToolSupportLevel
+from agentkthx.core.tool_cache import get_cached_tool_support, cache_tool_support
+from agentkthx.core.types import ToolSupportLevel
 
 # Check cache
 support = get_cached_tool_support("deepseek-r1:1.5b")
@@ -1789,13 +1789,13 @@ if support is None:
 **CLI Usage**:
 ```bash
 # List models (shows cached or "? untested")
-agentnova models
+agentkthx models
 
 # Test and cache tool support for all models
-agentnova models --tool-support
+agentkthx models --tool-support
 
 # Clear cache if needed
-python -c "from agentnova.core.tool_cache import clear_tool_cache; clear_tool_cache()"
+python -c "from agentkthx.core.tool_cache import clear_tool_cache; clear_tool_cache()"
 ```
 
 ### Technical Details
@@ -1808,7 +1808,7 @@ python -c "from agentnova.core.tool_cache import clear_tool_cache; clear_tool_ca
 4. Backend tests via test_tool_support(force_test=True)
 ```
 
-**Cache File Format** (`~/.cache/agentnova/tool_support.json`):
+**Cache File Format** (`~/.cache/agentkthx/tool_support.json`):
 ```json
 {
   "qwen2.5:0.5b": {
@@ -2040,7 +2040,7 @@ Fixed a critical bug where tool calls failed in OpenResponses mode (native `/api
 
 ### Specification Compliance Gap Fixes
 
-Resolved minor gaps identified in the AgentNova R03.3 Specification Compliance Audit Report. Overall compliance improved from 94% to an estimated 97%.
+Resolved minor gaps identified in the AgentKthx R03.3 Specification Compliance Audit Report. Overall compliance improved from 94% to an estimated 97%.
 
 ### Added
 
@@ -2067,7 +2067,7 @@ Resolved minor gaps identified in the AgentNova R03.3 Specification Compliance A
 
 #### AgentSkills Compatibility Parsing (`skills/loader.py`)
 - **`parse_compatibility()` function** - Parse compatibility strings into structured data
-  - Supports formats: `"python>=3.8"`, `"python>=3.8, ollama"`, `"agentnova>=1.0"`
+  - Supports formats: `"python>=3.8"`, `"python>=3.8, ollama"`, `"agentkthx>=1.0"`
   - Returns dict with `python`, `runtimes`, `frameworks` fields
 - **`Skill.compatibility_info` property** - Get parsed compatibility requirements
 - **`Skill.check_compatibility()` method** - Check compatibility with environment
@@ -2133,7 +2133,7 @@ Resolved minor gaps identified in the AgentNova R03.3 Specification Compliance A
 
 ```python
 # Chat-Completions streaming
-from agentnova.backends import OllamaBackend
+from agentkthx.backends import OllamaBackend
 backend = OllamaBackend()
 for chunk in backend.generate_completions_stream(
     model="qwen2.5:0.5b",
@@ -2143,16 +2143,16 @@ for chunk in backend.generate_completions_stream(
     print(chunk["delta"], end="")
 
 # SPDX license validation
-from agentnova.skills import validate_spdx_license
+from agentkthx.skills import validate_spdx_license
 valid, msg = validate_spdx_license("MIT")  # (True, "Valid SPDX identifier: MIT")
 
 # Skill compatibility check
-from agentnova.skills import Skill
+from agentkthx.skills import Skill
 skill = Skill(..., compatibility="python>=3.8")
 is_compat, warnings = skill.check_compatibility(python_version="3.10")
 
 # ACP batch context manager
-from agentnova.acp_plugin import ACPPlugin
+from agentkthx.acp_plugin import ACPPlugin
 acp = ACPPlugin(agent_name="TestAgent")
 with acp.batch_context("Read multiple files") as batch:
     batch.add_read("/file1.py")
@@ -2194,35 +2194,35 @@ Added support for both OpenResponses (`/api/chat`) and OpenAI Chat-Completions (
   - `[OpenResponses]` - Internal state tracking (Response, Items, tool_choice)
   - `[OpenAI-Comp]` - Chat-Completions API transport layer
   - `[Ollama]` - Backend dispatch routing
-  - `[AgentNova]`, `[Soul]`, `[Step]`, `[DEBUG]`, `[MSG]` - Agent-level debug (both modes)
+  - `[AgentKthx]`, `[Soul]`, `[Step]`, `[DEBUG]`, `[MSG]` - Agent-level debug (both modes)
 
 #### CLI Integration
 - **`--api` flag added to commands**:
-  - `agentnova run --api comp "What is 15 + 27?"`
-  - `agentnova chat --api comp`
-  - `agentnova agent --api comp`
-  - `agentnova test --api comp`
+  - `agentkthx run --api comp "What is 15 + 27?"`
+  - `agentkthx chat --api comp`
+  - `agentkthx agent --api comp`
+  - `agentkthx test --api comp`
 - **Startup info shows API mode**: `API Mode: comp`
 
 ### Changed
 - **Debug output separation**: Non-`[OpenResponses]` debug output now prints in both API modes
-  - `[Soul]`, `[AgentNova]`, `[Step]`, `[DEBUG]`, `[MSG]`, `[ErrorRecovery]` output preserved in comp mode
+  - `[Soul]`, `[AgentKthx]`, `[Step]`, `[DEBUG]`, `[MSG]`, `[ErrorRecovery]` output preserved in comp mode
   - Only `[OpenResponses]` specific output suppressed in comp mode
 
 ### Usage
 
 ```bash
 # Default: OpenResponses API (Ollama native)
-agentnova chat -m qwen2.5:0.5b
+agentkthx chat -m qwen2.5:0.5b
 
 # Use OpenAI Chat-Completions API
-agentnova chat -m qwen2.5:0.5b --api comp
+agentkthx chat -m qwen2.5:0.5b --api comp
 
 # Run test with Chat-Completions API
-agentnova test 01 -m qwen2.5:0.5b --api comp --debug
+agentkthx test 01 -m qwen2.5:0.5b --api comp --debug
 
 # Run single prompt with Chat-Completions API
-agentnova run "What is 15 plus 27?" --api comp --tools calculator
+agentkthx run "What is 15 plus 27?" --api comp --tools calculator
 ```
 
 ### Technical Details
@@ -2247,7 +2247,7 @@ agentnova run "What is 15 plus 27?" --api comp --tools calculator
 [OpenResponses] Response created: id=resp_...
 [OpenResponses] Response status: queued
 [OpenResponses] Response status: in_progress
-[AgentNova] Model: qwen2.5:0.5b
+[AgentKthx] Model: qwen2.5:0.5b
 [Step 1]
   [DEBUG] Sending 2 messages
   [OpenResponses] Tool calls detected: 1
@@ -2257,7 +2257,7 @@ agentnova run "What is 15 plus 27?" --api comp --tools calculator
 **Chat-Completions mode (`--api comp`)**:
 ```
 [Soul] Loaded: Agent Nova v1.0.0
-[AgentNova] Model: qwen2.5:0.5b
+[AgentKthx] Model: qwen2.5:0.5b
 [Step 1]
   [DEBUG] Sending 2 messages
   [Ollama] Dispatching to OpenAI-compatible API (mode=comp)
@@ -2340,7 +2340,7 @@ Major improvements to testing capabilities with soul persona integration for tes
 
 #### Soul Support for Test Command
 - **`--soul` flag for test subcommand** - Load soul personas during test runs
-  - Usage: `agentnova test 01 -m gemma3:270m --force-react --soul nova-helper`
+  - Usage: `agentkthx test 01 -m gemma3:270m --force-react --soul nova-helper`
 - **`--soul-level` flag for test subcommand** - Control progressive disclosure (1-3)
 - **All test modules updated** to accept soul arguments (tests 00-11)
 - **Soul arguments passed to Agent** in test modules that create agents
@@ -2353,7 +2353,7 @@ Major improvements to testing capabilities with soul persona integration for tes
 - **`resolve_model_pattern()` function** - Resolve pattern with helpful output
   - Shows all matching models when multiple match
   - Returns list when `allow_multiple=True`
-- **Test command fuzzy matching** - `agentnova test 01 -m qwen` tests all qwen models
+- **Test command fuzzy matching** - `agentkthx test 01 -m qwen` tests all qwen models
 
 #### LLM Diagnostic Soul (nova-helper)
 - **Redesigned nova-helper soul** for diagnostic testing
@@ -2366,7 +2366,7 @@ Major improvements to testing capabilities with soul persona integration for tes
 
 #### Soul Module Import
 - **Fixed `___init___.py` filename** - Was triple underscores, renamed to `__init__.py`
-  - Soul module now imports correctly: `from agentnova.soul import load_soul`
+  - Soul module now imports correctly: `from agentkthx.soul import load_soul`
 
 #### Fuzzy Matching Return Type
 - **Fixed `resolve_model_pattern()` return type** - Always returns list when `allow_multiple=True`
@@ -2408,13 +2408,13 @@ Major improvements to testing capabilities with soul persona integration for tes
 
 ```bash
 # Test with soul persona
-agentnova test 01 -m gemma3:270m --force-react --soul nova-helper
+agentkthx test 01 -m gemma3:270m --force-react --soul nova-helper
 
 # Test multiple models with fuzzy matching
-agentnova test 01 -m qwen --force-react
+agentkthx test 01 -m qwen --force-react
 
 # Test with soul and custom disclosure level
-agentnova test 01 -m dolphin --soul nova-helper --soul-level 3
+agentkthx test 01 -m dolphin --soul nova-helper --soul-level 3
 ```
 
 ---
@@ -2427,7 +2427,7 @@ Implemented ClawSouls Soul Spec v0.5 support for persona packages. Souls allow d
 
 ### Added
 
-#### Soul Spec Module (`agentnova/soul/`)
+#### Soul Spec Module (`agentkthx/soul/`)
 - **`types.py`** - Data structures for Soul Spec v0.5
   - `SoulManifest` - Main manifest with metadata, files, compatibility
   - `Author`, `Compatibility`, `SoulFiles`, `Disclosure` dataclasses
@@ -2441,7 +2441,7 @@ Implemented ClawSouls Soul Spec v0.5 support for persona packages. Souls allow d
   - Tool filtering based on `allowedTools`
 
 #### Sample Soul Package
-- **`agentnova/souls/nova-helper/`** - Example coding assistant soul
+- **`agentkthx/souls/nova-helper/`** - Example coding assistant soul
   - `soul.json` - Manifest defining the persona
   - `SOUL.md` - Core persona definition
   - `IDENTITY.md` - Background and identity
@@ -2450,7 +2450,7 @@ Implemented ClawSouls Soul Spec v0.5 support for persona packages. Souls allow d
 #### CLI Integration
 - **`--soul` flag** for run, chat, agent commands
 - **`--soul-level` flag** (1-3) for progressive disclosure
-- **`agentnova soul` command** to inspect soul packages
+- **`agentkthx soul` command** to inspect soul packages
   - `--validate` to run validation checks
   - `--prompt` to show generated system prompt
 - **`--num-ctx` parameter** for run, chat, agent, test commands
@@ -2458,7 +2458,7 @@ Implemented ClawSouls Soul Spec v0.5 support for persona packages. Souls allow d
   - Overrides `AGENTNOVA_NUM_CTX` environment variable
   - Falls back to config default if not specified
   - Displayed in mode startup info (e.g., `Context: 32K`)
-  - Usage: `agentnova chat -m qwen2.5:0.5b --num-ctx 32768`
+  - Usage: `agentkthx chat -m qwen2.5:0.5b --num-ctx 32768`
 - **`--acp` flag** for run, chat, agent, test commands
   - Enables ACP (Agent Control Panel) logging
   - Logs user prompts and assistant responses
@@ -2467,13 +2467,13 @@ Implemented ClawSouls Soul Spec v0.5 support for persona packages. Souls allow d
 - **`--acp-url` parameter** for run, chat, agent, test commands
   - Specifies ACP server URL
   - Falls back to `ACP_BASE_URL` environment variable or config default
-  - Usage: `agentnova chat --acp --acp-url https://tunnel.trycloudflare.com`
+  - Usage: `agentkthx chat --acp --acp-url https://tunnel.trycloudflare.com`
 - **`--timeout` parameter** for run, chat, agent, test commands
   - Sets the request timeout in seconds for API calls to the backend
   - Default: 120 seconds
   - Useful for slow remote Ollama servers (e.g., cloudflare tunnels)
   - Displayed in chat/agent mode startup info
-  - Usage: `agentnova chat --timeout 300 --acp --acp-url https://...`
+  - Usage: `agentkthx chat --timeout 300 --acp --acp-url https://...`
 
 #### Agent Integration
 - **`soul` parameter** in Agent.__init__
@@ -2509,7 +2509,7 @@ Implemented ClawSouls Soul Spec v0.5 support for persona packages. Souls allow d
   - Auto-removal of corrupted cache files
 
 #### Tool Support Display
-- **Fixed display logic for `"none"` status** - Models tested with `--tool-support` that returned `"none"` (no tool support) were incorrectly displayed as `"? untested"` on subsequent `agentnova models` runs
+- **Fixed display logic for `"none"` status** - Models tested with `--tool-support` that returned `"none"` (no tool support) were incorrectly displayed as `"? untested"` on subsequent `agentkthx models` runs
   - Added explicit handling for all status values:
     - `"native"` → `✓ native` (green)
     - `"react"` → `○ react` (yellow)
@@ -2538,8 +2538,8 @@ Implemented ClawSouls Soul Spec v0.5 support for persona packages. Souls allow d
   - Error: `SyntaxError: f-string expression part cannot include a backslash`
 
 #### Windows Compatibility
-- **Fixed `agentnova.__file__` being None on Windows** - In certain installation scenarios on Windows, `agentnova.__file__` returns `None` causing `TypeError: expected str, bytes or os.PathLike object, not NoneType`
-  - Added explicit check for `agentnova.__file__ is not None`
+- **Fixed `agentkthx.__file__` being None on Windows** - In certain installation scenarios on Windows, `agentkthx.__file__` returns `None` causing `TypeError: expected str, bytes or os.PathLike object, not NoneType`
+  - Added explicit check for `agentkthx.__file__ is not None`
   - Falls back to `importlib.resources.files()` for Python 3.9+ when `__file__` is unavailable
   - Soul loading now works correctly on Windows
 
@@ -2553,16 +2553,16 @@ Implemented ClawSouls Soul Spec v0.5 support for persona packages. Souls allow d
 
 ```bash
 # Inspect a soul package
-agentnova soul nova-helper --validate --prompt
+agentkthx soul nova-helper --validate --prompt
 
 # Use soul with chat mode
-agentnova chat --soul nova-helper -m qwen2.5:0.5b
+agentkthx chat --soul nova-helper -m qwen2.5:0.5b
 
 # Use soul with agent mode
-agentnova agent --soul nova-helper
+agentkthx agent --soul nova-helper
 
 # Run single prompt with soul
-agentnova run "Debug this code" --soul nova-helper --soul-level 2
+agentkthx run "Debug this code" --soul nova-helper --soul-level 2
 ```
 
 ### Creating Custom Souls
@@ -2630,8 +2630,8 @@ Added comprehensive reasoning and knowledge benchmark tests inspired by Google's
 
 #### CLI Updates
 - **Extended test registry** in `cli.py`
-  - Tests 05-11 now available via `agentnova test <id>`
-  - `agentnova test --list` shows all 12 available tests
+  - Tests 05-11 now available via `agentkthx test <id>`
+  - `agentkthx test --list` shows all 12 available tests
 
 ### Test Categories Summary
 
@@ -2648,13 +2648,13 @@ Added comprehensive reasoning and knowledge benchmark tests inspired by Google's
 ### Usage
 ```bash
 # List all available tests
-agentnova test --list
+agentkthx test --list
 
 # Run specific test
-agentnova test 10 --model qwen2.5:0.5b
+agentkthx test 10 --model qwen2.5:0.5b
 
 # Run all tests
-agentnova test all
+agentkthx test all
 ```
 
 ---
@@ -2722,14 +2722,14 @@ Complete reorganization of the codebase for improved modularity, type safety, an
 - **ASCII banner** - Braille art banner with color support
 - **Tool support testing** - `--tool-support` flag for `models` command
   - Actually tests models by making API calls
-  - Results cached in `~/.cache/agentnova/tool_support.json`
+  - Results cached in `~/.cache/agentkthx/tool_support.json`
   - `--no-cache` to ignore cached results
-- **Test subcommand** - `agentnova test <id>` for running diagnostic tests
+- **Test subcommand** - `agentkthx test <id>` for running diagnostic tests
   - Tests 00-04 available
   - `--list` to show available tests
   - `--acp` for ACP integration during tests
-- **Config command** - `agentnova config` to show current configuration
-- **Version command** - `agentnova version` with banner
+- **Config command** - `agentkthx config` to show current configuration
+- **Version command** - `agentkthx version` with banner
 
 ### Changed
 
@@ -2801,7 +2801,7 @@ main/                           refactor-1/
   - Previous: Would run live test during Agent init, causing false positives
   - Now: Checks cache only, defaults to REACT for untested models
   - Matches main branch behavior exactly
-  - Users run `agentnova models --tool-support` to test and cache results
+  - Users run `agentkthx models --tool-support` to test and cache results
 
 #### ReAct Model Final Answer Handling
 - **Fixed premature Final Answer acceptance** in `agent.py`
@@ -2826,7 +2826,7 @@ main/                           refactor-1/
   - `qwen2.5:0.5b` was incorrectly detected as "native" because the test tool had no params
   - When actual tools with required params were passed, model returned empty responses
   - Now properly detects models that can't fill in tool parameters
-- **Cache cleared**: Delete `~/.cache/agentnova/tool_support.json` to re-test models
+- **Cache cleared**: Delete `~/.cache/agentkthx/tool_support.json` to re-test models
 
 
 ### Test Results (Quick Diagnostic)
@@ -2842,20 +2842,20 @@ main/                           refactor-1/
 
 ```python
 # Old (main)
-from agentnova.core.agent import Agent
-from agentnova.core.ollama_client import OllamaClient
+from agentkthx.core.agent import Agent
+from agentkthx.core.ollama_client import OllamaClient
 
 client = OllamaClient()
 agent = Agent(model="qwen2.5:0.5b", ollama_client=client)
 
 # New (refactor-1)
-from agentnova import Agent, get_backend
+from agentkthx import Agent, get_backend
 
 backend = get_backend("ollama")
 agent = Agent(model="qwen2.5:0.5b", backend=backend)
 
 # Or even simpler
-from agentnova import Agent
+from agentkthx import Agent
 agent = Agent(model="qwen2.5:0.5b")  # Uses default backend
 ```
 
@@ -2931,7 +2931,7 @@ agent = Agent(model="qwen2.5:0.5b")  # Uses default backend
 - **Agent Mode Test (Test 16)** - New test suite for autonomous task execution
   - Tests: Simple Reasoning, Knowledge Recall, Calculator Chain, File Write, Shell Echo, Python REPL, Multi-Tool
   - Tests multi-step planning, tool orchestration, and file operations
-  - Usage: `agentnova test 16 --model qwen2.5-coder:0.5b`
+  - Usage: `agentkthx test 16 --model qwen2.5-coder:0.5b`
 - **Few-shot prompts for file operations** - Added `write_file` and `read_file` examples
   - Models now learn correct argument format: `{"path": "...", "content": "..."}`
   - Added to `FEW_SHOT_SUFFIX`, `FEW_SHOT_COMPACT`, and `NATIVE_TOOL_HINTS`
@@ -2982,7 +2982,7 @@ Major code reorganization for improved maintainability. The monolithic `agent.py
 ### Changed
 - **`core/agent.py`** reduced from ~2770 to ~1550 lines
 - **Clear dependency graph** - modules import from lower-level modules only
-- **Backward compatible** - `from agentnova import Agent, AgentRun, StepResult` still works
+- **Backward compatible** - `from agentkthx import Agent, AgentRun, StepResult` still works
 
 ### Module Dependency Graph
 
@@ -3100,7 +3100,7 @@ Dolphin fine-tunes are now detected as a unified family regardless of their base
   - This uses Ollama's native API support instead of prompt-based workaround
 - **Qwen3.5 config corrected** - Qwen3.5 has a simple template without thinking mode, unlike Qwen3
   - Set `needs_think_directive=False` for qwen35 family
-- **Tool support caching** - `agentnova models --tool_support` now skips already-tested models
+- **Tool support caching** - `agentkthx models --tool_support` now skips already-tested models
   - Added `--retest` flag to force re-testing all models
 
 ### Root Causes
@@ -3110,8 +3110,8 @@ Dolphin fine-tunes are now detected as a unified family regardless of their base
 
 ### Added
 - **Quick Diagnostic Test (test 15)** - 5-question rapid test for debugging (~30-60s per model)
-  - `agentnova test 15 --model granite3.1-moe:1b`
-  - `agentnova test 15 --model all --debug`
+  - `agentkthx test 15 --model granite3.1-moe:1b`
+  - `agentkthx test 15 --model all --debug`
   - Designed for rapid iteration during development
   - Questions target specific failure modes: simple math, multi-step, division, word problems, edge cases
 
@@ -3155,7 +3155,7 @@ Dolphin fine-tunes are now detected as a unified family regardless of their base
 - One line fix I missed in R02, had to completely re-package and bump version just to fix.
 - Development is too fast in Alpha to keep PyPi package always up to date
 - The current and latest version will always available on GitHub.
-- 'pip install git+https://github.com/VTSTech/AgentNova.git' will be the only supported install method for the near future.
+- 'pip install git+https://github.com/VTSTech/AgentKthx.git' will be the only supported install method for the near future.
 
 ## [R02] - 2026-03-21 3:25:54 PM
 
@@ -3238,7 +3238,7 @@ Major improvements to model-specific behavior with automatic family detection an
 
 ### 🚀 Native Tool Synthesis for Small Models
 
-Major improvements to native tool calling for small models (≤1B parameters). When models struggle to make tool calls, AgentNova now synthesizes them directly from natural language prompts.
+Major improvements to native tool calling for small models (≤1B parameters). When models struggle to make tool calls, AgentKthx now synthesizes them directly from natural language prompts.
 
 ### Added
 - **Expression extraction from natural language**:
@@ -3248,7 +3248,7 @@ Major improvements to native tool calling for small models (≤1B parameters). W
   - `"What is 100 divided by 4?"` → `100 / 4`
   - `"What is 2 to the power of 10?"` → `2 ** 10`
 - **Echo text extraction**:
-  - `"Echo the text 'Hello AgentNova'"` → `Hello AgentNova`
+  - `"Echo the text 'Hello AgentKthx'"` → `Hello AgentKthx`
 - **Two-tier empty response retry**:
   1. First retry: Send specific hint with extracted expression
   2. Second retry: Synthesize tool call directly (bypass confused model)
@@ -3332,7 +3332,7 @@ Significant improvements to ReAct-style tool calling for models without native s
 | Shell Echo | Failed (```) | **Passed** | Fixed |
 
 ### Key Fixes
-- Shell echo test was returning ` ``` ` instead of actual output - now correctly returns `Hello AgentNova`
+- Shell echo test was returning ` ``` ` instead of actual output - now correctly returns `Hello AgentKthx`
 - Models writing Python code blocks instead of using ReAct for math - now guided by few-shot examples
 
 ---
@@ -3341,24 +3341,24 @@ Significant improvements to ReAct-style tool calling for models without native s
 
 ### 🔄 Project Rename & Version Reset
 
-**LocalClaw is now AgentNova!**
+**LocalClaw is now AgentKthx!**
 
-This release marks the transition from `localclaw` to `agentnova` as the official package name. The project has been renamed to avoid conflicts with other projects using similar names.
+This release marks the transition from `localclaw` to `agentkthx` as the official package name. The project has been renamed to avoid conflicts with other projects using similar names.
 
 #### What Changed
-- **Package name**: `localclaw` → `agentnova`
-- **CLI command**: `localclaw` → `agentnova` (old command still works with deprecation warning)
+- **Package name**: `localclaw` → `agentkthx`
+- **CLI command**: `localclaw` → `agentkthx` (old command still works with deprecation warning)
 - **Environment variables**: `LOCALCLAW_*` → `AGENTNOVA_*` (old vars still work for backward compatibility)
 - **Version reset**: R04.0.0 → R00.0.0 (starting fresh with the new name)
-- **Repository**: https://github.com/VTSTech/AgentNova
+- **Repository**: https://github.com/VTSTech/AgentKthx
 
 #### Backward Compatibility
 The `localclaw` package is still available as a thin compatibility shim:
 ```python
-import localclaw  # Works, shows deprecation warning, redirects to agentnova
+import localclaw  # Works, shows deprecation warning, redirects to agentkthx
 ```
 ```bash
-localclaw run "prompt"  # Works, redirects to agentnova
+localclaw run "prompt"  # Works, redirects to agentkthx
 ```
 
 #### Migration Guide
@@ -3368,8 +3368,8 @@ import localclaw
 from localclaw import Agent
 
 # New (recommended)
-import agentnova
-from agentnova import Agent
+import agentkthx
+from agentkthx import Agent
 ```
 
 ```bash
@@ -3378,8 +3378,8 @@ localclaw run "What is the capital of Japan?"
 localclaw chat -m llama3.2:3b
 
 # New (recommended)
-agentnova run "What is the capital of Japan?"
-agentnova chat -m llama3.2:3b
+agentkthx run "What is the capital of Japan?"
+agentkthx chat -m llama3.2:3b
 ```
 
 ---
@@ -3392,7 +3392,7 @@ This release introduces full Agent Mode with autonomous task execution, complete
 
 ### Added
 - **Agent Mode - Full Implementation**:
-  - `agentnova agent` command for goal-driven autonomous task execution
+  - `agentkthx agent` command for goal-driven autonomous task execution
   - State machine: IDLE → WORKING → IDLE with PAUSED and STOPPING states
   - Message queuing during execution, processed after task completion
   - Rollback support with `/stop` prompting for confirmation
@@ -3435,7 +3435,7 @@ This release introduces full Agent Mode with autonomous task execution, complete
   - Notes content limit increased from 400 to 2000 chars
   - Note importance changed from "normal" to "high"
 
-- **Version reset**: Starting fresh with AgentNova name (was R04 under LocalClaw)
+- **Version reset**: Starting fresh with AgentKthx name (was R04 under LocalClaw)
 
 ### Fixed
 - Final responses now displayed in full when Agent Mode tasks complete
@@ -3444,26 +3444,26 @@ This release introduces full Agent Mode with autonomous task execution, complete
 ### Usage
 ```bash
 # Start agent mode with ACP logging
-agentnova agent --model llama3.2:1b --tools calculator,shell --acp
+agentkthx agent --model llama3.2:1b --tools calculator,shell --acp
 
 # With verbose output
-agentnova agent -m llama3.2:1b --tools calculator,shell -v --acp
+agentkthx agent -m llama3.2:1b --tools calculator,shell -v --acp
 
 # With Modelfile system prompt
-agentnova agent --use-mf-sys --tools shell --acp --debug
+agentkthx agent --use-mf-sys --tools shell --acp --debug
 ```
 
 ### Verified Working
 - `llama3.2:1b` - First model to correctly respond in Agent Mode
 - GSM8K champion at 90% accuracy
-- Correctly identifies as AgentNova, acknowledges user
+- Correctly identifies as AgentKthx, acknowledges user
 
 ---
 
 ## [R03.2.0] - 03-20-2026
 
 ### Added
-- **Agent Mode** - New `agentnova agent` command for autonomous task execution
+- **Agent Mode** - New `agentkthx agent` command for autonomous task execution
   - Goal-driven execution: Give tasks and agent works through them autonomously
   - State machine: IDLE → WORKING → IDLE with PAUSED and STOPPING states
   - Message queuing: Messages queued while working, processed after completion
@@ -3503,13 +3503,13 @@ agentnova agent --use-mf-sys --tools shell --acp --debug
 ### Usage
 ```bash
 # Start agent mode
-agentnova agent --model llama3.2:1b --tools calculator,shell
+agentkthx agent --model llama3.2:1b --tools calculator,shell
 
 # With verbose output
-agentnova agent -m llama3.2:1b --tools calculator,shell -v
+agentkthx agent -m llama3.2:1b --tools calculator,shell -v
 
 # With Modelfile system prompt
-agentnova agent --use-mf-sys --tools shell
+agentkthx agent --use-mf-sys --tools shell
 ```
 
 ---
@@ -3518,7 +3518,7 @@ agentnova agent --use-mf-sys --tools shell
 
 ### Added
 - **`--num-ctx`, `--num-predict`, `--fast` flags for test command** - Configure context window and prediction limits for benchmark tests
-  - Usage: `agentnova test 14 --num-ctx 4096 --num-predict 256`
+  - Usage: `agentkthx test 14 --num-ctx 4096 --num-predict 256`
   - `--fast` preset: `--num-ctx 2048 --num-predict 128`
   - Enables memory optimization for running benchmarks on resource-constrained systems
 - **`shared_args` module** - Centralized CLI argument handling for test scripts
@@ -3534,7 +3534,7 @@ agentnova agent --use-mf-sys --tools shell
 ### Fixed
 - **`--acp` flag not respected in test scripts** - `14_gsm8k_benchmark.py` wasn't using `shared_args`
   - Updated to import and use `add_shared_args()` and `parse_shared_args()`
-  - ACP integration now works correctly with `agentnova test 14 --acp`
+  - ACP integration now works correctly with `agentkthx test 14 --acp`
 - **Syntax error in cli.py line 446** - f-string cannot contain backslash
   - Changed `system.split('\n')` inside f-string to pre-computed `more_lines` variable
   - Python f-strings require backslash expressions to be moved outside the `{}`
@@ -3629,7 +3629,7 @@ agentnova agent --use-mf-sys --tools shell
 - **`get_tool_support()` function** - Exported tool support detection API
   - Returns: `"native"`, `"react"`, `"none"`, or `"untested"`
   - Checks `tested_models.json` only (no heuristic fallback)
-  - Usage: `from agentnova import get_tool_support`
+  - Usage: `from agentkthx import get_tool_support`
   - Enables external tools to query model capabilities before running agents
 
 - **Three-tier tool support system** in Agent class:
@@ -3651,7 +3651,7 @@ agentnova agent --use-mf-sys --tools shell
 ### Changed
 - **Removed heuristic fallback** from `get_tool_support()`:
   - Family-based assumptions were inaccurate (e.g., dolphin fine-tunes lost native support)
-  - Now requires explicit testing via `agentnova models --tool_support`
+  - Now requires explicit testing via `agentkthx models --tool_support`
   - Untested models show `"untested"` in models table
 
 - **Agent initialization** now uses `get_tool_support()` for detection:
@@ -3685,7 +3685,7 @@ agentnova agent --use-mf-sys --tools shell
 
 ### Example Output
 ```
-⚛️ AgentNova R00 Models
+⚛️ AgentKthx R00 Models
   Model                                      Family       Context    Tool Support
   ──────────────────────────────────────────────────────────────────────────────
   gemma3:270m                                gemma3       32K        ○ none
@@ -3707,7 +3707,7 @@ agentnova agent --use-mf-sys --tools shell
 
 ### Added
 - **Dynamic tool support detection** - Models are now tested individually instead of relying on family-based heuristics
-  - New `--tool_support` flag for `models` command: `agentnova models --tool_support`
+  - New `--tool_support` flag for `models` command: `agentkthx models --tool_support`
   - Tests each model using Ollama's native tool API with Modelfile system prompts (no custom prompts)
   - Results persisted to `tested_models.json` for future reference
 - **Enhanced `models` command output** - Now displays 4 columns:
@@ -3730,7 +3730,7 @@ Detection is now simplified and more accurate:
 
 ### Example Output
 ```
-⚛️ AgentNova R00 Models · Written by VTSTech · https://www.vts-tech.org · https://github.com/VTSTech/AgentNova
+⚛️ AgentKthx R00 Models · Written by VTSTech · https://www.vts-tech.org · https://github.com/VTSTech/AgentKthx
   Model                                      Family       Context    Tool Support
   ──────────────────────────────────────────────────────────────────────────────
   driaforall/tiny-agent-a:1.5b               qwen2        32K        ReAct
@@ -3745,11 +3745,11 @@ Detection is now simplified and more accurate:
 
 ### Added
 - **`--acp` flag for test command** - Enables ACP (Agent Control Panel) integration for all test scripts
-  - Usage: `agentnova test 01 --acp` or `agentnova test 14_acp`
+  - Usage: `agentkthx test 01 --acp` or `agentkthx test 14_acp`
   - Passes `AGENTNOVA_ACP=1` environment variable to test scripts
   - Provides activity tracking, token counting, and session logging via ACP server
-- **`--use-mf-sys` flag for test command** - Use Modelfile system prompts instead of AgentNova defaults
-  - Usage: `agentnova test 01 --use-mf-sys --model qwen2.5-coder:0.5b`
+- **`--use-mf-sys` flag for test command** - Use Modelfile system prompts instead of AgentKthx defaults
+  - Usage: `agentkthx test 01 --use-mf-sys --model qwen2.5-coder:0.5b`
   - Passes `AGENTNOVA_USE_MF_SYS=1` environment variable to test scripts
 - **`--debug` flag for test command** - Enable debug output for parsed tool calls and fuzzy matching
   - Passes `AGENTNOVA_DEBUG=1` environment variable to test scripts
@@ -3772,7 +3772,7 @@ Detection is now simplified and more accurate:
   - Test 14: GSM8K benchmark (50 math questions)
   - Removed old `gsm8k` and `gsm8k_acp` test IDs
 - **Updated cli.py EXAMPLES dict** with new test entries and `_acp` shorthand mappings
-  - Running `agentnova test 07_acp` auto-enables ACP and runs base script
+  - Running `agentkthx test 07_acp` auto-enables ACP and runs base script
   - All tests now support `--acp`, `--debug`, `--use-mf-sys`, and `--model` flags
 
 ### Fixed
@@ -3791,7 +3791,7 @@ Detection is now simplified and more accurate:
 
 ### Added
 - **`--force-react` flag for test command** - Forces text-based ReAct tool calling for all models
-  - Usage: `agentnova test gsm8k --force-react`
+  - Usage: `agentkthx test gsm8k --force-react`
   - Passes `AGENTNOVA_FORCE_REACT=1` environment variable to test scripts
   - Essential for models without native tool support (BitNet, some small models)
 - **`AGENTNOVA_FORCE_REACT` environment variable** - Controls ReAct mode across all examples
@@ -3822,7 +3822,7 @@ Detection is now simplified and more accurate:
 
 ### Added
 - **`--timeout` flag for test command** - Configurable timeout per test
-  - Usage: `agentnova test gsm8k --timeout 900` (15 minutes)
+  - Usage: `agentkthx test gsm8k --timeout 900` (15 minutes)
   - Default remains 300 seconds (5 minutes)
   - Timeout value shown in error message when exceeded
 
@@ -3852,7 +3852,7 @@ Detection is now simplified and more accurate:
   - `gsm8k` now correctly finds `gsm8k_agent_benchmark.py` (filters out `_acp` files)
   - Non-acp tests filter out `_acp` files to prevent wrong matches
 - **Import error in `gsm8k_agent_benchmark.py`** - Updated import statement
-  - Changed `from agentnova.core.ollama_client import get_default_client` to `from agentnova import get_default_client`
+  - Changed `from agentkthx.core.ollama_client import get_default_client` to `from agentkthx import get_default_client`
   - Function was moved to main package in earlier release
 
 ---
@@ -3906,8 +3906,8 @@ Detection is now simplified and more accurate:
 
 ### Added
 - **BitNet Backend Support** - Alternative inference backend using Microsoft's BitNet b1.58 2-bit quantization
-  - New `BitnetClient` class in `agentnova/bitnet_client.py` (simplified from 667 to 149 lines)
-  - Setup helper in `agentnova/bitnet_setup.py` for cloning and compiling BitNet
+  - New `BitnetClient` class in `agentkthx/bitnet_client.py` (simplified from 667 to 149 lines)
+  - Setup helper in `agentkthx/bitnet_setup.py` for cloning and compiling BitNet
   - CLI flag `--backend bitnet` to switch from Ollama to BitNet
   - Supported models: `BitNet-b1.58-2B-4T`, `Falcon3-1B-Instruct-1.58bit`, `Falcon3-3B-Instruct-1.58bit`, `Falcon3-7B-Instruct-1.58bit`
   - Model download via `huggingface-cli` or `wget` with automatic safetensors→GGUF conversion
@@ -3944,7 +3944,7 @@ Detection is now simplified and more accurate:
 - **ACP model name display** - Path-style model names (e.g., `Falcon3-1B-Instruct-1.58bit/ggml-model-i2_s.gguf`) now show directory name instead of GGUF filename in activity log
 
 ### Removed
-- `agentnova/acp_streaming.py` - merged into `acp_plugin.py`
+- `agentkthx/acp_streaming.py` - merged into `acp_plugin.py`
 
 ### Tested
 - BitNet backend with `Falcon3-1B-Instruct-1.58bit` model - ✅ Working
@@ -4019,8 +4019,8 @@ Detection is now simplified and more accurate:
 - **Resumability bug** in 08_robust_comparison.py that deleted progress on restart
 
 ### Technical Details
-- Added `_fuzzy_match_args()` method in `agentnova/core/tools.py` with alias dictionary for common argument variants
-- Added nested argument extraction in `_normalize_args()` in `agentnova/core/agent.py`
+- Added `_fuzzy_match_args()` method in `agentkthx/core/tools.py` with alias dictionary for common argument variants
+- Added nested argument extraction in `_normalize_args()` in `agentkthx/core/agent.py`
 - Argument aliases: `filepath→path`, `data→content`, `expr→expression`, `search→query`, `cmd→command`, `uri→url`
 
 ---

@@ -4,15 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "localclaw"
-version = "0.4.0.1"
-description = "REDIRECT PACKAGE - Use 'agentnova' instead. This package has been renamed."
+version = "0.5.0.0"
+description = "REDIRECT PACKAGE - Use 'agentkthx' instead. This package has been renamed."
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
     {name = "VTSTech", email = "veritas@vts-tech.org"}
 ]
 dependencies = [
-    "agentnova>=0.0",
+    "agentkthx>=0.6.0",
 ]
 classifiers = [
     "Development Status :: 7 - Inactive",
@@ -23,8 +23,8 @@ classifiers = [
 requires-python = ">=3.9"
 
 [project.urls]
-Homepage = "https://github.com/VTSTech/AgentNova"
-Repository = "https://github.com/VTSTech/AgentNova"
+Homepage = "https://github.com/VTSTech/AgentKthx"
+Repository = "https://github.com/VTSTech/AgentKthx"
 
 [project.scripts]
 localclaw = "localclaw:main"

@@ -12,7 +12,7 @@ import os
 import sys
 import pytest
 
-from agentnova.tools import make_builtin_registry
+from agentkthx.tools import make_builtin_registry
 
 
 # ============================================================================
@@ -349,17 +349,17 @@ class TestPerSessionTodoStores:
 
     def setup_method(self):
         """Reset global todo stores before each test."""
-        import agentnova.tools.builtins as bi
+        import agentkthx.tools.builtins as bi
         bi._todo_stores = {"default": []}
 
     def teardown_method(self):
         """Clean up after each test."""
-        import agentnova.tools.builtins as bi
+        import agentkthx.tools.builtins as bi
         bi._todo_stores = {"default": []}
 
     def test_default_store_isolation(self):
         """Default store works identically to pre-R04.6 behavior."""
-        from agentnova.tools.builtins import todo_add, todo_list, _get_todo_store
+        from agentkthx.tools.builtins import todo_add, todo_list, _get_todo_store
         result = todo_add("default session task")
         assert "Added todo" in result
         assert "default session task" in result
@@ -368,7 +368,7 @@ class TestPerSessionTodoStores:
 
     def test_separate_sessions_are_isolated(self):
         """Adding a todo to session A does not appear in session B."""
-        from agentnova.tools.builtins import _get_todo_store
+        from agentkthx.tools.builtins import _get_todo_store
         store_a = _get_todo_store("session-alpha")
         store_b = _get_todo_store("session-beta")
 
@@ -385,7 +385,7 @@ class TestPerSessionTodoStores:
 
     def test_multiple_sessions_coexist(self):
         """Multiple named sessions can have independent todo lists."""
-        from agentnova.tools.builtins import _get_todo_store
+        from agentkthx.tools.builtins import _get_todo_store
         sessions = ["sess-1", "sess-2", "sess-3"]
         stores = [_get_todo_store(s) for s in sessions]
 
@@ -397,19 +397,19 @@ class TestPerSessionTodoStores:
             assert store[0]["content"] == f"task {i}"
 
         # Default store should be untouched
-        from agentnova.tools.builtins import _todo_stores
+        from agentkthx.tools.builtins import _todo_stores
         assert len(_todo_stores["default"]) == 0
 
     def test_get_todo_store_lazy_creation(self):
         """_get_todo_store creates a new empty list for unknown sessions."""
-        from agentnova.tools.builtins import _get_todo_store
+        from agentkthx.tools.builtins import _get_todo_store
         store = _get_todo_store("brand-new-session")
         assert store == []
         assert len(store) == 0
 
     def test_store_persistence_within_process(self):
         """Store reference is stable — same object returned on repeated calls."""
-        from agentnova.tools.builtins import _get_todo_store
+        from agentkthx.tools.builtins import _get_todo_store
         a = _get_todo_store("persistent-test")
         b = _get_todo_store("persistent-test")
         assert a is b

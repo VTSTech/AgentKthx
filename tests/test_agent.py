@@ -5,12 +5,12 @@ Written by VTSTech — https://www.vts-tech.org
 """
 
 import pytest
-from agentnova.core.types import StepResultType, ToolSupportLevel, BackendType
-from agentnova.core.models import Tool, ToolParam, StepResult, AgentRun
-from agentnova.core.memory import Memory, MemoryConfig
-from agentnova.core.tool_parse import ToolParser
-from agentnova.core.helpers import fuzzy_match, normalize_args, sanitize_command, validate_path, is_safe_url
-from agentnova.tools import ToolRegistry, make_builtin_registry
+from agentkthx.core.types import StepResultType, ToolSupportLevel, BackendType
+from agentkthx.core.models import Tool, ToolParam, StepResult, AgentRun
+from agentkthx.core.memory import Memory, MemoryConfig
+from agentkthx.core.tool_parse import ToolParser
+from agentkthx.core.helpers import fuzzy_match, normalize_args, sanitize_command, validate_path, is_safe_url
+from agentkthx.tools import ToolRegistry, make_builtin_registry
 
 
 class TestTypes:
