@@ -1,12 +1,12 @@
 ---
 name: skill-creator
-description: Create, edit, or improve AgentSkills for AgentNova. Use when creating a new skill from scratch or when asked to improve, review, or clean up an existing skill. Triggers on phrases like "create a skill", "make a skill", "improve this skill", "review the skill".
+description: Create, edit, or improve AgentSkills for AgentKthx. Use when creating a new skill from scratch or when asked to improve, review, or clean up an existing skill. Triggers on phrases like "create a skill", "make a skill", "improve this skill", "review the skill".
 license: MIT
 ---
 
 # Skill Creator
 
-Guidance for creating effective AgentSkills for AgentNova.
+Guidance for creating effective AgentSkills for AgentKthx.
 
 ## What Are Skills?
 

@@ -831,6 +831,11 @@ class OpenRouterBackend(OllamaBackend):
         content = message.get("content") or ""
         raw_tool_calls = message.get("tool_calls") or []
         finish_reason = choice.get("finish_reason")
+        # R05.8: Capture reasoning_content (chain-of-thought) emitted by
+        # thinking-capable models routed through OpenRouter (e.g.
+        # o-series, GLM-5.x, deepseek-r1). Surfaced on the response so
+        # callers / CLI can display it via --think.
+        reasoning_content = message.get("reasoning_content", "") or ""
 
         # Parse OpenAI tool_calls format:
         #   { "id": "...", "type": "function",
@@ -867,6 +872,7 @@ class OpenRouterBackend(OllamaBackend):
                 "completion_tokens": usage.get("completion_tokens", 0),
                 "total_tokens": usage.get("total_tokens", 0),
             },
+            "reasoning_content": reasoning_content,  # populated by thinking models
             "raw": raw_response,
         }
 

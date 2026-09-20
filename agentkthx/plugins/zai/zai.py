@@ -773,6 +773,10 @@ class ZaiBackend(OllamaBackend):
         content = message.get("content", "")
         tool_calls = message.get("tool_calls", [])
         finish_reason = choices[0].get("finish_reason")
+        # R05.8: Capture reasoning_content (chain-of-thought) emitted by
+        # thinking-capable ZAI models (GLM-4.5+, GLM-5.x). Surfaced on the
+        # response so callers / CLI can display it via --think.
+        reasoning_content = message.get("reasoning_content", "") or ""
 
         # Parse tool calls from OpenAI format
         parsed_tool_calls = []
@@ -793,6 +797,9 @@ class ZaiBackend(OllamaBackend):
         if os.environ.get("AGENTNOVA_DEBUG"):
             print(f"  [ZAI] Content: {content[:1024] if content else '(empty)'}")
             print(f"  [ZAI] Tool calls: {parsed_tool_calls}")
+            if reasoning_content:
+                rc_preview = reasoning_content[:200] + "..." if len(reasoning_content) > 200 else reasoning_content
+                print(f"  [ZAI] Reasoning: {rc_preview}")
 
         usage = result.get("usage", {})
 
@@ -806,6 +813,7 @@ class ZaiBackend(OllamaBackend):
                 "total_tokens": usage.get("total_tokens", 0),
             },
             "latency_ms": latency_ms,
+            "reasoning_content": reasoning_content,  # populated by thinking models
             "raw": result,
         }
 

@@ -10,8 +10,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### 🐛 **Bug Fixes**
 - **Chat mode displayed "Agent Nova:" instead of "AgentKthx:"**: The chat loop's response prefix was hardcoded as `bright_green("Agent Nova")` in two places (`cli.py:1253` for empty responses, `cli.py:1259` for normal responses). Updated to `AgentKthx`.
 - **Soul files still referenced "Agent Nova"**: All three default soul packages (`nova-helper`, `nova-skills`, `nova-trading`) had "Agent Nova" as their persona name in `IDENTITY.md`, `SOUL.md`, `AGENTS.md`, and `soul.json displayName`. Updated to `AgentKthx` (except `nova-trading` which keeps "Nova Trading Analyst" as a thematic name — Nova = new/novel in trading context).
+- **Soul `repository` URLs pointed to old repo**: `nova-helper/soul.json` and `nova-skills/soul.json` had `"repository": "https://github.com/VTSTech/AgentNova"` — updated to `https://github.com/VTSTech/AgentKthx`.
+- **Skill files referenced AgentNova**: `skill-creator/SKILL.md`, `test-harness/SKILL.md`, and `crypto-signals/references/free_apis.md` (User-Agent string) all referenced "AgentNova" — updated to "AgentKthx".
+- **Test docstrings referenced AgentNova**: All test files had `AgentNova — <description>` headers. Updated to `AgentKthx`.
 - **Comment in OpenRouter backend**: Referenced "blank 'Agent Nova: '" — updated to "blank 'AgentKthx: '".
 - **`--think` flag had no effect in chat mode**: Previously only `run` mode surfaced `reasoning_content` in CLI output. Added chat-mode display logic: when `--think` is set AND the last FINAL_ANSWER step has `reasoning_content`, it's printed under the answer (dimmed, indented, line-truncated to 200 chars). Falls through to normal display when no reasoning_content is present (non-thinking models).
+- **ZAI backend didn't surface `reasoning_content`**: `ZaiBackend._generate_with_auth()` builds its own response dict (separate from `OllamaBackend.generate_completions()` because it needs Bearer auth injection). The R05.8 reasoning_content capture only added to OllamaBackend — ZAI was dropping `message.reasoning_content` on the floor. As a result, `--think` showed no reasoning output for ZAI even when GLM-4.5-flash emitted reasoning. Fixed: `_generate_with_auth()` now extracts `reasoning_content` from `choices[0].message` and includes it in the response dict. Also added debug preview when `AGENTNOVA_DEBUG=1`.
+- **OpenRouter backend didn't surface `reasoning_content`**: Same root cause — `OpenRouterBackend._parse_openai_response()` is a separate response parser that wasn't updated. Fixed: now extracts `reasoning_content` from `choices[0].message` and includes it in the returned dict.
+
+### ✅ **Verified**
+- 245/245 tests pass after fixes.
+- ZAI chat mode with `--think` now displays reasoning_content under the agent's response (when GLM emits reasoning_content).
+- All `AgentNova` references in user-facing strings, souls, skills, and test docstrings updated to `AgentKthx`.
+
+### 🔧 **Migration from R06.1**
+```bash
+pip install --upgrade agentkthx  # gets you to 0.6.2
+```
+
+## [R06.1] - 2026-09-20
 
 ### ✅ **Verified**
 - 245/245 tests pass after fixes.

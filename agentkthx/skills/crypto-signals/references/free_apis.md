@@ -126,7 +126,7 @@ import json
 
 def fetch_json(url):
     req = urllib.request.Request(url, headers={
-        'User-Agent': 'AgentNova-CryptoSignals/1.0',
+        'User-Agent': 'AgentKthx-CryptoSignals/1.0',
         'Accept': 'application/json'
     })
     with urllib.request.urlopen(req, timeout=15) as resp:
