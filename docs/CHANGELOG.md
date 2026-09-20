@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [R06.4] - 2026-09-20 12:53:41 PM
+
+### 🐛 **Bug Fixes**
+- **JEV mode infinite recursion on OpenRouter**: `OpenRouterBackend._jev_call_completions()` called `self.generate()`, which calls `_maybe_jev_dispatch()` at the top, which calls `generate_decision()`, which calls `_jev_call_completions()` again — infinite recursion → `RecursionError: maximum recursion depth exceeded`. Fixed: temporarily flip `_api_mode` to `OPENAI` during the JEV call so `_maybe_jev_dispatch()` returns None (no JEV dispatch), then restore original mode in a `finally` block. ZAI was not affected (it calls `_generate_with_auth()` directly, not `self.generate()`).
+
+- **Calculator tool auto-loaded in JEV mode**: `run_parser` defaults `tools_default="calculator"`, so `agentkthx run "..." --api jev` would auto-load the calculator tool. In JEV mode this is pointless — decisions never call tools (`generate_decision()` always passes `tools=None`). Fixed: `_build_agent()` now suppresses tool loading entirely when `api_mode == "jev"`. Debug output announces the suppression if `--tools` was explicitly passed.
+
+### ✅ **Verified**
+- 245/245 tests pass.
+- OpenRouter `_jev_call_completions` has recursion guard (temp api_mode flip).
+- ZAI `_jev_call_completions` does not recurse (calls `_generate_with_auth` directly).
+- JEV mode suppresses tools (agent.tools is empty registry).
+
 ## [R06.3] - 2026-09-20 12:10:12 PM
 
 ### 🐛 **Bug Fixes**

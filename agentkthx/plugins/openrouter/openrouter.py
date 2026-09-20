@@ -1034,14 +1034,27 @@ class OpenRouterBackend(OllamaBackend):
         # OpenRouter will respond with a 429 or paid-tier error.
         # We don't silently swap models here — the user picked the model.
 
-        return self.generate(
-            model=model,
-            messages=messages,
-            tools=None,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            **kwargs,
-        )
+        # CRITICAL: Temporarily flip api_mode to OPENAI to avoid infinite
+        # recursion. self.generate() calls _maybe_jev_dispatch() at the top,
+        # which would call generate_decision() → _jev_call_completions() →
+        # self.generate() again. By flipping to OPENAI, _maybe_jev_dispatch()
+        # returns None and we proceed to the actual API call.
+        original_api_mode = self._api_mode
+        from agentkthx.core.types import ApiMode
+        self._api_mode = ApiMode.OPENAI
+        try:
+            return self.generate(
+                model=model,
+                messages=messages,
+                tools=None,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                **kwargs,
+            )
+        finally:
+            # Restore original api_mode (JEV) so subsequent generate() calls
+            # from the agent loop still dispatch to JEV mode.
+            self._api_mode = original_api_mode
 
     @staticmethod
     def _is_tools_not_supported_error(err_str: str) -> bool:

@@ -484,7 +484,15 @@ def _build_agent(args: argparse.Namespace, config) -> Agent:
         print(f"[AgentKthx] API mode: {api_mode}")
 
     # Build tools
-    if args.tools:
+    # In JEV mode, tools are irrelevant — decisions never call tools
+    # (generate_decision() always passes tools=None to the backend).
+    # Suppress tool loading to avoid confusing the model and wasting
+    # the system prompt slot on tool definitions.
+    if api_mode == "jev":
+        tools = None
+        if args.debug and args.tools:
+            print(f"[AgentKthx] JEV mode — suppressing tools (decisions don't use them)")
+    elif args.tools:
         all_tools = make_builtin_registry()
         tool_names = [t.strip() for t in args.tools.split(",")]
         tools = all_tools.subset(tool_names)
