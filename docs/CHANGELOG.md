@@ -5,9 +5,22 @@ All notable changes to AgentKthx will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [R06.3] - 2026-09-20
+## [R06.3] - 2026-09-20 12:10:12 PM
 
 ### 🚀 **New Features**
+- **`/param` slash command in chat mode**: Show or set model generation parameters with per-backend support matrix. Parameters are filtered by what the current backend actually forwards to the API — e.g. `top_k` is settable on OpenRouter/Ollama but rejected on ZAI (ZAI's API doesn't accept it). Usage:
+  ```
+  /param                        — show all params, ✓/✗ for current backend
+  /param <name>                 — show one param's current value + range
+  /param <name> <value>         — set value (type-checked + range-validated)
+  /param reset <name>           — reset to model default
+  ```
+  Supported params: `temperature`, `top_p`, `max_tokens` (alias `num_predict`), `max_steps`, `num_ctx`, `top_k`, `seed`, `n`, `presence_penalty`, `frequency_penalty`, `thinking` (alias `thinking_level`), `think` (alias `show_reasoning`), `stream` (read-only).
+
+- **Per-backend parameter matrix**: Each parameter declares which backends support it. ZAI supports `temperature`, `top_p`, `presence_penalty`, `frequency_penalty` but not `top_k`/`seed`/`n`. OpenRouter supports everything. Ollama/llama-server/BitNet support `top_k`/`seed`. The matrix is defined inline in `cmd_chat` and easy to extend.
+
+- **OpenRouter API Technical Reference**: New `docs/OPENROUTER_API_TECHNICAL_REFERENCE.md` — comprehensive 680-line guide covering auth, endpoints, full request/response schema, sampling parameters table, model catalog, function calling, streaming, provider routing, transforms/plugins, error codes, rate limits, free tier behavior, implementation notes for AgentKthx, and troubleshooting matrix. Mirrors the format of the existing `ZAI_API_TECHNICAL_REFERENCE.md`.
+
 - **`/skills` slash command in chat mode**: Lists loaded skills with descriptions. If no skills are loaded, also lists available skills (read-only) so you can see what to pass to `--skills`. Example output:
   ```
   Loaded skills:
@@ -24,6 +37,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `agentkthx/config.py` (`MAX_STEPS` env var default)
   - `agentkthx/cli.py` (`_build_agent` fallback)
   - `agentkthx/shared_args.py` (help text)
+- **`_load_skills_prompt()` now returns a tuple**: Previously returned `str | None` (just the system prompt addition). Now returns `tuple[str | None, list[str]]` — the prompt AND the list of successfully-loaded skill names. Stashed on `agent._loaded_skills` so `/skills` and `/status` can display them.
+- **Agent loop forwards `_runtime_kwargs` to backend**: When user sets `top_k`, `seed`, `n`, `presence_penalty`, or `frequency_penalty` via `/param`, the values are stashed in `agent._runtime_kwargs` and forwarded to the backend via `backend_kwargs` in both `run()` and `run_stream()` paths.
+- **README updated**: Bumped to R06.4, added `OPENROUTER_API_TECHNICAL_REFERENCE.md` to documentation table.
 
 ### 🔧 **Internal Refactor**
 - **`_load_skills_prompt()` now returns a tuple**: Previously returned `str | None` (just the system prompt addition). Now returns `tuple[str | None, list[str]]` — the prompt AND the list of successfully-loaded skill names. Callers (just `_build_agent`) unpack both and stash the skill names on `agent._loaded_skills` so `/skills` and `/status` can display them.

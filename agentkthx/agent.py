@@ -1430,6 +1430,14 @@ Final Answer: <the answer>
         if self.num_ctx is not None:
             backend_kwargs["num_ctx"] = self.num_ctx
 
+        # R06.3: Forward runtime kwargs set via /param slash command.
+        # These are params that don't have a dedicated agent attribute
+        # (top_k, seed, n, presence_penalty, frequency_penalty).
+        # They're stashed on agent._runtime_kwargs by /param in cli.py.
+        if hasattr(self, '_runtime_kwargs') and self._runtime_kwargs:
+            for k, v in self._runtime_kwargs.items():
+                backend_kwargs[k] = v
+
         # Stop tokens: forward model-family stop sequences to backend.
         stops = self.model_config.stop_tokens if self.model_config else []
         if stops:

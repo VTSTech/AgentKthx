@@ -1128,6 +1128,7 @@ def cmd_chat(args: argparse.Namespace) -> int:
             print(f"  {cyan('/debug')}      Toggle debug output on/off")
             print(f"  {cyan('/help')}       Show this help message")
             print(f"  {cyan('/model')}      Show or change the model (e.g. /model glm-4.7-flash)")
+            print(f"  {cyan('/param')}      Show or set generation parameters (temp, top_p, top_k, etc.)")
             print(f"  {cyan('/security')}   Show or set security mode (max|off)")
             print(f"  {cyan('/skills')}     Show loaded skills (and available skills if none loaded)")
             print(f"  {cyan('/status')}     Show model, backend, tools, skills, and memory info")
@@ -1214,6 +1215,308 @@ def cmd_chat(args: argparse.Namespace) -> int:
                     # Fallback if skills module unavailable — just show names
                     for name in loaded:
                         print(f"  {magenta(name)}")
+            continue
+
+        # ── /param slash command ────────────────────────────────────────
+        # Show or set model generation parameters. Per-backend support
+        # matrix — only params the current backend actually forwards to
+        # the API are settable. Other params show as "not supported".
+        #
+        # Usage:
+        #   /param                        — show all current values
+        #   /param <name>                 — show value of one param
+        #   /param <name> <value>         — set value
+        #   /param reset <name>           — reset to None (use model default)
+        if user_input == "/param" or user_input.startswith("/param "):
+            from .core.types import BackendType
+
+            # Get current backend type
+            backend_type = getattr(agent.backend, 'backend_type', None)
+            backend_name = backend_type.value if hasattr(backend_type, 'value') else str(backend_type)
+
+            # Per-backend supported parameter matrix.
+            # Format: param_name → (type, description, supported_backends)
+            # supported_backends: set of backend name strings (matching BackendType.value)
+            # Special marker "all" means supported everywhere.
+            PARAM_MATRIX = {
+                # ── Generation control ──────────────────────────────────
+                "temperature": {
+                    "type": "float",
+                    "range": "0.0-2.0",
+                    "description": "Sampling temperature. Lower = focused, higher = creative",
+                    "backends": {"all"},
+                    "agent_attr": "_temperature",
+                },
+                "top_p": {
+                    "type": "float",
+                    "range": "0.0-1.0",
+                    "description": "Nucleus sampling probability mass",
+                    "backends": {"all"},
+                    "agent_attr": "_top_p",
+                },
+                "max_tokens": {
+                    "type": "int",
+                    "range": "1-N",
+                    "description": "Maximum tokens to generate (also: num_predict)",
+                    "backends": {"all"},
+                    "agent_attr": "_num_predict",
+                    "aliases": ["num_predict", "max_predict"],
+                },
+                "max_steps": {
+                    "type": "int",
+                    "range": "1-1000",
+                    "description": "Maximum agent reasoning steps",
+                    "backends": {"all"},
+                    "agent_attr": "max_steps",
+                },
+                "num_ctx": {
+                    "type": "int",
+                    "range": "2048-N",
+                    "description": "Context window size in tokens",
+                    "backends": {"all"},
+                    "agent_attr": "num_ctx",
+                },
+                # ── OpenAI / OpenRouter-specific ────────────────────────
+                "top_k": {
+                    "type": "int",
+                    "range": "0-N (0=disabled)",
+                    "description": "Top-K sampling: consider only K most likely tokens",
+                    "backends": {"openrouter", "ollama", "llama_server", "bitnet"},  # not ZAI
+                    "agent_attr": None,  # passed through kwargs at generate time
+                },
+                "seed": {
+                    "type": "int",
+                    "range": "any integer",
+                    "description": "Reproducibility seed (best-effort, provider-dependent)",
+                    "backends": {"openrouter", "ollama", "llama_server", "bitnet"},
+                    "agent_attr": None,
+                },
+                "n": {
+                    "type": "int",
+                    "range": "1-10",
+                    "description": "Number of completions to generate",
+                    "backends": {"openrouter", "ollama"},
+                    "agent_attr": None,
+                },
+                "presence_penalty": {
+                    "type": "float",
+                    "range": "-2.0 to 2.0",
+                    "description": "Penalize tokens already present (encourages new topics)",
+                    "backends": {"openrouter", "zai", "ollama"},
+                    "agent_attr": None,
+                },
+                "frequency_penalty": {
+                    "type": "float",
+                    "range": "-2.0 to 2.0",
+                    "description": "Penalize tokens proportional to frequency",
+                    "backends": {"openrouter", "zai", "ollama"},
+                    "agent_attr": None,
+                },
+                # ── Thinking controls (R05.8+) ──────────────────────────
+                "thinking": {
+                    "type": "str",
+                    "range": "off|auto|low|medium|high",
+                    "description": "Thinking / reasoning effort level",
+                    "backends": {"all"},
+                    "agent_attr": "_thinking_level",
+                    "aliases": ["thinking_level"],
+                    # Special setter: also updates _think and _reasoning_effort
+                    "special_setter": "_set_thinking_level",
+                },
+                "think": {
+                    "type": "bool",
+                    "range": "true|false",
+                    "description": "Display reasoning_content (chain-of-thought) in CLI output",
+                    "backends": {"all"},
+                    "agent_attr": "_show_reasoning",
+                    "aliases": ["show_reasoning"],
+                },
+                # ── AgentKthx-internal (not forwarded to API) ──────────
+                "stream": {
+                    "type": "bool",
+                    "range": "true|false",
+                    "description": "Whether to stream responses (cloud providers default to true)",
+                    "backends": {"all"},
+                    "agent_attr": None,  # handled at cmd_chat level, not on agent
+                    "note": "Read-only in /param — controlled by --stream flag at startup",
+                },
+            }
+
+            # Stash runtime kwargs on agent for params without agent_attr
+            # (top_k, seed, n, presence_penalty, frequency_penalty)
+            if not hasattr(agent, '_runtime_kwargs'):
+                agent._runtime_kwargs = {}
+
+            parts = user_input.split(None, 2)  # split into ["/param", name?, value?]
+            if len(parts) == 1:
+                # /param — show all current values
+                print(f"{bold('Backend:')} {cyan(backend_name)}")
+                print(f"{bold('Parameters:')}")
+                print()
+                for name, spec in PARAM_MATRIX.items():
+                    supported = "all" in spec["backends"] or backend_name in spec["backends"]
+                    if not supported:
+                        marker = dim("✗")
+                        val_str = dim("not supported by this backend")
+                    else:
+                        marker = green("✓")
+                        # Get current value
+                        attr = spec.get("agent_attr")
+                        if attr:
+                            val = getattr(agent, attr, None)
+                        else:
+                            val = agent._runtime_kwargs.get(name)
+                        if val is None:
+                            val_str = dim("(model default)")
+                        else:
+                            val_str = yellow(str(val))
+                    aliases = spec.get("aliases", [])
+                    alias_str = dim(f" (aliases: {', '.join(aliases)})") if aliases else ""
+                    print(f"  {marker} {magenta(name):<20} {val_str}{alias_str}")
+                    print(f"    {dim(spec['description'])}")
+                    if 'range' in spec:
+                        print(f"    {dim('Range:')} {dim(spec['range'])}")
+                    if 'note' in spec:
+                        print(f"    {yellow('Note:')} {dim(spec['note'])}")
+                print()
+                print(dim("  Usage:"))
+                print(dim("    /param <name>              — show current value"))
+                print(dim("    /param <name> <value>      — set value"))
+                print(dim("    /param reset <name>        — reset to model default"))
+                continue
+
+            param_name = parts[1].lower().strip()
+
+            # Handle reset
+            if param_name == "reset" and len(parts) >= 3:
+                target = parts[2].lower().strip()
+                # Find by name or alias
+                found = None
+                for n, spec in PARAM_MATRIX.items():
+                    if n == target or target in spec.get("aliases", []):
+                        found = (n, spec)
+                        break
+                if not found:
+                    print(yellow(f"Unknown parameter: {target}"))
+                    continue
+                name, spec = found
+                attr = spec.get("agent_attr")
+                if attr:
+                    if attr == "max_steps":
+                        setattr(agent, attr, 25)  # reset to default
+                    elif attr == "num_ctx":
+                        setattr(agent, attr, 8192)
+                    else:
+                        setattr(agent, attr, None)
+                else:
+                    agent._runtime_kwargs.pop(name, None)
+                print(green(f"Reset {name} to model default."))
+                continue
+
+            # Find parameter by name or alias
+            found = None
+            for n, spec in PARAM_MATRIX.items():
+                if n == param_name or param_name in spec.get("aliases", []):
+                    found = (n, spec)
+                    break
+
+            if not found:
+                print(yellow(f"Unknown parameter: {param_name}"))
+                print(dim("  Available params: " + ", ".join(sorted(PARAM_MATRIX.keys()))))
+                continue
+
+            name, spec = found
+
+            # Check backend support
+            supported = "all" in spec["backends"] or backend_name in spec["backends"]
+            if not supported:
+                print(yellow(f"Parameter '{name}' is not supported by backend '{backend_name}'."))
+                print(dim(f"  Supported backends: {', '.join(sorted(spec['backends']))}"))
+                continue
+
+            # Check for read-only
+            if spec.get("note") and "Read-only" in spec["note"]:
+                print(yellow(f"Parameter '{name}' is read-only."))
+                print(dim(f"  {spec['note']}"))
+                continue
+
+            # If no value provided, show current value
+            if len(parts) < 3:
+                attr = spec.get("agent_attr")
+                if attr:
+                    val = getattr(agent, attr, None)
+                else:
+                    val = agent._runtime_kwargs.get(name)
+                if val is None:
+                    print(f"{magenta(name)}: {dim('(model default)')}")
+                else:
+                    print(f"{magenta(name)}: {yellow(str(val))}")
+                print(dim(f"  {spec['description']}"))
+                print(dim(f"  Range: {spec.get('range', 'any')}"))
+                continue
+
+            # Parse and set value
+            raw_value = parts[2].strip()
+            ptype = spec["type"]
+
+            try:
+                if ptype == "float":
+                    value = float(raw_value)
+                    # Range check
+                    if "range" in spec and "-" in spec["range"]:
+                        parts_range = spec["range"].split("-")
+                        if len(parts_range) == 2:
+                            try:
+                                lo = float(parts_range[0])
+                                hi = float(parts_range[1].split()[0])  # strip "N" etc.
+                                if value < lo or value > hi:
+                                    print(yellow(f"Value {value} out of range [{lo}, {hi}]"))
+                                    continue
+                            except ValueError:
+                                pass  # range like "1-N" — skip validation
+                elif ptype == "int":
+                    value = int(raw_value)
+                elif ptype == "bool":
+                    if raw_value.lower() in ("true", "1", "yes", "on"):
+                        value = True
+                    elif raw_value.lower() in ("false", "0", "no", "off"):
+                        value = False
+                    else:
+                        print(yellow(f"Invalid bool value: {raw_value!r}. Use true/false."))
+                        continue
+                elif ptype == "str":
+                    value = raw_value.lower()
+                    # Validate against range if it's a pipe-list
+                    if "range" in spec and "|" in spec["range"]:
+                        valid_values = spec["range"].split("|")
+                        if value not in valid_values:
+                            print(yellow(f"Invalid value: {value!r}. Must be one of: {', '.join(valid_values)}"))
+                            continue
+                else:
+                    print(yellow(f"Unknown parameter type: {ptype}"))
+                    continue
+            except ValueError as e:
+                print(yellow(f"Invalid value for {name} ({ptype}): {raw_value!r} — {e}"))
+                continue
+
+            # Handle special setters (e.g. thinking_level updates multiple attrs)
+            if spec.get("special_setter") == "_set_thinking_level":
+                from agentkthx.core.types import parse_thinking_arg
+                think_val, effort_val = parse_thinking_arg(value)
+                agent._thinking_level = value
+                agent._think = think_val
+                agent._reasoning_effort = effort_val
+                print(green(f"Set {name} = {value!r}  →  think={think_val}, reasoning_effort={effort_val}"))
+                continue
+
+            # Standard setter
+            attr = spec.get("agent_attr")
+            if attr:
+                setattr(agent, attr, value)
+            else:
+                agent._runtime_kwargs[name] = value
+
+            print(green(f"Set {name} = {value!r}"))
             continue
 
         if user_input == "/model":
