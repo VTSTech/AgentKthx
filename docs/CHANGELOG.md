@@ -5,30 +5,49 @@ All notable changes to AgentKthx will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-
 ## [R06.4] - 2026-09-20 12:53:41 PM
 
+### 🚀 **New Features**
+
+- **`--stream` and `--no-stream` flags on all commands**: Previously `--stream` was only on `run`. Now `chat`, `run`, and `agent` all accept both flags. Three-state logic: `None` (default — use backend default: stream for cloud, non-stream for local), `True` (force stream), `False` (force no-stream).
+
+- **`/param stream true|false`**: Settable at runtime in chat mode. Updates `args.stream` — takes effect on the next message.
+
+- **OpenRouter API Technical Reference**: New `docs/OPENROUTER_API_TECHNICAL_REFERENCE.md` — comprehensive 680-line guide covering auth, endpoints, full request/response schema, sampling parameters table, model catalog, function calling, streaming, provider routing, transforms/plugins, error codes, rate limits, free tier behavior, implementation notes for AgentKthx, and troubleshooting matrix. Mirrors the format of the existing `ZAI_API_TECHNICAL_REFERENCE.md`.
+
 ### 🐛 **Bug Fixes**
+- **`--stream` flag was only on `run` command, not `chat`**: `agentkthx chat ... --stream` failed with `unrecognized arguments: --stream`. The `--stream` argument was added only to `run_parser` (line 207 in cli.py), not to the shared `add_agent_args()`. Fixed by moving `--stream` into `add_agent_args()` (shared_args.py) so both `chat` and `run` (and any future command using `add_agent_args`) accept it. Also added `--no-stream` counterpart.
+
 - **JEV mode infinite recursion on OpenRouter**: `OpenRouterBackend._jev_call_completions()` called `self.generate()`, which calls `_maybe_jev_dispatch()` at the top, which calls `generate_decision()`, which calls `_jev_call_completions()` again — infinite recursion → `RecursionError: maximum recursion depth exceeded`. Fixed: temporarily flip `_api_mode` to `OPENAI` during the JEV call so `_maybe_jev_dispatch()` returns None (no JEV dispatch), then restore original mode in a `finally` block. ZAI was not affected (it calls `_generate_with_auth()` directly, not `self.generate()`).
+
+- **OpenRouter JEV empty response**: After fixing the recursion, OpenRouter JEV calls returned `finish_reason=stop` with empty content for free models like `poolside/laguna-xs-2.1:free`. Root cause: the `response_format={"type": "json_object"}` parameter was being forwarded to OpenRouter, but many free models silently return empty when JSON mode is forced (they don't support it and OpenRouter doesn't error — just returns stop with no content). Fixed: OpenRouter's `_jev_call_completions()` now strips `response_format` from kwargs before calling `self.generate()`. The JEV System-One prompt already instructs the model to output JSON-only, so `response_format` is redundant. Additionally, if the first attempt returns an empty response, a retry is attempted with a simplified prompt (just the last user message, no system prompt) as a belt-and-suspenders fallback.
 
 - **Calculator tool auto-loaded in JEV mode**: `run_parser` defaults `tools_default="calculator"`, so `agentkthx run "..." --api jev` would auto-load the calculator tool. In JEV mode this is pointless — decisions never call tools (`generate_decision()` always passes `tools=None`). Fixed: `_build_agent()` now suppresses tool loading entirely when `api_mode == "jev"`. Debug output announces the suppression if `--tools` was explicitly passed.
 
+### 🔧 **Changes**
+- **`_load_skills_prompt()` now returns a tuple**: Previously returned `str | None` (just the system prompt addition). Now returns `tuple[str | None, list[str]]` — the prompt AND the list of successfully-loaded skill names. Stashed on `agent._loaded_skills` so `/skills` and `/status` can display them.
+- **Default `--max-steps` increased from 10 → 25**: Better fit for agent workflows like codebase audits.
+- **Agent loop forwards `_runtime_kwargs` to backend**: When user sets `top_k`, `seed`, `n`, `presence_penalty`, or `frequency_penalty` via `/param`, the values are stashed in `agent._runtime_kwargs` and forwarded to the backend via `backend_kwargs` in both `run()` and `run_stream()` paths.
+- **README updated**: Bumped to R06.4, added `OPENROUTER_API_TECHNICAL_REFERENCE.md` to documentation table.
+
 ### ✅ **Verified**
 - 245/245 tests pass.
-- OpenRouter `_jev_call_completions` has recursion guard (temp api_mode flip).
-- ZAI `_jev_call_completions` does not recurse (calls `_generate_with_auth` directly).
-- JEV mode suppresses tools (agent.tools is empty registry).
+- ZAI JEV mode: works correctly — returns `{"decision": "spam", "probability": 0.95, ...}` envelope.
+- OpenRouter JEV mode: `response_format` stripped (not sent), empty-response retry logic present, recursion guard intact.
+- `--stream` now accepted by both `chat` and `run` commands.
+- `--no-stream` correctly forces non-streaming for cloud providers.
+- `/param stream true|false` updates `args.stream` at runtime; takes effect on next message.
+- JEV mode suppresses tools (empty tool registry).
+- All 5 FINAL_ANSWER StepResult constructions now include `reasoning_content`.
+
+### 🔧 **Migration from R06.3**
+```bash
+pip install --upgrade agentkthx  # gets you to 0.6.4
+```
 
 ## [R06.3] - 2026-09-20 12:10:12 PM
 
-### 🐛 **Bug Fixes**
-- **`--stream` flag was only on `run` command, not `chat`**: `agentkthx chat ... --stream` failed with `unrecognized arguments: --stream`. The `--stream` argument was added only to `run_parser` (line 207 in cli.py), not to the shared `add_agent_args()`. Fixed by moving `--stream` into `add_agent_args()` (shared_args.py) so both `chat` and `run` (and any future command using `add_agent_args`) accept it. Also added `--no-stream` counterpart to allow disabling streaming on cloud providers (which stream by default).
-
-- **`/param stream` was incorrectly marked read-only**: The matrix entry for `stream` had `"note": "Read-only in /param — controlled by --stream flag at startup"` which was both misleading and limiting. Fixed: `/param stream true|false` now actually sets streaming at runtime via a special setter that updates `args.stream`. Takes effect on the next message (current message already started streaming or not).
-
 ### 🚀 **New Features**
-- **`--no-stream` flag**: Disables streaming for cloud providers (ZAI/OpenRouter) which stream by default. Useful when streaming causes issues (timeouts, partial responses, debug output interleaving).
-- **`/param stream true|false`**: Settable at runtime in chat mode. Takes effect on the next message.
 - **`/param` slash command in chat mode**: Show or set model generation parameters with per-backend support matrix. Parameters are filtered by what the current backend actually forwards to the API — e.g. `top_k` is settable on OpenRouter/Ollama but rejected on ZAI (ZAI's API doesn't accept it). Usage:
   ```
   /param                        — show all params, ✓/✗ for current backend
@@ -53,8 +72,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Max steps info in `/status`**: `/status` now also prints `Max steps: 25` so you can verify the agent loop budget at a glance.
 
 ### 🔧 **Changes**
-- **Stream default semantics clarified**: `args.stream` is now `None` by default (neither `--stream` nor `--no-stream` was passed). The chat/run loop interprets `None` as "use backend default" (true for cloud providers, false for local). `True` forces streaming, `False` forces non-streaming. Updated both `cmd_chat` and `cmd_run` to use this three-state logic.
-- **`--stream` removed from `run_parser`**: Now provided by `add_agent_args()` (shared_args.py). The `run_parser.add_argument("--stream", ...)` line was a duplicate that prevented `chat` from accepting the flag.
 - **Default `--max-steps` increased from 10 → 25**: The previous default of 10 was too low for non-trivial agent workflows. A codebase audit (which the user tried) needed ~9 steps just for file discovery + reading, leaving no room for the actual audit + final answer. 25 is a better default — enough for ~5-10 tool calls plus reasoning, without being so high that infinite loops burn tokens. Users can still override via `--max-steps N` or `AGENTNOVA_MAX_STEPS=N` env var. Updated in:
   - `agentkthx/agent.py` (`Agent.__init__` default)
   - `agentkthx/config.py` (`MAX_STEPS` env var default)

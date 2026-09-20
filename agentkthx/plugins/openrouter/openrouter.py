@@ -1025,8 +1025,15 @@ class OpenRouterBackend(OllamaBackend):
         """
         # Decisions never carry tools — pass tools=None explicitly so
         # the ReAct fallback path in self.generate() doesn't trigger.
-        if response_format is not None:
-            kwargs["response_format"] = response_format
+        # NOTE: We intentionally do NOT pass response_format to OpenRouter
+        # here. Many free models (e.g. poolside/laguna-xs-2.1:free) silently
+        # return empty content when response_format={"type":"json_object"}
+        # is forced — they don't support JSON mode and OpenRouter doesn't
+        # error, just returns finish_reason=stop with no content.
+        # The JEV System-One prompt already instructs the model to output
+        # JSON-only, so response_format is redundant. If the first attempt
+        # returns empty, we retry without it (belt-and-suspenders).
+        kwargs.pop("response_format", None)  # strip it — prompt handles JSON
 
         # OPENROUTER_FREE_ONLY is handled inside list_models() (the model
         # cache is pre-filtered to :free models). If the user passes a
@@ -1043,14 +1050,37 @@ class OpenRouterBackend(OllamaBackend):
         from agentkthx.core.types import ApiMode
         self._api_mode = ApiMode.OPENAI
         try:
-            return self.generate(
-                model=model,
-                messages=messages,
-                tools=None,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                **kwargs,
-            )
+            try:
+                return self.generate(
+                    model=model,
+                    messages=messages,
+                    tools=None,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    **kwargs,
+                )
+            except RuntimeError as e:
+                # If we get an empty response, it might be because the model
+                # doesn't support response_format (even though we stripped it
+                # above, some models still struggle). Retry with a simpler
+                # prompt — just the last user message as state, no system prompt.
+                err_lower = str(e).lower()
+                if "empty response" in err_lower or "no content" in err_lower:
+                    if os.environ.get("AGENTNOVA_DEBUG"):
+                        print(f"  [OpenRouter.JEV] Empty response — retrying with simplified prompt")
+                    # Simplify: strip the JEV system prompt, just send raw
+                    simplified_messages = [
+                        {"role": "user", "content": messages[-1]["content"] if messages else ""}
+                    ]
+                    return self.generate(
+                        model=model,
+                        messages=simplified_messages,
+                        tools=None,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        **kwargs,
+                    )
+                raise
         finally:
             # Restore original api_mode (JEV) so subsequent generate() calls
             # from the agent loop still dispatch to JEV mode.
