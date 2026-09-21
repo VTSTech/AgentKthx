@@ -5,6 +5,30 @@ All notable changes to AgentKthx will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [R06.51] - 2026-09-21 9:48:55 AM
+
+### 🔔 **Update Check — users now find out when a new release ships (stable + development)**
+
+Installed copies no longer go silent after install: the CLI now notices when a newer version is available, on **both release tracks**. This closes the awareness gap — pip doesn't notify anyone, GitHub only reaches repo watchers, and `agentkthx update` only helps people who already know to run it.
+
+**Release track taxonomy** (VTSTech does not cut GitHub Releases, so the GitHub *commits* API — not the releases API — is the source of truth for the dev track):
+
+- **Stable release** — a newer package version exists on PyPI (`pypi.org/pypi/agentkthx/json`).
+- **Development release** — new commits exist on GitHub main (`api.github.com/repos/VTSTech/AgentKthx/commits/HEAD`) that are not the commit the installed checkout was built from. Only reported for **git checkouts**: a pip install carries no commit hash, so there is no baseline to compare against (the commits API is never hit for pip installs).
+
+- **`agentkthx/update_check.py` (new)** — stdlib-only dual-source check: compares installed vs latest on each track, at most one request **per source** per 24h (per-source entries cached in `~/.agentkthx/update_check.json`), failed sources negatively cached for 6h so offline users never stall, each source fails independently and silently, PEP-440-lite version compare that strips git-hash suffixes (`0.6.51-f754294` → `0.6.51`), and automatic migration of pre-0.6.51 single-source cache files.
+- **Notice placement** — one dim block under the chat banner (printed before the persistent status footer takes over the terminal) and a pip-style post-run notice after non-interactive commands; both tracks can appear in one block:
+  ```
+  ⚡ agentkthx updates available:
+     Stable: 0.6.50 → 0.6.51 — Run: pip install --upgrade agentkthx
+     Development: new commits on GitHub main (deadbee) — Run: agentkthx update
+  ```
+- **`agentkthx version`** — gains `Latest on PyPI:` (green "stable update available" when newer, "(up to date)" otherwise) and `GitHub main:` (short SHA + "development release available" when the checkout is behind, "(up to date)" otherwise).
+- **Machine-readable safety** — `--json` invocations (`plugins --json`, etc.) never receive the notice on any stream.
+- **Upgrade hint adapts to install source** — git checkouts are pointed at `agentkthx update` for both tracks (it fast-forwards to main, which includes the stable release); pip installs at `pip install --upgrade agentkthx`.
+- **Opt-out** — `AGENTKTHX_NO_UPDATE_CHECK=1` (also `true`/`yes`/`on`) disables every check, mirroring pip/npm/AWS CLI policy.
+- **Tests** — 54 tests in `tests/test_update_check.py` (version compare, git-hash extraction, per-source cache hit/stale/expiry/negative-cache, pip-vs-checkout source routing, silent failures per track, notice formatting for stable/dev/both, endpoint URLs, timeout forwarding, cache-dir creation).
+
 ## [R06.5] - 2026-09-21 8:19:42 AM
 
 ### 🔌 **Plugin Specification v0.2 — Implemented**

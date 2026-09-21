@@ -96,6 +96,41 @@ def print_banner() -> None:
 
 
 # ============================================================================
+# Update Check (pip-style "new release available" notice)
+# ============================================================================
+
+# Result of the daily-cached PyPI update check for this process, stashed by
+# main() so the notice can be printed under the chat banner (cmd_chat) and
+# after non-interactive commands (post-run) without hitting the network twice.
+_LAST_UPDATE_CHECK = None
+
+
+def _run_update_check(timeout: float = 1.0) -> None:
+    """Run the daily-cached update check once; stash the result. Never raises."""
+    global _LAST_UPDATE_CHECK
+    try:
+        from .update_check import check_for_update
+        _LAST_UPDATE_CHECK = check_for_update(timeout=timeout)
+    except Exception:
+        _LAST_UPDATE_CHECK = None
+
+
+def _print_update_notice() -> None:
+    """Print the pip-style 'new release' notice if a newer version is on PyPI."""
+    result = _LAST_UPDATE_CHECK
+    if not result:
+        return
+    try:
+        from .update_check import format_notice
+        text = format_notice(result, current=__version__)
+    except Exception:
+        return
+    if text:
+        for line in text.splitlines():
+            print(dim(line))
+
+
+# ============================================================================
 # Model Matching
 # ============================================================================
 
@@ -887,6 +922,10 @@ def cmd_chat(args: argparse.Namespace) -> int:
 
     _print_session_header(agent, args, config, "Chat Mode")
     print("Type '/quit' to exit, '/help' for commands\n")
+
+    # Update notice under the banner — printed BEFORE the persistent footer
+    # takes over the bottom of the terminal (see _update_footer scroll regions).
+    _print_update_notice()
 
     _session_tokens_in = 0
     _session_tokens_out = 0
@@ -2571,6 +2610,29 @@ def cmd_version(args: argparse.Namespace) -> int:
     print(f"   {dim('Status:')}  {yellow(__status__)}")
     print(f"   {dim('Author:')}  {cyan(__author__)}")
     print(f"   {dim('Repo:')}    {dim('https://github.com/VTSTech/AgentKthx')}")
+
+    # Latest releases (daily-cached checks — silent on failure / opt-out):
+    # stable track via PyPI, development track via GitHub main commits
+    # (the commit line only appears for git checkouts, which have a baseline).
+    try:
+        from .update_check import base_version, check_for_update, git_hash, is_newer
+        _latest_info = check_for_update(timeout=1.0)
+    except Exception:
+        _latest_info = None
+    if _latest_info:
+        _latest = str(_latest_info.get("pypi_latest") or "").strip()
+        if _latest:
+            if is_newer(_latest, base_version(__version__)):
+                print(f"   {dim('Latest on PyPI:')} {bright_green(_latest)} {yellow('(stable update available)')}")
+            else:
+                print(f"   {dim('Latest on PyPI:')} {_latest} {dim('(up to date)')}")
+        _gh = str(_latest_info.get("github_sha") or "").strip().lower()
+        _installed = git_hash(__version__)
+        if _gh and _installed:
+            if not _gh.startswith(_installed):
+                print(f"   {dim('GitHub main:')} {bright_green(_gh[:7])} {yellow('(development release available)')}")
+            else:
+                print(f"   {dim('GitHub main:')} {_gh[:7]} {dim('(up to date)')}")
     print()
 
     return 0
@@ -3534,6 +3596,12 @@ def main(argv: Optional[list[str]] = None) -> int:
         parser.print_help()
         return 0
 
+    # Update check — daily-cached PyPI query, silent on failure / opt-out
+    # (AGENTKTHX_NO_UPDATE_CHECK=1). `version` does its own inline check;
+    # `update` obviously doesn't need one.
+    if args.command not in ("version", "update"):
+        _run_update_check()
+
     commands = {
         "run": cmd_run,
         "chat": cmd_chat,
@@ -3558,7 +3626,13 @@ def main(argv: Optional[list[str]] = None) -> int:
         handler = _plugin_cli_handlers.get(args.command)
 
     if handler:
-        return handler(args)
+        rc = handler(args)
+        # Post-run notice (pip-style) for non-interactive commands. Chat already
+        # printed it under the banner; version/update never stashed a result.
+        # --json invocations stay machine-readable — no notice, either stream.
+        if args.command != "chat" and not getattr(args, "json", False):
+            _print_update_notice()
+        return rc
 
     parser.print_help()
     return 0
