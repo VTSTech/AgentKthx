@@ -1,5 +1,5 @@
 """
-⚛️ AgentKthx R06.0
+⚛️ AgentKthx R06.41
 A minimal, hackable agentic framework engineered for local inference.
 
 Features:

@@ -1,6 +1,6 @@
 """
 ⚛️ AgentKthx — CLI
-Command-line interface for AgentKthx R06.0.
+Command-line interface for AgentKthx R06.41.
 
 Status: Alpha
 
