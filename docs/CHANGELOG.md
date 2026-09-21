@@ -5,6 +5,68 @@ All notable changes to AgentKthx will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [R06.5] - 2026-09-21 8:19:42 AM
+
+### 🔌 **Plugin Specification v0.2 — Implemented**
+
+The v0.2 plugin spec is now fully implemented in code: **tools + hooks are normative**, `entrypoint` is honored, external plugin roots are discovered, and manifests migrate to the `extensions` form. Spec and schema ship side-by-side with the untouched v0.1 spec. 50 new conformance tests; full suite **479 passed, 6 skipped, 0 failed**.
+
+#### New — spec document + JSON Schema
+
+- **`docs/PLUGIN_SPEC_v0.2.md`** — 24-section normative spec: RFC 2119 conformance language, plugin root discovery order, strict name constraints, manifest dual-form rules, `extensions` namespace handling, 4 plugin types, honored `entrypoint` contract, `provides` table, hooks spec (with context keys), tools API, config + secret protection, env/placeholder expansion, warn-only compatibility, dependency resolution, lifecycle diagram, failure boundaries table, CLI contract, packaging, v0.1 → v0.2 migration mapping + timeline, conformance checklist (Appendix A), file-by-file implementation checklist (Appendix B).
+- **`schemas/v0.2/plugin.schema.json`** — JSON Schema draft-07, dual-form (canonical `extensions["org.vts-tech.agentkthx"]` + LEGACY top-level fields marked deprecated), name pattern constraints, `provides.hooks` event enumeration, semver constraint patterns. Canonical `$schema` URL: `https://raw.githubusercontent.com/VTSTech/AgentKthx/main/schemas/v0.2/plugin.schema.json`.
+- `docs/PLUGIN_SPEC.md` (v0.1) left in place untouched — the two specs are side-by-side, with v0.2 as the migration target.
+
+#### Loader rewrite — `agentkthx/plugins/_loader.py`
+
+- **Dual-form manifests**: `extensions["org.vts-tech.agentkthx"]` is the canonical field source; legacy top-level fields still parse but emit deprecation warnings (hard removal planned v0.3). The `agentnova` compatibility key is aliased to `agentkthx` (warn-only).
+- **`$schema` recognized** on parse; unknown manifest fields produce warnings instead of being silently ignored.
+- **Strict name validation**: `^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$`, 1–64 chars, no `--`/`..` runs, and **name must equal the directory name** — v0.1 silently accepted mismatches.
+- **`entrypoint` honored**: v0.1 always imported the package `__init__` and ignored the field. v0.2 imports the declared entrypoint (package, `pkg.module`, or file path via `importlib` for external roots), then looks for `register(manager)` / `unregister(manager)`.
+- **Multi-root discovery**: built-in plugins → `~/.agentkthx/plugins/` → `$AGENTKTHX_PLUGIN_PATH` (os.pathsep-separated), with collision priority (built-in wins) and **result caching** — v0.1 re-scanned the disk on every backend lookup.
+- **Dependency resolution**: topological (Kahn's algorithm); cycles are rejected and named.
+- **`PLUGIN_ROOT` / `PLUGIN_DATA`**: per-plugin data dir created under XDG state home (`LOCALAPPDATA` on Windows) *before* `register()` runs; single-pass `${PLUGIN_ROOT}` / `${PLUGIN_DATA}` expansion across config values.
+- **Secret-shaped config guard**: manifest config values that look like API keys/secrets produce a warning (v0.1 shipped a real-looking `ACP_PASS` in the ACP manifest — now removed).
+- **Complete `unload()`**: v0.1 leaked config defaults after unload. v0.2 purges config, tools, hooks, backends, and CLI commands — including failure paths, so a crashed `register()` leaves no residue.
+- **Backend type validation**: `provides.backends` entries must be `BaseBackend` subclasses; anything else is rejected with a clear error.
+
+#### New — tools + hooks API on `PluginManager`
+
+- **Tools**: `register_tool()` / `unregister_tool()` / `list_tool_names()` / `get_tool()` plus `apply_to_registry()`, which bridges plugin tools into the core `ToolRegistry`. Plugin tools are merged into the Agent's registry at startup (best-effort, non-fatal).
+- **Hooks**: five lifecycle events — `on_init`, `on_run_start`, `on_run_end`, `on_error`, `on_shutdown` — registered declaratively via `provides.hooks` or imperatively via `register_hook()`; lazy subscriber resolution; `emit()` isolates errors per subscriber (one bad hook cannot kill a run); `on_init` fires once after all plugins load; `on_shutdown` fires in reverse load order via an atexit-once guard.
+- **`agent.py`**: `run()` now emits `on_run_start` / `on_run_end` / `on_error` with the spec's context keys.
+
+#### CLI — plugin management
+
+- `agentkthx plugins` gains `--load NAME`, `--unload NAME`, `--reload NAME`, `--json`, and `--verbose` (shows plugin root, legacy fields in use, and failed state). `--json` output is clean — loader chatter is routed to stderr.
+
+#### Bundled manifests migrated to v0.2
+
+- All 6 bundled plugin manifests (bitnet, zai, openrouter, turboquant, acp, test-plugin) now carry `$schema` + `extensions` blocks; the `agentnova` compat key is renamed to `agentkthx`; the hardcoded `ACP_PASS` secret is removed from the ACP manifest (set via env instead).
+
+#### Packaging
+
+- `pyproject.toml` package-data now ships `schemas/v0.2/plugin.schema.json` with installed builds.
+
+### ✅ **Verified**
+
+- `tests/test_plugin_spec.py`: 50 new conformance tests — names, dual-form parsing, `$schema`, entrypoint, compatibility aliases, multi-root discovery, env parsing, placeholder expansion, secret detection, hook error isolation, tool registry, unload completeness, dependency ordering, cycle rejection, on_init-once, `BaseBackend` rejection, bundled-manifest smoke — all pass.
+- Full test suite: **479 passed, 6 skipped, 0 failed** (no regressions).
+- CLI verified: plugins listing with state glyphs, `--json` pure output, `--load`/`--unload`/`--reload`/`--verbose` actions.
+- External plugin via `AGENTKTHX_PLUGIN_PATH` verified end-to-end: discovery, by-path import, declarative hook firing on emit.
+- Chat on OpenRouter re-verified after the loader changes.
+
+### 🔧 **Migration from R06.41 (plugin authors)**
+
+- v0.1 manifests keep working: legacy top-level fields parse with deprecation warnings. Move manifest fields into `extensions["org.vts-tech.agentkthx"]` before v0.3 (hard cutoff).
+- If you used the `"agentnova": ">=0.4.0"` compatibility key, rename it to `"agentkthx"` (the old key is aliased with a warning).
+- Don't ship secrets in manifests — reference environment variables via `env` entries instead.
+- PyPI note: R06.5 ships as **0.6.50** — a literal `0.6.5` would be a downgrade on PyPI (0.6.41 is already published), so the patch segment jumps to 50.
+
+```bash
+pip install --upgrade agentkthx  # gets you to 0.6.50
+```
+
 ## [R06.41] - 2026-09-20 8:52:23 PM
 
 ### 🛠️ **Audit Fixes (ROB-01, MAINT-02, ROB-03, SEC-01) + Cleanup**

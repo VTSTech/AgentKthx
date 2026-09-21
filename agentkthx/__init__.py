@@ -1,5 +1,5 @@
 """
-⚛️ AgentKthx R06.41
+⚛️ AgentKthx R06.5
 A minimal, hackable agentic framework engineered for local inference.
 
 Features:
@@ -10,6 +10,7 @@ Features:
   • Built-in security — path validation, command blocklist, SSRF protection
   • Soul Spec v0.5 — persona packages (disabled by default, use --soul)
   • Multi-cloud support — 500+ models via OpenRouter plugin
+  • Plugin Spec v0.2 — lifecycle hooks, plugin tools, external plugin roots
 
 Status: Alpha
 
@@ -29,7 +30,7 @@ Example Usage:
     agent = Agent(model="qwen2.5:0.5b", soul="/path/to/soul/package")
 """
 
-__version__ = "0.6.41"
+__version__ = "0.6.50"
 __author__ = "VTSTech"
 __status__ = "Alpha"
 

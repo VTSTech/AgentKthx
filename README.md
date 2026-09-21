@@ -1,4 +1,4 @@
-# ⚛️ AgentKthx R06.41
+# ⚛️ AgentKthx R06.5
 
 **Status: Alpha**
 
@@ -34,6 +34,7 @@ Inspired by the architecture of OpenClaw, rebuilt from scratch for local-first o
 | [CHANGELOG.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/CHANGELOG.md) | Version history and release notes (includes LocalClaw history) |
 | [TESTS.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/TESTS.md) | Benchmark results, model recommendations, and testing guide |
 | [PLUGIN_SPEC.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/PLUGIN_SPEC.md) | Plugin system specification (manifest format, API, lifecycle) |
+| [PLUGIN_SPEC_v0.2.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/PLUGIN_SPEC_v0.2.md) | Plugin spec v0.2 — lifecycle hooks, plugin tools API, external plugin roots, dual-form manifests, migration guide from v0.1 |
 | [JEV_API_MODE.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/JEV_API_MODE.md) | JEV API mode — System-One decisions via any free LLM (Jev-compatible shape) |
 | [ZAI_API_TECHNICAL_REFERENCE.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/ZAI_API_TECHNICAL_REFERENCE.md) | ZAI API technical reference (auth, endpoints, parameters, error codes) |
 | [OPENROUTER_API_TECHNICAL_REFERENCE.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/OPENROUTER_API_TECHNICAL_REFERENCE.md) | OpenRouter API technical reference (sampling params, model catalog, provider routing, rate limits) |
@@ -43,6 +44,7 @@ Inspired by the architecture of OpenClaw, rebuilt from scratch for local-first o
 
 - **Zero dependencies** — Uses Python stdlib only (urllib for HTTP)
 - **Plugin system** — Manifest-based plugin discovery, lazy loading, and dependency resolution (R05.0)
+- **Plugin Spec v0.2 (R06.5)** — Lifecycle hooks (`on_init`/`on_run_start`/`on_run_end`/`on_error`/`on_shutdown`), plugin-provided tools, external plugin roots (`~/.agentkthx/plugins/`, `$AGENTKTHX_PLUGIN_PATH`), dual-form manifests (`extensions` block) with deprecation warnings for legacy fields, `plugins --load/--unload/--reload/--json/--verbose` management
 - **Native + plugin backends** — Ollama built-in; OpenRouter, BitNet, ZAI, ACP, TurboQuant as plugins
 - **Multi-cloud support** — Access to 500+ models from OpenRouter, OpenAI, Anthropic, Google, Cohere
 - **Dual API support** — OpenResponses (`--api openre`) and OpenAI Chat-Completions (`--api openai`)
