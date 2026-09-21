@@ -119,6 +119,11 @@ class Memory:
 
     def get_messages(self) -> list[dict]:
         """Get all messages as dictionaries."""
+        # R06.52: repair tool-call pairing before handing history to the
+        # backend. Orphan tool results and dangling tool calls both produce
+        # illegal ChatCompletions sequences (HTTP 400 on OpenRouter,
+        # code 1214 on ZAI). Sanitizing is idempotent.
+        self.sanitize_history()
         result = []
 
         # Add system prompt first if present
@@ -131,6 +136,77 @@ class Memory:
                 result.append(msg.to_dict())
 
         return result
+
+    def sanitize_history(self) -> None:
+        """
+        Repair tool-call pairing in the history (R06.52, idempotent).
+
+        1. Drops orphan ``tool`` results whose tool_call_id was never
+           announced by a preceding assistant message (or whose announcing
+           assistant message was pruned away).
+        2. Inserts a placeholder tool result for dangling assistant
+           tool_calls that never received a result (the run was interrupted
+           before execution), so the sequence stays API-valid.
+        """
+        # ---- pass 1: drop orphan tool results ----
+        available: set[str] = set()
+        cleaned: list[Message] = []
+        for m in self._messages:
+            if m.role == "assistant" and m.tool_calls:
+                cleaned.append(m)
+                for tc in m.tool_calls:
+                    if isinstance(tc, dict):
+                        cid = tc.get("id", "")
+                        if cid:
+                            available.add(cid)
+            elif m.role == "tool":
+                if m.tool_call_id and m.tool_call_id in available:
+                    cleaned.append(m)
+                # else: orphan result — drop silently
+            else:
+                cleaned.append(m)
+
+        # ---- pass 2: fill dangling calls with placeholder results ----
+        answered: set[str] = {
+            m.tool_call_id for m in cleaned
+            if m.role == "tool" and m.tool_call_id
+        }
+        final: list[Message] = []
+        i = 0
+        n = len(cleaned)
+        while i < n:
+            m = cleaned[i]
+            final.append(m)
+            i += 1
+            if not (m.role == "assistant" and m.tool_calls):
+                continue
+            # Consume the contiguous run of tool results that follows this
+            # assistant message, THEN append placeholders — real results
+            # stay adjacent to their call, placeholders come after.
+            j = i
+            while j < n and cleaned[j].role == "tool":
+                final.append(cleaned[j])
+                j += 1
+            for tc in m.tool_calls:
+                if not isinstance(tc, dict):
+                    continue
+                cid = tc.get("id", "")
+                if cid and cid not in answered:
+                    final.append(Message(
+                        role="tool",
+                        content=(
+                            "Error: no result was recorded for this tool "
+                            "call (the run was interrupted before it "
+                            "completed). Continue, but do not retry it "
+                            "blindly."
+                        ),
+                        tool_call_id=cid,
+                        name=tc.get("name"),
+                    ))
+                    answered.add(cid)
+            i = j
+
+        self._messages = final
 
     def get_recent(self, n: int = 5) -> list[dict]:
         """Get the n most recent messages."""
@@ -146,33 +222,41 @@ class Memory:
             self._system_prompt = None
 
     def _prune_if_needed(self) -> None:
-        """Prune messages if limits exceeded."""
+        """
+        Prune messages if limits exceeded (R06.52, pairing-safe).
+
+        Instead of collapsing history down to ``keep_recent`` messages (which
+        destroyed context and orphaned tool results mid-pair), the window
+        *slides* down to the summarization threshold:
+
+            keep_count = max(1, int(max_messages * summarization_threshold))
+
+        e.g. 50 messages @ 0.8 → slide to 40. This reclaims headroom so the
+        next few adds don't re-trigger pruning, and keeps recent tool-call
+        pairs intact. Tool results whose announcing assistant message fell
+        out of the window are dropped from the head (they would otherwise
+        be orphaned and make the API sequence illegal).
+        """
         if len(self._messages) <= self.config.max_messages:
             return
 
-        # Calculate how many to remove
-        threshold = int(self.config.max_messages * self.config.summarization_threshold)
-        excess = len(self._messages) - threshold
+        keep_count = max(1, int(
+            self.config.max_messages * self.config.summarization_threshold
+        ))
 
-        if excess <= 0:
-            return
+        systems = [m for m in self._messages if m.role == "system"]
+        non_system = [m for m in self._messages if m.role != "system"]
 
-        # Keep system messages and recent messages
-        recent_to_keep = self.config.keep_recent
-        messages_to_remove = len(self._messages) - recent_to_keep - 1  # -1 for system
+        excess = len(non_system) - keep_count
+        if excess > 0:
+            non_system = non_system[excess:]
 
-        if messages_to_remove > 0:
-            # Remove oldest non-system messages
-            new_messages = []
-            skipped = 0
-            for msg in self._messages:
-                if msg.role == "system":
-                    new_messages.append(msg)
-                elif skipped >= messages_to_remove:
-                    new_messages.append(msg)
-                else:
-                    skipped += 1
-            self._messages = new_messages
+        # Pairing-safe head trim: a kept window must not START with a tool
+        # result (its call is gone) — drop leading tool results.
+        while non_system and non_system[0].role == "tool":
+            non_system.pop(0)
+
+        self._messages = systems + non_system
 
     def __len__(self) -> int:
         return len(self._messages)

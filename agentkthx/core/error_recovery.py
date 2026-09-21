@@ -27,8 +27,20 @@ from typing import Any, Optional
 # Maximum consecutive failures per tool before suggesting alternatives
 DEFAULT_MAX_CONSECUTIVE_FAILURES = 3
 
-# Maximum total failures before terminating the loop
+# Maximum total failures before terminating the loop (lifetime stat only)
 DEFAULT_MAX_TOTAL_FAILURES = 5
+
+# Maximum consecutive ALL-failure steps before terminating the loop.
+# Termination uses a *consecutive* semantic: any successful step resets the
+# counter, so an agent that alternates errors and successes (a healthy
+# exploration pattern) is never killed, while a stuck agent that fails
+# every single step is stopped after this many consecutive failures.
+DEFAULT_MAX_CONSECUTIVE_ALL_FAILURES = 5
+
+# Maximum times the exact same (tool, arguments) call may fail before the
+# harness blocks a re-issue of that identical call. Prevents small models
+# from hallucinating a bad argument and then resending it forever.
+DEFAULT_MAX_IDENTICAL_FAILURES = 2
 
 # Maximum retries per individual tool call before giving up
 DEFAULT_MAX_TOOL_RETRIES = 2
@@ -415,6 +427,18 @@ class ErrorRecoveryTracker:
     # Track total successes (for resetting consecutive failures)
     last_success_tool: str | None = None
     
+    # R06.52: consecutive steps in which EVERY tool call failed (any tool).
+    # Used for termination so a single bad step never kills a healthy run.
+    consecutive_all: int = 0
+    
+    # R06.52: recent failures keyed by (tool, args) signature -> count,
+    # so the harness can block the model from re-issuing the exact same
+    # failing call indefinitely (hallucinated-argument death spiral).
+    recent_failures: dict[tuple, int] = field(default_factory=dict)
+    
+    # R06.52: how many times the identical call may fail before blocking
+    max_identical_failures: int = DEFAULT_MAX_IDENTICAL_FAILURES
+    
     def record_failure(
         self, 
         tool_name: str, 
@@ -435,6 +459,11 @@ class ErrorRecoveryTracker:
         self.consecutive_failures[tool_name] = self.consecutive_failures.get(tool_name, 0) + 1
         self.total_failures += 1
         
+        # R06.52: track consecutive all-failure steps + identical-call counts
+        self.consecutive_all += 1
+        sig = self._signature(tool_name, arguments or {})
+        self.recent_failures[sig] = self.recent_failures.get(sig, 0) + 1
+        
         # Record in history
         self.failure_history.append(ToolFailureRecord(
             tool_name=tool_name,
@@ -442,6 +471,56 @@ class ErrorRecoveryTracker:
             step=step,
             arguments=arguments or {}
         ))
+    
+    @staticmethod
+    def _signature(tool_name: str, arguments: dict[str, Any]) -> tuple:
+        """Build a hashable signature of a tool call (order-independent)."""
+        try:
+            frozen = json.dumps(arguments, sort_keys=True, default=str)
+        except Exception:
+            frozen = str(sorted((str(k), str(v)) for k, v in arguments.items()))
+        return (tool_name, frozen)
+    
+    def get_repeat_failure(self, tool_name: str, arguments: dict[str, Any] | None = None) -> int:
+        """
+        Get how many times this exact call (tool + arguments) has failed.
+        
+        Args:
+            tool_name: Name of the tool
+            arguments: Arguments about to be passed (optional)
+        """
+        return self.recent_failures.get(self._signature(tool_name, arguments or {}), 0)
+    
+    def should_block_repeat(self, tool_name: str, arguments: dict[str, Any] | None = None) -> bool:
+        """
+        Check whether this exact call has already failed max_identical_failures
+        times and should be blocked before execution (it will fail again).
+        
+        Args:
+            tool_name: Name of the tool
+            arguments: Arguments about to be passed (optional)
+        """
+        return self.get_repeat_failure(tool_name, arguments) >= self.max_identical_failures
+    
+    def format_repeat_block(self, tool_name: str, arguments: dict[str, Any] | None = None) -> str:
+        """
+        Build the observation message used when an identical failing call is
+        blocked before execution. Instructs the model to change its approach.
+        """
+        count = self.get_repeat_failure(tool_name, arguments)
+        args_str = ""
+        try:
+            args_str = json.dumps(arguments or {}, ensure_ascii=False)
+        except Exception:
+            args_str = str(arguments)
+        if len(args_str) > 200:
+            args_str = args_str[:200] + "..."
+        return (
+            f"Error: Repeated identical tool call blocked. The call "
+            f"{tool_name}({args_str}) has already failed {count} times with the "
+            f"same result. Do NOT repeat the same call. Change your approach: "
+            f"fix the arguments, use a different tool, or continue without it."
+        )
     
     def record_success(self, tool_name: str) -> None:
         """
@@ -454,6 +533,9 @@ class ErrorRecoveryTracker:
         if tool_name in self.consecutive_failures:
             del self.consecutive_failures[tool_name]
         self.last_success_tool = tool_name
+        # R06.52: any success proves the run is not stuck — reset the
+        # consecutive all-failure counter.
+        self.consecutive_all = 0
     
     def get_consecutive_failures(self, tool_name: str) -> int:
         """Get the number of consecutive failures for a tool."""
@@ -464,8 +546,20 @@ class ErrorRecoveryTracker:
         return self.get_consecutive_failures(tool_name) >= self.max_consecutive_failures
     
     def should_terminate(self) -> bool:
-        """Check if we've exceeded failure thresholds."""
-        return self.total_failures >= self.max_total_failures
+        """
+        Check if the loop should terminate.
+        
+        R06.52 semantics: terminate only when EVERY tool call in each of the
+        last ``max_total_failures`` consecutive steps failed (i.e. the run is
+        genuinely stuck). A lifetime total would kill long healthy runs that
+        legitimately accumulate scattered errors.
+        """
+        return self.consecutive_all >= self.max_total_failures
+    
+    @property
+    def consecutive_all_failures(self) -> int:
+        """Number of consecutive steps in which every tool call failed."""
+        return self.consecutive_all
     
     def get_alternative_tools(self, tool_name: str) -> list[str]:
         """Get suggested alternative tools for a failing tool."""
@@ -563,6 +657,8 @@ class ErrorRecoveryTracker:
         self.failure_history.clear()
         self.total_failures = 0
         self.last_success_tool = None
+        self.consecutive_all = 0
+        self.recent_failures.clear()
 
 
 # ============================================================================
@@ -733,21 +829,44 @@ def build_retry_context(
     return "\n".join(parts)
 
 
+# R06.52: error detection is decided by the FIRST non-empty line of a tool
+# result only. The previous implementation scanned the whole text for
+# substrings like "error:" or "timeout", so healthy results that merely
+# *mention* errors ("grep found no matches for 'error'...", a log excerpt
+# containing "timeout") were misclassified as failures — which poisoned the
+# recovery tracker and terminated otherwise healthy audit runs.
+_ERROR_FIRST_LINE_RE = re.compile(
+    r"^\s*(?:"
+    r"error|"
+    r"security error|"
+    r"failed|"
+    r"file not found|"
+    r"permission denied|"
+    r"command timed out|"
+    r"traceback \(most recent call last\)|"
+    r"\[error\]|"
+    r"\[sandbox error\]|"
+    r"\[sandbox\].*(?:timeout|timed out|failed|exited)|"
+    r"\[exit code: (?P<code>[1-9][0-9]*)\]|"
+    r"tool '(?P<tool>[^']+)' (?:was blocked|not in allowed_tools|not found)"
+    r")",
+    re.IGNORECASE,
+)
+
+
 def is_error_result(result: str) -> bool:
-    """Check if a tool result indicates an error."""
-    if not result:
+    """
+    Check if a tool result indicates an error.
+    
+    R06.52: only the first non-empty line is inspected, via a strict pattern
+    list of error prefixes. An empty / whitespace-only result is treated as
+    an error (the tool produced nothing useful). Results that merely mention
+    error-ish words later in the text are NOT errors.
+    """
+    if not result or not result.strip():
         return True
-    result_lower = result.lower()
-    return (
-        result_lower.startswith("error") or
-        result_lower.startswith("security error") or
-        result_lower.startswith("failed") or
-        "error:" in result_lower or
-        "exception" in result_lower or
-        "timed out" in result_lower or
-        "timeout" in result_lower or        
-        result_lower.startswith("blocked")
-    )
+    first_line = result.strip().splitlines()[0]
+    return bool(_ERROR_FIRST_LINE_RE.match(first_line))
 
 
 def extract_error_type(error_message: str) -> str:
@@ -793,6 +912,8 @@ __all__ = [
     "TOOL_ALTERNATIVES",
     "DEFAULT_MAX_CONSECUTIVE_FAILURES",
     "DEFAULT_MAX_TOTAL_FAILURES",
+    "DEFAULT_MAX_CONSECUTIVE_ALL_FAILURES",
+    "DEFAULT_MAX_IDENTICAL_FAILURES",
     "DEFAULT_MAX_TOOL_RETRIES",
     "DEFAULT_RETRY_ON_ERROR",
 ]

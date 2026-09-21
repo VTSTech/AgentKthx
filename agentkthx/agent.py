@@ -37,6 +37,13 @@ from .core.error_recovery import (
     DEFAULT_MAX_TOOL_RETRIES,
     DEFAULT_RETRY_ON_ERROR,
 )
+from .core.api_resilience import (
+    is_transient_api_error,
+    backoff_delay,
+    max_api_retries_from_env,
+    describe_wait,
+    describe_terminal,
+)
 from .core.openresponses import (
     Response, ResponseStatus, ItemStatus,
     ToolChoice, ToolChoiceType,
@@ -126,6 +133,8 @@ class Agent:
         # Retry-with-error-feedback
         retry_on_error: bool = DEFAULT_RETRY_ON_ERROR,
         max_tool_retries: int = DEFAULT_MAX_TOOL_RETRIES,
+        # R06.54: transient API error tolerance
+        max_api_retries: int | None = None,
         # Truncation behavior
         truncation: str = "auto",
         # Thinking controls (R05.8)
@@ -157,6 +166,10 @@ class Agent:
             skills_prompt: Optional skill instructions to append to the system prompt
             retry_on_error: Whether to retry failed tool calls with error feedback (default: True)
             max_tool_retries: Maximum retries per tool call failure (default: 2)
+            max_api_retries: Consecutive transient API failures tolerated per step
+                before the run terminates (default: AGENTKTHX_MAX_API_RETRIES env or 5).
+                R06.54: rate limits / empty responses / connection blips retry with
+                exponential back-off instead of killing the run.
             **kwargs: Additional configuration (persistent, session_id, memory_db, confirm_dangerous, response_format)
         """
         # Ensure max_steps is never None (defensive fix)
@@ -166,6 +179,13 @@ class Agent:
         self.model = model
         self.max_steps = max_steps
         self.debug = debug
+
+        # R06.54: transient API error tolerance (rate limits, empty
+        # responses, connection blips). 0 disables retrying entirely.
+        self.max_api_retries = (
+            max_api_retries if max_api_retries is not None
+            else max_api_retries_from_env()
+        )
 
         # Generate a unique session ID for this agent instance.
         # Used for per-session todo isolation and logging.
@@ -675,6 +695,12 @@ Final Answer: <the answer>
         _last_successful_result = None
         _last_tool_name = None
         
+        # R06.52: true-termination flag. When the error tracker declares the
+        # run stuck, the inner tool loop breaks AND the outer step loop must
+        # stop too — the old code only broke the inner loop and kept calling
+        # the model with dangling tool_calls.
+        _terminated = False
+        
         # Reset error tracker for new run
         self._error_tracker.reset()
         
@@ -682,17 +708,50 @@ Final Answer: <the answer>
             if self.debug:
                 print(f"[Step {step_num + 1}]")
 
-            # Generate response from model
-            try:
-                gen_response = self._generate()
-            except Exception as e:
-                if self.debug:
-                    print(f"  ERROR: {e}")
-                steps.append(StepResult(
-                    type=StepResultType.ERROR,
-                    error=str(e),
-                ))
-                response.mark_failed({"message": str(e), "type": "model_error"})
+            # Generate response from model.
+            # R06.54: transient API errors (rate limits, empty responses,
+            # connection blips, provider 5xx) no longer kill the run — the
+            # same step is retried after an escalating back-off. Only a
+            # persistent failure (max_api_retries consecutive) or a permanent
+            # error (auth, bad request) terminates the run, and it does so
+            # with a clean history (nothing was announced for this step).
+            gen_response = None
+            _api_failure = 0
+            _api_wait_total = 0.0
+            while True:
+                try:
+                    gen_response = self._generate()
+                    break
+                except KeyboardInterrupt:
+                    raise
+                except Exception as e:
+                    _api_failure += 1
+                    _transient = is_transient_api_error(e)
+                    _exhausted = _transient and _api_failure > self.max_api_retries
+                    if not _transient or _exhausted:
+                        # R06.54: always tell the user WHY the run stopped —
+                        # the old code stayed silent here (non-debug), so chat
+                        # mode showed a bare "(empty response)".
+                        if _exhausted:
+                            print(describe_terminal(
+                                e, self.max_api_retries, _api_wait_total))
+                        elif not _transient:
+                            print(f"  [Resilience] Fatal API error — "
+                                  f"not retrying: {e}")
+                        if self.debug:
+                            print(f"  ERROR: {e}")
+                        steps.append(StepResult(
+                            type=StepResultType.ERROR,
+                            error=str(e),
+                        ))
+                        response.mark_failed({"message": str(e), "type": "model_error"})
+                        _terminated = True
+                        break
+                    _waited = backoff_delay(_api_failure)
+                    _api_wait_total += _waited
+                    print(describe_wait(_api_failure, self.max_api_retries, _waited, e))
+                    time.sleep(_waited)
+            if _terminated or gen_response is None:
                 break
 
             content = gen_response.get("content", "")
@@ -858,6 +917,44 @@ Final Answer: <the answer>
                             self.memory.add("user", f"Observation: Error: {error_msg}")
                         continue
 
+                    # R06.52: identical-repeat guard. If this exact call
+                    # (tool + arguments) already failed max_identical_failures
+                    # times, block it BEFORE execution and teach the model to
+                    # change approach. The result is recorded in memory so the
+                    # sequence stays paired.
+                    if self._error_tracker.should_block_repeat(tool_name, tool_args):
+                        blocked_msg = self._error_tracker.format_repeat_block(tool_name, tool_args)
+                        if self.debug:
+                            print(f"  [ErrorRecovery] Blocking repeated identical call: {tool_name}({tool_args})")
+                        if native_tool_calls:
+                            self.memory.add_tool_result(
+                                tool_call_id=tool_call_id or f"blocked_{step_num}_{tool_calls}",
+                                name=tool_name,
+                                content=blocked_msg,
+                            )
+                        else:
+                            self.memory.add("user", f"Observation: {blocked_msg}")
+                        # A blocked call still counts as a failure for the
+                        # consecutive counter — otherwise a stubborn model
+                        # re-issuing the same call would only stop at max_steps.
+                        self._error_tracker.record_failure(
+                            tool_name=tool_name,
+                            error_message=blocked_msg,
+                            step=step_num,
+                            arguments=tool_args,
+                        )
+                        steps.append(StepResult(
+                            type=StepResultType.ERROR,
+                            error=blocked_msg,
+                            tool_call=ToolCall(name=tool_name, arguments=tool_args),
+                            tokens_used=tokens,
+                        ))
+                        if self._error_tracker.should_terminate():
+                            response.mark_failed({"message": "Too many tool failures", "type": "error_recovery"})
+                            _terminated = True
+                            break
+                        continue
+
                     # Create FunctionCallItem
                     fc_item = create_function_call_item(tool_name, tool_args, tool_call_id)
                     fc_item.status = ItemStatus.IN_PROGRESS
@@ -893,9 +990,33 @@ Final Answer: <the answer>
                         # Check if we should terminate due to too many failures
                         if self._error_tracker.should_terminate():
                             if self.debug:
-                                print(f"  [ErrorRecovery] Terminating: total failures ({self._error_tracker.total_failures}) >= max ({self._error_tracker.max_total_failures})")
+                                print(f"  [ErrorRecovery] Terminating: {self._error_tracker.consecutive_all} consecutive all-failure steps >= max ({self._error_tracker.max_total_failures})")
                             fc_item.status = ItemStatus.FAILED
+                            term_msg = (
+                                f"Error: run terminated after "
+                                f"{self._error_tracker.consecutive_all} consecutive steps in which "
+                                f"every tool call failed. Review the observations above and "
+                                f"adjust the approach."
+                            )
+                            # R06.52: record the blocked result for THIS call so
+                            # the history stays paired; sanitize_history() fills
+                            # any remaining calls from this same step.
+                            if native_tool_calls:
+                                self.memory.add_tool_result(
+                                    tool_call_id=tool_call_id or f"terminated_{step_num}_{tool_calls}",
+                                    name=tool_name,
+                                    content=term_msg,
+                                )
+                            else:
+                                self.memory.add("user", f"Observation: {term_msg}")
+                            steps.append(StepResult(
+                                type=StepResultType.ERROR,
+                                error=term_msg,
+                                tool_call=ToolCall(name=tool_name, arguments=tool_args),
+                                tokens_used=tokens,
+                            ))
                             response.mark_failed({"message": "Too many tool failures", "type": "error_recovery"})
+                            _terminated = True
                             break
                     else:
                         # Record success to reset consecutive failure counter
@@ -978,6 +1099,23 @@ Final Answer: <the answer>
                     if self.debug:
                         print(f"  Tool: {tool_name}({tool_args})")
                         print(f"  Result: {str(result)[:200]}...")
+
+                # R06.52: if the run was terminated inside the tool loop,
+                # stop the WHOLE run. The old code only broke the inner loop
+                # and then called the model again with dangling tool_calls —
+                # an illegal API sequence (OpenRouter 400 / ZAI 1214).
+                if _terminated:
+                    self._response_history[response.id] = response
+                    response.usage["total_tokens"] = total_tokens
+                    total_ms = (time.time() - start_time) * 1000
+                    return AgentRun(
+                        final_answer="",
+                        steps=steps,
+                        total_tokens=total_tokens,
+                        total_ms=total_ms,
+                        tool_calls=tool_calls,
+                        success=False,
+                    )
 
                 # Check if model provided final_answer along with tool call
                 if pending_final_answer:
@@ -1271,6 +1409,9 @@ Final Answer: <the answer>
         _last_tool_name = None
         tool_call_count = 0
 
+        # R06.52: mirror of run() — true-termination flag for the tracker.
+        _terminated = False
+
         for step_num in range(self.max_steps):
             if self.debug:
                 print(f"[Stream Step {step_num + 1}]")
@@ -1278,21 +1419,46 @@ Final Answer: <the answer>
             # Collect the full streamed response
             full_content = ""
 
-            # Stream model response, collecting content for tool-call detection
-            try:
-                for chunk in self._generate_stream_chunks(prompt):
-                    full_content += chunk
-            except Exception as e:
-                if self.debug:
-                    print(f"  [Stream] ERROR: {e}")
-                # Emit failure event
-                response.mark_failed({"message": str(e), "type": "stream_error"})
-                fail_event = ResponseEvent(
-                    type=EventType.RESPONSE_FAILED,
-                    response=response,
-                )
-                yield fail_event.to_sse()
-                return
+            # Stream model response, collecting content for tool-call detection.
+            # R06.54: transient API errors (rate limits, empty responses,
+            # connection blips) are retried with escalating back-off instead of
+            # killing the stream. Permanent errors fail immediately.
+            _api_failure = 0
+            _api_wait_total = 0.0
+            while True:
+                try:
+                    for chunk in self._generate_stream_chunks(prompt):
+                        full_content += chunk
+                    break
+                except KeyboardInterrupt:
+                    raise
+                except Exception as e:
+                    _api_failure += 1
+                    _transient = is_transient_api_error(e)
+                    _exhausted = _transient and _api_failure > self.max_api_retries
+                    if not _transient or _exhausted:
+                        # R06.54: surface the terminal outcome to non-debug
+                        # users too (mirrors the run() path).
+                        if _exhausted:
+                            print(describe_terminal(
+                                e, self.max_api_retries, _api_wait_total))
+                        elif not _transient:
+                            print(f"  [Resilience] Fatal API error — "
+                                  f"not retrying: {e}")
+                        if self.debug:
+                            print(f"  [Stream] ERROR: {e}")
+                        # Emit failure event
+                        response.mark_failed({"message": str(e), "type": "stream_error"})
+                        fail_event = ResponseEvent(
+                            type=EventType.RESPONSE_FAILED,
+                            response=response,
+                        )
+                        yield fail_event.to_sse()
+                        return
+                    _waited = backoff_delay(_api_failure)
+                    _api_wait_total += _waited
+                    print(describe_wait(_api_failure, self.max_api_retries, _waited, e))
+                    time.sleep(_waited)
 
             # Parse for tool calls (ReAct format)
             tool_calls_found = []
@@ -1343,6 +1509,35 @@ Final Answer: <the answer>
                         self.memory.add("user", f"Observation: Error: {error_msg}")
                         continue
 
+                    # R06.52: identical-repeat guard (mirror of run()).
+                    if self._error_tracker.should_block_repeat(tool_name, tool_args):
+                        blocked_msg = self._error_tracker.format_repeat_block(tool_name, tool_args)
+                        if self.debug:
+                            print(f"  [ErrorRecovery] Blocking repeated identical call: {tool_name}({tool_args})")
+                        self.memory.add("user", f"Observation: {blocked_msg}")
+                        self._error_tracker.record_failure(
+                            tool_name=tool_name,
+                            error_message=blocked_msg,
+                            step=step_num,
+                            arguments=tool_args,
+                        )
+                        if self._error_tracker.should_terminate():
+                            term_msg = (
+                                f"Error: run terminated after "
+                                f"{self._error_tracker.consecutive_all} consecutive steps in which "
+                                f"every tool call failed. Review the observations above and "
+                                f"adjust the approach."
+                            )
+                            self.memory.add("user", f"Observation: {term_msg}")
+                            response.mark_incomplete()
+                            incomplete_event = ResponseEvent(
+                                type=EventType.RESPONSE_INCOMPLETE,
+                                response=response,
+                            )
+                            yield incomplete_event.to_sse()
+                            return
+                        continue
+
                     # Create FunctionCallItem and emit SSE events
                     fc_item = create_function_call_item(tool_name, tool_args)
                     fc_item.status = ItemStatus.IN_PROGRESS
@@ -1386,6 +1581,34 @@ Final Answer: <the answer>
 
                     # Build observation and add to memory
                     is_error = is_error_result(str(result))
+                    # R06.52: mirror run() — feed the recovery tracker so the
+                    # consecutive-failure termination and repeat blocking work
+                    # in streaming mode too.
+                    if is_error:
+                        self._error_tracker.record_failure(
+                            tool_name=tool_name,
+                            error_message=str(result),
+                            step=step_num,
+                            arguments=tool_args,
+                        )
+                        if self._error_tracker.should_terminate():
+                            term_msg = (
+                                f"Error: run terminated after "
+                                f"{self._error_tracker.consecutive_all} consecutive steps in which "
+                                f"every tool call failed. Review the observations above and "
+                                f"adjust the approach."
+                            )
+                            self.memory.add("user", f"Observation: {term_msg}")
+                            response.mark_incomplete()
+                            incomplete_event = ResponseEvent(
+                                type=EventType.RESPONSE_INCOMPLETE,
+                                response=response,
+                            )
+                            yield incomplete_event.to_sse()
+                            return
+                    else:
+                        self._error_tracker.record_success(tool_name)
+
                     observation_msg = build_enhanced_observation(
                         tool_name=tool_name,
                         result=str(result),
@@ -1758,8 +1981,29 @@ Final Answer: <the answer>
         from .core.helpers import normalize_args
         normalized_args = normalize_args(args, expected_params, tool_name=name)
 
+        # R06.52: numeric-string coercion. Small models frequently emit
+        # numeric arguments as strings ("depth": "3"); tools that expect
+        # int/float then raise TypeError and the call is guaranteed to fail.
+        for p in tool.params:
+            if p.name not in normalized_args:
+                continue
+            val = normalized_args[p.name]
+            if isinstance(val, str) and p.type in ("integer", "number", "float"):
+                try:
+                    normalized_args[p.name] = int(val) if p.type == "integer" else float(val)
+                except (ValueError, TypeError):
+                    pass  # leave as-is; the tool will report the real problem
+
+        # R06.52: hallucinated-parameter stripping. Arguments that are not in
+        # the tool's schema are removed before execution instead of causing a
+        # guaranteed TypeError. The model is told what was ignored so it can
+        # correct future calls.
+        ignored_params = [k for k in list(normalized_args.keys()) if k not in expected_params]
+        for k in ignored_params:
+            del normalized_args[k]
+
         try:
-            return tool.execute(**normalized_args)
+            result = tool.execute(**normalized_args)
 
         except TypeError as e:
             return f"Error: {e}"
@@ -1769,6 +2013,15 @@ Final Answer: <the answer>
 
         except Exception as e:
             return f"Error executing tool: {e}"
+
+        if ignored_params and isinstance(result, str):
+            result = (
+                f"{result}\n\n"
+                f"(Note: ignored unknown parameter(s) {', '.join(ignored_params)} — "
+                f"not part of the '{name}' tool schema. Valid parameters: "
+                f"{', '.join(expected_params) if expected_params else '(none)'}.)"
+            )
+        return result
 
     def chat(self, message: str) -> str:
         """

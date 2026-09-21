@@ -555,18 +555,47 @@ class OpenRouterBackend(OllamaBackend):
         
         return defaults
 
-    # Maximum retries for 429 rate-limit responses before giving up.
-    _MAX_429_RETRIES = 3
+    # R06.54: maximum retries for rate-limit (429) and transient server
+    # (502/503/504) responses before giving up. Free-tier models on
+    # OpenRouter return 429 "Provider returned error" constantly — 3 quick
+    # retries (~30 s of patience) were never enough for an agentic run, so
+    # the run died mid-audit. Override with OPENROUTER_MAX_429_RETRIES.
+    _MAX_429_RETRIES = 6
+
+    # Exponential back-off schedule (seconds) when no usable Retry-After
+    # header is present. Capped so a broken provider can't hang the agent.
+    _429_BACKOFF_BASE = 5.0
+    _429_BACKOFF_CAP = 90.0
+
+    def _max_429_retries(self) -> int:
+        """Resolve the 429 retry budget (env override > class default)."""
+        raw = os.environ.get("OPENROUTER_MAX_429_RETRIES", "")
+        try:
+            val = int(raw)
+            if val >= 0:
+                return val
+        except (ValueError, TypeError):
+            pass
+        return self._MAX_429_RETRIES
+
+    def _429_backoff(self, attempt: int) -> float:
+        """Back-off wait for the Nth (1-based) rate-limit retry."""
+        import random
+        delay = self._429_BACKOFF_BASE * (2 ** max(0, attempt - 1))
+        delay = min(delay, self._429_BACKOFF_CAP)
+        jitter = delay * 0.2
+        return max(1.0, delay + random.uniform(-jitter, jitter))
 
     def _make_api_request(self, endpoint: str, data: dict, stream: bool = False) -> dict | Generator:
-        """Make request to OpenRouter API with automatic 429 retry.
+        """Make request to OpenRouter API with automatic 429/5xx retry.
 
-        On HTTP 429 (rate limit), reads the `Retry-After` header and waits
-        the requested duration (capped at 60s) before retrying. Retries up
-        to `_MAX_429_RETRIES` times. Other errors are normalized to
-        RuntimeError carrying the upstream error message so callers can
-        pattern-match on the text (e.g. to detect "does not support
-        tools" for the ReAct fallback path).
+        On HTTP 429 (rate limit) or transient server errors (502/503/504),
+        waits — honoring the `Retry-After` header when present, otherwise
+        an exponential back-off schedule — and retries up to
+        `_max_429_retries()` times (R06.54: default 6, was 3). Other errors
+        are normalized to RuntimeError carrying the upstream error message
+        so callers can pattern-match on the text (e.g. to detect "does not
+        support tools" for the ReAct fallback path).
         """
         url = f"{self.base_url}/{endpoint}"
 
@@ -585,12 +614,16 @@ class OpenRouterBackend(OllamaBackend):
         if stream:
             return self._stream_request(url, data, headers)
 
-        # Retry loop for 429 rate-limit responses.
-        # OpenRouter sends 429 with a Retry-After header (seconds) when
-        # the upstream provider is rate-limited. We honor it and retry
-        # automatically so the user sees fewer "empty response" errors.
-        last_429_error = None
-        for attempt in range(self._MAX_429_RETRIES + 1):
+        # Retry loop for 429 rate-limit and transient 5xx responses.
+        # OpenRouter sends 429 (with an optional Retry-After header) when the
+        # upstream provider is rate-limited, and 502/503/504 when the provider
+        # itself errors out — both are routine on :free models and both are
+        # worth waiting out (R06.54). We honor Retry-After and fall back to an
+        # exponential schedule so the agent outlives provider hiccups instead
+        # of dying mid-run.
+        max_retries = self._max_429_retries()
+        last_retryable_error = None
+        for attempt in range(max_retries + 1):
             response = requests.post(
                 url,
                 json=data,
@@ -598,10 +631,18 @@ class OpenRouterBackend(OllamaBackend):
                 timeout=self.config.timeout
             )
 
-            # ---- 429 Rate Limit: wait and retry ----
-            if response.status_code == 429:
-                error_msg = "Rate limit exceeded"
-                retry_after_raw = response.headers.get("Retry-After", "10")
+            # ---- 429 Rate Limit / transient 5xx: wait and retry ----
+            retryable = (
+                response.status_code == 429
+                or response.status_code in (502, 503, 504)
+            )
+            if retryable:
+                error_msg = (
+                    "Rate limit exceeded"
+                    if response.status_code == 429
+                    else f"Provider error {response.status_code}"
+                )
+                retry_after_raw = response.headers.get("Retry-After", "")
                 try:
                     error_data = response.json()
                     if "error" in error_data:
@@ -612,28 +653,34 @@ class OpenRouterBackend(OllamaBackend):
                         error_msg = error_data["message"]
                 except Exception:
                     pass
-                last_429_error = error_msg
+                last_retryable_error = error_msg
 
-                # Parse Retry-After (seconds). Cap at 60s so we don't hang forever.
-                try:
-                    retry_after = int(retry_after_raw)
-                except (ValueError, TypeError):
-                    retry_after = 10
-                retry_after = min(max(retry_after, 1), 60)
+                # Honor Retry-After when parseable; otherwise back off
+                # exponentially (5s → 10s → 20s → 40s → 80s → 90s cap).
+                retry_after = None
+                if retry_after_raw:
+                    try:
+                        retry_after = float(retry_after_raw)
+                    except (ValueError, TypeError):
+                        retry_after = None
+                if retry_after is None:
+                    retry_after = self._429_backoff(attempt + 1)
+                retry_after = min(max(retry_after, 1.0), self._429_BACKOFF_CAP)
 
-                if attempt < self._MAX_429_RETRIES:
-                    if os.environ.get("AGENTKTHX_DEBUG"):
-                        print(f"  [OpenRouter] 429 rate limited "
-                              f"(attempt {attempt + 1}/{self._MAX_429_RETRIES + 1}): "
-                              f"{error_msg}. Retrying in {retry_after}s...")
+                if attempt < max_retries:
+                    # R06.54: always visible — the user must SEE that the
+                    # harness is patiently waiting instead of silently dying.
+                    print(f"  [OpenRouter] {response.status_code} — {error_msg}. "
+                          f"Retrying in {retry_after:.0f}s "
+                          f"(attempt {attempt + 1}/{max_retries + 1})...")
                     time.sleep(retry_after)
                     continue
                 else:
                     # Exhausted retries — raise the error.
                     raise RuntimeError(
                         f"OpenRouter rate limit: {error_msg}. "
-                        f"Retried {self._MAX_429_RETRIES} times. "
-                        f"Try again in {retry_after} seconds."
+                        f"Retried {max_retries} times. "
+                        f"Try again in {retry_after:.0f} seconds."
                     )
 
             # ---- 401 Auth error ----
@@ -675,8 +722,8 @@ class OpenRouterBackend(OllamaBackend):
 
         # Should never reach here (loop exits via return or raise above).
         raise RuntimeError(
-            f"OpenRouter rate limit: {last_429_error}. "
-            f"Retried {self._MAX_429_RETRIES} times."
+            f"OpenRouter rate limit: {last_retryable_error}. "
+            f"Retried {max_retries} times."
         )
 
     def _stream_request(self, url: str, data: dict, headers: dict) -> Generator[dict, None, None]:

@@ -5,6 +5,48 @@ All notable changes to AgentKthx will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - fixes pending user testing
+
+### 🛡️ **API Resilience — rate limits no longer kill agentic runs**
+
+Free-tier OpenRouter models (`:free`) return HTTP 429 "Provider returned error" every few requests, and occasionally 502/503/504 or silently empty responses. The old harness gave up after 3 quick backend retries (~30 s of patience) and the agent loop treated the raised error as fatal — the run died mid-audit with `AgentKthx: (empty response)`. A 100-step audit against a free model could never complete. This unreleased round adds two layers of patience so the run outlives provider hiccups.
+
+**Layer 1 — OpenRouter plugin (`_make_api_request`)**
+
+- **Retry budget raised 3 → 6** for rate-limit responses, overridable via `OPENROUTER_MAX_429_RETRIES`.
+- **Exponential back-off with jitter** when no usable `Retry-After` header is present: 5 s → 10 s → 20 s → 40 s → 80 s → 90 s cap (±20 % jitter so concurrent agents don't sync their retries). `Retry-After` is still honored verbatim when the provider sends it.
+- **Transient server errors (502/503/504) now retried** through the same schedule — upstream "Provider returned error" failures frequently arrive as 5xx, and previously only 429 got any patience at all.
+- **Retry notices are always printed** (`[OpenRouter] 429 — Provider returned error. Retrying in 20s (attempt 2/7)...`) instead of hiding behind `--debug`, so users can see the harness waiting instead of silently dying.
+
+**Layer 2 — Agent loop (`agentkthx/core/api_resilience.py`, new)**
+
+- **Transient generate() exceptions no longer kill the run.** Rate limits, empty responses, connection blips, and provider 5xx are retried at the same step after an escalating back-off (10 s base, doubling, 120 s cap). The retry does not consume a `max_steps` iteration.
+- **Permanent errors fail fast** — authentication, 401/403/404, invalid request, insufficient credits are detected by text classification and terminate immediately without pointless waiting.
+- **`max_api_retries` parameter** (default 5, env `AGENTKTHX_MAX_API_RETRIES`, 0 disables) bounds consecutive transient failures per step; sustained failure terminates the run gracefully with an ERROR step and a valid, dangling-free history.
+- **Both `run()` and `run_stream()`** share the semantics; the streaming path also gained the error-recovery mirroring from R06.52 (tracker recording, repeat-call blocking, graceful termination events).
+
+**Honest terminal UX — no more bare `(empty response)`**
+
+- **The pause reason is always printed.** When the retry budget is exhausted, the agent prints a `[Resilience] … persisted through N recovery attempts (X min of back-off) — pausing this run.` line even without `--debug`; permanent (non-retryable) errors print `[Resilience] Fatal API error — not retrying: …`. Previously both paths were silent outside debug mode, so chat users saw nothing before the empty-response line.
+- **Chat mode explains how to resume.** When the final failure was throttling, chat now prints: the run was paused by sustained rate limiting, the conversation history is intact, and sending `continue` resumes where it stopped — plus the `:free`-model tip (`AGENTKTHX_MAX_API_RETRIES` / `OPENROUTER_MAX_429_RETRIES`). The generic `(empty response)` advice remains only for genuinely empty-but-successful runs.
+
+**Tests** — 39 new tests in `tests/test_api_resilience.py` (transient/permanent classification, back-off schedule and jitter, env parsing, rate-limit-then-success completion, step-budget preservation, permanent-error fail-fast, sustained-failure graceful termination, history validity after API-failure termination, plugin 429/502 retry with mocked HTTP, non-retryable 400/401, default retry budget) plus error-kind classification, terminal-message formatting, and always-printed pause notices for `run()`/`run_stream()`.
+
+## [R06.52] - 2026-09-21
+
+### 🔁 **Loop Resilience — the codebase-audit death-spiral fix**
+
+Investigation of a 100-step `codebase-audit` run that never completed exposed a five-bug cascade in the agentic loop. Each bug fed the next: hallucinated tool arguments caused failures → the same failing call was re-issued forever → full-text error matching miscounted healthy steps as failures → termination never actually terminated → dangling tool_calls produced illegal API sequences (OpenRouter HTTP 400, ZAI code 1214).
+
+- **`is_error_result()` rewritten** (`core/error_recovery.py`) — error detection now inspects only the first non-empty line of a tool result against a strict pattern list (`_ERROR_FIRST_LINE_RE`). Results that merely *mention* error-ish words ("0 matches for 'error'", a log excerpt containing "timeout") are no longer misclassified.
+- **Consecutive termination semantics** — `should_terminate()` now fires only when *every* tool call in each of the last N consecutive steps failed (`consecutive_all`); any success resets the counter. The old lifetime-total check killed long, healthy runs that legitimately accumulated scattered errors.
+- **Identical duplicate-call blocking** — the tracker records `(tool, sorted-args)` signatures; after `DEFAULT_MAX_IDENTICAL_FAILURES` (2) failures of the exact same call, the harness blocks the re-issue *before execution* and injects a teaching observation ("Repeated identical tool call blocked… Change your approach"). Blocked calls still count toward the consecutive counter, so a stubborn model stops early instead of at max_steps.
+- **True termination with paired history** — when the tracker declares the run stuck, the outer step loop now actually stops (`_terminated`), the terminating call receives a real result in memory, and `memory.sanitize_history()` fills any remaining announced-but-unanswered calls with placeholder results. No dangling tool_calls, no 400s on the next request.
+- **Pairing-safe memory pruning** (`core/memory.py`) — the sliding window now slides to the summarization threshold (e.g. 50 → 40) instead of collapsing to `keep_recent`, preserving context and tool-call pairs; leading tool results whose announcing assistant message fell out of the window are dropped. `sanitize_history()` (idempotent, wired into `get_messages()`) removes orphan tool results and completes dangling ones.
+- **Hallucinated-parameter stripping** (`agent.py::_execute_tool`) — arguments not in the tool's schema are removed before execution (previously a guaranteed TypeError) and the result carries a teaching note listing valid parameters; numeric strings for integer/number params are coerced.
+- **Shell exit-code marker first** (`tools/builtins.py`) — non-zero exits now format as `[Exit code: N]\n<stdout>\nError: <stderr>` so the error marker is always the first line and is actually classified.
+- **Tests** — 48 tests in `tests/test_loop_resilience.py` covering error classification, consecutive termination, duplicate blocking, pruning, sanitization, argument handling, shell format, and two end-to-end scenarios (stubborn model terminates with paired history; healthy run with scattered errors survives).
+
 ## [R06.51] - 2026-09-21 9:48:55 AM
 
 ### 🔔 **Update Check — users now find out when a new release ships (stable + development)**

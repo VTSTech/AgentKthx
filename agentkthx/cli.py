@@ -1698,11 +1698,37 @@ def cmd_chat(args: argparse.Namespace) -> int:
         # or content filter mid-conversation. Surface it as an error
         # instead of showing a blank "AgentKthx: " line.
         if not result.final_answer or not result.final_answer.strip():
-            print(f"\n{red('AgentKthx: (empty response)')}")
-            print(yellow("  The model returned no content. This is likely a "
-                         "rate limit (429) or content filter."))
-            print(yellow("  Try again in a few seconds, or use /debug to see "
-                         "what happened."))
+            # R06.52+: if the run was paused by sustained provider
+            # throttling, say so plainly and tell the user how to resume —
+            # the old advice ("try again in a few seconds") was wrong once
+            # the resilience layer had already been waiting for minutes.
+            _last_err = ""
+            if result.steps:
+                _last_err = getattr(result.steps[-1], "error", "") or ""
+            _low = _last_err.lower()
+            _throttled = (
+                "rate limit" in _low
+                or "ratelimit" in _low
+                or "429" in _low
+                or "empty response" in _low
+                or "no choices" in _low
+                or "provider returned error" in _low
+            )
+            if _throttled:
+                print(f"\n{yellow('⏸  Run paused — the provider kept rate-limiting this model '
+                                   'even after repeated retries.')}")
+                print(yellow("   Your conversation history is intact: just send 'continue' "
+                             "(or any message) to pick up where it left off."))
+                print(yellow("   Tip: ':free' models throttle hard on long agentic runs. A paid "
+                             "model avoids this, or raise"))
+                print(yellow("   AGENTKTHX_MAX_API_RETRIES / OPENROUTER_MAX_429_RETRIES to "
+                             "give the harness more patience."))
+            else:
+                print(f"\n{red('AgentKthx: (empty response)')}")
+                print(yellow("  The model returned no content. This is likely a "
+                             "rate limit (429) or content filter."))
+                print(yellow("  Try again in a few seconds, or use /debug to see "
+                             "what happened."))
         else:
             # Display reasoning_content under the answer when --think is set
             # (only if the model emitted reasoning_content).

@@ -4,8 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agentkthx"
-# R06.51 — patch bump on the R06.5 line (0.6.50 < 0.6.51, PyPI-safe)
-version = "0.6.51"
+version = "0.6.52"
 description = "⚛️ AgentKthx - A minimal, hackable agentic framework for local LLM inference"
 readme = "README.md"
 license = {text = "MIT"}

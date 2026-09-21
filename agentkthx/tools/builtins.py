@@ -207,12 +207,18 @@ def shell(command: str, timeout: int = 30) -> str:
         output = result.stdout.strip()
         exit_code = result.returncode
         if exit_code != 0:
+            # R06.52: the exit-code marker MUST be the first line of the
+            # result. is_error_result() only inspects the first non-empty
+            # line, so a marker buried under stdout (the old format) was
+            # never classified as an error and the recovery tracker never
+            # learned about the failure.
+            parts = [f"[Exit code: {exit_code}]"]
             if output:
-                output += "\n"
-            output += f"[Exit code: {exit_code}]"
+                parts.append(output)
             stderr = result.stderr.strip()
             if stderr:
-                output += f"\nError: {stderr}"
+                parts.append(f"Error: {stderr}")
+            output = "\n".join(parts)
 
         _audit_log("shell", {"command": command}, "accepted", f"exit={exit_code}")
         return output or "(no output)"
