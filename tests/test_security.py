@@ -2,13 +2,14 @@
 AgentKthx — Security Tests
 
 Adversarial edge-case tests for path validation, shell injection
-prevention, and SSRF protection.  Covers the security surface in
-core/helpers.py and the tool wrappers in tools/builtins.py.
+prevention, SSRF protection, and safe math-expression evaluation.
+Covers the security surface in core/helpers.py, core/safe_eval.py, and
+the tool wrappers in tools/builtins.py.
 
-Known gaps documented:
-  - W-SEC03: eval() dunder attribute chains in sandboxed REPL
-             (e.g., ().__class__.__bases__) remain possible
-  - F-SEC01 variant: /var/tmp whitelist unreachable on some platforms
+History:
+  - W-SEC03 (eval() dunder chains) — CLOSED in R06.41 via core/safe_eval.py
+    AST walker that rejects ast.Attribute / ast.Subscript nodes outright.
+  - F-SEC01 variant (/var/tmp whitelist) — some platforms still unreachable.
 
 Written by VTSTech — https://www.vts-tech.org
 """
@@ -18,6 +19,7 @@ import sys
 import pytest
 
 from agentkthx.core.helpers import validate_path, sanitize_command, is_safe_url
+from agentkthx.core.safe_eval import safe_eval
 
 
 # ============================================================================
@@ -400,6 +402,235 @@ class TestSSRFBlockedSchemes:
     def test_empty_url(self):
         is_safe, _ = is_safe_url("")
         assert not is_safe
+
+
+# ============================================================================
+# SEC-01: safe_eval bypass attempts
+# ============================================================================
+# These tests verify that the AST-walking evaluator in core/safe_eval.py
+# rejects every known sandbox-escape payload that would have succeeded
+# against the old `eval(expr, {"__builtins__": {}}, ns)` pattern.
+# ============================================================================
+
+
+class TestSafeEvalBypassAttempts:
+    """SEC-01 regression tests: known sandbox-escape payloads must be rejected."""
+
+    def test_dunder_class_on_tuple(self):
+        """().__class__ → attribute access blocked at AST level."""
+        with pytest.raises(ValueError, match="Disallowed AST node|Attribute"):
+            safe_eval("().__class__", {})
+
+    def test_dunder_bases_subscript(self):
+        """().__class__.__bases__[0] → subscript blocked at AST level."""
+        # The parse phase succeeds but the AST walker rejects ast.Attribute
+        # (the [0] subscript would be next but we never reach it).
+        with pytest.raises(ValueError, match="Disallowed AST node|Attribute"):
+            safe_eval("().__class__.__bases__[0]", {})
+
+    def test_full_subclasses_escape(self):
+        """Full SEC-01 escape payload — must fail before any attribute is resolved."""
+        payload = "().__class__.__bases__[0].__subclasses__()"
+        # The outermost node is an ast.Call where func is an ast.Attribute,
+        # which we reject before traversing into the attribute payload.
+        with pytest.raises(ValueError):
+            safe_eval(payload, {})
+
+    def test_getattr_escalation(self):
+        """getattr(().__class__, '__bases__') — getattr isn't in allowlist anyway,
+        but we also verify the parse phase doesn't accidentally allow it."""
+        with pytest.raises((NameError, ValueError)):
+            safe_eval("getattr(().__class__, '__bases__')", {})
+
+    def test_import_dunder(self):
+        """__import__('os') — __import__ isn't in allowlist, and even if it
+        were, the Call func is a Name (allowed) but the name lookup fails."""
+        with pytest.raises(NameError):
+            safe_eval("__import__('os')", {})
+
+    def test_open_call(self):
+        """open('/etc/passwd') — open isn't in allowlist."""
+        with pytest.raises(NameError):
+            safe_eval("open('/etc/passwd')", {})
+
+    def test_eval_call(self):
+        """eval('1+1') — eval isn't in allowlist."""
+        with pytest.raises(NameError):
+            safe_eval("eval('1+1')", {})
+
+    def test_exec_call(self):
+        """exec('print(1)') — in Python 3, exec is a function (not a statement),
+        so the expression parses fine. The Call func is a Name (allowed),
+        but 'exec' isn't in allowlist → NameError."""
+        with pytest.raises(NameError):
+            safe_eval("exec('print(1)')", {})
+
+    def test_dunder_builtins_name(self):
+        """__builtins__ — name lookup fails (not in allowlist)."""
+        with pytest.raises(NameError):
+            safe_eval("__builtins__", {})
+
+    def test_f_string_escape(self):
+        """f"{().__class__}" — f-strings rejected at AST level."""
+        with pytest.raises(ValueError, match="Disallowed AST node"):
+            safe_eval('f"{().__class__}"', {})
+
+    def test_list_subscript_escape(self):
+        """[x for x in (1,).__class__.__mro__] — list comprehension rejected."""
+        with pytest.raises(ValueError, match="Disallowed AST node"):
+            safe_eval("[x for x in (1,).__class__.__mro__]", {})
+
+    def test_lambda_escape(self):
+        """(lambda: __import__('os'))() — outer Call's func is a Lambda, which
+        is rejected before the Lambda body is even examined."""
+        with pytest.raises(ValueError):
+            safe_eval("(lambda: __import__('os'))()", {})
+
+    def test_starred_unpacking(self):
+        """*[1,2,3] — starred unpacking rejected."""
+        with pytest.raises(ValueError, match="Starred"):
+            safe_eval("max(*[1, 2, 3])", {"max": max})
+
+    def test_double_starred_kwargs(self):
+        """**{'a': 1} — double-starred kwargs unpacking rejected."""
+        with pytest.raises(ValueError, match="\\*\\*kwargs"):
+            safe_eval("round(3.14159, **{'ndigits': 2})", {"round": round})
+
+    def test_walrus_operator(self):
+        """(x := 5) — walrus operator rejected."""
+        with pytest.raises(ValueError, match="Disallowed AST node"):
+            safe_eval("(x := 5)", {})
+
+    def test_string_literal_rejected(self):
+        """String literals blocked outright — they're not needed for math and
+        could be used to construct attribute names in escape payloads."""
+        with pytest.raises(ValueError, match="Literal of type 'str' not allowed"):
+            safe_eval("'hello'", {})
+
+    def test_bytes_literal_rejected(self):
+        """Bytes literals blocked."""
+        with pytest.raises(ValueError, match="Literal of type 'bytes' not allowed"):
+            safe_eval("b'hello'", {})
+
+    def test_list_literal_rejected(self):
+        """List literals blocked — collection literals are not needed for math
+        and could be used as containers for sandbox-escape payloads."""
+        with pytest.raises(ValueError, match="Disallowed AST node"):
+            safe_eval("[1, 2, 3]", {})
+
+    def test_dict_literal_rejected(self):
+        """Dict literals blocked."""
+        with pytest.raises(ValueError, match="Disallowed AST node"):
+            safe_eval("{'a': 1}", {})
+
+    def test_tuple_literal_rejected(self):
+        """Tuple literals blocked."""
+        with pytest.raises(ValueError, match="Disallowed AST node"):
+            safe_eval("(1, 2, 3)", {})
+
+    def test_subscript_on_name(self):
+        """foo[0] — subscript access blocked even on allowed names."""
+        # Define an allowed name with a subscriptable value.
+        names = {"foo": [1, 2, 3]}
+        with pytest.raises(ValueError, match="Disallowed AST node|Subscript"):
+            safe_eval("foo[0]", names)
+
+
+# ============================================================================
+# SEC-01: safe_eval correctness tests
+# ============================================================================
+
+
+class TestSafeEvalCorrectness:
+    """Verify safe_eval correctly evaluates legitimate math expressions."""
+
+    def test_addition(self):
+        assert safe_eval("2 + 3") == 5
+
+    def test_subtraction(self):
+        assert safe_eval("10 - 4") == 6
+
+    def test_multiplication(self):
+        assert safe_eval("6 * 7") == 42
+
+    def test_division(self):
+        assert safe_eval("20 / 4") == 5.0
+
+    def test_power(self):
+        assert safe_eval("2 ** 10") == 1024
+
+    def test_modulo(self):
+        assert safe_eval("17 % 5") == 2
+
+    def test_floor_division(self):
+        assert safe_eval("17 // 5") == 3
+
+    def test_unary_minus(self):
+        assert safe_eval("-5") == -5
+
+    def test_unary_plus(self):
+        assert safe_eval("+5") == 5
+
+    def test_not_operator(self):
+        assert safe_eval("not 0") is True
+        assert safe_eval("not 1") is False
+
+    def test_bitwise_invert(self):
+        assert safe_eval("~0") == -1
+
+    def test_boolean_and(self):
+        assert safe_eval("1 and 2") == 2
+        assert safe_eval("0 and 2") == 0  # short-circuit
+
+    def test_boolean_or(self):
+        assert safe_eval("0 or 3") == 3
+        assert safe_eval("1 or 3") == 1  # short-circuit
+
+    def test_chained_comparison(self):
+        assert safe_eval("1 < 2 < 3") is True
+        assert safe_eval("1 < 3 < 2") is False
+
+    def test_ternary(self):
+        assert safe_eval("5 if 1 > 0 else 10") == 5
+        assert safe_eval("5 if 1 < 0 else 10") == 10
+
+    def test_nested_parentheses(self):
+        assert safe_eval("((2 + 3) * 4)") == 20
+
+    def test_operator_precedence(self):
+        assert safe_eval("2 + 3 * 4") == 14
+        assert safe_eval("(2 + 3) * 4") == 20
+
+    def test_function_call_with_args(self):
+        names = {"sqrt": __import__("math").sqrt}
+        result = safe_eval("sqrt(144)", names)
+        assert result == 12.0
+
+    def test_function_call_with_kwargs(self):
+        # round() accepts a keyword arg `ndigits`.
+        result = safe_eval("round(3.14159, ndigits=2)", {"round": round})
+        assert result == 3.14
+
+    def test_zero_division_raises(self):
+        import pytest
+        with pytest.raises(ZeroDivisionError):
+            safe_eval("1 / 0")
+
+    def test_zero_modulo_raises(self):
+        with pytest.raises(ZeroDivisionError):
+            safe_eval("5 % 0")
+
+    def test_unknown_name_raises(self):
+        with pytest.raises(NameError):
+            safe_eval("foo", {})
+
+    def test_uncallable_name_raises(self):
+        with pytest.raises(TypeError):
+            safe_eval("pi()", {"pi": 3.14})
+
+    def test_syntax_error_raises(self):
+        with pytest.raises(SyntaxError):
+            safe_eval("2 +", {})
 
 
 if __name__ == "__main__":

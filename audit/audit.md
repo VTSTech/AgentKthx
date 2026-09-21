@@ -6,6 +6,13 @@
 **Author:** VTSTech | **License:** MIT | **Date:** 2026-09-21  
 14 Findings | 7 Categories | SEC, ROB, MAINT, PERF, FEAT, ARCH, TEST
 
+> **Status (R06.41):** ROB-01 ✓ fixed, MAINT-02 ✓ fixed (env vars + paths renamed),
+> ROB-03 ✓ fixed (45 → 0 failures via root-cause fixes + stale-test cleanup),
+> SEC-01 ✓ fixed (new `core/safe_eval.py` AST walker; `eval()` removed from
+> production source). See `docs/CHANGELOG.md` R06.41 entry for full details.
+> Remaining findings (SEC-02, ROB-02, PERF-01/02, FEAT-01/02, ARCH-01/02,
+> TEST-01, MAINT-01) are still open.
+
 ---
 
 ## Table of Contents

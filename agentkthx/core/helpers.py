@@ -818,21 +818,26 @@ def synthesize_tool_args(tool_name: str, args: dict, user_input: str) -> dict:
             # Special case: compare actual results
             if model_ops > 0 and extracted_ops == 0:
                 try:
-                    # Evaluate model's expression
-                    model_result = float(eval(expr, {"__builtins__": {}}, {}))
+                    # Evaluate model's expression using the safe AST-walking
+                    # evaluator (SEC-01 — bare eval() with {"__builtins__": {}}
+                    # was bypassable via ()._class_._bases_[0]._subclasses_()).
+                    # Empty allowed_names: the model's expression here is
+                    # pure arithmetic, no math functions expected.
+                    from .safe_eval import safe_eval
+                    model_result = float(safe_eval(expr, {}))
                     extracted_num = float(extracted)
-                    
+
                     # If model result is negative but extracted is positive
                     # (common for time calculations with AM/PM)
                     if model_result < 0 and extracted_num > 0:
                         args["expression"] = extracted
                         return args
-                    
+
                     # If results differ significantly, use extracted
                     if abs(model_result - extracted_num) > 0.5:
                         args["expression"] = extracted
                         return args
-                except:
+                except Exception:
                     pass
         
         # Check if expression is just an operator or very short

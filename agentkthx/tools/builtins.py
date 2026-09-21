@@ -81,14 +81,20 @@ def calculator(expression: str) -> str:
               sin, cos, tan, asin, acos, atan, atan2,
               degrees, radians, log, log10, exp, pi, e
 
+    Delegates to ``agentkthx.core.safe_eval.safe_eval()`` for the actual
+    evaluation. The safe_eval module rejects ``ast.Attribute`` and
+    ``ast.Subscript`` nodes outright, closing the SEC-01 sandbox bypass
+    (``().__class__.__bases__[0].__subclasses__()``) that was possible with
+    ``eval(expr, {"__builtins__": {}}, ns)``.
+
     Args:
         expression: Mathematical expression to evaluate
 
     Returns:
         Result of the calculation
     """
-    import ast
     import re
+    from ..core.safe_eval import safe_eval
 
     # Guard: block enormous exponents that would exhaust memory/CPU.
     # e.g. 2**9999999 hangs the process before eval() can be interrupted.
@@ -131,110 +137,8 @@ def calculator(expression: str) -> str:
         "inf": math.inf,
     }
 
-    # Allowed AST node types — anything else is rejected.
-    _ALLOWED_NODES = (
-        ast.Expression, ast.BinOp, ast.UnaryOp, ast.Constant, ast.Name,
-        ast.Call, ast.Compare,
-        ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Pow, ast.Mod,
-        ast.FloorDiv, ast.USub, ast.UAdd,
-        ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE,
-    )
-
-    def _eval_node(node):
-        """Recursively evaluate an AST node — only whitelisted nodes."""
-        if not isinstance(node, _ALLOWED_NODES):
-            raise ValueError(f"Unsupported expression element: {type(node).__name__}")
-
-        if isinstance(node, ast.Constant):
-            return node.value
-
-        if isinstance(node, ast.Name):
-            if node.id in _SAFE_NAMES:
-                return _SAFE_NAMES[node.id]
-            raise ValueError(f"Unknown name: '{node.id}'")
-
-        if isinstance(node, ast.BinOp):
-            left = _eval_node(node.left)
-            right = _eval_node(node.right)
-            return node.op.__class__.__name__, left, right  # placeholder
-
-        if isinstance(node, ast.UnaryOp):
-            operand = _eval_node(node.operand)
-            if isinstance(node.op, ast.USub):
-                return -operand
-            if isinstance(node.op, ast.UAdd):
-                return +operand
-            raise ValueError(f"Unsupported unary operator: {type(node.op).__name__}")
-
-        if isinstance(node, ast.Call):
-            if not isinstance(node.func, ast.Name):
-                raise ValueError("Only named function calls are allowed")
-            func_name = node.func.id
-            if func_name not in _SAFE_NAMES or not callable(_SAFE_NAMES[func_name]):
-                raise ValueError(f"Unknown function: '{func_name}'")
-            args = [_eval_node(a) for a in node.args]
-            # Resolve nested BinOps before calling
-            resolved_args = []
-            for a in args:
-                if isinstance(a, tuple) and len(a) == 3 and isinstance(a[0], str):
-                    op_name, left, right = a
-                    resolved_args.append(_resolve_binop(op_name, left, right))
-                else:
-                    resolved_args.append(a)
-            return _SAFE_NAMES[func_name](*resolved_args)
-
-        if isinstance(node, ast.Compare):
-            left = _eval_node(node.left)
-            for op, comparator in zip(node.ops, node.comparators):
-                right = _eval_node(comparator)
-                left = _resolve_compare(op, left, right)
-            return left
-
-        raise ValueError(f"Unsupported node: {type(node).__name__}")
-
-    def _resolve_binop(op_name, left, right):
-        """Resolve a binary operation."""
-        ops = {
-            "Add": lambda a, b: a + b,
-            "Sub": lambda a, b: a - b,
-            "Mult": lambda a, b: a * b,
-            "Div": lambda a, b: a / b,
-            "Pow": lambda a, b: a ** b,
-            "Mod": lambda a, b: a % b,
-            "FloorDiv": lambda a, b: a // b,
-        }
-        fn = ops.get(op_name)
-        if fn is None:
-            raise ValueError(f"Unsupported operator: {op_name}")
-        # Recursively resolve if operands are nested tuples
-        if isinstance(left, tuple) and len(left) == 3:
-            left = _resolve_binop(left[0], left[1], left[2])
-        if isinstance(right, tuple) and len(right) == 3:
-            right = _resolve_binop(right[0], right[1], right[2])
-        return fn(left, right)
-
-    def _resolve_compare(op, left, right):
-        """Resolve a comparison operation."""
-        cmp_ops = {
-            ast.Eq: lambda a, b: a == b,
-            ast.NotEq: lambda a, b: a != b,
-            ast.Lt: lambda a, b: a < b,
-            ast.LtE: lambda a, b: a <= b,
-            ast.Gt: lambda a, b: a > b,
-            ast.GtE: lambda a, b: a >= b,
-        }
-        fn = cmp_ops.get(type(op))
-        if fn is None:
-            raise ValueError(f"Unsupported comparison: {type(op).__name__}")
-        return fn(left, right)
-
     try:
-        tree = ast.parse(expression, mode="eval")
-        raw_result = _eval_node(tree.body)
-        # Resolve any remaining nested BinOp tuples
-        while isinstance(raw_result, tuple) and len(raw_result) == 3 and isinstance(raw_result[0], str):
-            raw_result = _resolve_binop(*raw_result)
-        result = raw_result
+        result = safe_eval(expression, _SAFE_NAMES)
 
         # Format numeric results cleanly.
         if isinstance(result, float):
@@ -252,7 +156,7 @@ def calculator(expression: str) -> str:
 
     except ZeroDivisionError:
         return "Error: division by zero"
-    except ValueError as e:
+    except (ValueError, NameError, TypeError) as e:
         return f"Error: {e}"
     except SyntaxError as e:
         return f"Error: invalid expression syntax: {e}"

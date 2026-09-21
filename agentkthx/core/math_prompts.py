@@ -190,6 +190,9 @@ def calculator_tool(expression: str) -> str:
         The result as a string, or an error message
     """
     # Allowed names from math module
+    # Import the shared safe evaluator (SEC-01 fix — no eval() bypass possible).
+    from .safe_eval import safe_eval
+
     allowed_names = {k: v for k, v in math.__dict__.items() if not k.startswith("_")}
     allowed_names.update({
         "abs": abs,
@@ -198,40 +201,22 @@ def calculator_tool(expression: str) -> str:
         "max": max,
         "sum": sum,
     })
-    
+
     try:
-        # Parse the expression
-        tree = ast.parse(expression, mode="eval")
-        
-        # Walk the tree and check for disallowed operations
-        for node in ast.walk(tree):
-            # Block imports
-            if isinstance(node, (ast.Import, ast.ImportFrom)):
-                return "[Error] Imports not allowed"
-            
-            # Check function calls
-            if isinstance(node, ast.Call):
-                if isinstance(node.func, ast.Name):
-                    func_name = node.func.id
-                    if func_name not in allowed_names:
-                        return f"[Error] Function '{func_name}' not allowed"
-        
-        # Evaluate safely
-        result = eval(
-            compile(tree, "<calculator>", "eval"),
-            {"__builtins__": {}},
-            allowed_names
-        )
-        
+        # Safe AST-walking evaluation — rejects ast.Attribute / ast.Subscript
+        # outright, so the SEC-01 bypass (().__class__.__bases__[0].__subclasses__())
+        # cannot even be parsed into an evaluatable form.
+        result = safe_eval(expression, allowed_names)
+
         # Format result
         if isinstance(result, float):
             # Clean up float display
             if result == int(result):
                 return str(int(result))
             return str(round(result, 10))
-        
+
         return str(result)
-        
+
     except SyntaxError as e:
         return f"[Syntax error] {e}"
     except NameError as e:
@@ -240,6 +225,8 @@ def calculator_tool(expression: str) -> str:
         return "[Error] Division by zero"
     except OverflowError:
         return "[Error] Result too large"
+    except (ValueError, TypeError) as e:
+        return f"[Calculator error] {type(e).__name__}: {e}"
     except Exception as e:
         return f"[Calculator error] {type(e).__name__}: {e}"
 

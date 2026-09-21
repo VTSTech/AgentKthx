@@ -128,6 +128,11 @@ agentkthx/
 │   ├── CREDITS.md            # Credits, acknowledgments, and development history
 │   ├── PLUGIN_SPEC.md        # Plugin system specification (R05.0)
 │   ├── TESTS.md              # Benchmark results and testing guide
+│   ├── JEV_API_MODE.md       # JEV (System-One) API mode reference
+│   ├── ZAI_API_TECHNICAL_REFERENCE.md  # ZAI API reference
+│   └── OPENROUTER_API_TECHNICAL_REFERENCE.md  # OpenRouter API reference
+│
+├── audit/                    # Audit materials (R06.41)
 │   ├── audit.md              # Codebase audit findings report
 │   └── brief.md              # Condensed project orientation brief
 │
