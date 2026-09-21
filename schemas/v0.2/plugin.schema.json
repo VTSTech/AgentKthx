@@ -1,0 +1,141 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/VTSTech/AgentKthx/main/schemas/v0.2/plugin.schema.json",
+  "title": "AgentKthx Plugin Manifest",
+  "description": "Validation schema for AgentKthx plugin.json manifests, specification version 0.2. Dual-form: AgentKthx-specific fields may appear at top level (v0.1 legacy, deprecated) or under extensions['org.vts-tech.agentkthx'] (v0.2 canonical). Unknown top-level fields are permitted in v0.2 (warn-and-ignore); the schema is planned to close in v0.3.",
+  "type": "object",
+  "required": ["name", "description"],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Canonical schema identifier. v0.2 value: https://raw.githubusercontent.com/VTSTech/AgentKthx/main/schemas/v0.2/plugin.schema.json"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "description": "Unique plugin identifier. MUST match the plugin directory name.",
+      "allOf": [
+        { "pattern": "^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$" },
+        { "not": { "pattern": "--" } },
+        { "not": { "pattern": "\\.\\." } }
+      ]
+    },
+    "version": {
+      "type": "string",
+      "default": "0.0.0",
+      "description": "Semantic Versioning RECOMMENDED."
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Short description of what the plugin does."
+    },
+    "author": {
+      "description": "Author name, or structured author object (Agent Plugins form).",
+      "oneOf": [
+        { "type": "string" },
+        {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "email": { "type": "string" },
+            "url": { "type": "string" }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "license": {
+      "type": "string",
+      "description": "SPDX license identifier RECOMMENDED. Validated warn-only by the client."
+    },
+    "extensions": {
+      "type": "object",
+      "description": "Client-specific manifest data keyed by reverse-domain extension namespace.",
+      "propertyNames": {
+        "pattern": "^[a-z]+(\\.[a-z0-9-]+)+$"
+      }
+    },
+    "display_name": {
+      "type": "string",
+      "description": "LEGACY top-level form (deprecated in v0.2). Canonical location: extensions['org.vts-tech.agentkthx'].display_name"
+    },
+    "type": {
+      "description": "LEGACY top-level form (deprecated in v0.2). Canonical location: extensions['org.vts-tech.agentkthx'].type",
+      "enum": ["backend", "feature", "tools", "hook"],
+      "default": "feature"
+    },
+    "entrypoint": {
+      "type": "string",
+      "default": "__init__",
+      "description": "LEGACY top-level form (deprecated in v0.2). Python module inside the plugin directory providing register()/unregister()."
+    },
+    "depends": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "LEGACY top-level form (deprecated in v0.2). Hard dependencies by plugin name."
+    },
+    "optional_depends": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "LEGACY top-level form (deprecated in v0.2). Soft dependencies."
+    },
+    "config": {
+      "type": "object",
+      "properties": {
+        "env_prefix": { "type": "string" },
+        "defaults": {
+          "type": "object",
+          "description": "ENV_VAR -> default value. Values MAY reference ${PLUGIN_ROOT} and ${PLUGIN_DATA}."
+        }
+      },
+      "description": "LEGACY top-level form (deprecated in v0.2)."
+    },
+    "provides": {
+      "type": "object",
+      "properties": {
+        "backends": {
+          "type": "object",
+          "description": "Backend name -> 'module.ClassPath' relative to the plugin directory. Classes MUST subclass BaseBackend."
+        },
+        "cli_commands": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "cli_flags": {
+          "type": "object",
+          "description": "Flag name -> list of allowed values, e.g. {\"--backend\": [\"bitnet\"]}."
+        },
+        "tools": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Tool names the plugin registers into the core ToolRegistry."
+        },
+        "hooks": {
+          "type": "object",
+          "propertyNames": {
+            "enum": ["on_init", "on_run_start", "on_run_end", "on_error", "on_shutdown"]
+          },
+          "additionalProperties": {
+            "type": "string",
+            "description": "'module.function' path relative to the plugin directory."
+          }
+        }
+      },
+      "description": "LEGACY top-level form (deprecated in v0.2)."
+    },
+    "compatibility": {
+      "type": "object",
+      "properties": {
+        "agentkthx": {
+          "type": "string",
+          "pattern": "^(>=|<=|>|<|==|!=)?[0-9]+\\.[0-9]+\\.[0-9]+(,(>=|<=|>|<|==|!=)?[0-9]+\\.[0-9]+\\.[0-9]+)*$",
+          "description": "Comma-separated semver comparisons, ANDed. Warn-only enforcement."
+        }
+      },
+      "description": "LEGACY top-level form (deprecated in v0.2). Legacy key 'agentnova' is accepted as an alias of 'agentkthx' with a deprecation warning."
+    }
+  },
+  "additionalProperties": true
+}

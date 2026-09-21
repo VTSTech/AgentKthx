@@ -1,6 +1,6 @@
 # AgentKthx Plugin Specification v0.2
 
-**Status: Draft** (implementation pending — see Appendix B)
+**Status: Implemented** (loader, CLI, hooks, tools, manifests, and tests land in the same release — see Appendix B for the implemented change map)
 
 **Supersedes:** Plugin Specification v0.1 (`docs/PLUGIN_SPEC.md`)
 

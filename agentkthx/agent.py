@@ -260,6 +260,16 @@ class Agent:
         else:
             raise ValueError("tools must be ToolRegistry, list[str], or list[Tool]")
 
+        # v0.2 plugin tools: merge plugin-registered tools into the registry
+        # (spec §Tools). Best-effort; never blocks Agent construction.
+        try:
+            from .plugins import get_plugin_manager as _get_pm
+            _pm = _get_pm(init=False)
+            if _pm is not None and _pm.plugin_tools():
+                _pm.apply_to_registry(self.tools)
+        except Exception:
+            pass
+
         # Wire up per-session todo isolation for this agent instance.
         # Each Agent gets its own todo store keyed by session_id.
         if "todo" in self.tools.names():
@@ -534,6 +544,68 @@ Final Answer: <the answer>
 4. Never make up information"""
 
     def run(self, prompt: str, stream: bool = False) -> AgentRun:
+        """
+        Run the agent on a prompt (v0.2: emits plugin lifecycle hooks).
+
+        Emits ``on_run_start`` before the agentic loop, ``on_run_end`` after
+        a successful run, and ``on_error`` if the run raises. Hook failures
+        never affect the run itself (spec §Hooks).
+        """
+        pm = None
+        try:
+            from .plugins import get_plugin_manager as _get_pm
+            pm = _get_pm(init=False)
+        except Exception:
+            pm = None
+
+        session = getattr(self, "session_id", None)
+        _backend = getattr(self, "backend", None)
+        backend_name = (
+            getattr(_backend, "backend_name", None)
+            or getattr(_backend, "name", None)
+            or (type(_backend).__name__ if _backend is not None else None)
+        )
+
+        if pm is not None:
+            try:
+                pm.emit("on_run_start", {
+                    "prompt": prompt,
+                    "session": session,
+                    "backend": backend_name,
+                    "model": getattr(self, "model", None),
+                })
+            except Exception:
+                pass
+
+        try:
+            result = self._run_core(prompt, stream)
+        except Exception as e:
+            if pm is not None:
+                try:
+                    pm.emit("on_error", {
+                        "prompt": prompt,
+                        "session": session,
+                        "error": str(e),
+                        "exception": e,
+                    })
+                except Exception:
+                    pass
+            raise
+
+        if pm is not None:
+            try:
+                pm.emit("on_run_end", {
+                    "prompt": prompt,
+                    "session": session,
+                    "usage": {"total_tokens": getattr(result, "total_tokens", 0)},
+                    "duration_ms": getattr(result, "total_ms", 0),
+                })
+            except Exception:
+                pass
+
+        return result
+
+    def _run_core(self, prompt: str, stream: bool = False) -> AgentRun:
         """
         Run the agent on a prompt.
 

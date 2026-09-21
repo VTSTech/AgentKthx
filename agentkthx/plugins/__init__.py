@@ -1,11 +1,20 @@
 """
-AgentKthx Plugin System v0.1
+AgentKthx Plugin System v0.2
 
 Provides a directory-scan-based plugin architecture for extending AgentKthx
-with backends, CLI commands, configuration, and feature hooks.
+with backends, CLI commands, configuration, tools, and lifecycle hooks.
+Implements docs/PLUGIN_SPEC_v0.2.md:
 
-Plugins are discovered from ``agentkthx/plugins/`` directories that contain
-a ``plugin.json`` manifest.  Each plugin exposes ``register()`` and
+  - Multi-root discovery (package dir, ~/.agentkthx/plugins/,
+    $AGENTKTHX_PLUGIN_PATH)
+  - plugin.json manifests with $schema + extensions namespace
+    (org.vts-tech.agentkthx), legacy v0.1 top-level fields still accepted
+  - PLUGIN_ROOT / PLUGIN_DATA per plugin
+  - Warn-only compatibility enforcement
+  - Tool bridge (ToolRegistry) and lifecycle hooks with error isolation
+
+Plugins are discovered from plugin root directories that contain a
+``plugin.json`` manifest.  Each plugin exposes ``register()`` and
 ``unregister()`` entrypoints that the PluginManager calls during lifecycle.
 
 Core (native) backends -- ollama and llama-server -- are never treated as
