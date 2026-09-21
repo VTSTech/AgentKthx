@@ -1,6 +1,6 @@
 # Codebase Intelligence Brief: AgentKthx
 
-> Generated: 2026-09-21 | Auditor: Super-Z (Z.ai) | Commit: f0e48f1
+> Generated: 2026-09-20 | Auditor: Super Z (running codebase-audit skill v0.2.0) | Version: R06.41 (0.6.41)
 
 ---
 
@@ -8,91 +8,125 @@
 
 | Field | Value |
 |-------|-------|
-| **Purpose** | Minimal, hackable agentic framework for autonomous AI agents — runs locally with Ollama, in the cloud with ZAI/OpenRouter |
-| **Tech Stack** | Python 3.9+ (stdlib only — zero dependencies), argparse CLI, urllib for HTTP, SQLite for persistent memory |
-| **Entry Point** | `agentkthx/cli.py:main()` — CLI entry point; `agentkthx/__main__.py` for `python -m agentkthx` |
-| **Build/Run** | `pip install -e .` for dev; `pip install agentkthx` for PyPI; `agentkthx run/chat/agent` CLI binary |
-| **Test Command** | `pytest` — 506 tests across 11 test files, 245 passing, 3 skipped, 9 pre-existing failures |
+| **Purpose** | Minimal, hackable agentic framework for local LLM inference — zero dependencies, Python stdlib only |
+| **Tech Stack** | Python 3.9+ (stdlib only: urllib, sqlite3, argparse, json, re, ast, subprocess, pathlib) |
+| **Entry Point** | `agentkthx/__main__.py` → `agentkthx.cli:main()` — installed as `agentkthx` console script |
+| **Build/Run** | `pip install -e .` (dev) or `pip install agentkthx` (PyPI). Run with `agentkthx chat` / `agentkthx run "<prompt>"` / `python -m agentkthx ...` |
+| **Test Command** | `ZAI_API_KEY=test_dummy_key_12345 python -m pytest tests/ -q` (env var required for ZAI backend import) |
 
 ---
 
 ## Architecture Map
 
 ```
-agentkthx/
-├── cli.py              → CLI entry point, all subcommands (3478 lines — largest file)
-├── agent.py            → Agent class + agentic loop (1747 lines)
-├── config.py           → Central config from env vars
-├── shared_args.py      → Shared argparse arguments for run/chat/agent
-├── orchestrator.py     → Multi-agent router/pipeline/parallel modes
-├── agent_mode.py       → Autonomous agent mode (task planning)
-├── model_discovery.py  → Ollama model discovery + benchmarking
-├── turbo.py            → TurboQuant server management
-├── acp_plugin.py       → ACP plugin (duplicate of plugins/acp/)
-├── colors.py           → Terminal ANSI color helpers
-├── core/               → Core framework types + logic
-│   ├── types.py        → Enums: ApiMode, ThinkingLevel, BackendType, ToolSupportLevel
-│   ├── models.py       → Dataclasses: Tool, StepResult, AgentRun, ToolCall
-│   ├── helpers.py      → Security: sanitize_command, validate_path, is_safe_url (1003 lines)
-│   ├── memory.py       → Sliding window conversation memory
-│   ├── persistent_memory.py → SQLite-backed persistent memory
-│   ├── openresponses.py → OpenResponses spec implementation (1067 lines)
-│   ├── tool_parse.py   → ReAct/JSON tool call extraction
-│   ├── tool_cache.py   → Persistent tool support detection cache
-│   ├── model_family_config.py → Model family configs (stop tokens, prompts, thinking)
-│   ├── error_recovery.py → Retry-with-error-feedback logic
-│   ├── prompts.py      → System prompt builders, tool argument aliases
-│   ├── args_normal.py  → Argument normalization for small models
-│   └── math_prompts.py → Math-specific prompts + safe eval calculator
-├── backends/           → Inference backends (always available)
-│   ├── base.py         → BaseBackend ABC + BackendConfig
-│   ├── ollama.py       → OllamaBackend (1602 lines — native + OpenAI paths)
-│   ├── llama_server.py → LlamaServerBackend (923 lines)
-│   ├── bitnet.py       → BitNetBackend (deprecated wrapper of LlamaServerBackend)
-│   └── ollama_registry.py → Ollama model registry helpers
-├── plugins/            → Plugin system (loaded on demand)
-│   ├── _loader.py     → PluginManager singleton, discovery, loading
-│   ├── zai/           → ZAI cloud backend (Bearer auth, GLM models)
-│   ├── openrouter/    → OpenRouter backend (500+ models, 429 retry)
-│   ├── bitnet/        → BitNet plugin wrapper (wraps LlamaServerBackend)
-│   ├── acp/           → ACP (Agent Control Panel) integration
-│   ├── turboquant/    → TurboQuant server management
-│   └── test-plugin/   → Test backend plugin
-├── tools/             → Built-in tools (17 tools)
-│   ├── builtins.py     → shell, read_file, write_file, calculator, http_get, etc (1430 lines)
-│   ├── registry.py     → ToolRegistry, ToolParam
-│   └── sandboxed_repl.py → Sandboxed Python REPL
-├── soul/               → Soul Spec v0.5 persona system
-│   ├── loader.py       → SoulLoader, build_system_prompt (1066 lines)
-│   ├── types.py        → SoulManifest, Environment, InteractionMode dataclasses
-│   └── __init__.py     → Exports
-├── souls/              → Default soul packages
-│   ├── nova-helper/    → Default helper persona
-│   ├── nova-skills/    → Skill-guided assistant persona
-│   └── nova-trading/   → Trading analyst persona
-├── skills/             → AgentSkills spec
-│   ├── loader.py        → SkillLoader, SkillRegistry (734 lines)
-│   ├── codebase-audit/ → Codebase audit skill
-│   ├── crypto-signals/ → Crypto trading signal skill
-│   ├── skill-creator/  → Skill creation/validation toolkit
-│   └── test-harness/   → Diagnostic testing skill
-└── examples/          → 12 diagnostic/benchmark test scripts
+agentkthx/                    → Main package
+├── __init__.py               → Public API: Agent, Backends, Config, ACPPlugin
+├── __main__.py               → CLI entry: `python -m agentkthx`
+├── agent.py                  → Agent class — agentic loop, tool calling, JEV dispatch
+├── agent_mode.py             → AgentMode/AgentState/TaskPlan (R05.x agentic plan mode)
+├── orchestrator.py           → Multi-agent orchestrator (AgentCard, fallbacks)
+├── cli.py                    → CLI (3478 lines — flagged MAINT-01)
+├── colors.py                 → ANSI color helpers + glyph mode (AGENTKTHX_GLYPHS env var)
+├── config.py                 → Env-var-driven config (AGENTKTHX_* env vars)
+├── shared_args.py            → Shared argparse definitions + SharedConfig dataclass
+├── model_discovery.py        → Ollama model listing, fuzzy match, pick_best_model
+├── turbo.py                  → REMOVED in R06.41 (was duplicate of plugins/turboquant/turbo.py)
+├── acp_plugin.py             → REMOVED in R06.41 (was duplicate of plugins/acp/acp_plugin.py)
+│
+├── core/                     → Core utilities (no plugin coupling)
+│   ├── base.py               → (not present; backends/base.py is the backend base)
+│   ├── models.py             → Dataclasses: AgentRun, StepResult, Tool, ToolParam, ToolCall
+│   ├── types.py              → Enums: ApiMode (OPENRE/OPENAI/JEV), BackendType, StepResultType, ToolSupportLevel
+│   ├── memory.py             → In-memory conversation window (MemoryConfig, Message)
+│   ├── persistent_memory.py  → SQLite-backed memory (~/.agentkthx/memory.db)
+│   ├── helpers.py           → sanitize_command, validate_path, is_safe_url, normalize_tool_args
+│   ├── math_prompts.py       → Math system prompts + calculator_tool (uses safe_eval)
+│   ├── safe_eval.py          → NEW in R06.41: AST-walking evaluator (replaces eval())
+│   ├── tool_cache.py         → Tool support cache (~/.cache/agentkthx/tool_support.json)
+│   ├── tool_parse.py         → Tool-call string parsing (ReAct text format)
+│   ├── openresponses.py      → OpenResponses API envelope helpers
+│   ├── error_recovery.py     → Tool-call error feedback + retry logic
+│   ├── args_normal.py        → Argument normalization (fuzzy match, schema fixup)
+│   ├── model_config.py       → Per-model defaults (context size, max_tokens)
+│   ├── model_family_config.py → Family-based model defaults (qwen2, llama3, etc.)
+│   └── prompts.py            → System prompts (general, ReAct, planning)
+│
+├── backends/                 → Backend implementations
+│   ├── base.py               → BaseBackend + BackendConfig
+│   ├── ollama.py             → OllamaBackend (native + OpenAI-compatible)
+│   ├── llama_server.py       → LlamaServerBackend (native llama.cpp)
+│   ├── __init__.py            → _BACKENDS registry + get_backend(name) lazy plugin loader
+│   └── ollama_registry.py    → Ollama model catalog (sizes, families)
+│
+├── tools/                    → Built-in tools
+│   ├── __init__.py            → make_builtin_registry(), BUILTIN_REGISTRY
+│   ├── registry.py            → ToolRegistry class (subset, get, fuzzy match)
+│   ├── builtins.py            → calculator (uses safe_eval), shell (uses sanitize_command),
+│   │                          read_file, write_file, http_get (uses is_safe_url), python_repl,
+│   │                          list_files, todo_write, todo_read (per-session todos)
+│   └── sandboxed_repl.py     → subprocess-isolated Python REPL tool
+│
+├── plugins/                  → Plugin system (lazy-loaded)
+│   ├── __init__.py            → get_plugin_manager()
+│   ├── _loader.py             → PluginManager: scans plugins/*/plugin.json
+│   ├── acp/                   → ACP v1.0.6 (Agent Control Panel — monitoring/STOP/resume)
+│   ├── bitnet/                → BitNet backend (1.58-bit inference, routes to llama-server)
+│   ├── zai/                   → Z.AI API backend (GLM-4.x, GLM-5.x family)
+│   ├── openrouter/            → OpenRouter backend (500+ models via OpenAI-compat API)
+│   ├── turboquant/            → TurboQuant (quantized llama-server launcher)
+│   └── test-plugin/           → Test backend (for plugin-system tests)
+│
+├── soul/                     → Soul Spec v0.5 persona system
+│   ├── loader.py              → SoulLoader: parses soul.json + persona files
+│   ├── types.py               → SoulManifest dataclass, Environment, InteractionMode, etc.
+│   └── souls/                 → Built-in soul packages
+│       ├── nova-skills/       → Default skills-oriented persona
+│       ├── nova-helper/       → Helpful assistant persona
+│       └── nova-trading/      → Trading analyst persona
+│
+└── skills/                   → Built-in skills (audit, codebase-audit, crypto-signals, etc.)
+    ├── __init__.py
+    ├── loader.py              → Skill loader: compatibility check, prompt building
+    ├── codebase-audit/        → THIS skill (audit + brief generation)
+    ├── crypto-signals/        → Crypto market signal agent
+    ├── skill-creator/         → Meta-skill for creating new skills
+    └── test-harness/          → Multi-question benchmark harness
 
-# Redirect packages (backward compat)
-agentnova/              → Redirect stub → agentkthx
-localclaw/              → Redirect stub → agentkthx
+audit/                        → Audit materials (R06.41)
+├── audit.md                  → Current audit (R06.41)
+├── brief.md                  → Current brief (this file, R06.41)
+├── audit_r06.4.md            → Historical R06.4 audit (preserved for reference)
+└── brief_r06.4.md            → Historical R06.4 brief
 
-# Standalone PyPI redirect packages
-agentnova-redirect/     → PyPI package: "agentnova" depends on agentkthx
-localclaw-redirect/     → PyPI package: "localclaw" depends on agentkthx
+docs/                         → Documentation
+├── ARCH.md                   → Technical architecture doc
+├── CHANGELOG.md              → Version history (R06.41 entry covers 5 closed findings)
+├── old_CHANGELOG.md          → Pre-R06.0 historical changelog
+├── PLUGIN_SPEC.md            → Plugin manifest format spec
+├── JEV_API_MODE.md           → JEV (System-One) decision API mode
+├── ZAI_API_TECHNICAL_REFERENCE.md → ZAI API reference
+├── OPENROUTER_API_TECHNICAL_REFERENCE.md → OpenRouter API reference (has stale AGENTNOVA_ refs — MAINT-03)
+├── TESTS.md                  → Benchmark results (R04.5 era, stale)
+├── CREDITS.md               → Credits/acknowledgments
+└── brief.md                  → REMOVED in R06.41 (moved to audit/)
+
+agentnova/                    → Redirect stub package (deprecated, kept for compat)
+localclaw/                   → Redirect stub package (deprecated, kept for compat)
+agentnova-redirect/           → Standalone PyPI package for the agentnova redirect
+localclaw-redirect/           → Standalone PyPI package for the localclaw redirect
+
+patches/                      → Manual patch files (turbo_v_padding fix, etc.)
+tests/                        → Test suite (8 files, 435 tests)
+AgentKthx.ipynb              → Jupyter notebook demo
+pyproject.toml                → Package config (version 0.6.41)
 ```
 
 ### Skip List
 
-- `__pycache__/`, `.git/`, `.pytest_cache/`
-- `agentkthx/examples/` — diagnostic scripts, not core
-- `audit/` — screenshot images from earlier testing
-- `patches/` — historical patches for turboquant
+- `agentnova/`, `localclaw/`, `*-redirect/` — redirect stubs, kept for compat (separate concern from MAINT-02)
+- `agentkthx/skills/skill-creator/scripts/` — template scripts with TODO placeholders (by design)
+- `docs/old_CHANGELOG.md`, `audit/audit_r06.4.md`, `audit/brief_r06.4.md` — historical records
+- `__pycache__/`, `.pytest_cache/`, `*.egg-info/`, `*.egg-link`
 
 ---
 
@@ -100,43 +134,42 @@ localclaw-redirect/     → PyPI package: "localclaw" depends on agentkthx
 
 | File | Purpose | Why It Matters |
 |------|---------|----------------|
-| `agentkthx/cli.py` | CLI entry point, all subcommands | 3478 lines — every command, slash command, and display logic lives here. `/param`, `/skills`, `/status`, chat loop, run loop all in this file |
-| `agentkthx/agent.py` | Agent class + agentic loop | 1747 lines — the core reasoning loop, tool execution, memory management, JEV dispatch, thinking controls |
-| `agentkthx/backends/ollama.py` | OllamaBackend | 1602 lines — largest backend. Contains `generate()`, `generate_completions()`, `generate_stream()`, `generate_decision()`, `_maybe_jev_dispatch()`, `_jev_call_completions()`. Also the parent class for ZAI and OpenRouter backends |
-| `agentkthx/core/helpers.py` | Security utilities | 1003 lines — `sanitize_command()`, `validate_path()`, `is_safe_url()`, command blocklist, injection detection |
-| `agentkthx/tools/builtins.py` | 17 built-in tools | 1430 lines — shell, read_file, write_file, edit_file, calculator, http_get, python_repl, web_search, etc |
-| `agentkthx/plugins/zai/zai.py` | ZAI backend | 993 lines — Bearer auth, GLM model catalog, `_generate_with_auth()`, `_jev_call_completions()` |
-| `agentkthx/plugins/openrouter/openrouter.py` | OpenRouter backend | 1103 lines — 429 retry, model cache, `_make_api_request()`, `_parse_openai_response()` |
-| `agentkthx/config.py` | Central config | All env var defaults live here. `AGENTNOVA_*` env vars (kept for backward compat) |
-| `agentkthx/core/types.py` | Enums | `ApiMode` (OPENRE/OPENAI/JEV), `ThinkingLevel` (OFF/AUTO/LOW/MEDIUM/HIGH), `BackendType`, `ToolSupportLevel` |
-| `agentkthx/shared_args.py` | Shared CLI args | `add_agent_args()` — all flags shared by run/chat/agent commands |
+| `agentkthx/agent.py` (1747 lines) | Agent class — agentic loop | The agent's `run()` is the entry point for every prompt. Tool calls, JEV dispatch, thinking controls, runtime kwargs all live here. Touch this for any agent-behavior change. |
+| `agentkthx/cli.py` (3478 lines) | CLI — all subcommands, slash commands, banner, footer | Flagged MAINT-01 (monolithic). Any CLI change lands here. Split is a known refactor target. |
+| `agentkthx/backends/ollama.py` (1602 lines) | OllamaBackend — native + OpenAI mode | Parent of ZAI/OpenRouter backends (flagged ARCH-01). JEV dispatch (`_maybe_jev_dispatch`) lives here and is inherited. Touch for any backend behavior change. |
+| `agentkthx/core/helpers.py` (1129 lines) | Security utilities + arg normalization | `sanitize_command()` (blocklist + DANGEROUS_FLAG_COMBOS), `validate_path()`, `is_safe_url()`, `normalize_tool_args()`. The security boundary — read before touching tool security. |
+| `agentkthx/core/safe_eval.py` (NEW, ~280 lines) | AST-walking math expression evaluator | NEW in R06.41 (SEC-01 fix). Replaces `eval()` everywhere. Only allows: numeric literals, names from allowlist, BinOp/UnaryOp/BoolOp/Compare/IfExp/Call. Rejects `ast.Attribute`, `ast.Subscript`, `ast.Lambda`, comprehensions, f-strings, walrus. |
+| `agentkthx/config.py` | Central config — all `AGENTKTHX_*` env vars | Single source of truth for env-var-driven config. Edit here when adding a new env var. |
+| `agentkthx/tools/builtins.py` (1334 lines) | Built-in tools — calculator, shell, file I/O | Calculator uses `safe_eval`; shell uses `sanitize_command`; file I/O uses `validate_path`. The tool surface. |
+| `agentkthx/plugins/openrouter/openrouter.py` (1103 lines) | OpenRouter backend | Inherits OllamaBackend. Has its own `_jev_call_completions` (ARCH-01 fragile inheritance). Has the `_api_mode` test-bypass issue (fixed in tests but production hardening deferred). |
+| `agentkthx/soul/loader.py` (1066 lines) | Soul manifest loader | Has fallback paths to `agentkthx.__file__` (fixed in R06.41 from `agentnova.__file__` NameError bug). |
 
 ---
 
 ## Request / Execution Lifecycle
 
 ```
-1. User runs: agentkthx run/chat/agent "prompt" --backend X --api Y
-2. cli.py: create_parser() → parse args → _build_agent() → Agent(...)
-3. Agent.run(prompt, stream=bool)
-4. Agent._generate() → backend.generate(model, messages, tools, **kwargs)
-5. Backend dispatches:
-   ├── api_mode == JEV → _maybe_jev_dispatch() → generate_decision()
-   ├── api_mode == OPENAI → generate_completions()
-   └── api_mode == OPENRE → native /api/chat (Ollama) or _generate_with_auth() (ZAI)
-6. Response parsed → content + tool_calls + reasoning_content
-7. If tool_calls: execute tools → add observation to memory → loop (step 4)
-8. If no tool_calls: accept as final answer → return AgentRun
-9. CLI displays: final_answer + optional reasoning_content (if --think)
-```
-
-JEV mode flow:
-```
-generate() → _maybe_jev_dispatch() → generate_decision()
-  → _build_jev_messages() [system prompt + user state]
-  → _jev_call_completions() [per-backend: ZAI→_generate_with_auth, OR→self.generate()]
-  → _parse_jev_response() [JSON parsing, probability clamping, fuzzy matching]
-  → return {decision, probability, alternatives, usage, reasoning_content}
+1. User runs: `agentkthx run "<prompt>"` or `agentkthx chat`
+2. cli.py:cmd_run / cmd_chat → _build_agent() factory
+3. _build_agent():
+   a. Parse --backend, --model, --tools, --soul, --skills
+   b. backends.get_backend(name) → lazy-loads plugin if needed
+   c. tools.make_builtin_registry().subset([...])
+   d. (optional) soul.loader.load_soul(path)
+   e. (optional) skills.loader.load_skill(name)
+   f. Agent(model=..., tools=..., soul=..., ...)
+4. agent.run(prompt):
+   a. Build system prompt (base + soul + skills + ReAct instructions)
+   b. Loop (max_steps):
+      i.   backend.generate(messages, tools=...) → response dict
+      ii.  If JEV mode: _maybe_jev_dispatch() → generate_decision() → JSON envelope
+      iii. Parse response: extract content + tool_calls
+      iv.  If tool_calls: dispatch via ToolRegistry, capture results
+      v.   Append assistant message + tool results to memory
+      vi.  If final_answer: break
+   c. Return AgentRun(final_answer, steps, total_tokens, total_ms, ...)
+5. cli.py:_print_agent_steps(run, debug) — surfaces tool calls + results
+6. (chat mode) Read next user input; loop back to step 4
 ```
 
 ---
@@ -144,21 +177,24 @@ generate() → _maybe_jev_dispatch() → generate_decision()
 ## Dependency Graph
 
 ```
-cli.py → shared_args.py → config.py
-cli.py → agent.py → backends/*.py → core/helpers.py (security)
-cli.py → agent.py → core/memory.py → core/persistent_memory.py
-agent.py → core/openresponses.py → core/models.py → core/types.py
-agent.py → backends/ollama.py ← plugins/zai/zai.py (inherits)
-agent.py → backends/ollama.py ← plugins/openrouter/openrouter.py (inherits)
-plugins/_loader.py → plugins/*/plugin.json (manifests)
-cli.py → skills/loader.py → skills/*/SKILL.md
-agent.py → soul/loader.py → souls/*/soul.json
-```
+cli.py → agent.py → backends/* + tools/* + core/*
+                       │
+                       ├─ backends/ollama.py ← (parent of) plugins/zai, plugins/openrouter
+                       │                       (ARCH-01: fragile inheritance)
+                       │
+                       ├─ tools/builtins.py → core/helpers.py (sanitize_command, validate_path)
+                       │                   → core/safe_eval.py (calculator tool)
+                       │
+                       └─ core/helpers.py → core/safe_eval.py (normalize_tool_args)
+                                          (helpers.py:822 uses safe_eval — R06.41 fix)
 
-Key coupling points:
-- ZAI and OpenRouter backends both inherit from OllamaBackend — changes to OllamaBackend affect all three
-- `agent.py` references `_maybe_jev_dispatch()` and `generate_decision()` which live on OllamaBackend
-- CLI is monolithic — all slash commands and display logic in one 3478-line file
+plugins/_loader.py → discovers plugins/*/plugin.json at startup
+                    → backends/__init__.py:get_backend() lazy-loads on demand
+
+soul/loader.py → agentkthx.__file__ (R06.41 fix — was agentnova.__file__ NameError)
+
+skills/loader.py → checks frameworks: ["agentnova", ...] (kept for compat — separate concern)
+```
 
 ---
 
@@ -166,28 +202,38 @@ Key coupling points:
 
 | Aspect | Pattern |
 |--------|---------|
-| Error handling | `except Exception` used 119 times; 2 bare `except:` (helpers.py:833, orchestrator.py:279) |
-| Backend inheritance | ZaiBackend(OpenaiBackend), OpenRouterBackend(OllamaBackend) — share generate_completions() |
-| Config | All env vars prefixed `AGENTNOVA_*` (kept for backward compat from rename) |
-| Security | `--security max|off` runtime toggle; command blocklist + injection detection in sanitize_command() |
-| Memory | Sliding window (default 50 messages); SQLite persistent mode via `--session` |
-| Thinking | `--thinking off\|auto\|low\|medium\|high` → `parse_thinking_arg()` → `(think, reasoning_effort)` |
-| Plugin discovery | Directory scan `plugins/*/plugin.json`, no pip install required |
-| Tool support | Auto-detected: NATIVE (API tools), REACT (text parsing), NONE (pure reasoning) |
-| Redirect stubs | `agentnova` and `localclaw` packages re-export from `agentkthx` with DeprecationWarning |
+| **Config** | Env-var-driven; module-level constants in `config.py`. `AGENTKTHX_*` prefix (renamed from `AGENTNOVA_*` in R06.41; no aliases kept). |
+| **Backend abstraction** | `BaseBackend` abstract class. Native backends (`OllamaBackend`, `LlamaServerBackend`) eager-loaded. Plugin backends (`ZaiBackend`, `OpenRouterBackend`, `BitnetBackend`) lazy-loaded via `PluginManager`. |
+| **API modes** | `ApiMode` enum: `OPENRE` (OpenResponses, native), `OPENAI` (Chat Completions), `JEV` (System-One decision wrapper). JEV is API-mode, not backend — any chat-capable backend can produce Jev-shaped decisions. |
+| **Tool calling** | Three-tier: native (function-calling API), ReAct (text-based `<tool>...</tool>`), none (auto-detected via `test_tool_support`). |
+| **Memory** | `Memory` (in-memory sliding window) + `PersistentMemory` (SQLite-backed, survives restarts). Both subclassable. |
+| **Security** | Defense-in-depth: `sanitize_command()` (blocklist + `DANGEROUS_FLAG_COMBOS` + injection regex) → `validate_path()` (allowed dirs + traversal prevention) → `is_safe_url()` (SSRF blocklist + IPv6 hostname extraction). Runtime toggle via `--security max\|off`. |
+| **Math eval** | `safe_eval()` AST walker (R06.41) — no `eval()` in production. Rejects `ast.Attribute`/`ast.Subscript` outright. |
+| **Plugin discovery** | Directory scan: `plugins/*/plugin.json` manifest. No pip-install or entry points needed — drop a folder to add a backend. |
+| **Naming** | `snake_case` for vars/funcs, `PascalCase` for classes, `UPPER_SNAKE` for constants. `~/.agentkthx/` for user data (renamed from `~/.agentnova/` in R06.41). |
+| **Tests** | pytest. Mocked unit tests only (TEST-01: no integration tests). 435 tests collected, 429 pass, 6 skip (all with explicit `@pytest.mark.skip(reason=...)`). |
 
 ---
 
 ## Known Landmines
 
-- **`cli.py` is 3478 lines** — adding any new feature requires touching this file. No module splitting for slash commands, display logic, or agent construction.
-- **Duplicate files**: `agentkthx/acp_plugin.py` is a near-exact copy of `agentkthx/plugins/acp/acp_plugin.py` (only import paths differ). Same for `agentkthx/turbo.py` vs `agentkthx/plugins/turboquant/turbo.py`.
-- **`eval()` in calculator**: `core/math_prompts.py:220` and `core/helpers.py:820` use `eval()` with `{"__builtins__": {}}` — safe-ish but can be bypassed with carefully crafted AST. The calculator is the only tool that evaluates user input.
-- **`shell=True` in subprocess**: `tools/builtins.py:295` runs `subprocess.run(validated_cmd, shell=True)`. Security relies entirely on `sanitize_command()` blocklist + injection detection. With `--security off`, all checks are disabled and the model can run any command.
-- **ZAI's `thinking` object format**: ZAI uses `{"type": "disabled"}` not a bare `think=false`. If you forget to convert, `--thinking off` silently does nothing (was a real bug in R06.3).
-- **OpenRouter JEV recursion**: `_jev_call_completions()` calls `self.generate()` which calls `_maybe_jev_dispatch()`. Must temporarily flip `_api_mode` to `OPENAI` to avoid infinite recursion (was a real bug in R06.2).
-- **`agentnova` redirect stub**: `__all__` in `agentkthx/__init__.py` must stay in sync with actual imports. A pre-existing mismatch (OPENROUTER_* listed but not imported) was only caught when the redirect stub did `from agentkthx import *`.
-- **9 pre-existing test failures**: `tests/test_r048_changes.py` (8 failures — module path `agentnova.backends.zai` no longer exists) and `tests/test_security.py` (1 failure — IPv6 loopback SSRF detection). These were broken before the R06.0 rename and haven't been fixed.
+- **`agentkthx/cli.py` is 3478 lines** (MAINT-01) — any CLI feature change lands in this single file. The `/param` matrix is ~100 inline lines. Split into `cli/parser.py`, `cli/chat.py`, `cli/display.py`, `cli/agent_factory.py`, `cli/params.py` is the audit's recommendation.
+
+- **`OllamaBackend` is the parent of `ZaiBackend` and `OpenRouterBackend`** (ARCH-01) — backend-specific changes (e.g., `_jev_call_completions`) must be carefully threaded through the inheritance. The R06.2 OpenRouter JEV recursion bug was caused by this coupling. Extract an `OpenAICompatibleBackend` mixin to decouple.
+
+- **`OllamaBackend._maybe_jev_dispatch()` accesses `self._api_mode` without a `hasattr` guard** — line 590: `if self._api_mode != ApiMode.JEV:`. Line 1403 uses `hasattr(self, "_api_mode")` defensively. If a test bypasses `__init__` via `__new__` (as some do), `_api_mode` is missing → `AttributeError`. The test-side fix is in place (set `b._api_mode = ApiMode.OPENAI`); production-side hardening is deferred.
+
+- **`docs/OPENROUTER_API_TECHNICAL_REFERENCE.md` references `AGENTNOVA_*` env vars** (MAINT-03, NEW in R06.41) — lines 633-635 still say `AGENTNOVA_BACKEND=openrouter` etc. The MAINT-02 rename missed this doc. Low severity but inconsistent.
+
+- **`skills/loader.py:118,127` accepts `"agentnova"` as a framework identifier** — kept intentionally (existing skill manifests may declare `frameworks: ["agentnova"]` in their `soul.json`). Adding `"agentkthx"` as an accepted alias is a separate enhancement, not a bug.
+
+- **`agentkthx/soul/loader.py:77,103` references `agentkthx.__file__`** — fixed in R06.41 from a `NameError` bug (the file imported `agentkthx` but referenced `agentnova.__file__`). Watch for similar leftover `agentnova.` references if touching this file.
+
+- **`agentnova/` and `localclaw/` redirect stub packages** are kept for backward compat — `import agentnova` still works (emits DeprecationWarning). Separately published as their own PyPI packages (`agentnova-redirect/`, `localclaw-redirect/`). Don't touch unless doing a deprecation cycle.
+
+- **`ACP plugin "source" field is `"agentnova"`** in `plugins/acp/acp_plugin.py:781` — sent to external ACP servers as an identifier. Kept intentionally (wire-format contract).
+
+- **Test isolation issue**: some tests mutate `ZAI_API_KEY` env var or `agentkthx.config.ZAI_API_KEY` module attribute without restoring. Now-historical (the affected test file was deleted in R06.41).
 
 ---
 
@@ -195,38 +241,41 @@ Key coupling points:
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| Zero dependencies | Python stdlib only (urllib, sqlite3) | Hackable, no dependency hell, works in minimal environments |
-| Plugin system | Directory scan, not pip install | Simpler for local-first users; no virtualenv management |
-| Env var names | Kept `AGENTNOVA_*` (not renamed to `AGENTKTHX_*`) | Backward compat with existing user configs after rename |
-| Filesystem paths | Kept `~/.agentnova/` (not renamed) | Existing SQLite sessions + tool cache continue to work |
-| JEV mode | Emulation via any LLM (not native TypeSafe Jev API) | Free models only; no TypeSafe API key or waitlist required |
-| Default max-steps | 25 (was 10) | Enough for codebase audits; not so high that infinite loops burn tokens |
-| Default streaming | Cloud providers stream, local don't | Cloud feels faster with streaming; local Ollama is fast enough non-streaming |
-| `think` parameter | ZAI uses `{"type": "disabled"}` object; Ollama uses bare `think=false`; OpenRouter ignores it | Each backend has different thinking model APIs |
+| **Zero dependencies** | stdlib only (urllib, sqlite3, ast, etc.) | Eliminates supply chain, version conflicts. Installable in any Python 3.9+ env. |
+| **Plugin discovery** | Directory scan of `plugins/*/plugin.json` | Local-first users can drop a backend folder without `pip install` or entry points. |
+| **`shell=True` kept in subprocess** | Accepted-risk + `DANGEROUS_FLAG_COMBOS` hardening (SEC-02) | Threat model is "model makes a casual mistake", not "determined adversary". `shell=False` would break agent workflows (pipes, redirects) for a threat that doesn't manifest. Power users opt out via `--security off` for trusted models. |
+| **`AGENTNOVA_*` env vars dropped (not aliased)** | No backward-compat aliases | User explicitly opted in ("we don't have many users"). Clean rename; `AGENTKTHX_*` is the only namespace. |
+| **`agentnova/` redirect stub kept** | Backward-compat for `import agentnova` | Downstream users may still `import agentnova`. Separate deprecation-cycle concern. |
+| **JEV as `ApiMode`, not a separate `JevBackend`** | `ApiMode.JEV` sibling of `openre`/`openai` | Any chat-capable backend can produce Jev-shaped decisions by wrapping `generate_completions()`. `_jev_call_completions()` hook per-backend routes through own auth. |
+| **`ThinkingLevel` enum + `parse_thinking_arg()` helper** | Enum + parser + per-backend forwarding | Clean separation: user-facing enum, parser maps to `(think, reasoning_effort)` tuple, each backend forwards the right fields. |
+| **`safe_eval()` rejects strings** | AST walker blocks non-numeric literals | Strings aren't needed for math; closing the surface prevents attribute-name-construction payloads. |
 
 ---
 
 ## What's Missing / Incomplete
 
-- **Streaming display**: `agent.run(stream=True)` accepts the param but never uses it — always runs non-streaming path. `run_stream()` exists but yields SSE events, not console output. Real streaming display (typewriter effect + live tool call display) is not implemented.
-- **No integration tests**: All tests are unit tests with mocks. No end-to-end test that exercises a full agent run with a real backend.
-- **`acp_plugin.py` and `turbo.py` duplicates**: Two copies exist — one at repo root, one in `plugins/`. Should be consolidated.
-- **9 broken tests**: `test_r048_changes.py` references `agentnova.backends.zai` (old path). `test_security.py` IPv6 loopback test fails. Pre-existing, not caused by R06.x changes.
-- **No OpenRouter `stream_options.include_usage`**: Streaming responses have no token usage info.
-- **No `provider` routing preferences**: Can't pin to specific OpenRouter providers or control failover.
-- **No `transforms` or `plugins` support**: OpenRouter's middle-out truncation and web search plugins not wired.
-- **`/param` matrix is hardcoded**: Adding a new parameter requires editing the inline dict in `cmd_chat`. Not extensible via plugin system.
-- **No coverage measurement**: `pytest --cov` not configured; actual coverage unknown.
+- **`cli.py` split** (MAINT-01) — 3478-line monolith. No modules split yet.
+- **Streaming UX** (PERF-01) — `Agent.run(stream=True)` accepts the param but ignores it. Users see a spinner until the full response arrives. Cloud-provider users don't get typewriter-style streaming output.
+- **OpenRouter `stream_options.include_usage`** (PERF-02) — not sent on streaming requests; token counts show 0 for streamed responses.
+- **OpenRouter provider routing** (FEAT-01) — no `provider.order` / `provider.ignore` / `provider.data_collection` flags. Users can't pin to free providers or avoid specific ones.
+- **`/param` matrix extensibility** (FEAT-02) — hardcoded inline in `cmd_chat()`. Plugins can't register new params.
+- **Backend inheritance decoupling** (ARCH-01) — `OpenAICompatibleBackend` mixin extraction not done. R06.2 OpenRouter JEV recursion bug class still possible.
+- **Coverage measurement** (ARCH-02) — no `pytest-cov` configured. Actual coverage percentage unknown.
+- **Integration tests** (TEST-01) — all 435 tests are mocked. No real HTTP calls, no end-to-end agent loop, no CLI subprocess tests.
+- **`docs/OPENROUTER_API_TECHNICAL_REFERENCE.md` stale AGENTNOVA_ refs** (MAINT-03, NEW) — three lines still reference the old env var names.
+- **`docs/TESTS.md`** — R04.5 era benchmark tables; references models that have been renamed. Could be archived or refreshed.
+- **PrintAgentSteps output capture** (2 tests skipped) — `_print_agent_steps` likely uses `rich.Console` or stderr; `sys.stdout` capture in tests misses output. Functionality works interactively; capture mechanism needs investigation.
 
 ---
 
 ## Quick Start for Developer
 
-1. Read the Critical Files Index above — start with `cli.py`, `agent.py`, `backends/ollama.py`
-2. Understand the Request Lifecycle — `_build_agent()` → `Agent.run()` → `backend.generate()` → response
-3. Check Known Landmines — especially the JEV recursion guard and ZAI thinking object format
-4. Follow Patterns & Conventions — zero deps, env var backward compat, plugin directory scan
-5. If touching backends, check the inheritance chain: ZAI/OpenRouter inherit from OllamaBackend
-6. If touching CLI, note that `cli.py` is 3478 lines — consider whether a new module would help
+1. **Read the Critical Files Index above** — start with `agent.py` (agent loop) and `cli.py` (CLI surface).
+2. **Understand the Request Lifecycle** — `cmd_run` → `_build_agent` → `agent.run` → `backend.generate` → tool dispatch → final answer.
+3. **Check Known Landmines** — especially `cli.py` size, backend inheritance coupling, `_api_mode` `hasattr` gap.
+4. **Follow Patterns & Conventions** — `AGENTKTHX_*` env vars (no `AGENTNOVA_*` aliases), `safe_eval()` for math (no `eval()`), `sanitize_command()` for shell (blocklist + flag-combos).
+5. **If changing a critical file**, check the Dependency Graph for blast radius — `backends/ollama.py` changes affect ZAI + OpenRouter via inheritance.
 
 Do NOT start by reading every file. Use this brief as your map and read only what you need for your specific task.
+
+**Test first, push second**: `ZAI_API_KEY=test_dummy_key_12345 python -m pytest tests/ -q` should report `429 passed, 6 skipped`. If anything fails, you broke something.
