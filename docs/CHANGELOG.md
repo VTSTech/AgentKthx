@@ -5,7 +5,7 @@ All notable changes to AgentKthx will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] - fixes pending user testing
+## [R06.52] - 2026-09-21 1:46:06 PM
 
 ### 🛡️ **API Resilience — rate limits no longer kill agentic runs**
 
@@ -31,8 +31,6 @@ Free-tier OpenRouter models (`:free`) return HTTP 429 "Provider returned error" 
 - **Chat mode explains how to resume.** When the final failure was throttling, chat now prints: the run was paused by sustained rate limiting, the conversation history is intact, and sending `continue` resumes where it stopped — plus the `:free`-model tip (`AGENTKTHX_MAX_API_RETRIES` / `OPENROUTER_MAX_429_RETRIES`). The generic `(empty response)` advice remains only for genuinely empty-but-successful runs.
 
 **Tests** — 39 new tests in `tests/test_api_resilience.py` (transient/permanent classification, back-off schedule and jitter, env parsing, rate-limit-then-success completion, step-budget preservation, permanent-error fail-fast, sustained-failure graceful termination, history validity after API-failure termination, plugin 429/502 retry with mocked HTTP, non-retryable 400/401, default retry budget) plus error-kind classification, terminal-message formatting, and always-printed pause notices for `run()`/`run_stream()`.
-
-## [R06.52] - 2026-09-21
 
 ### 🔁 **Loop Resilience — the codebase-audit death-spiral fix**
 
