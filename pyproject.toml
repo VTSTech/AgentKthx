@@ -79,7 +79,7 @@ ollama = "agentkthx.backends.ollama:OllamaBackend"
 include = ["agentkthx", "agentkthx.*", "agentnova", "localclaw"]
 
 [tool.setuptools.package-data]
-agentkthx = ["py.typed", "skills/*/SKILL.md", "souls/*/soul.json", "souls/*/*.md", "plugins/*/plugin.json"]
+agentkthx = ["py.typed", "skills/*/SKILL.md", "souls/*/soul.json", "souls/*/*.md", "plugins/*/plugin.json", "schemas/v0.2/plugin.schema.json"]
 
 [tool.black]
 line-length = 100
