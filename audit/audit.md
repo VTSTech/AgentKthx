@@ -9,9 +9,10 @@
 > **Status (R06.41):** ROB-01 ✓ fixed, MAINT-02 ✓ fixed (env vars + paths renamed),
 > ROB-03 ✓ fixed (45 → 0 failures via root-cause fixes + stale-test cleanup),
 > SEC-01 ✓ fixed (new `core/safe_eval.py` AST walker; `eval()` removed from
-> production source). See `docs/CHANGELOG.md` R06.41 entry for full details.
-> Remaining findings (SEC-02, ROB-02, PERF-01/02, FEAT-01/02, ARCH-01/02,
-> TEST-01, MAINT-01) are still open.
+> production source), SEC-02 ✓ accepted-risk + modestly hardened (threat model
+> documented; `DANGEROUS_FLAG_COMBOS` extended; `shell=False` deferred).
+> See `docs/CHANGELOG.md` R06.41 entry for full details. Remaining findings
+> (ROB-02, PERF-01/02, FEAT-01/02, ARCH-01/02, TEST-01, MAINT-01) are still open.
 
 ---
 
@@ -90,14 +91,33 @@ The `math_prompts.py` usage does parse the AST first and validates function name
 | **Severity** | Medium |
 | **Category** | Security |
 | **File(s)** | `agentkthx/tools/builtins.py:295` |
+| **Status (R06.41)** | **Accepted-risk (Option A) + modestly hardened (Option B)** |
 
 The `shell()` tool executes commands via `subprocess.run(validated_cmd, shell=True)`. Security relies on `sanitize_command()` which implements a command blocklist (`BLOCKED_COMMANDS` set) and injection pattern detection (regex for `;`, `|`, `&&`, `||`, backticks, `$()`, `${}`, `>`, `<`). With `--security off`, all checks are disabled and the model can run any command.
 
 The blocklist approach is inherently incomplete — new dangerous commands can be added by upstream packages (e.g., `busybox rm`, `python -c "import os; os.system('rm -rf /')"`, `perl -e "system('...')"`). The injection detection regex catches common patterns but misses Unicode-based bypass, hex encoding, and nested quoting tricks. The `shell=True` flag itself is the root issue — it invokes `/bin/sh -c` which interprets the entire command string.
 
-**Recommendation:** Use `shell=False` with `shlex.split()` for command parsing. This prevents shell metacharacter interpretation entirely. For commands that genuinely need pipes/redirects, require the model to use explicit tool calls (e.g., `write_file` for output redirection) rather than shell syntax. Document this as a deliberate trade-off: less flexible but much harder to exploit.
+**Original recommendation (audit, R06.4):** Use `shell=False` with `shlex.split()` for command parsing. This prevents shell metacharacter interpretation entirely. For commands that genuinely need pipes/redirects, require the model to use explicit tool calls (e.g., `write_file` for output redirection) rather than shell syntax.
 
-**Impact:** With `--security max`, the blocklist provides reasonable defense-in-depth. With `--security off`, the model has unrestricted shell access — by design, but the risk surface is the entire OS.
+**Resolution (R06.41 — accepted-risk + modest hardening):** After review, the project maintainer determined that the audit's threat model (determined adversary crafting payloads) doesn't match AgentKthx's actual threat model (the model itself making a casual mistake). Anyone prompting the model is a user of the same system it would break — they have no incentive to bypass the blocklist, and a model that gets an initial refusal rarely pivots to a bypass technique to "achieve the goal anyway". Switching to `shell=False` would break legitimate agent workflows (pipes, redirects) for a threat that doesn't manifest in practice.
+
+Two mitigations were applied instead:
+
+1. **Documented the threat model** in `core/helpers.py:sanitize_command()` docstring + a new multi-paragraph comment above `BLOCKED_COMMANDS`. The docstring now explicitly states that the function is a guardrail against model mistakes, not a defense against determined prompt injection. Future contributors will understand why `shell=True` was kept.
+
+2. **Modestly extended the blocklist** with a new `DANGEROUS_FLAG_COMBOS` dict — context-aware blocks on otherwise-safe commands paired with dangerous flags:
+   - `find -exec` / `-execdir` / `-delete` (arbitrary command execution + mass deletion)
+   - `xargs rm` / `mv` / `dd` / `shred` / `rmdir` (chained destructive operations)
+   - `python -c` and `python3 -c` (inline code execution)
+   - `perl -e` and `ruby -e` (inline interpreter)
+   - `awk system(...)` (shell exec from inside awk script)
+   - `tar --use-compress-program=X` and `tar -I X` (arbitrary compressor execution)
+   - `cp /dev/null <file>` (file-truncation trick)
+   - Also added `busybox` to `BLOCKED_COMMANDS` outright (universal multi-call binary bypasses per-binary blocks)
+
+These cover the most common prompt-injection primitives (the gap the audit specifically called out) without breaking legitimate uses of the underlying commands. A determined adversary can still construct bypasses (Unicode normalization, base64-decoded payloads, brace expansion) — for that threat, `--security max` AND validation/sanitization of tool output before display to the model is the recommended defense-in-depth.
+
+**Impact (revised):** With `--security max`, the blocklist + flag-combo check catches the obvious model-mistake and prompt-injection-via-tool-output payloads. With `--security off`, the model has unrestricted shell access — by design (power-user escape hatch for trusted models). Switching to `shell=False` remains a future hardening option if the threat model ever shifts toward adversarial users or untrusted content pipelines.
 
 ---
 

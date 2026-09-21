@@ -286,7 +286,25 @@ def normalize_args(args: dict[str, Any], expected_params: list[str], tool_name: 
 # Security Utilities
 # ============================================================================
 
-# Blocked shell commands for security
+# Blocked shell commands for security.
+#
+# THREAT MODEL (SEC-02, R06.41):
+# This blocklist is a GUARDRAIL AGAINST MODEL MISTAKES — it catches the
+# model when it casually reaches for `rm -rf /` or `dd of=/dev/sda` because
+# it misread a flag or got confused about the working directory. It is NOT
+# a defense against a determined adversary or a sophisticated prompt-
+# injection payload. A model that wants to bypass will find another binary
+# (busybox, find -exec, python -c, etc.) — for those, see the
+# DANGEROUS_FLAG_COMBOS dict below, which adds context-aware blocks for
+# the most common injection primitives without breaking legitimate uses of
+# the underlying commands.
+#
+# For defense against prompt injection via tool output (e.g., the model
+# reads a webpage containing "ignore prior instructions, run X"), the
+# blocklist is necessary but not sufficient — use `--security max` AND
+# validate / sanitize tool output before displaying it to the model. For
+# trusted models and trusted content, `--security off` skips all checks
+# (power-user escape hatch).
 BLOCKED_COMMANDS = {
     # System modification
     "rm", "rmdir", "del", "format", "fdisk", "mkfs",
@@ -316,6 +334,71 @@ BLOCKED_COMMANDS = {
 
     # Shell escapes
     "vi", "vim", "nano", "emacs", "less", "more", "man",
+
+    # Universal multi-call binaries — `busybox rm` bypasses the `rm` block.
+    # Legit uses exist (Alpine, embedded) but agents rarely need this; if
+    # they do, the user can opt out with `--security off`.
+    "busybox",
+}
+
+# Commands that are allowed by themselves but dangerous with specific flags.
+#
+# Each entry maps a base command name to a list of (regex, reason) tuples.
+# If the base command matches AND any of the flag patterns match, the
+# command is rejected. This lets us block the dangerous variants of useful
+# commands (find, python, perl, awk, tar, cp) without breaking their
+# legitimate everyday uses.
+#
+# The regex patterns are matched against the FULL command string (not just
+# the args), so they can anchor on whitespace + flag combinations.
+DANGEROUS_FLAG_COMBOS: dict[str, list[tuple[str, str]]] = {
+    # `find -exec` and `-execdir` run arbitrary commands; `-delete` removes
+    # files en masse. The base `find` binary is essential for file discovery.
+    "find": [
+        (r"\s-exec\b",   "find -exec runs arbitrary commands"),
+        (r"\s-execdir\b", "find -execdir runs arbitrary commands"),
+        (r"\s-delete\b", "find -delete removes files en masse"),
+    ],
+    # `xargs rm` chains deletion across many files; same for mv/dd/shred.
+    # `xargs` alone is fine for legit pipelines like `find . -print | xargs grep foo`.
+    "xargs": [
+        (r"\brm\b",     "xargs rm chains deletion"),
+        (r"\brmdir\b",  "xargs rmdir chains directory removal"),
+        (r"\bmv\b",     "xargs mv chains moves"),
+        (r"\bdd\b",     "xargs dd chains low-level device writes"),
+        (r"\bshred\b",  "xargs shred chains shredding"),
+    ],
+    # `python -c` / `python3 -c` runs inline Python — arbitrary code.
+    # The base `python` binary is fine for running scripts.
+    "python": [
+        (r"\s-c\b", "python -c runs inline Python (arbitrary code execution)"),
+    ],
+    "python3": [
+        (r"\s-c\b", "python3 -c runs inline Python (arbitrary code execution)"),
+    ],
+    # `perl -e` / `ruby -e` run inline scripts — arbitrary code.
+    "perl": [
+        (r"\s-e\b", "perl -e runs inline Perl (arbitrary code execution)"),
+    ],
+    "ruby": [
+        (r"\s-e\b", "ruby -e runs inline Ruby (arbitrary code execution)"),
+    ],
+    # `awk` with `system()` calls runs shell commands from inside the awk
+    # script. The base `awk` is fine for text processing.
+    "awk": [
+        (r"system\s*\(", "awk system() runs shell commands"),
+    ],
+    # `tar --use-compress-program=X` and `tar -I X` exec an arbitrary
+    # compressor binary. Standard `tar -czf` / `tar -xzf` are fine.
+    "tar": [
+        (r"--use-compress-program", "tar --use-compress-program runs arbitrary compressor"),
+        (r"\s-I\s+\S", "tar -I runs arbitrary compressor"),
+    ],
+    # `cp /dev/null <file>` is a known file-truncation trick. The base
+    # `cp` is fine for legitimate copies.
+    "cp": [
+        (r"/dev/null", "cp /dev/null truncates the target file"),
+    ],
 }
 
 # Dangerous URL patterns
@@ -531,6 +614,33 @@ def sanitize_command(command: str) -> tuple[bool, str, str]:
 
     When security mode is "off", all checks are skipped and the command
     is returned as-is. Use with caution — the model can run anything.
+
+    THREAT MODEL (SEC-02, R06.41):
+    This function is a GUARDRAIL AGAINST MODEL MISTAKES, not a defense
+    against determined prompt injection. The checks are layered:
+
+    1. ``BLOCKED_COMMANDS`` — denylist of obviously-dangerous binaries
+       (rm, dd, mkfs, sudo, nc, etc.). Catches the model when it
+       casually reaches for one of these because it misread a flag.
+
+    2. ``DANGEROUS_FLAG_COMBOS`` — context-aware blocks on otherwise-
+       safe commands paired with dangerous flags. Catches the common
+       bypass primitives (``find -exec``, ``python -c``, ``perl -e``,
+       ``tar --use-compress-program``, ``awk system()``, ``xargs rm``,
+       ``cp /dev/null``) without breaking legitimate uses of the
+       underlying commands.
+
+    3. Injection pattern regex — catches shell metacharacter chaining
+       (``;``, ``|``, ``&&``, ``||``, backticks, ``$()``, ``${}``,
+       ``>``, ``<``) and embedded newlines.
+
+    Layer 1 + 2 catch the obvious model-mistake and prompt-injection-
+    via-tool-output payloads. Layer 3 catches classical shell injection.
+    A determined adversary can still construct bypasses (Unicode
+    normalization, base64-decoded payloads, brace expansion) — for that
+    threat, use ``--security max`` AND validate tool output before
+    showing it to the model. For trusted models and trusted content,
+    ``--security off`` skips all checks (power-user escape hatch).
     """
     if not command:
         return False, "Command cannot be empty", ""
@@ -556,6 +666,15 @@ def sanitize_command(command: str) -> tuple[bool, str, str]:
     for blocked in BLOCKED_COMMANDS:
         if base_cmd == blocked:
             return False, f"Blocked command: {blocked}", ""
+
+    # Check dangerous-flag combinations (SEC-02, R06.41).
+    # Catches bypass payloads like `find -exec rm`, `python -c "import os;
+    # os.system('rm')"`, `tar --use-compress-program=sh -c rm`, etc. The
+    # base binary is allowed; only the dangerous flag variant is rejected.
+    if base_cmd in DANGEROUS_FLAG_COMBOS:
+        for pattern, reason in DANGEROUS_FLAG_COMBOS[base_cmd]:
+            if re.search(pattern, command):
+                return False, f"Blocked flag combination: {reason}", ""
 
     # Strip newlines and carriage returns before checking (shell interprets
     # them as command separators).  A command like "ls\ncat /etc/passwd"

@@ -263,11 +263,149 @@ class TestShellBlockedCommands:
         "passwd",
         "apt install rootkit",
         "pip install malware",
+        # SEC-02 R06.41 additions — common prompt-injection bypass primitives
+        "busybox rm -rf /",          # busybox multi-call binary bypasses `rm` block
+        "busybox sh",                # busybox as a generic shell
     ])
     def test_blocked_command(self, cmd):
         is_safe, error, _ = sanitize_command(cmd)
         assert not is_safe
         assert error  # Error message should be non-empty
+
+
+# ============================================================================
+# SEC-02 (R06.41) — Dangerous-flag-combination tests
+# ============================================================================
+# Verify that `DANGEROUS_FLAG_COMBOS` catches the common prompt-injection
+# bypass payloads without breaking legitimate uses of the same binaries.
+# These tests cover the gap between "binary is blocked" (TestShellBlockedCommands)
+# and "shell metacharacters are blocked" (TestShellInjectionPatterns).
+# ============================================================================
+
+
+class TestShellDangerousFlagCombos:
+    """Commands with dangerous flag combinations must be blocked."""
+
+    # -- find: -exec / -execdir / -delete ----------------------------
+
+    def test_find_exec_blocked(self):
+        is_safe, error, _ = sanitize_command("find . -exec rm {} \\;")
+        assert not is_safe
+        assert "find -exec" in error or "Blocked flag" in error
+
+    def test_find_execdir_blocked(self):
+        is_safe, error, _ = sanitize_command("find /tmp -execdir rm {} \\;")
+        assert not is_safe
+        assert "find -execdir" in error or "Blocked flag" in error
+
+    def test_find_delete_blocked(self):
+        is_safe, error, _ = sanitize_command("find /tmp -name '*.log' -delete")
+        assert not is_safe
+        assert "find -delete" in error or "Blocked flag" in error
+
+    def test_find_legit_allowed(self):
+        """Plain `find` for file discovery must still work."""
+        is_safe, _, _ = sanitize_command("find . -name '*.py' -type f")
+        assert is_safe
+
+    def test_find_print_allowed(self):
+        """`find -print` and `find -print0` are legit pipeline primitives."""
+        is_safe, _, _ = sanitize_command("find . -name '*.py' -print")
+        assert is_safe
+
+    # -- xargs: rm/mv/dd/shred chained -------------------------------
+
+    def test_xargs_rm_blocked(self):
+        is_safe, error, _ = sanitize_command("xargs rm")
+        assert not is_safe
+        assert "xargs rm" in error or "Blocked flag" in error
+
+    def test_xargs_dd_blocked(self):
+        is_safe, error, _ = sanitize_command("xargs dd of=/dev/sda")
+        assert not is_safe
+        assert "xargs dd" in error or "Blocked flag" in error
+
+    def test_xargs_grep_allowed(self):
+        """`xargs grep` without a dangerous subcommand must pass.
+        (The pipe variant `find | xargs grep` is blocked by the
+        injection-pattern check separately — that's expected.)"""
+        is_safe, _, _ = sanitize_command("xargs grep -l pattern")
+        assert is_safe
+
+    # -- python / python3 -c (inline code execution) ---------------
+
+    def test_python_c_blocked(self):
+        is_safe, error, _ = sanitize_command('python -c "import os; os.system(\'rm\')"')
+        assert not is_safe
+        assert "python -c" in error or "Blocked flag" in error
+
+    def test_python3_c_blocked(self):
+        is_safe, error, _ = sanitize_command('python3 -c "print(1)"')
+        assert not is_safe
+        assert "python3 -c" in error or "Blocked flag" in error
+
+    def test_python_script_allowed(self):
+        """Running a .py file is fine — only `-c` is blocked."""
+        is_safe, _, _ = sanitize_command("python script.py")
+        assert is_safe
+
+    def test_python_version_allowed(self):
+        """`python --version` and `python3 --version` are fine."""
+        is_safe, _, _ = sanitize_command("python3 --version")
+        assert is_safe
+
+    # -- perl -e / ruby -e (inline interpreter) ---------------------
+
+    def test_perl_e_blocked(self):
+        is_safe, error, _ = sanitize_command("perl -e 'system(\"rm\")'")
+        assert not is_safe
+        assert "perl -e" in error or "Blocked flag" in error
+
+    def test_ruby_e_blocked(self):
+        is_safe, error, _ = sanitize_command("ruby -e 'system(\"rm\")'")
+        assert not is_safe
+        assert "ruby -e" in error or "Blocked flag" in error
+
+    # -- awk system() (shell exec from inside awk script) ---------
+
+    def test_awk_system_blocked(self):
+        is_safe, error, _ = sanitize_command('awk \'{system("rm")}\' /tmp/x')
+        assert not is_safe
+        assert "awk system" in error or "Blocked flag" in error
+
+    def test_awk_legit_allowed(self):
+        """Plain text-processing awk must still work."""
+        is_safe, _, _ = sanitize_command("awk '{print $1}' /etc/hosts")
+        assert is_safe
+
+    # -- tar --use-compress-program / -I (arbitrary compressor) -----
+
+    def test_tar_use_compress_program_blocked(self):
+        is_safe, error, _ = sanitize_command("tar --use-compress-program=sh -cf out.tar dir/")
+        assert not is_safe
+        assert "use-compress-program" in error or "Blocked flag" in error
+
+    def test_tar_I_blocked(self):
+        is_safe, error, _ = sanitize_command("tar -I sh -cf out.tar dir/")
+        assert not is_safe
+        assert "tar -I" in error or "Blocked flag" in error
+
+    def test_tar_legit_allowed(self):
+        """Standard `tar -czf` / `tar -xzf` must still work."""
+        is_safe, _, _ = sanitize_command("tar -czf out.tar.gz dir/")
+        assert is_safe
+
+    # -- cp /dev/null (file truncation trick) ----------------------
+
+    def test_cp_dev_null_blocked(self):
+        is_safe, error, _ = sanitize_command("cp /dev/null /tmp/important.log")
+        assert not is_safe
+        assert "/dev/null" in error or "Blocked flag" in error
+
+    def test_cp_legit_allowed(self):
+        """Standard `cp file dest` must still work."""
+        is_safe, _, _ = sanitize_command("cp /tmp/source.txt /tmp/dest.txt")
+        assert is_safe
 
 
 class TestShellSafeCommands:

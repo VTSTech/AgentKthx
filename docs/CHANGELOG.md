@@ -36,6 +36,35 @@ Both tests have a real test-vs-code mismatch: they use `sys.stdout` capture but 
 - After R06.41 cleanup: **406 passed, 0 failed, 6 skipped** (412 tests total)
 - All 6 skips have explicit reasons in the source code (4 pre-existing + 2 newly-added PrintAgentSteps)
 
+#### SEC-02 — `shell=True` accepted-risk + modestly hardened (Medium severity)
+
+The audit recommended switching `subprocess.run(cmd, shell=True)` to `shell=False` with `shlex.split()` to prevent shell metacharacter interpretation entirely. After review, the maintainer determined that the audit's threat model (determined adversary crafting payloads) doesn't match AgentKthx's actual use case (trusted user + cooperative model + occasional mistakes). Switching to `shell=False` would break legitimate agent workflows (pipes, redirects) for a threat that doesn't manifest in practice — anyone prompting the model is a user of the same system it would break, so they have no incentive to bypass.
+
+**Option A — documented the threat model.** Updated `core/helpers.py`:
+- New multi-paragraph comment above `BLOCKED_COMMANDS` explaining the threat model: blocklist is a guardrail against model mistakes, NOT a defense against determined prompt injection. For untrusted content pipelines, the recommended defense-in-depth is `--security max` AND validation/sanitization of tool output before display to the model.
+- Expanded `sanitize_command()` docstring to enumerate the three defense layers: `BLOCKED_COMMANDS` (denylist) → `DANGEROUS_FLAG_COMBOS` (context-aware flag blocks) → injection-pattern regex (shell metacharacters). Each layer's coverage and gaps are documented.
+- Future contributors will understand why `shell=True` was kept and what would have to change before switching to `shell=False` (e.g., a shift to adversarial users or untrusted content pipelines).
+
+**Option B — modestly extended the blocklist** with a new `DANGEROUS_FLAG_COMBOS` dict — context-aware blocks on otherwise-safe commands paired with dangerous flags. Catches the common prompt-injection bypass primitives the audit specifically called out (`busybox rm`, `python -c`, `perl -e`, `find -exec`, `tar --use-compress-program`) without breaking legitimate uses of the underlying binaries:
+
+| Command | Blocked flag combo | Legit use still allowed |
+|---------|---------------------|-------------------------|
+| `find` | `-exec` / `-execdir` / `-delete` | `find . -name '*.py' -type f` |
+| `xargs` | `rm` / `mv` / `dd` / `shred` / `rmdir` subcommand | `xargs grep -l pattern` |
+| `python` / `python3` | `-c` (inline code) | `python script.py`, `python3 --version` |
+| `perl` / `ruby` | `-e` (inline interpreter) | `perl script.pl` |
+| `awk` | `system(...)` call inside awk script | `awk '{print $1}' file` |
+| `tar` | `--use-compress-program=X` / `-I X` | `tar -czf out.tar.gz dir/` |
+| `cp` | `/dev/null` source (file truncation trick) | `cp source.txt dest.txt` |
+| `busybox` | (added to `BLOCKED_COMMANDS` outright — agents rarely need it) | (use `--security off` if needed) |
+
+**Tests** — added 24 new tests in `tests/test_security.py::TestShellDangerousFlagCombos`:
+- 14 tests verifying dangerous flag combinations are blocked
+- 9 tests verifying legitimate uses of the same commands still pass (no false positives)
+- Also extended the existing `TestShellBlockedCommands::test_blocked_command` parametrize list with 2 busybox cases
+
+**Result**: full test suite grew from 406 → 429 passed (+23 new SEC-02 tests, all passing). `audit/audit.md` SEC-02 entry updated with the resolution rationale; the audit header now lists SEC-02 as "✓ accepted-risk + modestly hardened".
+
 #### SEC-01 — `eval()` sandbox bypass closed (HIGH severity)
 
 The audit identified `eval()` usage with the bypassable `{"__builtins__": {}}` sandbox at two production sites: `agentkthx/core/math_prompts.py:220` (`evaluate_math_expression`) and `agentkthx/core/helpers.py:820` (inside `normalize_tool_args`). The `tools/builtins.py:calculator()` tool had already been secured via AST walking in a prior release, but these two internal call sites were not.
@@ -135,16 +164,18 @@ The audit understated the failure count: it mentioned 9 (8 in `test_r048_changes
 - **`"source": "agentnova"` field** in ACP plugin API calls kept as-is — this is an external API contract with ACP servers (used for tracking/dashboards). Renaming it changes wire-format behavior.
 
 ### ✅ **Verified**
-- **Full test suite: 406 passed, 0 failed, 6 skipped** (412 total).
+- **Full test suite: 429 passed, 0 failed, 6 skipped** (435 total).
   - Up from R06.4 baseline: 457 passed / 45 failed / 4 skipped (506 total, 45 failures).
-  - 0 failures achieved by: fixing 34 ROB-03 root-cause tests (R06.41 first pass), then deleting 137 stale R04.x verification tests + 35 stale pre-plugin ZAI tests (cleanup pass), then skipping 2 PrintAgentSteps tests with explicit reasons.
+  - 0 failures achieved by: fixing 34 ROB-03 root-cause tests (R06.41 first pass), then deleting 137 stale R04.x verification tests + 35 stale pre-plugin ZAI tests (cleanup pass), then skipping 2 PrintAgentSteps tests with explicit reasons, then adding 23 SEC-02 + 49 SEC-01 = 72 new security tests.
   - 6 skips all have explicit `@pytest.mark.skip(reason=...)` annotations in source.
-- 49 SEC-01 tests (44 bypass attempts + correctness) pass — full coverage of the `safe_eval` security boundary.
+- 49 SEC-01 tests (24 bypass attempts + 25 correctness) pass — full coverage of the `safe_eval` security boundary.
+- 24 SEC-02 tests (14 dangerous flag combos blocked + 9 legit uses allowed + 1 busybox added to blocklist) pass — context-aware shell-command hardening.
 - `python -m agentkthx version` runs cleanly; banner shows `R06.41-5fe165a`.
 - `AGENTKTHX_BACKEND=openrouter` env var is honored correctly.
 - All affected modules import cleanly: `agentkthx`, `agentkthx.cli`, `agentkthx.plugins.acp.acp_plugin`, `agentkthx.plugins.turboquant.turbo`, `agentkthx.tools.builtins`, `agentkthx.core.safe_eval`, `agentkthx.core.persistent_memory`, `agentkthx.core.tool_cache`, `agentkthx.colors`, `agentkthx.soul.loader`.
 - IPv6 SSRF: `is_safe_url("http://[::1]/admin")` now correctly returns `(False, "SSRF protection: blocked hostname pattern '::1'")`.
 - Zero `eval()` calls remain in production source (verified via grep — only mentions in docstrings/comments).
+- `sanitize_command()` correctly blocks: `busybox rm -rf /`, `find -exec rm {} \;`, `python -c "import os; ..."`, `perl -e 'system("rm")'`, `awk '{system("rm")}'`, `tar --use-compress-program=sh`, `cp /dev/null /tmp/x`.
 
 ### ⏭️ **Deferred (deliberately not addressed in R06.41)**
 
