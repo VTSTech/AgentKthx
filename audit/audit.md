@@ -1,6 +1,6 @@
 # Improvement & Enhancement Audit
 
-**AgentKthx v0.6.53 (R06.53)**
+**AgentKthx v0.6.54 (R06.54)**
 
 **Repository:** https://github.com/VTSTech/AgentKthx  
 **Author:** VTSTech | **License:** MIT | **Date:** 2026-09-22  
@@ -27,9 +27,11 @@
 
 ## Executive Summary
 
-AgentKthx is a 35,250+ line Python framework for autonomous AI agents with zero external dependencies — built entirely on the standard library. Since R06.41, the codebase has evolved to version R06.53 with significant improvements:
+AgentKthx is a 35,250+ line Python framework for autonomous AI agents with zero external dependencies — built entirely on the standard library. Since R06.41, the codebase has evolved to version R06.54 with significant improvements:
 
-- **R06.53 (Current)**: Cleanup + streaming pass — closed MAINT-03 (stale `AGENTNOVA_*` refs in OpenRouter doc), ROB-02 (last bare `except:` in `orchestrator.py`), PERF-02 (`stream_options.include_usage` on OpenRouter streaming), PERF-01 (real streaming display via `_generate_stream()` + `_run_core_streaming()`). Also fixed live bugs: `You:` prompt EOL wrap, `agentkthx update` PEP 668 prompt for `--break-system-packages`. 25 new tests added.
+- **R06.54 (Current)**: ZAI streaming fix — same bug class as R06.53 OpenRouter streaming 404, applied the same override pattern to `ZaiBackend.generate_completions_stream()` so ZAI streaming hits `/api/paas/v4/chat/completions` instead of the inherited OllamaBackend `/v1/chat/completions` (which 404s). 9 new tests added.
+
+- **R06.53**: Cleanup + streaming pass — closed MAINT-03 (stale `AGENTNOVA_*` refs in OpenRouter doc), ROB-02 (last bare `except:` in `orchestrator.py`), PERF-02 (`stream_options.include_usage` on OpenRouter streaming), PERF-01 (real streaming display via `_generate_stream()` + `_run_core_streaming()`). Also fixed live bugs: `You:` prompt EOL wrap, `agentkthx update` PEP 668 prompt for `--break-system-packages`. 25 new tests added.
 
 - **R06.52**: Loop resilience fixes — closed the "codebase-audit death-spiral" with improved error detection, consecutive termination semantics, duplicate call blocking, pairing-safe memory pruning, and hallucinated-parameter stripping. 48 new tests added.
 
@@ -382,6 +384,12 @@ All 479 tests use `MagicMock`, `monkeypatch`, or source-level string inspection.
 
 ## Recent Improvements Since R06.41
 
+### R06.54 - ZAI Streaming Fix (2026-09-22)
+- **ZAI streaming 404 fixed** — `ZaiBackend.generate_completions_stream()` override added, uses ZAI's `/api/paas/v4/chat/completions` endpoint with Bearer auth instead of inherited OllamaBackend `/v1/chat/completions` path (which 404s on ZAI)
+- Sends `stream_options.include_usage` (PERF-02) on ZAI streaming requests
+- Same error recovery as non-streaming: insufficient credits → free model fallback, model-doesn't-support-tools → ReAct fallback
+- 9 new tests in `tests/test_zai_streaming.py`
+
 ### R06.53 - Cleanup + Streaming Pass (2026-09-22)
 - **MAINT-03 closed** — `docs/OPENROUTER_API_TECHNICAL_REFERENCE.md` "Backward-compatibility env vars" section rewritten to "Configuration env vars" with `AGENTKTHX_*` prefix
 - **ROB-02 closed** — last bare `except:` at `orchestrator.py:279` replaced with `except Exception:`
@@ -453,7 +461,7 @@ tests/test_update_check.py .......................
 
 ## Files Changed Since R06.41 Brief
 
-- Version: 0.6.41 → 0.6.53
+- Version: 0.6.41 → 0.6.54
 - cli.py: 3478 → 3667 lines (added update check, resilience improvements)
 - Added: `agentkthx/core/api_resilience.py` (R06.50)
 - Added: `agentkthx/update_check.py` (R06.51)
@@ -463,5 +471,6 @@ tests/test_update_check.py .......................
 - Updated: `agentkthx/plugins/openrouter/openrouter.py` (R06.53 — `stream_options.include_usage`)
 - Updated: `agentkthx/agent.py` (R06.53 — added `_generate_stream()` + `_run_core_streaming()` for PERF-01)
 - Updated: `agentkthx/cli.py` (R06.53 — streaming-aware spinner suppression, no duplicate final answer print, input EOL wrap fix, PEP 668 update prompt)
+- Updated: `agentkthx/plugins/zai/zai.py` (R06.54 — added `generate_completions_stream()` override for ZAI-native streaming endpoint)
 - Updated: `docs/OPENROUTER_API_TECHNICAL_REFERENCE.md` (R06.53 — `AGENTNOVA_*` → `AGENTKTHX_*`)
-- Updated test count: 435 → 660 tests
+- Updated test count: 435 → 671 tests

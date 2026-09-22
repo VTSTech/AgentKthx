@@ -616,6 +616,213 @@ class ZaiBackend(OllamaBackend):
         except urllib.error.URLError as e:
             raise RuntimeError(f"ZAI connection error: {e.reason}")
 
+    def generate_completions_stream(
+        self,
+        model: str,
+        messages: list[dict],
+        tools: list[Tool] | None = None,
+        temperature: float = 0.7,
+        max_tokens: int = 2048,
+        top_p: float | None = None,
+        think: bool | None = None,
+        stop: str | list[str] | None = None,
+        presence_penalty: float | None = None,
+        frequency_penalty: float | None = None,
+        response_format: dict | None = None,
+        reasoning_effort: str | None = None,
+        num_ctx: int | None = None,
+        num_predict: int | None = None,
+        truncation: str | None = None,
+        **kwargs,
+    ) -> Generator[dict, None, None]:
+        """Stream OpenAI Chat-Completions chunks from ZAI (PERF-01).
+
+        R06.54: ZAI's inherited ``OllamaBackend.generate_completions_stream``
+        builds the URL as ``{self.base_url}/v1/chat/completions`` which on
+        ZAI yields ``https://api.z.ai/v1/chat/completions`` — a path that
+        doesn't exist on ZAI's API (returns nginx 404). ZAI's actual
+        Chat-Completions endpoint is ``/api/paas/v4/chat/completions``.
+
+        This override uses ZAI's correct endpoint with Bearer auth,
+        OpenAI SSE parsing, and the same dict shape that
+        ``Agent._generate_stream()`` expects:
+
+            {
+              "delta": str,                     # text content delta
+              "tool_calls": list[dict] | None,  # OpenAI tool_calls deltas
+              "finish_reason": str | None,       # "stop" / "tool_calls" / None
+              "reasoning_content": str | None,   # thinking model CoT delta
+            }
+
+        Supports the same error recovery as ``_generate_with_auth``:
+        - Insufficient credits → fallback to free model (one retry)
+        - "Does not support tools" → retry without tools (ReAct fallback)
+
+        Yields:
+            dict with delta / tool_calls / finish_reason / reasoning_content
+        """
+        import urllib.request
+        import urllib.error
+
+        # Resolve per-model defaults
+        defaults = self._get_model_defaults(model)
+        if temperature is None:
+            temperature = defaults["temperature"]
+        if max_tokens is None:
+            max_tokens = defaults["max_tokens"]
+
+        # ZAI_FREE_ONLY: reject paid models upfront
+        if ZAI_FREE_ONLY and not _is_free_model(model):
+            fallback = ZAI_FREE_FALLBACK_MODEL
+            print(f"  [ZAI] FREE_ONLY mode — '{model}' is a paid model, switching to '{fallback}'")
+            model = fallback
+
+        # Build request body in OpenAI format
+        body: dict = {
+            "model": model,
+            "messages": messages,
+            "stream": True,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+
+        # PERF-02: stream_options.include_usage so ZAI emits a final
+        # usage-carrying SSE chunk (ZAI follows the OpenAI spec here).
+        body["stream_options"] = {"include_usage": True}
+
+        # Optional OpenAI-compatible parameters
+        if stop is not None:
+            body["stop"] = stop if isinstance(stop, list) else [stop]
+        if presence_penalty is not None:
+            body["presence_penalty"] = presence_penalty
+        if frequency_penalty is not None:
+            body["frequency_penalty"] = frequency_penalty
+        if response_format is not None:
+            body["response_format"] = response_format
+        if top_p is not None:
+            body["top_p"] = top_p
+
+        # Tools in OpenAI format
+        if tools:
+            body["tools"] = [t.to_openai_schema() for t in tools]
+        if kwargs.get("tool_choice") is not None:
+            body["tool_choice"] = kwargs["tool_choice"]
+
+        # Forward reasoning_effort (GLM-5.x thinking models honor this)
+        if reasoning_effort is not None:
+            body["reasoning_effort"] = reasoning_effort
+
+        # Inject Bearer token
+        headers = {"Content-Type": "application/json"}
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
+
+        if os.environ.get("AGENTKTHX_DEBUG"):
+            print(f"  [ZAI-Stream] POST /api/paas/v4/chat/completions — "
+                  f"tools={len(tools) if tools else 0}, stream=True")
+
+        # Make the streaming request with error recovery:
+        # - 429 insufficient credits → retry with free fallback model
+        # - 400 "does not support tools" → retry without tools
+        # We try once, on retryable error we patch body and try once more.
+        def _do_request(req_body: dict, req_headers: dict):
+            req = urllib.request.Request(
+                f"{self.base_url}/api/paas/v4/chat/completions",
+                data=json.dumps(req_body).encode("utf-8"),
+                headers=req_headers,
+                method="POST",
+            )
+            return urllib.request.urlopen(req, timeout=self.config.timeout)
+
+        try:
+            response = _do_request(body, headers)
+        except urllib.error.HTTPError as e:
+            error_body = e.read().decode("utf-8") if e.fp else ""
+            error_msg = error_body.lower() if error_body else ""
+
+            # Insufficient credits — auto-fallback to free model
+            if e.code == 429 and ("insufficient balance" in error_msg or "insufficient" in error_msg or "no resource package" in error_msg):
+                fallback = ZAI_FREE_FALLBACK_MODEL
+                if not _is_free_model(model):
+                    import sys
+                    print(
+                        f"\n  \033[33m[ZAI-Stream] Insufficient credits for '{model}' — "
+                        f"falling back to free model '{fallback}'\033[0m",
+                        file=sys.stderr,
+                    )
+                    body_fallback = {**body, "model": fallback}
+                    try:
+                        response = _do_request(body_fallback, headers)
+                    except urllib.error.HTTPError as e2:
+                        error_body2 = e2.read().decode("utf-8") if e2.fp else ""
+                        raise RuntimeError(f"ZAI HTTP error {e2.code}: {error_body2}")
+                else:
+                    raise RuntimeError(f"ZAI HTTP error {e.code}: {error_body}")
+            # Model doesn't support tools — retry without tools (ReAct fallback)
+            elif "does not support tools" in error_msg and tools:
+                import sys
+                print(
+                    f"\n  \033[33m[ZAI-Stream] Model '{model}' does not support tools — "
+                    f"retrying without tool definitions\033[0m",
+                    file=sys.stderr,
+                )
+                body_fallback = {k: v for k, v in body.items() if k != "tools"}
+                body_fallback.pop("tool_choice", None)
+                try:
+                    response = _do_request(body_fallback, headers)
+                except urllib.error.HTTPError as e2:
+                    error_body2 = e2.read().decode("utf-8") if e2.fp else ""
+                    raise RuntimeError(f"ZAI HTTP error {e2.code}: {error_body2}")
+            else:
+                raise RuntimeError(f"ZAI HTTP error {e.code}: {error_body}")
+        except urllib.error.URLError as e:
+            raise RuntimeError(f"ZAI connection error: {e.reason}")
+
+        # Parse SSE stream — ZAI follows OpenAI format:
+        #   data: {"choices":[{"delta":{"content":"...","tool_calls":[...],
+        #           "reasoning_content":"..."},"finish_reason":null}]}
+        #   data: [DONE]
+        try:
+            for line in response:
+                if not line:
+                    continue
+                line_str = line.decode("utf-8")
+                if not line_str.startswith("data: "):
+                    continue
+                json_str = line_str[6:].strip()
+                if json_str == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(json_str)
+                except json.JSONDecodeError:
+                    continue
+
+                choices = chunk.get("choices", []) or []
+                if not choices:
+                    # Final usage-only chunk (no choices) — skip; the agent
+                    # loop doesn't need usage during streaming display.
+                    continue
+                choice = choices[0]
+                delta = choice.get("delta", {}) or {}
+                text_delta = delta.get("content", "") or ""
+                tool_calls_delta = delta.get("tool_calls")
+                reasoning_delta = delta.get("reasoning_content", "") or ""
+                finish_reason = choice.get("finish_reason")
+
+                yield_chunk: dict = {
+                    "delta": text_delta,
+                    "tool_calls": tool_calls_delta,
+                    "finish_reason": finish_reason,
+                }
+                if reasoning_delta:
+                    yield_chunk["reasoning_content"] = reasoning_delta
+                yield yield_chunk
+        finally:
+            try:
+                response.close()
+            except Exception:
+                pass
+
     def _generate_with_auth(
         self,
         model: str,

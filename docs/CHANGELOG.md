@@ -5,7 +5,46 @@ All notable changes to AgentKthx will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [R06.54] - 2026-09-22 4:25:38 PM
+
+### 🐛 **BUG: ZAI streaming hit HTTP 404 via inherited OllamaBackend method**
+
+Same bug class as the R06.53 OpenRouter streaming fix. `ZaiBackend` inherited `generate_completions_stream` from `OllamaBackend`, but the inherited method builds the URL as `{self.base_url}/v1/chat/completions` and posts directly via `urllib`. For ZAI that yields `https://api.z.ai/v1/chat/completions` — a path that doesn't exist on ZAI's API (returns nginx 404). The error message ("Ollama HTTP error 404") was misleading because the inherited method labels all errors with "Ollama" regardless of which backend called it.
+
+ZAI's actual Chat-Completions endpoint is `/api/paas/v4/chat/completions`, with Bearer token authentication required on every request.
+
+**Fix** — added `ZaiBackend.generate_completions_stream()` that overrides the inherited method. The new method:
+
+- Uses ZAI's correct endpoint: `{base_url}/api/paas/v4/chat/completions` (not OllamaBackend's `/v1/chat/completions`)
+- Injects `Authorization: Bearer {api_key}` header on every request (the inherited method didn't)
+- Sends `stream_options.include_usage=True` (PERF-02) so ZAI emits a final usage-carrying SSE chunk
+- Parses OpenAI SSE format: `data: {"choices":[{"delta":{"content":"...","tool_calls":[...],"reasoning_content":"..."},"finish_reason":null}]}` → yields the same dict shape `Agent._generate_stream()` expects
+- Mirrors the same error recovery as `_generate_with_auth`:
+  - **429 insufficient credits** → auto-fallback to free model (one retry, same as non-streaming)
+  - **"Does not support tools"** → retry without tools (ReAct fallback, same as non-streaming)
+- Yields chunks with `delta` / `tool_calls` / `finish_reason` / `reasoning_content` keys, matching the OpenAI SSE shape
+
+**Tests** — 9 new tests in `tests/test_zai_streaming.py`:
+- `TestZaiStreamMethodOverride` (3 tests): method exists on ZaiBackend (not inherited from OllamaBackend), references the ZAI endpoint, doesn't use the OllamaBackend `/v1/chat/completions` path
+- `TestZaiStreamMethodShape` (6 tests): yields correct dict shape from SSE, surfaces `reasoning_content` for thinking models, surfaces `tool_calls` deltas, body includes `stream_options.include_usage`, request URL uses ZAI endpoint, `Authorization` header with Bearer token present
+
+---
+
+### 📊 Summary
+
+- **Live bugs fixed**: 1 (ZAI streaming 404 via inherited OllamaBackend method)
+- **Tests added**: 9 (ZAI override detection, dict shape, SSE parsing, URL, headers, reasoning_content, tool_calls, stream_options)
+- **Test suite**: 662 → 671 passed, 6 skipped, 0 failed
+- **Open findings remaining**: 10 (1 High — MAINT-01 cli.py split, 4 Medium, 5 Low) — unchanged from R06.53
+
+The R06.53 streaming infrastructure (`Agent._generate_stream()` + `_run_core_streaming()`) now works end-to-end on both cloud providers (OpenRouter and ZAI). The same fix pattern — override `generate_completions_stream` on each backend that uses a non-`/v1/chat/completions` endpoint — would apply to any future cloud plugin.
+
+---
+
+
+
 ## [R06.53] - 2026-09-22 3:53:13 PM
+
 
 ### ⚡ **PERF-01 — Real Streaming Display (typewriter effect)**
 
