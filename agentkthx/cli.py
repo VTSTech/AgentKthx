@@ -1062,20 +1062,26 @@ def cmd_chat(args: argparse.Namespace) -> int:
 
         line1 = _footer_line1()
         line2 = _footer_line2()
-        # Save cursor, move to footer area, clear + write both lines, restore
+        # Save cursor, move to footer area, clear + write both lines, restore.
+        # try/finally guarantees auto-wrap is re-enabled even if line1/line2
+        # raise — otherwise an exception here would leave the terminal in
+        # no-wrap mode and the next `You:` prompt would overwrite its line
+        # instead of scrolling the region up on wrap.
         sys.stdout.write("\033[s")                            # save cursor
         sys.stdout.write("\033[?7l")                           # disable line wrap
-        # Line 1: second-to-last terminal line
-        row1 = _term_size.lines - 1
-        sys.stdout.write(f"\033[{row1};1H")                    # move to line 1
-        sys.stdout.write("\033[2K")                            # clear entire line
-        sys.stdout.write(line1)                                # write footer line 1
-        # Line 2: last terminal line
-        row2 = _term_size.lines
-        sys.stdout.write(f"\033[{row2};1H")                    # move to line 2
-        sys.stdout.write("\033[2K")                            # clear entire line
-        sys.stdout.write(line2)                                # write footer line 2
-        sys.stdout.write("\033[?7h")                           # re-enable line wrap
+        try:
+            # Line 1: second-to-last terminal line
+            row1 = _term_size.lines - 1
+            sys.stdout.write(f"\033[{row1};1H")                # move to line 1
+            sys.stdout.write("\033[2K")                         # clear entire line
+            sys.stdout.write(line1)                             # write footer line 1
+            # Line 2: last terminal line
+            row2 = _term_size.lines
+            sys.stdout.write(f"\033[{row2};1H")                # move to line 2
+            sys.stdout.write("\033[2K")                         # clear entire line
+            sys.stdout.write(line2)                             # write footer line 2
+        finally:
+            sys.stdout.write("\033[?7h")                       # re-enable line wrap
         sys.stdout.write("\033[u")                             # restore cursor
         sys.stdout.flush()
 
@@ -1084,6 +1090,15 @@ def cmd_chat(args: argparse.Namespace) -> int:
 
         This ensures the input prompt always appears one line above the
         footer, regardless of where the previous response left the cursor.
+
+        Also explicitly re-enables terminal auto-wrap (DECAWM, ``\033[?7h``)
+        before each prompt. ``_update_footer()`` toggles it OFF/ON around the
+        footer redraw; if anything between then and ``input()`` leaves the
+        terminal with auto-wrap OFF, long input at the ``You:`` prompt
+        overwrites the last column instead of wrapping to a new line.
+        Forcing it ON here guarantees the scroll region scrolls up by one
+        line when the user's input reaches the right edge — the intended
+        behavior.
         """
         if not _use_persistent_footer:
             return
@@ -1091,6 +1106,7 @@ def cmd_chat(args: argparse.Namespace) -> int:
         bottom = _term_size.lines - _FOOTER_LINES
         sys.stdout.write(f"\033[{bottom};1H")
         sys.stdout.write("\033[2K")  # clear the line (remove stale text)
+        sys.stdout.write("\033[?7h")  # ensure auto-wrap is ON for input
         sys.stdout.flush()
 
     # ── Spinner ───────────────────────────────────────────────────────
@@ -1154,8 +1170,21 @@ def cmd_chat(args: argparse.Namespace) -> int:
             # We do NOT read or write a history file — that caused unbounded
             # growth (600MB+ reported). In-memory recall only.
             import readline
+            # Force horizontal-scroll-mode OFF so long input wraps to a new
+            # visual line instead of scrolling horizontally within one line.
+            # Default is OFF, but an ~/.inputrc could enable it. Without this,
+            # input at the `You:` prompt would overwrite the rightmost column
+            # instead of scrolling the scroll region up for a new input line.
+            readline.parse_and_bind("set horizontal-scroll-mode off")
 
-            user_input = input(f"\033[90mYou:\033[0m ").strip()
+            # Prompt uses \001 ... \002 (readline's RL_PROMPT_START_IGNORE /
+            # RL_PROMPT_END_IGNORE) around ANSI escape codes so readline
+            # counts them as zero-width. Without these markers, readline
+            # treats `\033[90m` + `You:` + `\033[0m` + ` ` as 14 visible
+            # chars, miscounting the prompt width and breaking wrap detection.
+            user_input = input(
+                "\001\033[90m\002You:\001\033[0m\002 "
+            ).strip()
 
             # Track last user_input for in-session recall (replaces file-based history)
             if user_input:
