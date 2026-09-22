@@ -3533,21 +3533,50 @@ def cmd_plugins(args: argparse.Namespace) -> int:
 
 
 def cmd_update(args: argparse.Namespace) -> int:
-    """Update AgentKthx to the latest version from GitHub."""
-    print(f"{bright_cyan('⚛ AgentKthx')} - Updating from GitHub...")
-    print(f"{dim('Running:')} pip install git+https://github.com/VTSTech/AgentKthx.git --force-reinstall")
+    """Update AgentKthx to the latest version from GitHub.
+
+    On PEP 668 externally-managed-environment errors (Debian/Ubuntu/Fedora
+    system Python), prompts the user once with a y/n to retry with
+    ``--break-system-packages``. Never silently enables the flag — the user
+    always has to opt in after seeing the failure.
+    """
+    print(f"{bright_cyan('\u2696 AgentKthx')} - Updating from GitHub...")
+    base_cmd = [
+        sys.executable, "-m", "pip", "install",
+        "git+https://github.com/VTSTech/AgentKthx.git", "--force-reinstall",
+    ]
+    print(f"{dim('Running:')} {' '.join(base_cmd[1:])}")
     print()
 
     import subprocess as sp
-    result = sp.run(
-        [sys.executable, "-m", "pip", "install",
-         "git+https://github.com/VTSTech/AgentKthx.git", "--force-reinstall"],
-        capture_output=True,
-        text=True,
-    )
+    result = sp.run(base_cmd, capture_output=True, text=True)
+
+    # PEP 668 detection: pip exits non-zero with a stderr mention of
+    # "externally-managed-environment" on Debian/Ubuntu/Fedora system
+    # Python installs. We do NOT silently add --break-system-packages —
+    # we surface the failure and ask the user explicitly.
+    if result.returncode != 0 and _is_externally_managed_error(result.stderr):
+        print(f"{red('\u2717 Update failed.')}")
+        print(f"{yellow('This Python environment is externally managed (PEP 668).')}")
+        print(f"{dim('The system Python on Debian/Ubuntu/Fedora blocks pip installs to')} "
+              f"{dim('protect the OS package manager — overriding it risks breaking the OS.')}")
+        print()
+        try:
+            choice = input(f"  {dim('Retry with')} --break-system-packages{dim('? [y/N]')} ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            choice = ""
+        if choice in ("y", "yes"):
+            retry_cmd = base_cmd + ["--break-system-packages"]
+            print()
+            print(f"{dim('Running:')} {' '.join(retry_cmd[1:])}")
+            print()
+            result = sp.run(retry_cmd, capture_output=True, text=True)
+        else:
+            print(f"{dim('Skipped. Use a venv, or re-run with --break-system-packages manually.')}")
+            return 1
 
     if result.returncode == 0:
-        print(f"{green('✓ Updated successfully!')}")
+        print(f"{green('\u2713 Updated successfully!')}")
         # Show the installed version
         try:
             version_result = sp.run(
@@ -3560,7 +3589,7 @@ def cmd_update(args: argparse.Namespace) -> int:
         except Exception:
             pass
     else:
-        print(f"{red('✗ Update failed.')}")
+        print(f"{red('\u2717 Update failed.')}")
         if result.stderr:
             print()
             for line in result.stderr.strip().split("\n")[-5:]:
@@ -3568,6 +3597,36 @@ def cmd_update(args: argparse.Namespace) -> int:
         return 1
 
     return 0
+
+
+def _is_externally_managed_error(stderr: str) -> bool:
+    """Return True if pip stderr indicates a PEP 668 externally-managed env.
+
+    Matches the actual phrases pip emits under PEP 668 on Debian, Ubuntu,
+    Fedora, and downstream distros. Conservative matcher — only fires on
+    the real externally-managed-environment signal, not on unrelated pip
+    failures (auth, network, missing package, etc.).
+    """
+    if not stderr:
+        return False
+    text = stderr.lower()
+    # The PEP 668 marker phrase — appears in pip's stderr verbatim.
+    if "externally-managed-environment" in text:
+        return True
+    # Spaced variant — older / reworded phrasings on some distros.
+    if "externally managed environment" in text:
+        return True
+    # Even looser: "This environment is externally managed" (Debian's
+    # human-readable explanation line). We require both "externally" and
+    # "managed" near "environment" to avoid false positives.
+    if "externally" in text and "managed" in text and "environment" in text:
+        return True
+    # The hint pip appends pointing the user at --break-system-packages.
+    # We treat the hint alone as a positive signal because some distros
+    # reword the main error but keep the hint verbatim.
+    if "--break-system-packages" in text and "pep 668" in text:
+        return True
+    return False
 
 
 def main(argv: Optional[list[str]] = None) -> int:
