@@ -2036,6 +2036,22 @@ Final Answer: <the answer>
         elif hasattr(self.backend, 'generate_stream'):
             stream_method = 'native'
 
+        # PERF-01 readability: print the "AgentKthx: " prefix once, before
+        # the first content/reasoning delta arrives. Tracked so subsequent
+        # iterations of the agentic loop (after tool calls) don't re-print
+        # it — the loop is one continuous answer from the user's perspective.
+        # Reset at the start of each _run_core_streaming() call (new user
+        # prompt) so the prefix appears on every new reply.
+        _prefix_emitted = getattr(self, "_stream_prefix_emitted", False)
+        def _emit_prefix_once():
+            nonlocal _prefix_emitted
+            if not _prefix_emitted:
+                # Bright green to match the non-streaming "AgentKthx:" label.
+                sys.stdout.write("\033[92mAgentKthx:\033[0m ")
+                sys.stdout.flush()
+                _prefix_emitted = True
+                self._stream_prefix_emitted = True
+
         if stream_method is None:
             # Backend has no streaming — fall back to non-streaming and
             # print the result in one shot. Don't pretend to stream.
@@ -2054,6 +2070,7 @@ Final Answer: <the answer>
             # that generation completed).
             content = response.get("content", "") or ""
             if content:
+                _emit_prefix_once()
                 sys.stdout.write(content)
                 sys.stdout.flush()
                 if not content.endswith("\n"):
@@ -2095,6 +2112,7 @@ Final Answer: <the answer>
                         finish_reason = fr
                     # Content delta — print immediately
                     if delta:
+                        _emit_prefix_once()
                         content_acc.append(delta)
                         sys.stdout.write(delta)
                         sys.stdout.flush()
@@ -2105,6 +2123,10 @@ Final Answer: <the answer>
                     elif isinstance(chunk, dict) and chunk.get("reasoning_content"):
                         reasoning_delta = chunk["reasoning_content"]
                     if reasoning_delta:
+                        # Reasoning appears before content — emit the prefix
+                        # here too so the user sees "AgentKthx:" before any
+                        # output (whether reasoning or content arrives first).
+                        _emit_prefix_once()
                         reasoning_acc.append(reasoning_delta)
                         # Print reasoning in dim grey before content continues
                         sys.stdout.write(f"\033[90m{reasoning_delta}\033[0m")
@@ -2160,12 +2182,14 @@ Final Answer: <the answer>
                 )
                 for chunk in stream_gen:
                     if isinstance(chunk, str):
+                        _emit_prefix_once()
                         content_acc.append(chunk)
                         sys.stdout.write(chunk)
                         sys.stdout.flush()
                     elif isinstance(chunk, dict):
                         delta = chunk.get("delta", "") or chunk.get("content", "") or ""
                         if delta:
+                            _emit_prefix_once()
                             content_acc.append(delta)
                             sys.stdout.write(delta)
                             sys.stdout.flush()
@@ -2252,6 +2276,14 @@ Final Answer: <the answer>
         total_tokens = 0
         tool_calls = 0
         successful_results = []
+
+        # PERF-01 readability: reset the "AgentKthx:" prefix tracker for
+        # each new user prompt. Inside a single _run_core_streaming() call
+        # (which may span multiple agentic-loop iterations due to tool
+        # calls), the prefix is emitted only once — before the first
+        # content/reasoning delta of the first iteration. On the next user
+        # prompt we want it to appear again.
+        self._stream_prefix_emitted = False
 
         response = Response(
             model=self.model,
