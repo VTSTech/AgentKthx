@@ -20,6 +20,8 @@ Written by VTSTech — https://www.vts-tech.org
 
 from __future__ import annotations
 
+import json
+import sys
 import time
 from typing import Any, Generator, Optional
 
@@ -639,11 +641,22 @@ Final Answer: <the answer>
 
         Args:
             prompt: User prompt
-            stream: Whether to stream output
+            stream: When True, delegate to ``_run_core_streaming`` which
+                prints model output chunks to stdout as they arrive (PERF-01).
+                The returned ``AgentRun`` shape is identical to the non-
+                streaming path; only the display behavior differs.
 
         Returns:
             AgentRun with final answer and execution details
         """
+        # PERF-01: streaming path. Delegates to a parallel implementation
+        # that uses backend.generate_completions_stream() and prints
+        # text/reasoning deltas to stdout as they arrive. Returns the
+        # same AgentRun shape as the non-streaming path so callers
+        # (CLI, programmatic users, tests) are unaffected.
+        if stream:
+            return self._run_core_streaming(prompt)
+
         start_time = time.time()
         steps = []
         total_tokens = 0
@@ -1950,6 +1963,765 @@ Final Answer: <the answer>
             print(f"  [DEBUG] Native tool calls: {response.get('tool_calls', [])}")
 
         return response
+
+    # ── PERF-01: streaming generation ─────────────────────────────────
+    # Streaming path that mirrors _generate() but uses backend streaming
+    # and prints content/reasoning deltas to stdout as they arrive.
+    # Returns the SAME dict shape as _generate() so _run_core_streaming
+    # can reuse all of the non-streaming loop's logic (tool dispatch,
+    # error recovery, finish_reason handling, memory tracking).
+
+    def _generate_stream(self) -> dict:
+        """Stream a response from the backend, printing deltas to stdout.
+
+        Mirrors ``_generate()`` but uses ``backend.generate_completions_stream()``
+        (when available) and prints content / reasoning_content chunks to
+        stdout as they arrive — the typewriter effect users expect from
+        ``stream=True``.
+
+        Accumulates ``tool_calls`` fragments across SSE chunks (OpenAI
+        streaming splits a single tool_call across many deltas: the first
+        carries ``id`` + ``name``, subsequent ones append to ``arguments``
+        as a partial JSON string). Returns the assembled call list in the
+        same shape as ``_generate()`` so callers don't need to know
+        whether streaming was used.
+
+        If the backend has no streaming method, falls back to ``_generate()``
+        and prints the content in one shot (with a leading marker so the
+        user can tell streaming was requested but unavailable).
+
+        Returns:
+            dict with keys: content, tool_calls, usage, finish_reason,
+            reasoning_content, _finish_reason, _cancelled
+        """
+        messages = self.memory.get_messages()
+
+        # Resolve think / reasoning_effort / kwargs exactly like _generate()
+        think = self._think
+        if think is None and self.model_family:
+            from .core.model_family_config import needs_no_think_directive
+            if needs_no_think_directive(self.model_family):
+                think = False
+
+        backend_kwargs = {"think": think}
+        if self._reasoning_effort is not None:
+            backend_kwargs["reasoning_effort"] = self._reasoning_effort
+        if self.num_ctx is not None:
+            backend_kwargs["num_ctx"] = self.num_ctx
+        if self._num_predict is not None:
+            backend_kwargs["num_predict"] = self._num_predict
+        if hasattr(self, '_runtime_kwargs') and self._runtime_kwargs:
+            for k, v in self._runtime_kwargs.items():
+                backend_kwargs[k] = v
+        stops = self.model_config.stop_tokens if self.model_config else []
+        if stops:
+            backend_kwargs["stop"] = stops
+        if self.tool_choice and self.tool_choice.type != ToolChoiceType.AUTO:
+            backend_kwargs["tool_choice"] = self.tool_choice.to_dict()
+        if self._response_format is not None:
+            backend_kwargs["response_format"] = self._response_format
+        backend_kwargs["truncation"] = self.truncation
+
+        tools_for_backend = self.tools.all() if self.tools and len(self.tools) > 0 else None
+        gen_temperature = self._temperature if self._temperature is not None else self.model_config.default_temperature
+        gen_max_tokens = self._num_predict if self._num_predict is not None else self.model_config.default_max_tokens
+        gen_top_p = self._top_p if self._top_p is not None else self.model_config.default_top_p
+
+        # Pick the streaming method. Order: OpenAI-compat (chat/completions
+        # SSE) preferred because it carries tool_calls deltas. The native
+        # Ollama generate_stream is text-only.
+        stream_method = None
+        if hasattr(self.backend, 'generate_completions_stream'):
+            stream_method = 'openai_compat'
+        elif hasattr(self.backend, 'generate_stream'):
+            stream_method = 'native'
+
+        if stream_method is None:
+            # Backend has no streaming — fall back to non-streaming and
+            # print the result in one shot. Don't pretend to stream.
+            if self.debug:
+                print(f"  [Stream] backend has no streaming method — falling back to _generate()")
+            response = self.backend.generate(
+                model=self.model,
+                messages=messages,
+                tools=tools_for_backend,
+                temperature=gen_temperature,
+                max_tokens=gen_max_tokens,
+                top_p=gen_top_p,
+                **backend_kwargs,
+            )
+            # Print content as a single chunk (still gives the user feedback
+            # that generation completed).
+            content = response.get("content", "") or ""
+            if content:
+                sys.stdout.write(content)
+                sys.stdout.flush()
+                if not content.endswith("\n"):
+                    sys.stdout.write("\n")
+                    sys.stdout.flush()
+            response["_finish_reason"] = response.get("finish_reason", "stop")
+            return response
+
+        if self.debug:
+            print(f"  [Stream] using {stream_method} backend streaming")
+
+        # ── Accumulators for SSE chunk merging ──────────────────────────
+        # OpenAI streaming tool_calls arrive as a list of "delta" objects,
+        # each carrying an index, optional id (first chunk only), optional
+        # function.name (first chunk only), and function.arguments as a
+        # partial JSON string that grows across subsequent chunks.
+        content_acc = []
+        reasoning_acc = []
+        # tool_calls_acc[index] = {"id", "name", "arguments_str"}
+        tool_calls_acc: dict[int, dict] = {}
+        finish_reason = None
+        usage = {}
+        try:
+            if stream_method == 'openai_compat':
+                stream_gen = self.backend.generate_completions_stream(
+                    model=self.model,
+                    messages=messages,
+                    tools=tools_for_backend,
+                    temperature=gen_temperature,
+                    max_tokens=gen_max_tokens,
+                    top_p=gen_top_p,
+                    **backend_kwargs,
+                )
+                for chunk in stream_gen:
+                    delta = chunk.get("delta", "") or ""
+                    tc_delta = chunk.get("tool_calls")
+                    fr = chunk.get("finish_reason")
+                    if fr:
+                        finish_reason = fr
+                    # Content delta — print immediately
+                    if delta:
+                        content_acc.append(delta)
+                        sys.stdout.write(delta)
+                        sys.stdout.flush()
+                    # Reasoning delta — print with dim styling
+                    reasoning_delta = ""
+                    if isinstance(tc_delta, dict) and "reasoning_content" in tc_delta:
+                        reasoning_delta = tc_delta["reasoning_content"] or ""
+                    elif isinstance(chunk, dict) and chunk.get("reasoning_content"):
+                        reasoning_delta = chunk["reasoning_content"]
+                    if reasoning_delta:
+                        reasoning_acc.append(reasoning_delta)
+                        # Print reasoning in dim grey before content continues
+                        sys.stdout.write(f"\033[90m{reasoning_delta}\033[0m")
+                        sys.stdout.flush()
+                    # Tool-call delta accumulation
+                    if tc_delta:
+                        # tc_delta is the raw OpenAI delta format:
+                        # [{"index": 0, "id": "...", "function": {"name": "...", "arguments": "..."}}]
+                        if isinstance(tc_delta, list):
+                            for tc_d in tc_delta:
+                                idx = tc_d.get("index", 0)
+                                slot = tool_calls_acc.setdefault(idx, {
+                                    "id": "", "name": "", "arguments_str": "",
+                                })
+                                if tc_d.get("id"):
+                                    slot["id"] = tc_d["id"]
+                                func = tc_d.get("function") or {}
+                                if func.get("name"):
+                                    slot["name"] = func["name"]
+                                if func.get("arguments"):
+                                    slot["arguments_str"] += func["arguments"]
+                        elif isinstance(tc_delta, dict):
+                            # Single tool call delta
+                            idx = tc_delta.get("index", 0)
+                            slot = tool_calls_acc.setdefault(idx, {
+                                "id": "", "name": "", "arguments_str": "",
+                            })
+                            if tc_delta.get("id"):
+                                slot["id"] = tc_delta["id"]
+                            func = tc_delta.get("function") or {}
+                            if isinstance(func, dict):
+                                if func.get("name"):
+                                    slot["name"] = func["name"]
+                                if func.get("arguments"):
+                                    slot["arguments_str"] += func["arguments"]
+                            # Some backends stash reasoning_content on tool_calls dict
+                            if "reasoning_content" in tc_delta:
+                                rc = tc_delta.get("reasoning_content") or ""
+                                if rc:
+                                    reasoning_acc.append(rc)
+                                    sys.stdout.write(f"\033[90m{rc}\033[0m")
+                                    sys.stdout.flush()
+            else:
+                # native generate_stream — text only, no tool_calls in stream
+                stream_gen = self.backend.generate_stream(
+                    model=self.model,
+                    messages=messages,
+                    tools=tools_for_backend,
+                    temperature=gen_temperature,
+                    max_tokens=gen_max_tokens,
+                    top_p=gen_top_p,
+                    **backend_kwargs,
+                )
+                for chunk in stream_gen:
+                    if isinstance(chunk, str):
+                        content_acc.append(chunk)
+                        sys.stdout.write(chunk)
+                        sys.stdout.flush()
+                    elif isinstance(chunk, dict):
+                        delta = chunk.get("delta", "") or chunk.get("content", "") or ""
+                        if delta:
+                            content_acc.append(delta)
+                            sys.stdout.write(delta)
+                            sys.stdout.flush()
+                        if chunk.get("finish_reason"):
+                            finish_reason = chunk["finish_reason"]
+        except KeyboardInterrupt:
+            # User cancelled mid-stream
+            # Newline so the next prompt isn't on the same line
+            sys.stdout.write("\n")
+            sys.stdout.flush()
+            return {
+                "content": "".join(content_acc),
+                "tool_calls": [],
+                "usage": {},
+                "reasoning_content": "".join(reasoning_acc),
+                "_finish_reason": "cancelled",
+                "_cancelled": True,
+            }
+
+        # End of stream — print a newline if content didn't end with one
+        # so the next prompt / step summary appears on its own line.
+        content_str = "".join(content_acc)
+        if content_str and not content_str.endswith("\n"):
+            sys.stdout.write("\n")
+            sys.stdout.flush()
+
+        # Assemble tool_calls in index order, parsing the accumulated
+        # arguments JSON string into a dict. If parsing fails (model emitted
+        # malformed JSON across chunks), fall back to a raw wrapper so the
+        # agent loop can surface the bad payload rather than crashing.
+        assembled_tool_calls = []
+        for idx in sorted(tool_calls_acc.keys()):
+            slot = tool_calls_acc[idx]
+            args_str = slot["arguments_str"]
+            if not args_str:
+                args = {}
+            else:
+                try:
+                    args = json.loads(args_str)
+                except json.JSONDecodeError:
+                    # Surface the raw string so the agent loop / error
+                    # recovery can teach the model about the format.
+                    args = {"_raw_arguments": args_str}
+            assembled_tool_calls.append({
+                "id": slot["id"] or f"call_{idx}",
+                "name": slot["name"],
+                "arguments": args,
+            })
+
+        if self.debug:
+            print(f"  [Stream] content: {content_str[:100]!r}")
+            print(f"  [Stream] tool_calls assembled: {assembled_tool_calls}")
+            print(f"  [Stream] finish_reason: {finish_reason}")
+
+        return {
+            "content": content_str,
+            "tool_calls": assembled_tool_calls,
+            "usage": usage,
+            "reasoning_content": "".join(reasoning_acc),
+            "_finish_reason": finish_reason or "stop",
+        }
+
+    def _run_core_streaming(self, prompt: str) -> AgentRun:
+        """Streaming variant of ``_run_core()`` (PERF-01).
+
+        Identical agentic loop (tool dispatch, error recovery, memory
+        tracking, finish_reason handling, OpenResponses lifecycle), but
+        each ``_generate()`` call is replaced with ``_generate_stream()``
+        so content / reasoning deltas are printed to stdout as they
+        arrive instead of being held until the full response is back.
+
+        The returned ``AgentRun`` shape is identical to ``_run_core()``.
+
+        Implementation note: this is intentionally a near-copy of
+        ``_run_core()`` rather than a parameterized fork. The non-
+        streaming path has years of bug fixes (R06.52 loop resilience,
+        pairing-safe memory pruning, error tracker integration) that
+        would be risky to thread through a single parameterized
+        implementation. The duplication is the price of preserving
+        those invariants — see audit PERF-01 for the trade-off.
+        """
+        start_time = time.time()
+        steps = []
+        total_tokens = 0
+        tool_calls = 0
+        successful_results = []
+
+        response = Response(
+            model=self.model,
+            status=ResponseStatus.QUEUED,
+            tool_choice=self.tool_choice,
+            allowed_tools=self._allowed_tools or [],
+        )
+        response.mark_in_progress()
+
+        self.memory.add("user", prompt)
+        user_item = create_message_item("user", prompt)
+        response.input.append(user_item)
+
+        if self.debug:
+            print(f"\n[AgentKthx] Model: {self.model}")
+            print(f"[AgentKthx] Backend: {self.backend.base_url}")
+            print(f"[AgentKthx] Prompt: {prompt}\n")
+
+        _expecting_final_answer = False
+        _last_successful_result = None
+        _last_tool_name = None
+        _terminated = False
+        self._error_tracker.reset()
+
+        for step_num in range(self.max_steps):
+            if self.debug:
+                print(f"[Step {step_num + 1}] (streaming)")
+
+            # Streaming generate with API resilience retry
+            gen_response = None
+            _api_failure = 0
+            _api_wait_total = 0.0
+            while True:
+                try:
+                    gen_response = self._generate_stream()
+                    break
+                except KeyboardInterrupt:
+                    raise
+                except Exception as e:
+                    _api_failure += 1
+                    _transient = is_transient_api_error(e)
+                    _exhausted = _transient and _api_failure > self.max_api_retries
+                    if not _transient or _exhausted:
+                        if _exhausted:
+                            print(describe_terminal(
+                                e, self.max_api_retries, _api_wait_total))
+                        elif not _transient:
+                            print(f"  [Resilience] Fatal API error — "
+                                  f"not retrying: {e}")
+                        if self.debug:
+                            print(f"  ERROR: {e}")
+                        steps.append(StepResult(
+                            type=StepResultType.ERROR,
+                            error=str(e),
+                        ))
+                        response.mark_failed({"message": str(e), "type": "model_error"})
+                        _terminated = True
+                        break
+                    _waited = backoff_delay(_api_failure)
+                    _api_wait_total += _waited
+                    print(describe_wait(_api_failure, self.max_api_retries, _waited, e))
+                    time.sleep(_waited)
+            if _terminated or gen_response is None:
+                break
+
+            content = gen_response.get("content", "")
+            native_tool_calls = gen_response.get("tool_calls", [])
+            tokens = gen_response.get("usage", {}).get("total_tokens", 0)
+            total_tokens += tokens
+            reasoning_content = gen_response.get("reasoning_content", "") or ""
+
+            if gen_response.get("_cancelled"):
+                if self.debug:
+                    print(f"  [Cancelled] Generation interrupted by user")
+                steps.append(StepResult(
+                    type=StepResultType.ERROR,
+                    error="Cancelled by user",
+                    tokens_used=tokens,
+                ))
+                response.mark_cancelled(debug=self.debug)
+                break
+
+            finish_reason = gen_response.get("_finish_reason", "stop")
+            if finish_reason == "length":
+                steps.append(StepResult(
+                    type=StepResultType.MAX_STEPS,
+                    content="Response truncated: token limit reached",
+                    tokens_used=tokens,
+                ))
+                response.mark_incomplete()
+                break
+            elif finish_reason == "content_filter":
+                steps.append(StepResult(
+                    type=StepResultType.ERROR,
+                    error="Response blocked by content filter",
+                    tokens_used=tokens,
+                ))
+                response.mark_failed({"message": "Content filtered by provider", "type": "content_filter"})
+                break
+
+            if self.debug:
+                print(f"  Content: {content[:200] if content else '(empty)'}...")
+                print(f"  Native tool calls: {native_tool_calls}")
+
+            # ---- Process tool calls (native or ReAct) ----
+            tool_calls_found = []
+            if native_tool_calls:
+                for tc in native_tool_calls:
+                    tool_calls_found.append({
+                        "name": tc.get("name", ""),
+                        "arguments": tc.get("arguments", {}),
+                        "id": tc.get("id", ""),
+                    })
+            elif content:
+                parsed_calls = self._parser.parse(content)
+                for call in parsed_calls:
+                    if hasattr(call, 'thought') and call.thought:
+                        reasoning_item = ReasoningItem(
+                            content=[OutputText(text=call.thought)]
+                        )
+                        reasoning_item.status = ItemStatus.COMPLETED
+                        response.add_output_item(reasoning_item, debug=not self._is_comp_mode and self.debug)
+                    tool_calls_found.append({
+                        "name": call.name,
+                        "arguments": call.arguments,
+                        "id": "",
+                        "final_answer": call.final_answer,
+                    })
+
+            if tool_calls_found:
+                # Final Answer enforcement (same as non-streaming path)
+                if _expecting_final_answer and _last_successful_result is not None:
+                    final_answer = _last_successful_result
+                    msg_item = create_message_item("assistant", final_answer)
+                    msg_item.status = ItemStatus.COMPLETED
+                    response.add_output_item(msg_item, debug=not self._is_comp_mode and self.debug)
+                    steps.append(StepResult(
+                        type=StepResultType.FINAL_ANSWER,
+                        content=final_answer,
+                        tokens_used=tokens,
+                        reasoning_content=reasoning_content,
+                    ))
+                    if response.status == ResponseStatus.IN_PROGRESS:
+                        response.mark_completed()
+                    self._response_history[response.id] = response
+                    response.usage["total_tokens"] = total_tokens
+                    total_ms = (time.time() - start_time) * 1000
+                    return AgentRun(
+                        final_answer=final_answer,
+                        steps=steps,
+                        total_tokens=total_tokens,
+                        total_ms=total_ms,
+                        tool_calls=tool_calls,
+                        success=True,
+                    )
+
+                pending_final_answer = None
+                if native_tool_calls:
+                    self.memory.add_tool_call("assistant", content, native_tool_calls)
+                else:
+                    self.memory.add("assistant", content)
+
+                for tc in tool_calls_found:
+                    tool_name = tc["name"]
+                    tool_args = tc["arguments"]
+                    tool_call_id = tc.get("id", "") or ""
+
+                    if tc.get("final_answer"):
+                        pending_final_answer = tc["final_answer"]
+
+                    if self._allowed_tools and tool_name not in self._allowed_tools:
+                        error_msg = f"Tool '{tool_name}' not in allowed_tools: {self._allowed_tools}"
+                        if native_tool_calls:
+                            self.memory.add_tool_result(
+                                tool_call_id=tool_call_id,
+                                name=tool_name,
+                                content=f"Error: {error_msg}",
+                            )
+                        else:
+                            self.memory.add("user", f"Observation: Error: {error_msg}")
+                        continue
+
+                    if self._error_tracker.should_block_repeat(tool_name, tool_args):
+                        blocked_msg = self._error_tracker.format_repeat_block(tool_name, tool_args)
+                        if self.debug:
+                            print(f"  [ErrorRecovery] Blocking repeated identical call: {tool_name}({tool_args})")
+                        if native_tool_calls:
+                            self.memory.add_tool_result(
+                                tool_call_id=tool_call_id or f"blocked_{step_num}_{tool_calls}",
+                                name=tool_name,
+                                content=blocked_msg,
+                            )
+                        else:
+                            self.memory.add("user", f"Observation: {blocked_msg}")
+                        self._error_tracker.record_failure(
+                            tool_name=tool_name,
+                            error_message=blocked_msg,
+                            step=step_num,
+                            arguments=tool_args,
+                        )
+                        steps.append(StepResult(
+                            type=StepResultType.ERROR,
+                            error=blocked_msg,
+                            tool_call=ToolCall(name=tool_name, arguments=tool_args),
+                            tokens_used=tokens,
+                        ))
+                        if self._error_tracker.should_terminate():
+                            response.mark_failed({"message": "Too many tool failures", "type": "error_recovery"})
+                            _terminated = True
+                            break
+                        continue
+
+                    fc_item = create_function_call_item(tool_name, tool_args, tool_call_id)
+                    fc_item.status = ItemStatus.IN_PROGRESS
+                    response.add_output_item(fc_item, debug=not self._is_comp_mode and self.debug)
+
+                    try:
+                        result = self._execute_tool(tool_name, tool_args, prompt)
+                    except KeyboardInterrupt:
+                        fc_item.status = ItemStatus.FAILED
+                        response.mark_cancelled(debug=self.debug)
+                        steps.append(StepResult(
+                            type=StepResultType.ERROR,
+                            error="Cancelled by user during tool execution",
+                        ))
+                        break
+
+                    tool_calls += 1
+                    is_error = is_error_result(str(result))
+                    if is_error:
+                        self._error_tracker.record_failure(
+                            tool_name=tool_name,
+                            error_message=str(result),
+                            step=step_num,
+                            arguments=tool_args
+                        )
+                        if self._error_tracker.should_terminate():
+                            fc_item.status = ItemStatus.FAILED
+                            term_msg = (
+                                f"Error: run terminated after "
+                                f"{self._error_tracker.consecutive_all} consecutive steps in which "
+                                f"every tool call failed. Review the observations above and "
+                                f"adjust the approach."
+                            )
+                            if native_tool_calls:
+                                self.memory.add_tool_result(
+                                    tool_call_id=tool_call_id or f"terminated_{step_num}_{tool_calls}",
+                                    name=tool_name,
+                                    content=term_msg,
+                                )
+                            else:
+                                self.memory.add("user", f"Observation: {term_msg}")
+                            steps.append(StepResult(
+                                type=StepResultType.ERROR,
+                                error=term_msg,
+                                tool_call=ToolCall(name=tool_name, arguments=tool_args),
+                                tokens_used=tokens,
+                            ))
+                            response.mark_failed({"message": "Too many tool failures", "type": "error_recovery"})
+                            _terminated = True
+                            break
+                    else:
+                        self._error_tracker.record_success(tool_name)
+
+                    fc_item.status = ItemStatus.COMPLETED
+                    fco_item = create_function_call_output(fc_item.call_id, str(result))
+                    response.add_output_item(fco_item, debug=not self._is_comp_mode and self.debug)
+
+                    if native_tool_calls:
+                        self.memory.add_tool_result(
+                            tool_call_id=fc_item.call_id,
+                            name=tool_name,
+                            content=str(result),
+                        )
+                        if is_error and self._retry_on_error:
+                            retry_msg = build_retry_context(
+                                tool_name=tool_name,
+                                tool_args=tool_args,
+                                tracker=self._error_tracker,
+                                max_tool_retries=self._max_tool_retries,
+                            )
+                            if retry_msg:
+                                if self.debug:
+                                    print(f"  [Retry Context] Adding retry hint for native tool call: {tool_name}")
+                                self.memory.add("user", retry_msg)
+                    else:
+                        observation_msg = build_enhanced_observation(
+                            tool_name=tool_name,
+                            result=str(result),
+                            tracker=self._error_tracker,
+                            available_tools=self.tools.names(),
+                            is_error=is_error,
+                            retry_on_error=self._retry_on_error,
+                            tool_args=tool_args,
+                        )
+                        if is_error:
+                            _expecting_final_answer = False
+                            _last_tool_name = None
+                        else:
+                            from .core.error_recovery import _is_simple_result
+                            if _is_simple_result(str(result), tool_name):
+                                _expecting_final_answer = True
+                                _last_successful_result = str(result)
+                                _last_tool_name = tool_name
+                            else:
+                                _expecting_final_answer = False
+                                _last_tool_name = None
+                        self.memory.add("user", observation_msg)
+
+                    if not is_error:
+                        successful_results.append(f"{tool_name}: {result}")
+
+                    steps.append(StepResult(
+                        type=StepResultType.TOOL_CALL,
+                        content=content,
+                        tool_call=ToolCall(name=tool_name, arguments=tool_args),
+                        tool_result=result,
+                        tokens_used=tokens,
+                    ))
+
+                if _terminated:
+                    self._response_history[response.id] = response
+                    response.usage["total_tokens"] = total_tokens
+                    total_ms = (time.time() - start_time) * 1000
+                    return AgentRun(
+                        final_answer="",
+                        steps=steps,
+                        total_tokens=total_tokens,
+                        total_ms=total_ms,
+                        tool_calls=tool_calls,
+                        success=False,
+                    )
+
+                if pending_final_answer:
+                    msg_item = create_message_item("assistant", pending_final_answer)
+                    msg_item.status = ItemStatus.COMPLETED
+                    response.add_output_item(msg_item, debug=not self._is_comp_mode and self.debug)
+                    steps.append(StepResult(
+                        type=StepResultType.FINAL_ANSWER,
+                        content=pending_final_answer,
+                        tokens_used=tokens,
+                        reasoning_content=reasoning_content,
+                    ))
+                    if response.status == ResponseStatus.IN_PROGRESS:
+                        response.mark_completed()
+                    self._response_history[response.id] = response
+                    response.usage["total_tokens"] = total_tokens
+                    total_ms = (time.time() - start_time) * 1000
+                    return AgentRun(
+                        final_answer=pending_final_answer,
+                        steps=steps,
+                        total_tokens=total_tokens,
+                        total_ms=total_ms,
+                        tool_calls=tool_calls,
+                        success=True,
+                    )
+
+                continue
+
+            # ---- Check for Final Answer (ReAct format) ----
+            if self._parser.is_final_answer(content):
+                needs_tool = False
+                rejection_reason = ""
+                if self.tool_choice.type == ToolChoiceType.REQUIRED and tool_calls == 0:
+                    needs_tool = True
+                    rejection_reason = "tool_choice='required' but no tool was called"
+                elif self.tool_choice.type == ToolChoiceType.SPECIFIC and tool_calls == 0:
+                    needs_tool = True
+                    rejection_reason = f"tool_choice requires '{self.tool_choice.name}' but no tool was called"
+                if needs_tool:
+                    self.memory.add("assistant", content)
+                    if self.tool_choice.type == ToolChoiceType.SPECIFIC:
+                        self.memory.add("user", f"You must use the '{self.tool_choice.name}' tool before providing a final answer.")
+                    else:
+                        self.memory.add("user", "You must use at least one tool before providing a final answer.")
+                    continue
+
+                answer = self._parser.extract_final_answer(content)
+                _expecting_final_answer = False
+                msg_item = create_message_item("assistant", answer)
+                msg_item.status = ItemStatus.COMPLETED
+                response.add_output_item(msg_item, debug=not self._is_comp_mode and self.debug)
+                steps.append(StepResult(
+                    type=StepResultType.FINAL_ANSWER,
+                    content=answer,
+                    tokens_used=tokens,
+                    reasoning_content=reasoning_content,
+                ))
+                break
+
+            # ---- No tool call, no final answer ----
+            needs_tool = False
+            rejection_reason = ""
+            if self.tool_choice.type == ToolChoiceType.REQUIRED and tool_calls == 0:
+                needs_tool = True
+                rejection_reason = "tool_choice='required' but no tool was called"
+            elif self.tool_choice.type == ToolChoiceType.SPECIFIC and tool_calls == 0:
+                needs_tool = True
+                rejection_reason = f"tool_choice requires '{self.tool_choice.name}' but no tool was called"
+            if needs_tool:
+                self.memory.add("assistant", content)
+                if self.tool_choice.type == ToolChoiceType.SPECIFIC:
+                    self.memory.add("user", f"You must use the '{self.tool_choice.name}' tool.")
+                else:
+                    self.memory.add("user", "You must use at least one tool.")
+                continue
+
+            if _expecting_final_answer and _last_successful_result is not None:
+                final_answer = _last_successful_result
+                msg_item = create_message_item("assistant", final_answer)
+                msg_item.status = ItemStatus.COMPLETED
+                response.add_output_item(msg_item, debug=not self._is_comp_mode and self.debug)
+                steps.append(StepResult(
+                    type=StepResultType.FINAL_ANSWER,
+                    content=final_answer,
+                    tokens_used=tokens,
+                    reasoning_content=reasoning_content,
+                ))
+                if response.status == ResponseStatus.IN_PROGRESS:
+                    response.mark_completed()
+                self._response_history[response.id] = response
+                response.usage["total_tokens"] = total_tokens
+                total_ms = (time.time() - start_time) * 1000
+                return AgentRun(
+                    final_answer=final_answer,
+                    steps=steps,
+                    total_tokens=total_tokens,
+                    total_ms=total_ms,
+                    tool_calls=tool_calls,
+                    success=True,
+                )
+
+            # Accept as final answer
+            if content:
+                msg_item = create_message_item("assistant", content)
+                msg_item.status = ItemStatus.COMPLETED
+                response.add_output_item(msg_item, debug=not self._is_comp_mode and self.debug)
+            steps.append(StepResult(
+                type=StepResultType.FINAL_ANSWER,
+                content=content,
+                tokens_used=tokens,
+                reasoning_content=reasoning_content,
+            ))
+            self.memory.add("assistant", content)
+            break
+        else:
+            response.mark_incomplete()
+            steps.append(StepResult(
+                type=StepResultType.MAX_STEPS,
+                content="Maximum steps reached without final answer",
+            ))
+
+        total_ms = (time.time() - start_time) * 1000
+        if response.status == ResponseStatus.IN_PROGRESS:
+            response.mark_completed()
+        self._response_history[response.id] = response
+        final_answer = ""
+        for step in reversed(steps):
+            if step.type == StepResultType.FINAL_ANSWER:
+                final_answer = step.content or ""
+                break
+        response.usage["total_tokens"] = total_tokens
+        return AgentRun(
+            final_answer=final_answer,
+            steps=steps,
+            total_tokens=total_tokens,
+            total_ms=total_ms,
+            tool_calls=tool_calls,
+            success=bool(final_answer),
+        )
 
     def _execute_tool(self, name: str, args: dict, user_prompt: str = "") -> Any:
         """

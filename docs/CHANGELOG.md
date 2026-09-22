@@ -5,6 +5,120 @@ All notable changes to AgentKthx will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [R06.53] - 2026-09-22 3:53:13 PM
+
+### ⚡ **PERF-01 — Real Streaming Display (typewriter effect)**
+
+`Agent.run(prompt, stream=True)` previously accepted the `stream` parameter but silently ignored it — the method always ran the non-streaming code path. Users on cloud providers (OpenRouter, ZAI) saw a spinner until the full response arrived, with no indication of progress. This closes the largest perceived-latency gap in the harness for cloud users.
+
+**New `Agent._generate_stream()` (~250 lines)** — mirrors `_generate()` but uses the backend's streaming method. Picks the best available transport in order: OpenAI Chat-Completions SSE (`backend.generate_completions_stream()`, preferred because it carries `tool_calls` deltas), native Ollama streaming (`backend.generate_stream()`, text-only), or finally non-streaming `backend.generate()` if neither is present.
+
+- **Content deltas printed to stdout immediately** — typewriter effect as the model produces tokens.
+- **`reasoning_content` deltas printed in dim grey (`\033[90m`)** inline before content continues, so `--think` users see chain-of-thought arriving in real time.
+- **`tool_calls` fragments accumulated across SSE chunks.** OpenAI streaming splits a single tool call into many deltas: the first chunk carries `id` + `function.name`, subsequent ones append to `function.arguments` as a partial JSON string. The accumulator merges them in index order and parses the assembled JSON into a dict. Malformed JSON falls back to `{"_raw_arguments": "..."}` so the agent loop can surface the bad payload to the model instead of crashing.
+- **`KeyboardInterrupt` mid-stream returns `{"_cancelled": True, "_finish_reason": "cancelled"}`** with partial content preserved — the agent loop handles it as a clean cancel rather than a fatal error.
+- **Returns the same dict shape as `_generate()`** so callers don't need to know streaming was used.
+
+**New `Agent._run_core_streaming()` (~500 lines)** — parallel to `_run_core()`, calls `_generate_stream()` instead of `_generate()` inside the agentic loop. The full non-streaming semantics are preserved: tool dispatch, error recovery, pairing-safe memory pruning, finish_reason handling, OpenResponses lifecycle, R06.52 loop-resilience fixes. Returns the same `AgentRun` shape. Implementation is intentionally a near-copy rather than a parameterized fork — the non-streaming path has years of bug fixes that would be risky to thread through a single parameterized implementation.
+
+**`_run_core(stream=True)`** — single-line delegation to `_run_core_streaming()`.
+
+**CLI changes**:
+- `cmd_chat`: spinner suppressed when streaming (typewriter output IS the progress indicator — a spinner on stderr would visually compete with content arriving on stdout).
+- `cmd_chat` + `cmd_run`: final answer no longer re-printed after streaming — it was already shown by the typewriter effect.
+- `reasoning_content` block still printed after streaming completes, for `--think` review.
+- Default streaming behavior preserved: `--stream` forces streaming on, `--no-stream` forces off, neither = auto (cloud providers stream, local backends don't).
+
+**Tests** — 11 new tests in `tests/test_streaming.py` cover: return shape parity with `_generate()`, single tool_call assembled from fragments, multiple tool_calls in index order, malformed JSON arguments fallback to `_raw_arguments`, empty arguments become `{}`, fallback to non-streaming when backend has no streaming method, native `generate_stream()` path, KeyboardInterrupt mid-stream cancellation, end-to-end `AgentRun` return via `_run_core(stream=True)`.
+
+---
+
+### 🔌 **PERF-02 — `stream_options.include_usage` on OpenRouter streaming**
+
+When OpenRouter is used in streaming mode, the `stream_options: {"include_usage": true}` field was not sent. Without this, OpenRouter's SSE chunks omit `usage` data entirely — making token tracking impossible for streamed responses.
+
+- **`OpenRouterBackend._build_openai_body()` gains a `stream: bool = False` parameter.** When `stream=True`, the body includes `stream_options.include_usage=True`. Non-streaming requests are unaffected — `stream_options` is omitted entirely.
+- **Updated the "What's NOT yet implemented" section** in `docs/OPENROUTER_API_TECHNICAL_REFERENCE.md` to remove `stream_options.include_usage` (it's now implemented).
+- **Tests** — 3 new tests in `tests/test_openrouter_backend.py` cover both branches and the default: `test_stream_false_omits_stream_options`, `test_stream_true_adds_include_usage`, `test_stream_default_false_no_stream_options`.
+
+---
+
+### 🐛 **BUG: OpenRouter streaming hit HTTP 404 via inherited OllamaBackend method**
+
+`OpenRouterBackend` inherited `generate_completions_stream` from `OllamaBackend`, but the inherited method builds the URL as `{self.base_url}/v1/chat/completions` and posts directly via `urllib`. For OpenRouter that yields `https://openrouter.ai/api/v1/v1/chat/completions` — a doubled `/v1` path that returns HTTP 404. The error message ("Ollama HTTP error 404") was misleading because the inherited method labels all errors with "Ollama" regardless of which backend called it.
+
+**Fix** — added `OpenRouterBackend.generate_completions_stream()` that overrides the inherited method. Uses `_build_openai_body(stream=True)` (which now correctly emits `stream_options.include_usage` via PERF-02) and the existing `_make_api_request(stream=True)` path that already handles OpenRouter's 429/5xx retry, error extraction, and SSE parsing. Yields chunks in the same dict shape `Agent._generate_stream()` expects.
+
+**Tests** — 2 new tests in `tests/test_openrouter_backend.py::TestOpenRouterStreamMethodOverride`:
+- `test_method_is_defined_on_openrouter_not_inherited` — verifies `generate_completions_stream` is in `OpenRouterBackend.__dict__`, not inherited from `OllamaBackend`.
+- `test_method_uses_openrouter_url_builder` — smoke test that the method body references `_make_api_request` and `chat/completions` (not OllamaBackend's urllib path).
+
+---
+
+### 🛡️ **ROB-02 — Last bare `except:` replaced**
+
+The final remaining bare `except:` clause (at `agentkthx/orchestrator.py:279`, in the multi-agent orchestrator's fallback-result processing loop) was replaced with `except Exception:`. Bare `except:` clauses catch *everything* including `KeyboardInterrupt` and `SystemExit`, silently suppressing user-initiated cancellation. Global scan confirmed it was the only remaining site.
+
+---
+
+### 📝 **MAINT-03 — OpenRouter API reference no longer references `AGENTNOVA_*` env vars**
+
+The MAINT-02 rename in R06.41 missed `docs/OPENROUTER_API_TECHNICAL_REFERENCE.md`. Lines 633-635 still claimed `AGENTNOVA_*` env vars were kept "for backward compatibility" — doubly wrong: (a) wrong env var names, (b) wrong claim about aliases (MAINT-02 explicitly removed all aliases, no compat layer retained). Section renamed from "Backward-compatibility env vars" to "Configuration env vars" and rewritten to reflect the `AGENTKTHX_*` prefix with a note about the R06.41 rename.
+
+---
+
+### 🐛 **BUG: `You:` prompt input overwrote the line at terminal EOL**
+
+Long input at the `You:` chat prompt overwrote the current line instead of scrolling previous output up and continuing on a new line. Three contributing causes, all fixed:
+
+1. **Auto-wrap state not guaranteed** — `_update_footer()` toggles terminal auto-wrap OFF (`\033[?7l`) to draw the footer, then back ON (`\033[?7h`). If anything between then and `input()` left it OFF (exception, partial flush), the cursor stayed at the rightmost column and overwrote it. `_position_for_input()` now explicitly re-asserts `\033[?7h` before every prompt.
+2. **`_update_footer()` redraw wrapped in `try/finally`** — guarantees auto-wrap is re-enabled even if `_footer_line1()`/`_footer_line2()` throw.
+3. **Readline prompt had unmarked ANSI escapes** — `f"\033[90mYou:\033[0m "` doesn't wrap escape codes in `\001`/`\002` markers, so readline miscounted prompt width as 14 chars instead of 4. Now uses `"\001\033[90m\002You:\001\033[0m\002 "`. Also explicitly forces `readline.parse_and_bind("set horizontal-scroll-mode off")` to override any `~/.inputrc` that enables horizontal scrolling.
+
+---
+
+### 🐛 **BUG: `agentkthx update` failed silently on PEP 668 externally-managed environments**
+
+On Debian/Ubuntu/Fedora system Python, `agentkthx update` ran `pip install git+https://github.com/VTSTech/AgentKthx.git --force-reinstall`, hit PEP 668's `externally-managed-environment` block, and printed `✗ Update failed.` with no recovery path. Users had to manually re-run pip with `--break-system-packages` — but the error message only hinted at this in pip's trailing note.
+
+**Fix** — `cmd_update()` now detects PEP 668 errors via `_is_externally_managed_error(stderr)` and prompts the user explicitly:
+
+```
+✗ Update failed.
+This Python environment is externally managed (PEP 668).
+The system Python on Debian/Ubuntu/Fedora blocks pip installs to protect the OS
+package manager — overriding it risks breaking the OS.
+
+  Retry with --break-system-packages? [y/N]
+```
+
+- **Never silent** — `--break-system-packages` is only ever added after the user explicitly types `y`/`yes`.
+- **EOF / Ctrl+C safe** — `input()` wrapped in try/except, defaults to "no".
+- **Idempotent** — runs only once per update invocation, not recursively.
+- **Bounded** — if the retry also fails, falls through to the normal error-print path.
+
+**Detector** (`_is_externally_managed_error`) fires only on genuine PEP 668 signals — `externally-managed-environment` (canonical), `externally managed environment` (older spaced variant), `externally` + `managed` + `environment` co-occurring (Debian's human-readable line), or `--break-system-packages` + `pep 668` (hint pairing). Rejects unrelated pip failures (auth, network, missing package, build errors).
+
+**Tests** — 11 new tests in `tests/test_cmd_update_pep668.py` cover: 4 positive cases (canonical marker, spaced variant, hint-only, the exact error reported by the user), 7 negative cases (empty, None, missing package, network, build, auth, false-positive guard for `--break-system-packages` without PEP 668 context).
+
+---
+
+### 🐛 **BUG: Banner showed R06.52 (version source mismatch)**
+
+The CLI banner pulls `__version__` from `agentkthx/__init__.py`, but the R06.53 version bump only updated `pyproject.toml`. `__init__.py` was still `0.6.52`, so the banner and footer showed `R06.52 [Alpha]` / `0.6.52` even after installing the R06.53 build. Fixed by bumping `agentkthx/__init__.py:__version__` to `"0.6.53"`.
+
+---
+
+### 📊 Summary
+
+- **Audit findings closed in R06.53**: 4 (MAINT-03, ROB-02, PERF-02, PERF-01)
+- **Live bugs fixed**: 4 (OpenRouter streaming 404, `You:` prompt EOL wrap, `agentkthx update` PEP 668, version source mismatch)
+- **Tests added**: 27 (3 PERF-02, 11 PERF-01 streaming, 11 PEP 668, 2 OpenRouter stream method override)
+- **Test suite**: 638 → 662 passed, 6 skipped, 0 failed
+- **Open findings remaining**: 10 (1 High — MAINT-01 cli.py split, 4 Medium, 5 Low)
+
+---
+
 ## [R06.52] - 2026-09-21 1:46:06 PM
 
 ### 🛡️ **API Resilience — rate limits no longer kill agentic runs**

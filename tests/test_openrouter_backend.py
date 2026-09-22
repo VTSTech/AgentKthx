@@ -250,6 +250,37 @@ class TestBuildOpenAiBody(unittest.TestCase):
         self.assertNotIn("stream_options", body)
 
 
+class TestOpenRouterStreamMethodOverride(unittest.TestCase):
+    """PERF-01: OpenRouterBackend must override generate_completions_stream.
+
+    The inherited OllamaBackend.generate_completions_stream builds the URL
+    as ``{self.base_url}/v1/chat/completions`` which on OpenRouter yields
+    ``https://openrouter.ai/api/v1/v1/chat/completions`` — a doubled /v1
+    that returns HTTP 404. OpenRouterBackend must define its own method
+    that uses _make_api_request(stream=True) instead.
+    """
+
+    def test_method_is_defined_on_openrouter_not_inherited(self):
+        from agentkthx.backends.ollama import OllamaBackend
+        # generate_completions_stream must be in OpenRouterBackend's own
+        # __dict__ (defined on the class itself), not inherited.
+        self.assertIn(
+            "generate_completions_stream",
+            OpenRouterBackend.__dict__,
+            "OpenRouterBackend must override generate_completions_stream — "
+            "otherwise it inherits OllamaBackend's URL builder which produces "
+            "a doubled /v1 path on OpenRouter (404 error).",
+        )
+
+    def test_method_uses_openrouter_url_builder(self):
+        """Smoke test: confirm the method body references _make_api_request
+        (the OpenRouter-native URL builder), not OllamaBackend's urllib path."""
+        import inspect
+        src = inspect.getsource(OpenRouterBackend.generate_completions_stream)
+        self.assertIn("_make_api_request", src)
+        self.assertIn("chat/completions", src)
+
+
 class TestIsToolsNotSupportedError(unittest.TestCase):
     """Tests for the error-text matcher used by the ReAct fallback path."""
 

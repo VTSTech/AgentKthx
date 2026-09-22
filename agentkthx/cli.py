@@ -806,7 +806,17 @@ def cmd_run(args: argparse.Namespace) -> int:
                 reasoning_content = getattr(step, 'reasoning_content', '') or ""
                 break
 
-    if reasoning_content:
+    # PERF-01: when streaming, the final answer was already printed by
+    # the typewriter effect in _generate_stream(). Don't print it again.
+    if stream:
+        if reasoning_content:
+            print(f"{dim('  reasoning:')}")
+            for line in reasoning_content.splitlines():
+                if len(line) > 200:
+                    line = line[:197] + "..."
+                print(f"    {dim(line)}")
+            print()
+    elif reasoning_content:
         print(result.final_answer)
         print(f"{dim('  reasoning:')}")
         for line in reasoning_content.splitlines():
@@ -1666,11 +1676,27 @@ def cmd_chat(args: argparse.Namespace) -> int:
         if acp:
             acp.log_chat("user", user_input)
 
-        # Run with spinner (suppress spinner when debug is on — debug already prints progress)
+        # Run with spinner (suppress spinner when debug is on — debug already prints progress).
+        # PERF-01: also suppress the spinner when stream=True — streaming output
+        # itself is the progress indicator (typewriter effect on stdout), and a
+        # spinning cursor on stderr would visually compete with it.
         spinner_t = None
         if not agent.debug:
-            print()  # blank line before spinner
-            spinner_t = _spinner_start()
+            # Pre-compute stream flag so we know whether to suppress the spinner.
+            # This must mirror the logic used below when calling agent.run().
+            from .core.types import BackendType
+            _is_cloud = (
+                hasattr(agent.backend, 'backend_type') and
+                agent.backend.backend_type in [BackendType.OPENROUTER, BackendType.ZAI]
+            )
+            _explicit = getattr(args, 'stream', None)
+            _will_stream = (
+                _explicit is True or
+                (_explicit is None and _is_cloud)
+            )
+            if not _will_stream:
+                print()  # blank line before spinner
+                spinner_t = _spinner_start()
         try:
             # Enable streaming by default for cloud providers, but respect
             # explicit --stream / --no-stream from the user.
@@ -1771,7 +1797,23 @@ def cmd_chat(args: argparse.Namespace) -> int:
                         reasoning_content = getattr(step, 'reasoning_content', '') or ""
                         break
 
-            if reasoning_content:
+            # PERF-01: when streaming, the final answer was already printed
+            # by the typewriter effect in _generate_stream(). Don't print it
+            # again — that would duplicate the response. Only print the
+            # reasoning_content block (if any) since reasoning is emitted
+            # inline with content during streaming but the structured
+            # dim-grey block under the answer is still useful for review.
+            if _will_stream:
+                # Streaming already printed content; just show reasoning if asked.
+                if reasoning_content:
+                    print(f"{dim('  reasoning:')}")
+                    for line in reasoning_content.splitlines():
+                        if len(line) > 200:
+                            line = line[:197] + "..."
+                        print(f"    {dim(line)}")
+                    print()
+                # No "AgentKthx: <answer>" line — content already streamed.
+            elif reasoning_content:
                 print(f"\n{bright_green('AgentKthx')}: {result.final_answer}")
                 print(f"{dim('  reasoning:')}")
                 for line in reasoning_content.splitlines():

@@ -4,7 +4,7 @@
 
 **Repository:** https://github.com/VTSTech/AgentKthx  
 **Author:** VTSTech | **License:** MIT | **Date:** 2026-09-22  
-**Status:** 11 Open Findings | 7 Categories | SEC, ROB, MAINT, PERF, FEAT, ARCH, TEST
+**Status:** 10 Open Findings | 7 Categories | SEC, ROB, MAINT, PERF, FEAT, ARCH, TEST
 
 ---
 
@@ -29,7 +29,7 @@
 
 AgentKthx is a 35,250+ line Python framework for autonomous AI agents with zero external dependencies — built entirely on the standard library. Since R06.41, the codebase has evolved to version R06.53 with significant improvements:
 
-- **R06.53 (Current)**: Cleanup pass — closed MAINT-03 (stale `AGENTNOVA_*` refs in OpenRouter doc), ROB-02 (last bare `except:` in `orchestrator.py`), PERF-02 (`stream_options.include_usage` on OpenRouter streaming). 3 new tests added.
+- **R06.53 (Current)**: Cleanup + streaming pass — closed MAINT-03 (stale `AGENTNOVA_*` refs in OpenRouter doc), ROB-02 (last bare `except:` in `orchestrator.py`), PERF-02 (`stream_options.include_usage` on OpenRouter streaming), PERF-01 (real streaming display via `_generate_stream()` + `_run_core_streaming()`). Also fixed live bugs: `You:` prompt EOL wrap, `agentkthx update` PEP 668 prompt for `--break-system-packages`. 25 new tests added.
 
 - **R06.52**: Loop resilience fixes — closed the "codebase-audit death-spiral" with improved error detection, consecutive termination semantics, duplicate call blocking, pairing-safe memory pruning, and hallucinated-parameter stripping. 48 new tests added.
 
@@ -55,7 +55,7 @@ The test suite now has **479 passed, 6 skipped, 0 failed** tests. Security pract
 | MAINT-02 | ~~Medium~~ | Maintainability | ✓ CLOSED R06.41 | `AGENTNOVA_*` env vars renamed to `AGENTKTHX_*`; `~/.agentnova/` → `~/.agentkthx/` |
 | ROB-02 | ~~Medium~~ | Robustness | ✓ CLOSED R06.53 | Bare `except:` clause at `orchestrator.py:279` replaced with `except Exception:` |
 | MAINT-03 | ~~Low~~ | Maintainability | ✓ CLOSED R06.53 | `docs/OPENROUTER_API_TECHNICAL_REFERENCE.md` no longer references `AGENTNOVA_*` env vars |
-| PERF-01 | Medium | Performance | OPEN | Streaming mode silently ignored — no real-time output |
+| PERF-01 | ~~Medium~~ | Performance | ✓ CLOSED R06.53 | `run(stream=True)` now delegates to `_run_core_streaming` which prints content/reasoning deltas via `_generate_stream()` typewriter effect |
 | PERF-02 | ~~Low~~ | Performance | ✓ CLOSED R06.53 | `stream_options.include_usage` now sent on OpenRouter streaming requests |
 | FEAT-01 | Medium | New Feature | OPEN | No provider routing preferences for OpenRouter |
 | FEAT-02 | Low | New Feature | OPEN | `/param` matrix hardcoded, not extensible via plugins |
@@ -63,7 +63,7 @@ The test suite now has **479 passed, 6 skipped, 0 failed** tests. Security pract
 | ARCH-02 | Low | Architecture | OPEN | No coverage measurement configured |
 | TEST-01 | Medium | Testing | PARTIALLY ADDRESSED | No integration tests — all tests are mocked unit tests (improved) |
 
-**Severity distribution**: 1 High (MAINT-01), 5 Medium, 5 Low (excluding closed findings). Of the 11 still-open: 1 High, 5 Medium, 5 Low.
+**Severity distribution**: 1 High (MAINT-01), 4 Medium, 5 Low (excluding closed findings). Of the 10 still-open: 1 High, 4 Medium, 5 Low.
 
 ---
 
@@ -217,23 +217,31 @@ The test suite now has **479 passed, 6 skipped, 0 failed** tests. Security pract
 
 ### Performance
 
-#### PERF-01: Streaming mode silently ignored — no real-time output
+#### PERF-01: Streaming mode silently ignored — CLOSED in R06.53
 
 | Property | Value |
 |----------|-------|
-| **Severity** | Medium |
+| **Severity** | ~~Medium~~ → Resolved |
 | **Category** | Performance |
-| **File(s)** | `agentkthx/agent.py:536` (`run()` method) |
+| **File(s)** | `agentkthx/agent.py`, `agentkthx/cli.py` |
+| **Status (R06.53)** | ✓ CLOSED — `_generate_stream()` + `_run_core_streaming()` implemented
 
-`Agent.run(prompt, stream=True)` accepts the `stream` parameter but never uses it — the method always runs the non-streaming code path.
+**Status:** CLOSED in R06.53. Two new methods on `Agent`:
 
-**Recommendation:** Implement a `run_stream_console()` method that:
-1. Calls the backend's streaming method
-2. Prints text chunks as they arrive (typewriter effect)
-3. Accumulates `tool_calls` fragments across SSE chunks
-4. After stream completes, checks if tool_calls were found and continues the agentic loop
+1. **`_generate_stream()`** — mirrors `_generate()` but uses backend's `generate_completions_stream()` (OpenAI SSE) when available, falls back to `generate_stream()` (native), or finally to `_generate()` if neither is present. Accumulates content + reasoning_content deltas and writes them to stdout immediately (typewriter effect). Critically, it also **accumulates `tool_calls` fragments across SSE chunks** — OpenAI streaming splits a single tool_call into multiple deltas (first chunk carries `id` + `name`, subsequent ones append to `arguments` as partial JSON). The accumulator merges them in index order, parses the assembled JSON arguments string, and falls back to a `_raw_arguments` wrapper if parsing fails so the agent loop can surface malformed payloads.
 
-**Impact:** Dramatically improves perceived latency for cloud-provider users.
+2. **`_run_core_streaming()`** — parallel to `_run_core()`, calls `_generate_stream()` instead of `_generate()`. The full agentic loop (tool dispatch, error recovery, pairing-safe memory pruning, finish_reason handling, OpenResponses lifecycle) is preserved. Returns the same `AgentRun` shape.
+
+3. **`_run_core(stream=True)`** — delegates to `_run_core_streaming()`.
+
+CLI changes:
+- `cmd_chat`: spinner suppressed when streaming (streaming output IS the progress indicator)
+- `cmd_chat` + `cmd_run`: final answer not duplicated when streaming (already printed by typewriter)
+- `reasoning_content` block still printed after streaming for `--think` review
+
+11 new tests in `tests/test_streaming.py` cover: return shape parity, single + multi tool_call fragment accumulation, malformed JSON fallback, empty args → `{}`, native fallback path, KeyboardInterrupt mid-stream cancellation, end-to-end `AgentRun` return.
+
+**Impact:** Cloud-provider users (OpenRouter, ZAI) now see typewriter-style output as it arrives instead of a spinner until the full response is back. Perceived latency dramatically improved for long responses. Agentic loop continues to work — tool calls dispatched during streaming still re-enter the loop and stream the next iteration.
 
 ---
 
@@ -342,7 +350,7 @@ All 479 tests use `MagicMock`, `monkeypatch`, or source-level string inspection.
 
 | Timeline | Findings |
 |----------|----------|
-| **Near term (R06.6–R06.7)** | MAINT-01 (cli.py split), PERF-01 (streaming display) |
+| **Near term (R06.6–R06.7)** | MAINT-01 (cli.py split) |
 | **Short term (R06.7–R07.0)** | ARCH-01 (backend inheritance decoupling), FEAT-01 (OpenRouter provider routing), TEST-01 (integration tests) |
 | **Medium term (R07.0+)** | FEAT-02 (/param matrix extensibility), ARCH-02 (coverage measurement) |
 
@@ -374,11 +382,14 @@ All 479 tests use `MagicMock`, `monkeypatch`, or source-level string inspection.
 
 ## Recent Improvements Since R06.41
 
-### R06.53 - Cleanup Pass (2026-09-22)
+### R06.53 - Cleanup + Streaming Pass (2026-09-22)
 - **MAINT-03 closed** — `docs/OPENROUTER_API_TECHNICAL_REFERENCE.md` "Backward-compatibility env vars" section rewritten to "Configuration env vars" with `AGENTKTHX_*` prefix
 - **ROB-02 closed** — last bare `except:` at `orchestrator.py:279` replaced with `except Exception:`
 - **PERF-02 closed** — `_build_openai_body(stream=True)` now emits `stream_options.include_usage` so streaming responses carry token counts
-- 3 new tests added in `tests/test_openrouter_backend.py`
+- **PERF-01 closed** — `_generate_stream()` + `_run_core_streaming()` provide real typewriter-style streaming output via `run(stream=True)`. Tool-call fragments accumulated across SSE chunks. Same `AgentRun` return shape.
+- **Bug fix** — `You:` prompt input wraps at terminal EOL (auto-wrap re-enabled, readline prompt ANSI codes wrapped in `\001`/`\002`, `horizontal-scroll-mode off` forced)
+- **Bug fix** — `agentkthx update` detects PEP 668 externally-managed-environment errors and prompts y/n to retry with `--break-system-packages`
+- 25 new tests added (3 for PERF-02, 11 for PERF-01 streaming, 11 for PEP 668 detection)
 
 ### R06.52 - Loop Resilience (2026-09-21)
 - **`is_error_result()` rewritten** — error detection now inspects only the first non-empty line
@@ -450,5 +461,7 @@ tests/test_update_check.py .......................
 - Updated: `agentkthx/core/error_recovery.py` (R06.52)
 - Updated: `agentkthx/orchestrator.py` (R06.53 — bare `except:` → `except Exception:`)
 - Updated: `agentkthx/plugins/openrouter/openrouter.py` (R06.53 — `stream_options.include_usage`)
+- Updated: `agentkthx/agent.py` (R06.53 — added `_generate_stream()` + `_run_core_streaming()` for PERF-01)
+- Updated: `agentkthx/cli.py` (R06.53 — streaming-aware spinner suppression, no duplicate final answer print, input EOL wrap fix, PEP 668 update prompt)
 - Updated: `docs/OPENROUTER_API_TECHNICAL_REFERENCE.md` (R06.53 — `AGENTNOVA_*` → `AGENTKTHX_*`)
-- Updated test count: 435 → 638 tests
+- Updated test count: 435 → 660 tests

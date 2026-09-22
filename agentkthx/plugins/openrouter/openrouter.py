@@ -1160,4 +1160,120 @@ class OpenRouterBackend(OllamaBackend):
         )
         return any(ind in err_lower for ind in indicators)
 
-    # Generate_stream method is inherited from OllamaBackend
+    # Generate_stream method is inherited from OllamaBackend — BUT
+    # OllamaBackend.generate_completions_stream() builds the URL as
+    # ``{self.base_url}/v1/chat/completions`` and posts directly. For
+    # OpenRouter that yields ``https://openrouter.ai/api/v1/v1/chat/completions``
+    # — a doubled ``/v1`` path that returns HTTP 404.
+    # Override with an OpenRouter-native streaming method that uses the
+    # existing _make_api_request(stream=True) path so PERF-01 streaming
+    # works on OpenRouter without going through Ollama's URL builder.
+
+    def generate_completions_stream(
+        self,
+        model: str,
+        messages: list[dict],
+        tools: list[Tool] | None = None,
+        temperature: float = 0.7,
+        max_tokens: int = 2048,
+        top_p: float | None = None,
+        think: bool | None = None,
+        stop: str | list[str] | None = None,
+        presence_penalty: float | None = None,
+        frequency_penalty: float | None = None,
+        response_format: dict | None = None,
+        reasoning_effort: str | None = None,
+        num_ctx: int | None = None,
+        num_predict: int | None = None,
+        truncation: str | None = None,
+        **kwargs,
+    ) -> Generator[dict, None, None]:
+        """Stream OpenAI Chat-Completions chunks from OpenRouter.
+
+        PERF-01: this is the OpenRouter-native streaming path. The
+        inherited ``OllamaBackend.generate_completions_stream`` builds
+        the wrong URL (doubled ``/v1``) so we override it here.
+
+        Uses ``_build_openai_body(stream=True)`` (which emits
+        ``stream_options.include_usage`` thanks to PERF-02) and the
+        existing ``_make_api_request(stream=True)`` path that already
+        handles OpenRouter's 429/5xx retry, error extraction, and
+        ``_stream_request`` SSE parsing.
+
+        Yields dicts in the shape ``_generate_stream()`` (in agent.py)
+        expects:
+            {
+              "delta": str,                     # text content delta
+              "tool_calls": list[dict] | None,  # OpenAI tool_calls deltas
+              "finish_reason": str | None,      # "stop" / "tool_calls" / None
+              "reasoning_content": str | None,  # thinking model CoT delta
+            }
+        """
+        # Resolve per-model defaults
+        defaults = self._get_model_defaults(model)
+        if temperature is None:
+            temperature = defaults["temperature"]
+        if max_tokens is None:
+            max_tokens = defaults["max_tokens"]
+
+        # Build body with stream=True so PERF-02's stream_options.include_usage
+        # is sent and OpenRouter emits a usage-carrying final chunk.
+        body = self._build_openai_body(
+            model=model,
+            messages=messages,
+            tools=tools,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            stream=True,
+            top_p=top_p,
+            stop=stop,
+            presence_penalty=presence_penalty,
+            frequency_penalty=frequency_penalty,
+            response_format=response_format,
+            reasoning_effort=reasoning_effort,
+            num_ctx=num_ctx,
+            num_predict=num_predict,
+            truncation=truncation,
+            **kwargs,
+        )
+
+        if os.environ.get("AGENTKTHX_DEBUG"):
+            print(f"  [OpenRouter-Stream] POST chat/completions — "
+                  f"tools={len(tools) if tools else 0}, stream=True")
+
+        # _make_api_request(stream=True) returns a generator of raw parsed
+        # JSON chunks from the SSE stream.
+        raw_stream = self._make_api_request("chat/completions", body, stream=True)
+        for chunk in raw_stream:
+            # OpenRouter/OpenAI SSE chunk shape:
+            #   {
+            #     "choices": [{
+            #       "delta": {
+            #         "content": "...",
+            #         "tool_calls": [...],
+            #         "reasoning_content": "..."
+            #       },
+            #       "finish_reason": null | "stop" | "tool_calls" | ...
+            #     }],
+            #     "usage": {...}  # only in final chunk when stream_options.include_usage=true
+            #   }
+            choices = chunk.get("choices", []) or []
+            if not choices:
+                # Final usage-only chunk (no choices) — skip, the agent
+                # loop doesn't need usage during streaming display.
+                continue
+            choice = choices[0]
+            delta = choice.get("delta", {}) or {}
+            text_delta = delta.get("content", "") or ""
+            tool_calls_delta = delta.get("tool_calls")
+            reasoning_delta = delta.get("reasoning_content", "") or ""
+            finish_reason = choice.get("finish_reason")
+
+            yield_chunk: dict = {
+                "delta": text_delta,
+                "tool_calls": tool_calls_delta,
+                "finish_reason": finish_reason,
+            }
+            if reasoning_delta:
+                yield_chunk["reasoning_content"] = reasoning_delta
+            yield yield_chunk
