@@ -276,7 +276,7 @@ class Orchestrator:
                         result.agents_used.append(fallback_card.name)
                         result.success = True
                         break
-                    except:
+                    except Exception:
                         continue
 
         return result

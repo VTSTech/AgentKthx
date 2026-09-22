@@ -628,15 +628,15 @@ export OPENROUTER_DEFAULT_MODEL="anthropic/claude-3.5-sonnet"  # default
 export OPENROUTER_FREE_ONLY=1  # filter to :free models only
 ```
 
-### Backward-compatibility env vars
+### Configuration env vars
 
-AgentKthx keeps `AGENTNOVA_*` env var names for backward compatibility:
-- `AGENTNOVA_BACKEND=openrouter` — set default backend
-- `AGENTNOVA_API_MODE=openai` — OpenRouter only supports OpenAI mode
+AgentKthx uses the `AGENTKTHX_*` env var prefix (renamed from `AGENTNOVA_*`
+in R06.41 — no aliases retained):
+- `AGENTKTHX_BACKEND=openrouter` — set default backend
+- `AGENTKTHX_API_MODE=openai` — OpenRouter only supports OpenAI mode
 
 ### What AgentKthx does NOT yet implement (potential future work)
 
-- **`stream_options.include_usage`** — would fix usage tracking in streaming responses
 - **`reasoning` parameter object** — for thinking models (`{"effort": "high", "max_tokens": 1024, "exclude": false}`)
 - **`provider` preferences** — would let users pin to specific providers
 - **`transforms`** — would enable auto-truncation for long conversations

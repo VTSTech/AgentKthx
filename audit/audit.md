@@ -1,10 +1,10 @@
 # Improvement & Enhancement Audit
 
-**AgentKthx v0.6.52 (R06.52)**
+**AgentKthx v0.6.53 (R06.53)**
 
 **Repository:** https://github.com/VTSTech/AgentKthx  
-**Author:** VTSTech | **License:** MIT | **Date:** 2026-09-21  
-**Status:** 14 Open Findings | 7 Categories | SEC, ROB, MAINT, PERF, FEAT, ARCH, TEST
+**Author:** VTSTech | **License:** MIT | **Date:** 2026-09-22  
+**Status:** 11 Open Findings | 7 Categories | SEC, ROB, MAINT, PERF, FEAT, ARCH, TEST
 
 ---
 
@@ -27,9 +27,11 @@
 
 ## Executive Summary
 
-AgentKthx is a 35,250+ line Python framework for autonomous AI agents with zero external dependencies — built entirely on the standard library. Since R06.41, the codebase has evolved to version R06.52 with significant improvements:
+AgentKthx is a 35,250+ line Python framework for autonomous AI agents with zero external dependencies — built entirely on the standard library. Since R06.41, the codebase has evolved to version R06.53 with significant improvements:
 
-- **R06.52 (Current)**: Loop resilience fixes — closed the "codebase-audit death-spiral" with improved error detection, consecutive termination semantics, duplicate call blocking, pairing-safe memory pruning, and hallucinated-parameter stripping. 48 new tests added.
+- **R06.53 (Current)**: Cleanup pass — closed MAINT-03 (stale `AGENTNOVA_*` refs in OpenRouter doc), ROB-02 (last bare `except:` in `orchestrator.py`), PERF-02 (`stream_options.include_usage` on OpenRouter streaming). 3 new tests added.
+
+- **R06.52**: Loop resilience fixes — closed the "codebase-audit death-spiral" with improved error detection, consecutive termination semantics, duplicate call blocking, pairing-safe memory pruning, and hallucinated-parameter stripping. 48 new tests added.
 
 - **R06.51**: Dual-source update check system — checks PyPI for stable releases and GitHub for development commits with smart caching and notification placement. 54 new tests added.
 
@@ -51,17 +53,17 @@ The test suite now has **479 passed, 6 skipped, 0 failed** tests. Security pract
 | SEC-02 | ~~Medium~~ | Security | ✓ CLOSED R06.41 (accepted-risk) | `shell=True` + blocklist — threat model documented, `DANGEROUS_FLAG_COMBOS` added |
 | ROB-03 | ~~Medium~~ | Robustness | ✓ CLOSED R06.41 | Pre-existing test failures fixed (45 → 0) |
 | MAINT-02 | ~~Medium~~ | Maintainability | ✓ CLOSED R06.41 | `AGENTNOVA_*` env vars renamed to `AGENTKTHX_*`; `~/.agentnova/` → `~/.agentkthx/` |
-| ROB-02 | Medium | Robustness | PARTIALLY FIXED | Bare `except:` clause at `orchestrator.py:279` (1 of 2 sites remains) |
-| MAINT-03 | Low | Maintainability | OPEN | `docs/OPENROUTER_API_TECHNICAL_REFERENCE.md` still references `AGENTNOVA_*` env vars |
+| ROB-02 | ~~Medium~~ | Robustness | ✓ CLOSED R06.53 | Bare `except:` clause at `orchestrator.py:279` replaced with `except Exception:` |
+| MAINT-03 | ~~Low~~ | Maintainability | ✓ CLOSED R06.53 | `docs/OPENROUTER_API_TECHNICAL_REFERENCE.md` no longer references `AGENTNOVA_*` env vars |
 | PERF-01 | Medium | Performance | OPEN | Streaming mode silently ignored — no real-time output |
-| PERF-02 | Low | Performance | OPEN | Missing `stream_options.include_usage` on OpenRouter |
+| PERF-02 | ~~Low~~ | Performance | ✓ CLOSED R06.53 | `stream_options.include_usage` now sent on OpenRouter streaming requests |
 | FEAT-01 | Medium | New Feature | OPEN | No provider routing preferences for OpenRouter |
 | FEAT-02 | Low | New Feature | OPEN | `/param` matrix hardcoded, not extensible via plugins |
 | ARCH-01 | Medium | Architecture | OPEN | Backend inheritance couples ZAI/OpenRouter to OllamaBackend internals |
 | ARCH-02 | Low | Architecture | OPEN | No coverage measurement configured |
 | TEST-01 | Medium | Testing | PARTIALLY ADDRESSED | No integration tests — all tests are mocked unit tests (improved) |
 
-**Severity distribution**: 1 High (MAINT-01), 7 Medium, 5 Low (excluding closed findings). Of the 14 still-open: 1 High, 7 Medium, 5 Low.
+**Severity distribution**: 1 High (MAINT-01), 5 Medium, 5 Low (excluding closed findings). Of the 11 still-open: 1 High, 5 Medium, 5 Low.
 
 ---
 
@@ -127,20 +129,16 @@ The test suite now has **479 passed, 6 skipped, 0 failed** tests. Security pract
 
 ---
 
-#### ROB-02: Bare `except:` clause — PARTIALLY FIXED
+#### ROB-02: Bare `except:` clause — CLOSED in R06.53
 
 | Property | Value |
 |----------|-------|
-| **Severity** | Medium |
+| **Severity** | ~~Medium~~ → Resolved |
 | **Category** | Robustness |
-| **File(s)** | `agentkthx/orchestrator.py:279` (1 remaining site) |
-| **Status (R06.52)** | PARTIALLY FIXED — 1 of 2 sites closed |
+| **File(s)** | `agentkthx/orchestrator.py:279` |
+| **Status (R06.53)** | ✓ CLOSED — replaced with `except Exception:`
 
-**Status:** The `helpers.py:833` site was fixed as a side-effect of SEC-01. The `orchestrator.py:279` site still has `except: continue` in the multi-agent orchestrator's fallback-result processing loop.
-
-**Recommendation:** Replace with `except Exception:` to allow `KeyboardInterrupt`/`SystemExit` to propagate.
-
-**Impact:** Prevents silent suppression of `KeyboardInterrupt` during multi-agent orchestration.
+**Status:** CLOSED in R06.53. The last remaining bare `except:` clause (in the multi-agent orchestrator's fallback-result processing loop) was replaced with `except Exception:`, allowing `KeyboardInterrupt` / `SystemExit` to propagate correctly.
 
 ---
 
@@ -204,19 +202,16 @@ The test suite now has **479 passed, 6 skipped, 0 failed** tests. Security pract
 
 ---
 
-#### MAINT-03: OpenRouter API reference still mentions `AGENTNOVA_*` env vars — OPEN
+#### MAINT-03: OpenRouter API reference still mentions `AGENTNOVA_*` env vars — CLOSED in R06.53
 
 | Property | Value |
 |----------|-------|
-| **Severity** | Low |
+| **Severity** | ~~Low~~ → Resolved |
 | **Category** | Maintainability |
-| **File(s)** | `docs/OPENROUTER_API_TECHNICAL_REFERENCE.md:633-635` |
+| **File(s)** | `docs/OPENROUTER_API_TECHNICAL_REFERENCE.md:631-636` |
+| **Status (R06.53)** | ✓ CLOSED — section rewritten
 
-The MAINT-02 rename in R06.41 missed `docs/OPENROUTER_API_TECHNICAL_REFERENCE.md`. Lines 633-635 still reference `AGENTNOVA_*` env vars.
-
-**Recommendation:** Find-and-replace `AGENTNOVA_` with `AGENTKTHX_` in `docs/OPENROUTER_API_TECHNICAL_REFERENCE.md`.
-
-**Impact:** Eliminates documentation that contradicts the codebase's actual behavior.
+**Status:** CLOSED in R06.53. The "Backward-compatibility env vars" section was doubly wrong: (a) it used `AGENTNOVA_*` names, (b) it claimed backward-compat aliases were retained — MAINT-02 explicitly removed all aliases. Section renamed to "Configuration env vars" and rewritten to reflect the `AGENTKTHX_*` prefix with a note about the R06.41 rename.
 
 ---
 
@@ -242,19 +237,16 @@ The MAINT-02 rename in R06.41 missed `docs/OPENROUTER_API_TECHNICAL_REFERENCE.md
 
 ---
 
-#### PERF-02: Missing `stream_options.include_usage` on OpenRouter
+#### PERF-02: Missing `stream_options.include_usage` on OpenRouter — CLOSED in R06.53
 
 | Property | Value |
 |----------|-------|
-| **Severity** | Low |
+| **Severity** | ~~Low~~ → Resolved |
 | **Category** | Performance |
 | **File(s)** | `agentkthx/plugins/openrouter/openrouter.py` |
+| **Status (R06.53)** | ✓ CLOSED — `stream` parameter added to `_build_openai_body()`
 
-When OpenRouter is used in streaming mode, the `stream_options: {"include_usage": true}` field is not sent. Without this, OpenRouter's streaming SSE chunks don't include `usage` data.
-
-**Recommendation:** Add `"stream_options": {"include_usage": True}` to the request body in `_build_openai_body()` when `stream=True`.
-
-**Impact:** Enables accurate token tracking for streaming responses.
+**Status:** CLOSED in R06.53. `_build_openai_body()` now accepts a `stream: bool = False` parameter. When `stream=True` is passed, the body includes `"stream_options": {"include_usage": True}` so OpenRouter emits a final SSE chunk carrying token-usage stats. Non-streaming requests are unaffected — `stream_options` is omitted entirely. Three new tests in `tests/test_openrouter_backend.py` cover both branches and the default.
 
 ---
 
@@ -350,9 +342,9 @@ All 479 tests use `MagicMock`, `monkeypatch`, or source-level string inspection.
 
 | Timeline | Findings |
 |----------|----------|
-| **Near term (R06.53–R06.6)** | MAINT-01 (cli.py split), MAINT-03 (OpenRouter doc stale refs), PERF-01 (streaming display) |
-| **Short term (R06.7–R07.0)** | ROB-02 (orchestrator bare except), ARCH-01 (backend inheritance decoupling), FEAT-01 (OpenRouter provider routing), TEST-01 (integration tests) |
-| **Medium term (R07.0+)** | PERF-02 (stream_options), FEAT-02 (/param matrix extensibility), ARCH-02 (coverage measurement) |
+| **Near term (R06.6–R06.7)** | MAINT-01 (cli.py split), PERF-01 (streaming display) |
+| **Short term (R06.7–R07.0)** | ARCH-01 (backend inheritance decoupling), FEAT-01 (OpenRouter provider routing), TEST-01 (integration tests) |
+| **Medium term (R07.0+)** | FEAT-02 (/param matrix extensibility), ARCH-02 (coverage measurement) |
 
 ---
 
@@ -381,6 +373,12 @@ All 479 tests use `MagicMock`, `monkeypatch`, or source-level string inspection.
 ---
 
 ## Recent Improvements Since R06.41
+
+### R06.53 - Cleanup Pass (2026-09-22)
+- **MAINT-03 closed** — `docs/OPENROUTER_API_TECHNICAL_REFERENCE.md` "Backward-compatibility env vars" section rewritten to "Configuration env vars" with `AGENTKTHX_*` prefix
+- **ROB-02 closed** — last bare `except:` at `orchestrator.py:279` replaced with `except Exception:`
+- **PERF-02 closed** — `_build_openai_body(stream=True)` now emits `stream_options.include_usage` so streaming responses carry token counts
+- 3 new tests added in `tests/test_openrouter_backend.py`
 
 ### R06.52 - Loop Resilience (2026-09-21)
 - **`is_error_result()` rewritten** — error detection now inspects only the first non-empty line
@@ -444,10 +442,13 @@ tests/test_update_check.py .......................
 
 ## Files Changed Since R06.41 Brief
 
-- Version: 0.6.41 → 0.6.52
+- Version: 0.6.41 → 0.6.53
 - cli.py: 3478 → 3667 lines (added update check, resilience improvements)
 - Added: `agentkthx/core/api_resilience.py` (R06.50)
 - Added: `agentkthx/update_check.py` (R06.51)
 - Updated: `agentkthx/core/memory.py` (R06.52)
 - Updated: `agentkthx/core/error_recovery.py` (R06.52)
-- Updated test count: 435 → 479 tests
+- Updated: `agentkthx/orchestrator.py` (R06.53 — bare `except:` → `except Exception:`)
+- Updated: `agentkthx/plugins/openrouter/openrouter.py` (R06.53 — `stream_options.include_usage`)
+- Updated: `docs/OPENROUTER_API_TECHNICAL_REFERENCE.md` (R06.53 — `AGENTNOVA_*` → `AGENTKTHX_*`)
+- Updated test count: 435 → 638 tests

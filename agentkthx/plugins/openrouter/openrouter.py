@@ -785,17 +785,23 @@ class OpenRouterBackend(OllamaBackend):
         tools: list[Tool] | None,
         temperature: float,
         max_tokens: int,
+        stream: bool = False,
         **kwargs,
     ) -> dict:
         """Build an OpenAI Chat-Completions request body for OpenRouter.
 
         Centralises request construction so generate() and generate_stream()
         stay in sync. All optional fields are only added when supplied.
+
+        When ``stream=True``, sets ``stream_options.include_usage=True`` so
+        OpenRouter emits a final SSE chunk carrying token-usage stats
+        (PERF-02). Without this, streaming responses report ``usage=None``
+        and the agent loop can't track token consumption.
         """
         body: dict = {
             "model": model,
             "messages": messages,
-            "stream": False,
+            "stream": stream,
             "temperature": temperature,
             # OpenRouter accepts both `max_tokens` (legacy, universally
             # supported) and `max_completion_tokens` (newer OpenAI). We send
@@ -803,6 +809,12 @@ class OpenRouterBackend(OllamaBackend):
             # providers that may not have adopted the new field yet.
             "max_tokens": max_tokens,
         }
+
+        # PERF-02: when streaming, ask OpenRouter to include usage in the
+        # final SSE chunk. Without this, OpenRouter's streaming responses
+        # omit usage data entirely — making token tracking impossible.
+        if stream:
+            body["stream_options"] = {"include_usage": True}
 
         # Tools in OpenAI function-calling format.
         if tools:

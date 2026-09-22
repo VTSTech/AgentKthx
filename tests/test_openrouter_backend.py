@@ -217,6 +217,38 @@ class TestBuildOpenAiBody(unittest.TestCase):
         self.assertIn("max_tokens", body)
         self.assertNotIn("max_completion_tokens", body)
 
+    def test_stream_false_omits_stream_options(self):
+        """PERF-02: non-streaming requests must not send stream_options."""
+        b = self._backend()
+        body = b._build_openai_body(
+            model="m", messages=[], tools=None, temperature=0.7, max_tokens=128,
+            stream=False,
+        )
+        self.assertEqual(body["stream"], False)
+        self.assertNotIn("stream_options", body)
+
+    def test_stream_true_adds_include_usage(self):
+        """PERF-02: streaming requests must send stream_options.include_usage."""
+        b = self._backend()
+        body = b._build_openai_body(
+            model="m", messages=[], tools=None, temperature=0.7, max_tokens=128,
+            stream=True,
+        )
+        self.assertEqual(body["stream"], True)
+        self.assertEqual(
+            body.get("stream_options"),
+            {"include_usage": True},
+        )
+
+    def test_stream_default_false_no_stream_options(self):
+        """Default stream value (False) must not emit stream_options."""
+        b = self._backend()
+        body = b._build_openai_body(
+            model="m", messages=[], tools=None, temperature=0.7, max_tokens=128,
+        )
+        self.assertEqual(body["stream"], False)
+        self.assertNotIn("stream_options", body)
+
 
 class TestIsToolsNotSupportedError(unittest.TestCase):
     """Tests for the error-text matcher used by the ReAct fallback path."""
