@@ -1263,10 +1263,12 @@ def cmd_chat(args: argparse.Namespace) -> int:
             print(f"  {cyan('/model')}      Show or change the model (e.g. /model glm-4.7-flash)")
             print(f"  {cyan('/param')}      Show or set generation parameters (temp, top_p, top_k, etc.)")
             print(f"  {cyan('/security')}   Show or set security mode (max|off)")
-            print(f"  {cyan('/skills')}     Show loaded skills (and available skills if none loaded)")
+            print(f"  {cyan('/skills')}     Show available skills (✓ = loaded)")
+            print(f"  {cyan('/skill')}      Load a skill mid-session (e.g. /skill codebase-audit, crypto-signals)")
             print(f"  {cyan('/status')}     Show model, backend, tools, skills, and memory info")
             print(f"  {cyan('/system')}     Print the current system prompt")
-            print(f"  {cyan('/tools')}      List available tools with descriptions")
+            print(f"  {cyan('/tools')}      Show available tools (✓ = loaded)")
+            print(f"  {cyan('/tool')}       Load a tool mid-session (e.g. /tool shell,read_file,write_file)")
             print(f"  {cyan('/quit')}       Exit AgentKthx")
             continue
 
@@ -1303,51 +1305,198 @@ def cmd_chat(args: argparse.Namespace) -> int:
             continue
 
         if user_input == "/tools":
-            tools = agent.tools.all()
-            if not tools:
-                print(yellow("No tools loaded."))
+            # R06.56: Show ALL available tools (not just loaded ones),
+            # with a ✓ marker for loaded tools and ○ for available-but-not-loaded.
+            all_tools = make_builtin_registry()
+            loaded_names = set(agent.tools.names()) if agent.tools else set()
+            all_tool_list = all_tools.all()
+            if not all_tool_list:
+                print(yellow("No tools available in the builtin registry."))
             else:
-                for t in tools:
+                loaded_count = 0
+                for t in all_tool_list:
+                    is_loaded = t.name in loaded_names
+                    marker = green("✓") if is_loaded else dim("○")
                     desc = t.description.split('.')[0] if t.description else 'No description'
                     if len(desc) > 60:
                         desc = desc[:57] + '...'
-                    print(f"  {cyan(t.name)}  {desc}")
+                    params = ", ".join(p.name for p in t.params) if t.params else ""
+                    param_str = dim(f"  ({params})") if params else ""
+                    print(f"  {marker} {cyan(t.name):<28}{desc}{param_str}")
+                    if is_loaded:
+                        loaded_count += 1
+                print()
+                print(dim(f"  {loaded_count}/{len(all_tool_list)} tools loaded. "
+                          f"Use {cyan('/tool <name,name,...>')} to load more."))
+            continue
+
+        # ── /tool slash command ────────────────────────────────────────────
+        # Load tools mid-session. Supports comma-separated list like --tools.
+        # Usage:
+        #   /tool                       — show usage
+        #   /tool shell                 — load one tool
+        #   /tool shell,read_file,calc  — load multiple tools
+        if user_input == "/tool" or user_input.startswith("/tool "):
+            parts = user_input.split(None, 1)
+            if len(parts) < 2 or not parts[1].strip():
+                # No args — show usage + currently loaded tools
+                loaded_names = set(agent.tools.names()) if agent.tools else set()
+                print(dim("  Usage: /tool <name,name,...>  (comma-separated, like --tools)"))
+                print(dim("  Example: /tool shell,read_file,write_file"))
+                print()
+                if loaded_names:
+                    print(f"  Currently loaded: {cyan(', '.join(sorted(loaded_names)))}")
+                else:
+                    print(yellow("  No tools currently loaded."))
+                continue
+            # Parse comma-separated list (same logic as --tools at line 551)
+            requested = [t.strip() for t in parts[1].split(",") if t.strip()]
+            all_tools = make_builtin_registry()
+            loaded_names = set(agent.tools.names()) if agent.tools else set()
+            newly_loaded = []
+            already_loaded = []
+            not_found = []
+            for name in requested:
+                tool = all_tools.get(name)
+                if tool is None:
+                    # Try fuzzy match for a helpful suggestion
+                    fuzzy = all_tools.get_fuzzy(name, threshold=0.6)
+                    if fuzzy and fuzzy.name != name:
+                        not_found.append(f"{name} (did you mean '{fuzzy.name}'?)")
+                    else:
+                        not_found.append(name)
+                elif name in loaded_names:
+                    already_loaded.append(name)
+                else:
+                    agent.tools.register_tool(tool)
+                    newly_loaded.append(name)
+                    loaded_names.add(name)
+            # Report
+            if newly_loaded:
+                print(green(f"  ✓ Loaded {len(newly_loaded)} tool(s): ") + cyan(", ".join(newly_loaded)))
+            if already_loaded:
+                print(yellow(f"  ⚠ Already loaded ({len(already_loaded)}): ") + dim(", ".join(already_loaded)))
+            if not_found:
+                print(red(f"  ✗ Not found ({len(not_found)}): ") + dim(", ".join(not_found)))
+                # Show available tools that weren't requested
+                available = [n for n in all_tools.names() if n not in loaded_names]
+                if available:
+                    print(dim(f"  Available: {', '.join(sorted(available))}"))
+            if not newly_loaded and not already_loaded and not not_found:
+                print(yellow("  No tools specified."))
             continue
 
         if user_input == "/skills":
+            # R06.56: Show ALL available skills (not just loaded ones),
+            # with a ✓ marker for loaded skills and ○ for available-but-not-loaded.
             loaded = getattr(agent, '_loaded_skills', [])
-            if not loaded:
-                print(yellow("No skills loaded."))
-                print(dim(f"  Use --skills <name1,name2> at startup, e.g."))
-                print(dim(f"  agentkthx chat --skills codebase-audit --tools shell,read_file,write_file"))
-                # Also show available skills (read-only, doesn't load them)
+            try:
+                from .skills import SkillLoader
+                loader = SkillLoader()
+                available = loader.list_skills()
+            except Exception as e:
+                print(yellow(f"Skills module unavailable: {e}"))
+                continue
+            if not available:
+                print(yellow("No skills available."))
+                print(dim("  Skills live in agentkthx/skills/<name>/SKILL.md"))
+                continue
+            print(f"{bold('Available skills:')}")
+            for name in available:
+                is_loaded = name in loaded
+                marker = green("✓") if is_loaded else dim("○")
                 try:
-                    from .skills import SkillLoader
-                    loader = SkillLoader()
-                    available = loader.list_skills()
-                    if available:
-                        print()
-                        print(dim(f"  Available skills:"))
-                        for name in available:
-                            print(f"    {magenta(name)}")
-                except Exception:
-                    pass
-            else:
-                print(f"{bold('Loaded skills:')}")
+                    skill = loader.load(name)
+                    desc = skill.description[:60] + "..." if len(skill.description) > 60 else skill.description
+                except Exception as e:
+                    desc = red(f"Error: {e}")
+                print(f"  {marker} {magenta(name):<28}{desc}")
+            print()
+            print(dim(f"  {len(loaded)}/{len(available)} skills loaded. "
+                      f"Use {cyan('/skill <name,name,...>')} to load more."))
+            continue
+
+        # ── /skill slash command ───────────────────────────────────────────
+        # Load skills mid-session. Supports comma-separated list.
+        # Usage:
+        #   /skill                      — show usage
+        #   /skill codebase-audit       — load one skill
+        #   /skill codebase-audit,crypto-signals  — load multiple skills
+        if user_input == "/skill" or user_input.startswith("/skill "):
+            parts = user_input.split(None, 1)
+            loaded = getattr(agent, '_loaded_skills', [])
+            if len(parts) < 2 or not parts[1].strip():
+                # No args — show usage + currently loaded skills
+                print(dim("  Usage: /skill <name,name,...>  (comma-separated)"))
+                print(dim("  Example: /skill codebase-audit,crypto-signals"))
+                print()
+                if loaded:
+                    print(f"  Currently loaded: {magenta(', '.join(loaded))}")
+                else:
+                    print(yellow("  No skills currently loaded."))
+                continue
+            # Parse comma-separated list
+            requested = [s.strip() for s in parts[1].split(",") if s.strip()]
+            try:
+                from .skills import SkillLoader
+                loader = SkillLoader()
+            except Exception as e:
+                print(red(f"Skills module unavailable: {e}"))
+                continue
+            newly_loaded = []
+            already_loaded = []
+            not_found = []
+            available = loader.list_skills()
+            for name in requested:
+                if name not in available:
+                    # Suggest closest match
+                    from .core.helpers import fuzzy_match
+                    fuzzy = fuzzy_match(name, available, threshold=0.6)
+                    if fuzzy:
+                        not_found.append(f"{name} (did you mean '{fuzzy}'?)")
+                    else:
+                        not_found.append(name)
+                    continue
+                if name in loaded:
+                    already_loaded.append(name)
+                    continue
                 try:
-                    from .skills import SkillLoader
-                    loader = SkillLoader()
-                    for name in loaded:
-                        try:
-                            skill = loader.load(name)
-                            desc = skill.description[:60] + "..." if len(skill.description) > 60 else skill.description
-                            print(f"  {magenta(name):<20} {desc}")
-                        except Exception as e:
-                            print(f"  {magenta(name):<20} {red(f'Error: {e}')}")
-                except Exception:
-                    # Fallback if skills module unavailable — just show names
-                    for name in loaded:
-                        print(f"  {magenta(name)}")
+                    skill = loader.load(name)
+                    # Append the skill's instructions to the system prompt
+                    # so the agent has access to them on the next message.
+                    # The skill instructions are added to _custom_system_prompt
+                    # and the memory's system message is updated.
+                    skill_text = skill.instructions.strip()
+                    if skill_text:
+                        old_prompt = getattr(agent, '_custom_system_prompt', '') or ''
+                        agent._custom_system_prompt = f"{old_prompt}\n\n# Skill: {skill.name}\n{skill_text}"
+                        # Update memory: replace the system message with the updated prompt.
+                        # Memory stores messages as a list of dicts; the first 'system' role
+                        # message is the system prompt. Replace it.
+                        for i, msg in enumerate(agent.memory.messages):
+                            if msg.get("role") == "system":
+                                agent.memory.messages[i]["content"] = agent._custom_system_prompt
+                                break
+                        else:
+                            # No system message in memory — add one
+                            agent.memory.add("system", agent._custom_system_prompt)
+                    loaded.append(name)
+                    newly_loaded.append(name)
+                except Exception as e:
+                    not_found.append(f"{name} (load error: {e})")
+            # Update the agent's loaded-skills list
+            agent._loaded_skills = loaded
+            # Report
+            if newly_loaded:
+                print(green(f"  ✓ Loaded {len(newly_loaded)} skill(s): ") + magenta(", ".join(newly_loaded)))
+            if already_loaded:
+                print(yellow(f"  ⚠ Already loaded ({len(already_loaded)}): ") + dim(", ".join(already_loaded)))
+            if not_found:
+                print(red(f"  ✗ Not found ({len(not_found)}): ") + dim(", ".join(not_found)))
+                if available:
+                    print(dim(f"  Available: {', '.join(available)}"))
+            if not newly_loaded and not already_loaded and not not_found:
+                print(yellow("  No skills specified."))
             continue
 
         # ── /param slash command ────────────────────────────────────────
