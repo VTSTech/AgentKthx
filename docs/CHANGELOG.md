@@ -5,7 +5,7 @@ All notable changes to AgentKthx will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [R06.55] - 2026-09-22 (stashed — not yet published)
+## [R06.55] - 2026-09-23 9:18:11 PM
 
 ### 🏗️ **ARCH-01 — OpenAICompatibleBackend extracted (backend inheritance decoupled)**
 
@@ -64,6 +64,43 @@ The `isinstance(backend, OllamaBackend)` checks in `cli.py` (lines 2060, 2152, 3
 - **709 lines** of new shared base class
 - **Net**: +175 lines, but 534 lines of duplication eliminated — the shared code is in one place, not three
 - **9 open findings** remaining (was 10) — ARCH-01 closed
+
+---
+
+### 🐛 **BUG: `agentkthx models --backend openrouter` crashed (missing methods after ARCH-01)**
+
+When `OpenRouterBackend` was refactored to extend `OpenAICompatibleBackend` instead of `OllamaBackend`, it lost access to three methods that were defined on `OllamaBackend` and previously inherited:
+
+1. `get_model_runtime_context()` — called by `cli.py:2136` in `cmd_models`
+2. `get_context_by_family()` — called by `OpenRouterBackend.get_model_max_context()` itself (line 500)
+3. `get_model_context_size()` — deprecated but referenced elsewhere
+
+The `cmd_models` loop hit the first missing method (`get_model_runtime_context`) and crashed with `AttributeError: 'OpenRouterBackend' object has no attribute 'get_model_runtime_context'`.
+
+**Fix** — moved all three methods to `OpenAICompatibleBackend` so all OpenAI-compat backends inherit them:
+
+- **`FAMILY_CONTEXT_DEFAULTS`** dict + **`get_context_by_family()`** classmethod — the family→context mapping (qwen2→32K, llama3→8K, etc.). Now available on all backends as a fallback when per-model data isn't available.
+- **`get_model_runtime_context(model)`** — default implementation delegates to `get_model_max_context()` (sensible for cloud providers — they don't have a separate "runtime" context like Ollama's `num_ctx`). `OllamaBackend` keeps its own override that reads the actual `num_ctx` from the Modelfile.
+- **`get_model_context_size(model, family)`** — deprecated wrapper, delegates to `get_model_max_context()`.
+
+Removed the duplicate `FAMILY_CONTEXT_DEFAULTS` and `get_context_by_family` from `OllamaBackend` (now inherited).
+
+---
+
+### 🎨 **POLISH: `agentkthx models` table layout for cloud providers**
+
+**Removed `Size` column for cloud providers** (OpenRouter + ZAI) — it was always `unknown` for cloud backends, adding visual noise without information. Cloud layout is now:
+
+```
+  Name                                              Context        openre        openai
+---------------------------------------------------------------------------------------------
+  cohere/north-mini-code:free                         250K      ✓ native      ✓ native
+  z-ai/glm-5.2:free                                    32K      ✓ native      ✓ native
+```
+
+Local-backend layout (Ollama) is unchanged — still shows Size + Family columns since those values are meaningful for local models.
+
+**Fixed Context column alignment for OpenRouter** — OpenRouter model names like `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free` (49 chars) were overflowing the 36-char `NAME_W` column, pushing the Context column to the right. Widened `NAME_W` to 50 for cloud providers so all names fit. Also fixed the separator line width calculation — previously the cloud-provider separator was wider than the header (84 vs 79 chars). Now both separators use the correct width calculated from the actual header format string.
 
 ---
 

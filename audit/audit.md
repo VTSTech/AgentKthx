@@ -1,6 +1,6 @@
 # Improvement & Enhancement Audit
 
-**AgentKthx v0.6.54 (R06.54)**
+**AgentKthx v0.6.55 (R06.55)**
 
 **Repository:** https://github.com/VTSTech/AgentKthx  
 **Author:** VTSTech | **License:** MIT | **Date:** 2026-09-22  
@@ -27,9 +27,9 @@
 
 ## Executive Summary
 
-AgentKthx is a 35,250+ line Python framework for autonomous AI agents with zero external dependencies — built entirely on the standard library. Since R06.41, the codebase has evolved to version R06.54 with significant improvements:
+AgentKthx is a 35,250+ line Python framework for autonomous AI agents with zero external dependencies — built entirely on the standard library. Since R06.41, the codebase has evolved to version R06.55 with significant improvements:
 
-- **R06.55 (Current, stashed)**: ARCH-01 closed — extracted `OpenAICompatibleBackend` base class from `OllamaBackend`. ZAI and OpenRouter no longer inherit from OllamaBackend. 534 lines of duplicated code removed (JEV methods, body construction, response parsing, streaming SSE). New shared base class is 709 lines.
+- **R06.55 (Current)**: ARCH-01 closed — extracted `OpenAICompatibleBackend` base class from `OllamaBackend`. ZAI and OpenRouter no longer inherit from OllamaBackend. 534 lines of duplicated code removed (JEV methods, body construction, response parsing, streaming SSE). New shared base class is 709 lines. Also fixed: `agentkthx models --backend openrouter` crash (missing methods after refactor), removed Size column from cloud-provider models table, fixed Context column alignment.
 
 - **R06.54**: ZAI streaming fix — same bug class as R06.53 OpenRouter streaming 404, applied the same override pattern to `ZaiBackend.generate_completions_stream()` so ZAI streaming hits `/api/paas/v4/chat/completions` instead of the inherited OllamaBackend `/v1/chat/completions` (which 404s). 9 new tests added.
 
@@ -402,6 +402,11 @@ All 479 tests use `MagicMock`, `monkeypatch`, or source-level string inspection.
 
 ## Recent Improvements Since R06.41
 
+### R06.55 - ARCH-01 + Models Table Polish (2026-09-22)
+- **ARCH-01 closed** — extracted `OpenAICompatibleBackend` base class (709 lines). ZAI/OpenRouter no longer inherit from OllamaBackend. 534 lines of duplicated code removed.
+- **Bug fix** — `agentkthx models --backend openrouter` crashed after ARCH-01 refactor (missing `get_model_runtime_context` / `get_context_by_family` / `get_model_context_size`). Moved all three to `OpenAICompatibleBackend`.
+- **Polish** — removed `Size` column from cloud-provider models table (always `unknown` for cloud backends). Widened `NAME_W` to 50 for cloud providers so long OpenRouter model names don't overflow. Fixed separator line width calculation.
+
 ### R06.54 - ZAI Streaming Fix (2026-09-22)
 - **ZAI streaming 404 fixed** — `ZaiBackend.generate_completions_stream()` override added, uses ZAI's `/api/paas/v4/chat/completions` endpoint with Bearer auth instead of inherited OllamaBackend `/v1/chat/completions` path (which 404s on ZAI)
 - Sends `stream_options.include_usage` (PERF-02) on ZAI streaming requests
@@ -479,7 +484,7 @@ tests/test_update_check.py .......................
 
 ## Files Changed Since R06.41 Brief
 
-- Version: 0.6.41 → 0.6.54
+- Version: 0.6.41 → 0.6.55
 - cli.py: 3478 → 3667 lines (added update check, resilience improvements)
 - Added: `agentkthx/core/api_resilience.py` (R06.50)
 - Added: `agentkthx/update_check.py` (R06.51)
@@ -488,7 +493,10 @@ tests/test_update_check.py .......................
 - Updated: `agentkthx/orchestrator.py` (R06.53 — bare `except:` → `except Exception:`)
 - Updated: `agentkthx/plugins/openrouter/openrouter.py` (R06.53 — `stream_options.include_usage`)
 - Updated: `agentkthx/agent.py` (R06.53 — added `_generate_stream()` + `_run_core_streaming()` for PERF-01)
-- Updated: `agentkthx/cli.py` (R06.53 — streaming-aware spinner suppression, no duplicate final answer print, input EOL wrap fix, PEP 668 update prompt)
-- Updated: `agentkthx/plugins/zai/zai.py` (R06.54 — added `generate_completions_stream()` override for ZAI-native streaming endpoint)
+- Updated: `agentkthx/cli.py` (R06.53 — streaming-aware spinner suppression, no duplicate final answer print, input EOL wrap fix, PEP 668 update prompt; R06.55 — models table cloud-provider layout fix)
+- Added: `agentkthx/backends/openai_compat.py` (R06.55 — new `OpenAICompatibleBackend` base class, 709 lines)
+- Updated: `agentkthx/backends/ollama.py` (R06.55 — parent changed to `OpenAICompatibleBackend`, JEV methods + family context defaults removed, 233 lines removed)
+- Updated: `agentkthx/plugins/zai/zai.py` (R06.54 — added `generate_completions_stream()` override; R06.55 — parent changed to `OpenAICompatibleBackend`, override removed, 90 lines removed)
+- Updated: `agentkthx/plugins/openrouter/openrouter.py` (R06.53 — `stream_options.include_usage`; R06.55 — parent changed to `OpenAICompatibleBackend`, streaming/body/response overrides removed, 211 lines removed)
 - Updated: `docs/OPENROUTER_API_TECHNICAL_REFERENCE.md` (R06.53 — `AGENTNOVA_*` → `AGENTKTHX_*`)
-- Updated test count: 435 → 671 tests
+- Updated test count: 435 → 672 tests
