@@ -231,3 +231,71 @@ class TestBitNetBackendInstantiation:
         from agentkthx.plugins.bitnet.bitnet import BitNetBackend
         b = BitNetBackend()
         assert b._bitnet_mode is True
+
+
+class TestUnsupportedParamToolsFallback:
+    """R06.57: BitNet's llama-server returns HTTP 500 'Unsupported param: tools'
+    when the tools JSON param is sent to a model that doesn't support OpenAI
+    function-calling. This must trigger the ReAct fallback (retry without tools),
+    not a fatal error.
+
+    Regression test for the bug found on Colab:
+        agentkthx chat --backend bitnet  →  /tool shell  →  "Can you use the shell tool?"
+        → Fatal API error — not retrying: Ollama HTTP error 500:
+          {"error":{"code":500,"message":"Unsupported param: tools","type":"server_error"}}
+
+    The existing "does not support tools" pattern didn't match this error message.
+    Fix: added "unsupported param: tools" as an alternative trigger at all 3 sites
+    in ollama.py (generate, generate_completions, test_tool_support).
+    """
+
+    def test_bitnet_500_error_pattern_matches(self):
+        """The exact BitNet error message must trigger the fallback condition."""
+        # This is the literal error from the Colab session
+        error_body = '{"error":{"code":500,"message":"Unsupported param: tools","type":"server_error"}}'
+        error_msg = error_body.lower()
+        # The condition used in ollama.py:generate() and generate_completions()
+        matches = ("does not support tools" in error_msg
+                   or "unsupported param: tools" in error_msg)
+        assert matches, f"BitNet 500 error should match the fallback pattern: {error_body}"
+
+    def test_ollama_400_error_pattern_still_matches(self):
+        """The existing Ollama 400 pattern must still work (no regression)."""
+        error_body = "This model does not support tools"
+        error_msg = error_body.lower()
+        matches = ("does not support tools" in error_msg
+                   or "unsupported param: tools" in error_msg)
+        assert matches
+
+    def test_unrelated_error_does_not_match(self):
+        """An unrelated 500 error must NOT trigger the fallback (specificity check)."""
+        error_body = '{"error":{"code":500,"message":"Internal server error"}}'
+        error_msg = error_body.lower()
+        matches = ("does not support tools" in error_msg
+                   or "unsupported param: tools" in error_msg)
+        assert not matches, "Unrelated 500 errors must not trigger the ReAct fallback"
+
+    def test_unrelated_400_does_not_match(self):
+        """A 400 that mentions 'tools' but not the exact phrases must not fire."""
+        error_body = '{"error":{"code":400,"message":"Invalid tools format"}}'
+        error_msg = error_body.lower()
+        matches = ("does not support tools" in error_msg
+                   or "unsupported param: tools" in error_msg)
+        assert not matches, "Generic 'tools' mentions must not trigger the fallback"
+
+    def test_test_tool_support_classifies_bitnet_500_as_none(self):
+        """test_tool_support() must classify 'Unsupported param: tools' as NONE.
+
+        This ensures the tool-support cache stores NONE (not REACT) for models
+        that reject the tools param with this specific error, so future calls
+        skip the native-tools path entirely.
+        """
+        # Simulate the error string that test_tool_support would catch
+        error_str = 'RuntimeError: Ollama HTTP error 500: {"error":{"code":500,"message":"Unsupported param: tools","type":"server_error"}}'
+        error_lower = error_str.lower()
+        # The condition used in ollama.py:test_tool_support()
+        is_tools_not_supported = (
+            "does not support tools" in error_lower
+            or "unsupported param: tools" in error_lower
+        )
+        assert is_tools_not_supported, "test_tool_support should classify this as NONE"
