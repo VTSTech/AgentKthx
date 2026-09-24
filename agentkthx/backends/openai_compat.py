@@ -652,6 +652,19 @@ class OpenAICompatibleBackend(BaseBackend):
         if max_tokens is None:
             max_tokens = defaults["max_tokens"]
 
+        # ROB-06: If a context-safe max_tokens was persisted from a
+        # previous context-length 400 error, use it instead of whatever
+        # was passed. This overrides both explicit max_tokens from the
+        # agent and model_config defaults, because the persisted value
+        # was calculated from the actual token counts in the error
+        # message and is the only value that won't re-trigger the 400.
+        # The attribute is set by OpenRouterBackend._iter_sse_lines()
+        # after a context-length 400. Backends that don't set it
+        # (Ollama, ZAI) don't have this attribute — use getattr.
+        context_safe = getattr(self, "_context_safe_max_tokens", None)
+        if context_safe is not None:
+            max_tokens = context_safe
+
         # Build body with stream=True so stream_options.include_usage is sent
         body = self._build_openai_body(
             model=model,

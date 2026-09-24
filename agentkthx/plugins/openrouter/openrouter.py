@@ -301,6 +301,11 @@ class OpenRouterBackend(OpenAICompatibleBackend):
         # API key is lazy-loaded - only required for generation, not for listing models
         self.api_key = os.environ.get("OPENROUTER_API_KEY", "")
 
+        # ROB-06: Persisted safe max_tokens after a context-length 400.
+        # When set, _get_model_defaults() returns this instead of the
+        # model's reported max_completion_tokens. Set to None initially.
+        self._context_safe_max_tokens: int | None = None
+
         # Set headers for OpenRouter
         self.headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -525,12 +530,51 @@ class OpenRouterBackend(OpenAICompatibleBackend):
                         print(f"  [OpenRouter Debug] Found exact match: '{cached_name}'")
                     details = cached_model["details"]
                     max_tokens = details.get("max_completion_tokens", 4096)
+                    context_length = details.get("context_length", 128000)
+
+                    # ROB-06: If we previously hit a context-length 400 and
+                    # calculated a safe max_tokens, use that instead of the
+                    # model default. This persists across agentic-loop steps.
+                    if self._context_safe_max_tokens is not None:
+                        if os.environ.get("AGENTKTHX_DEBUG"):
+                            print(f"  [OpenRouter Debug] Using persisted safe "
+                                  f"max_tokens: {self._context_safe_max_tokens}")
+                        return {
+                            "temperature": 0.7,
+                            "max_tokens": self._context_safe_max_tokens,
+                            "context_length": context_length,
+                        }
+
+                    # ROB-06: Cap max_tokens so input + output fits the
+                    # context window. Many OpenRouter :free models report
+                    # max_completion_tokens close to the full context_length,
+                    # leaving no room for input.
+                    #
+                    # EMPIRICAL FINDING (R06.55 testing on nex-agi/nex-n2.5-mini:free,
+                    # 256K context, codebase-audit skill with 30+ tool calls):
+                    #   num_ctx/4  (75%)  → 400 on step 5 (input ~85K + output ~196K)
+                    #   num_ctx/8  (12.5%)→ 400 on step 9 (input grew to ~100K)
+                    #   num_ctx/16 (6%)  → proceeded to step 27+ without 400
+                    #   num_ctx/32 (3%)  → conservative default for longest tasks
+                    #
+                    # The issue: as the agentic loop accumulates tool results in
+                    # memory, input grows. A large max_tokens leaves no room for
+                    # that growth. num_ctx/32 (8K on a 256K model) gives 97% of
+                    # context to input, which is enough for long audits.
+                    # The reactive handler (_iter_sse_lines context-length 400
+                    # retry) still fires if this proves too large.
+                    capped_max = min(max_tokens, context_length // 32)
+                    if capped_max < max_tokens:
+                        if os.environ.get("AGENTKTHX_DEBUG"):
+                            print(f"  [OpenRouter Debug] Capped max_tokens "
+                                  f"{max_tokens} → {capped_max} "
+                                  f"(context={context_length}, divisor=32)")
                     if os.environ.get("AGENTKTHX_DEBUG"):
-                        print(f"  [OpenRouter Debug] Using max_tokens: {max_tokens}")
+                        print(f"  [OpenRouter Debug] Using max_tokens: {capped_max}")
                     return {
-                        "temperature": 0.7,  # Default temperature
-                        "max_tokens": max_tokens,
-                        "context_length": details.get("context_length", 128000),
+                        "temperature": 0.7,
+                        "max_tokens": capped_max,
+                        "context_length": context_length,
                     }
                 elif model in cached_name or cached_name in model:
                     if os.environ.get("AGENTKTHX_DEBUG"):
@@ -878,6 +922,25 @@ class OpenRouterBackend(OpenAICompatibleBackend):
                 body.pop("tools", None)
                 body.pop("tool_choice", None)
                 raw_response = self._make_api_request("chat/completions", body)
+            # ROB-06: Context-length 400 — the model's reported
+            # max_completion_tokens was too large for the actual input.
+            # Dynamically reduce max_tokens and retry once. The error
+            # message usually contains "maximum context length" and the
+            # token breakdown.
+            elif "maximum context length" in err_str.lower() or "context length" in err_str.lower():
+                # Estimate a safe max_tokens: use 1/3 of the current value
+                # or 4096, whichever is larger. This is conservative but
+                # prevents the death-spiral where the agent keeps re-sending
+                # the same oversized request.
+                old_max = body.get("max_tokens", 4096)
+                new_max = max(old_max // 3, 4096)
+                if new_max < old_max:
+                    print(f"  [OpenRouter] Context length exceeded — "
+                          f"reducing max_tokens {old_max} → {new_max} and retrying")
+                    body["max_tokens"] = new_max
+                    raw_response = self._make_api_request("chat/completions", body)
+                else:
+                    raise RuntimeError(f"OpenRouter API error: {err_str}")
             else:
                 raise RuntimeError(f"OpenRouter API error: {err_str}")
 
@@ -1043,23 +1106,103 @@ class OpenRouterBackend(OpenAICompatibleBackend):
         ROB-04 (R06.56): uses stdlib `urllib.request.urlopen` (not `requests`)
         to preserve the zero-dependency claim. The base class
         `generate_completions_stream()` parses these lines.
-        """
-        req = urllib.request.Request(
-            url,
-            data=json.dumps(body).encode("utf-8"),
-            headers=headers,
-            method="POST",
-        )
-        try:
-            response = urllib.request.urlopen(req, timeout=self.config.timeout)
-        except urllib.error.HTTPError as e:
-            error_body = e.read().decode("utf-8") if e.fp else ""
-            raise RuntimeError(f"OpenRouter HTTP error {e.code}: {error_body}")
-        except urllib.error.URLError as e:
-            raise RuntimeError(f"OpenRouter connection error: {e.reason}")
 
-        for line in response:
-            yield line
+        ROB-06: On 400 "context length" errors, parses the actual token
+        counts from the error message, calculates a safe max_tokens that
+        fits the remaining context, and retries. The reduced max_tokens
+        is persisted on the backend instance (``self._context_safe_max_tokens``)
+        so future calls in the same agentic run don't re-trigger the 400.
+        """
+        for attempt in range(2):  # max 2 attempts (original + 1 retry)
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(body).encode("utf-8"),
+                headers=headers,
+                method="POST",
+            )
+            try:
+                response = urllib.request.urlopen(req, timeout=self.config.timeout)
+            except urllib.error.HTTPError as e:
+                error_body = e.read().decode("utf-8") if e.fp else ""
+                # ROB-06: Context-length 400 — parse actual token counts,
+                # calculate safe max_tokens, persist for future calls,
+                # and retry once.
+                if (e.code == 400 and attempt == 0
+                        and "context length" in error_body.lower()):
+                    new_max = self._calculate_safe_max_tokens(error_body, body)
+                    if new_max is not None:
+                        old_max = body.get("max_tokens", 4096)
+                        print(f"  [OpenRouter-Stream] Context length exceeded — "
+                              f"reducing max_tokens {old_max} → {new_max} and retrying")
+                        body["max_tokens"] = new_max
+                        # Persist so future _build_openai_body() calls use
+                        # the safe value instead of the model default.
+                        self._context_safe_max_tokens = new_max
+                        continue
+                raise RuntimeError(f"OpenRouter HTTP error {e.code}: {error_body}")
+            except urllib.error.URLError as e:
+                raise RuntimeError(f"OpenRouter connection error: {e.reason}")
+
+            for line in response:
+                yield line
+            return  # success — don't retry
+
+    def _calculate_safe_max_tokens(self, error_body: str, body: dict) -> int | None:
+        """Parse token counts from a context-length 400 error and calculate
+        a safe max_tokens that fits the remaining context.
+
+        OpenRouter's error message looks like:
+            "This endpoint's maximum context length is 262144 tokens.
+             However, you requested about 282334 tokens (85421 of text input,
+             305 of tool input, 196608 in the output)."
+
+        We extract the max context and the input tokens, then calculate:
+            safe_max = max_context - input_tokens - safety_margin
+
+        Returns None if parsing fails.
+        """
+        import re
+        text = error_body.lower()
+
+        # Extract max context length: "maximum context length is 262144 tokens"
+        max_match = re.search(r"maximum context length is (\d+) tokens", text)
+        # Extract input tokens: "85421 of text input" or "26871 of text input"
+        input_match = re.search(r"(\d+) of text input", text)
+        # Also try "tool input" count
+        tool_match = re.search(r"(\d+) of tool input", text)
+        # Extract output tokens requested: "196608 in the output"
+        output_match = re.search(r"(\d+) in the output", text)
+
+        if not max_match or not input_match:
+            # Can't parse — fall back to 1/3 reduction
+            old_max = body.get("max_tokens", 4096)
+            new_max = max(old_max // 3, 4096)
+            return new_max if new_max < old_max else None
+
+        max_context = int(max_match.group(1))
+        input_tokens = int(input_match.group(1))
+        if tool_match:
+            input_tokens += int(tool_match.group(1))
+
+        # Safety margin: 2K tokens for overhead (system prompt growth,
+        # tool definitions, response framing). Conservative but prevents
+        # re-triggering the 400 on the next step.
+        safety_margin = 2048
+
+        safe_max = max_context - input_tokens - safety_margin
+
+        # Floor at 1024 — if input is so large that even 1K output doesn't
+        # fit, the agent needs to summarize/prune history, not reduce
+        # output further.
+        if safe_max < 1024:
+            safe_max = 1024
+
+        # Don't increase beyond the original max_tokens
+        old_max = body.get("max_tokens", 4096)
+        if safe_max >= old_max:
+            return None  # already safe, something else is wrong
+
+        return safe_max
 
     # _get_model_defaults() already exists on OpenRouterBackend (uses _model_cache)
     # generate_completions_stream() is inherited from OpenAICompatibleBackend
