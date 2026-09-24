@@ -1466,21 +1466,16 @@ def cmd_chat(args: argparse.Namespace) -> int:
                     # Append the skill's instructions to the system prompt
                     # so the agent has access to them on the next message.
                     # The skill instructions are added to _custom_system_prompt
-                    # and the memory's system message is updated.
+                    # and the memory's system message is updated via memory.add()
+                    # which handles replacing any existing system message.
                     skill_text = skill.instructions.strip()
                     if skill_text:
                         old_prompt = getattr(agent, '_custom_system_prompt', '') or ''
                         agent._custom_system_prompt = f"{old_prompt}\n\n# Skill: {skill.name}\n{skill_text}"
-                        # Update memory: replace the system message with the updated prompt.
-                        # Memory stores messages as a list of dicts; the first 'system' role
-                        # message is the system prompt. Replace it.
-                        for i, msg in enumerate(agent.memory.messages):
-                            if msg.get("role") == "system":
-                                agent.memory.messages[i]["content"] = agent._custom_system_prompt
-                                break
-                        else:
-                            # No system message in memory — add one
-                            agent.memory.add("system", agent._custom_system_prompt)
+                        # memory.add("system", ...) automatically removes any
+                        # existing system messages and appends the new one —
+                        # no need to manually find/replace in _messages.
+                        agent.memory.add("system", agent._custom_system_prompt)
                     loaded.append(name)
                     newly_loaded.append(name)
                 except Exception as e:
