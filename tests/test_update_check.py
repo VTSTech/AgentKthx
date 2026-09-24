@@ -26,6 +26,7 @@ from agentkthx.update_check import (
     GITHUB_RAW_INIT_URL,
     PYPI_JSON_URL,
     SUCCESS_TTL,
+    _cache_fresh,
     base_version,
     check_for_update,
     format_notice,
@@ -174,6 +175,93 @@ class TestIsNewer:
     ])
     def test_compare(self, latest, current, expected):
         assert is_newer(latest, current) is expected
+
+
+class TestCacheTTL:
+    """R06.57: cache TTLs reduced from 24h/6h to 1h/15min.
+
+    Verifies the constants and that ``_cache_fresh`` honors them —
+    success entries expire after 1h, failure entries after 15min.
+    """
+
+    def test_success_ttl_is_one_hour(self):
+        # R06.57: was 24h, reduced to 1h after user-reported stale-cache
+        # confusion (a 24h-cached "0.6.54 on PyPI" hid 0.6.55+0.6.56).
+        assert SUCCESS_TTL == 3600
+
+    def test_failure_ttl_is_fifteen_minutes(self):
+        # R06.57: was 6h, reduced proportionally to 15min.
+        assert FAILURE_TTL == 900
+
+    def test_failure_ttl_shorter_than_success(self):
+        # Transient failures (rate limit, blip) should be retried sooner
+        # than successful entries need refreshing.
+        assert FAILURE_TTL < SUCCESS_TTL
+
+    def test_success_entry_fresh_within_one_hour(self):
+        # 30min after a successful check at T0 → still fresh
+        now = time.time()
+        assert _cache_fresh({"error": False}, now - 1800, now) is True
+
+    def test_success_entry_stale_after_one_hour(self):
+        # 1h + 1s after a successful check at T0 → stale (refetch)
+        now = time.time()
+        assert _cache_fresh({"error": False}, now - 3601, now) is False
+
+    def test_failure_entry_fresh_within_fifteen_minutes(self):
+        # 10min after a failed check at T0 → still fresh (negative cache)
+        now = time.time()
+        assert _cache_fresh({"error": True}, now - 600, now) is True
+
+    def test_failure_entry_stale_after_fifteen_minutes(self):
+        # 15min + 1s after a failed check at T0 → stale (retry)
+        now = time.time()
+        assert _cache_fresh({"error": True}, now - 901, now) is False
+
+
+class TestForceRefresh:
+    """R06.57: ``check_for_update(force=True)`` bypasses cache for all sources."""
+
+    def test_force_refetches_pypi_even_with_fresh_cache(self, counter_urlopen, tmp_path, pip_install):
+        calls, set_fake = counter_urlopen
+        def _route(url, timeout=None):
+            if "raw.githubusercontent.com" in url:
+                return _FakeResponse(_github_init_payload("0.6.51"))
+            return _FakeResponse(_pypi_payload("0.6.99"))
+        set_fake(_route)
+        cache = tmp_path / "c.json"
+        cache.write_text(json.dumps({
+            "checked_at": time.time(),  # fresh cache
+            "pypi": {"latest_version": "0.6.50"},
+            "github_version": {"version": "0.6.50"},
+        }))
+        result = check_for_update(force=True, cache_file=cache)
+        assert result["pypi_latest"] == "0.6.99"  # bypassed cache
+        assert result["github_latest_version"] == "0.6.51"  # bypassed cache
+        # Should have hit both URLs despite fresh cache
+        assert len(calls) == 2
+
+    def test_force_refetches_github_sha_for_git_checkout(self, counter_urlopen, tmp_path, git_checkout):
+        calls, set_fake = counter_urlopen
+        full_sha = "f754294" + "0" * 33
+        def _route(url, timeout=None):
+            if "raw.githubusercontent.com" in url:
+                return _FakeResponse(_github_init_payload("0.6.51"))
+            if "github" in url:  # commits API
+                return _FakeResponse(_github_payload(full_sha))
+            return _FakeResponse(_pypi_payload("0.6.51"))
+        set_fake(_route)
+        cache = tmp_path / "c.json"
+        cache.write_text(json.dumps({
+            "checked_at": time.time(),
+            "pypi": {"latest_version": "0.6.50"},
+            "github": {"sha": "0" * 40},
+            "github_version": {"version": "0.6.50"},
+        }))
+        result = check_for_update(force=True, cache_file=cache)
+        assert result["github_sha"] == full_sha  # bypassed cache
+        # All 3 sources refetched
+        assert len(calls) == 3
 
 
 # ----------------------------------------------------------------------------
