@@ -49,7 +49,12 @@ class BitNetBackend(LlamaServerBackend):
         config=None,
         **kwargs,
     ):
-        # Pass through all args, force bitnet_mode=True
+        # bitnet_mode may be passed by get_backend("bitnet") (which adds it
+        # at line 108-109 of backends/__init__.py) OR hardcoded here. To
+        # avoid "multiple values for keyword argument 'bitnet_mode'",
+        # pop it from kwargs and force True regardless — BitNetBackend
+        # always runs in bitnet_mode.
+        kwargs.pop("bitnet_mode", None)  # discard whatever was passed
         super().__init__(
             base_url=base_url,
             host=host,

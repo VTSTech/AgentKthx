@@ -172,3 +172,62 @@ class TestCliDefensiveFallback:
 
         backend = CloudBackend()
         assert getattr(backend, 'is_cloud', False) is True
+
+
+class TestBitNetBackendInstantiation:
+    """R06.57: BitNetBackend must accept api_mode kwarg without crashing.
+
+    Regression test for the bug found on Colab: `agentkthx models --backend bitnet`
+    crashed with ``TypeError: got multiple values for keyword argument 'bitnet_mode'``.
+
+    Root cause: ``get_backend("bitnet")`` adds ``bitnet_mode=True`` to kwargs
+    (backends/__init__.py:108-109), but ``BitNetBackend.__init__`` ALSO hardcoded
+    ``bitnet_mode=True`` in its ``super().__init__()`` call. When ``api_mode``
+    was passed as a kwarg (by MAINT-05's ``_probe_backend`` call in cmd_models),
+    both ``bitnet_mode`` values collided.
+
+    Fix: ``BitNetBackend.__init__`` now pops ``bitnet_mode`` from kwargs before
+    passing the hardcoded True. This test ensures the fix sticks.
+    """
+
+    def test_bitnet_accepts_api_mode_openai(self):
+        """get_backend('bitnet', api_mode=ApiMode.OPENAI) must not crash."""
+        from agentkthx.backends import get_backend
+        from agentkthx.core.types import ApiMode
+        b = get_backend("bitnet", api_mode=ApiMode.OPENAI)
+        assert b is not None
+        assert b.is_cloud is False  # local backend
+
+    def test_bitnet_accepts_api_mode_openre(self):
+        """get_backend('bitnet', api_mode=ApiMode.OPENRE) must not crash."""
+        from agentkthx.backends import get_backend
+        from agentkthx.core.types import ApiMode
+        b = get_backend("bitnet", api_mode=ApiMode.OPENRE)
+        assert b is not None
+
+    def test_bitnet_accepts_api_mode_string(self):
+        """get_backend('bitnet', api_mode='openai') must not crash (string form)."""
+        from agentkthx.backends import get_backend
+        b = get_backend("bitnet", api_mode="openai")
+        assert b is not None
+
+    def test_bitnet_bitnet_mode_is_always_true(self):
+        """Regardless of what's passed, BitNetBackend always runs with bitnet_mode=True."""
+        from agentkthx.backends import get_backend
+        from agentkthx.core.types import ApiMode
+        # Even if someone explicitly passes bitnet_mode=False, it's forced True
+        b = get_backend("bitnet", api_mode=ApiMode.OPENAI, bitnet_mode=False)
+        assert hasattr(b, "_bitnet_mode")
+        assert b._bitnet_mode is True
+
+    def test_bitnet_direct_instantiation_with_bitnet_mode_kwarg(self):
+        """BitNetBackend(bitnet_mode=True) direct call must not crash either."""
+        from agentkthx.plugins.bitnet.bitnet import BitNetBackend
+        b = BitNetBackend(bitnet_mode=True)
+        assert b._bitnet_mode is True
+
+    def test_bitnet_direct_instantiation_without_bitnet_mode(self):
+        """BitNetBackend() with no bitnet_mode still defaults to True."""
+        from agentkthx.plugins.bitnet.bitnet import BitNetBackend
+        b = BitNetBackend()
+        assert b._bitnet_mode is True
