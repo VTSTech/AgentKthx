@@ -506,7 +506,9 @@ class OllamaBackend(OpenAICompatibleBackend):
             error_msg = error_body.lower() if error_body else ""
             
             # Check if model doesn't support tools - fallback to no tools (ReAct mode)
-            if "does not support tools" in error_msg and tools:
+            # R06.57: also match "unsupported param: tools" (llama-server 500)
+            # which is how BitNet's llama.cpp fork rejects the tools param.
+            if tools and ("does not support tools" in error_msg or "unsupported param: tools" in error_msg):
                 if os.environ.get("AGENTKTHX_DEBUG"):
                     print(f"  [OpenAI-Comp] Model doesn't support tools, falling back to ReAct mode")
                 # Retry without tools - let ReAct parsing handle tool calls
