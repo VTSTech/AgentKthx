@@ -26,7 +26,11 @@ import pytest
 from agentkthx.plugins.gemini.gemini import (
     GeminiBackend,
     GEMINI_MODELS,
+    FREE_TIER_LIMITS,
     detect_gemini_family,
+    _is_free_tier_model,
+    _get_free_tier_limits,
+    _is_chat_capable_model,
 )
 from agentkthx.core.models import Tool, ToolParam
 from agentkthx.core.types import BackendType, ToolSupportLevel, ApiMode
@@ -291,6 +295,336 @@ class TestBackendInit(unittest.TestCase):
         # And GEMINI is in the cloud-provider set used by cli.py
         cloud_provider_types = {BackendType.OPENROUTER, BackendType.ZAI, BackendType.GEMINI}
         self.assertIn(self.backend.backend_type, cloud_provider_types)
+
+
+class TestModelIdPrefixStripping(unittest.TestCase):
+    """Polish fix 1: Google's /v1beta/openai/models endpoint returns IDs
+    prefixed with 'models/'. Without stripping the prefix, catalog merge
+    sees 'gemini-3.8-flash' (catalog) and 'models/gemini-3.8-flash' (API)
+    as different entries and emits duplicates."""
+
+    def setUp(self):
+        from unittest.mock import patch
+        with patch.object(GeminiBackend, "list_models", return_value=[]):
+            with patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}, clear=False):
+                self.backend = GeminiBackend()
+
+    def test_parse_strips_models_prefix(self):
+        parsed = self.backend._parse_gemini_model({"id": "models/gemini-3.8-flash"})
+        self.assertEqual(parsed["name"], "gemini-3.8-flash")
+
+    def test_parse_preserves_unprefixed_id(self):
+        """If the API ever returns IDs without the prefix, don't break."""
+        parsed = self.backend._parse_gemini_model({"id": "gemini-3.8-flash"})
+        self.assertEqual(parsed["name"], "gemini-3.8-flash")
+
+    def test_parse_strips_prefix_before_catalog_lookup(self):
+        """After stripping 'models/', catalog context_length is applied.
+        Pro models should show 2M context (2048K), Flash should show 1M (1024K)."""
+        parsed = self.backend._parse_gemini_model({"id": "models/gemini-3.1-pro-preview"})
+        # Catalog has gemini-3.1-pro-preview with context_length=2_097_152 (2M)
+        self.assertEqual(parsed["details"]["context_length"], 2_097_152)
+
+    def test_parse_uses_1m_default_when_no_catalog_match(self):
+        """Unknown models fall back to 1M context (Gemini Flash default)."""
+        parsed = self.backend._parse_gemini_model({"id": "models/some-future-model-2099"})
+        self.assertEqual(parsed["details"]["context_length"], 1_048_576)
+
+
+class TestChatCapabilityClassification(unittest.TestCase):
+    """Polish fix 2 + 3: Non-chat models (embeddings, Veo, Lyria, robotics,
+    TTS, Live API, image gen, computer-use, deep-research, antigravity,
+    Gemma open-source) can't accept chat-completions requests with tools.
+    They should be marked as ✗ none in the tool-support columns instead
+    of ✓ native."""
+
+    def setUp(self):
+        from unittest.mock import patch
+        with patch.object(GeminiBackend, "list_models", return_value=[]):
+            with patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}, clear=False):
+                self.backend = GeminiBackend()
+
+    # Chat models → NATIVE
+    def test_chat_flash_models_are_native(self):
+        for name in ("gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.5-flash",
+                     "gemini-2.5-flash", "gemini-2.5-flash-lite"):
+            self.assertEqual(
+                self.backend.test_tool_support(name),
+                ToolSupportLevel.NATIVE,
+                f"{name} should be NATIVE (chat model)"
+            )
+
+    def test_chat_pro_models_are_native(self):
+        for name in ("gemini-3.1-pro-preview", "gemini-2.5-pro"):
+            self.assertEqual(
+                self.backend.test_tool_support(name),
+                ToolSupportLevel.NATIVE,
+                f"{name} should be NATIVE (chat model)"
+            )
+
+    # Non-chat models → NONE
+    def test_embedding_models_are_none(self):
+        for name in ("gemini-embedding-001", "gemini-embedding-2-preview"):
+            self.assertEqual(
+                self.backend.test_tool_support(name),
+                ToolSupportLevel.NONE,
+                f"{name} should be NONE (embedding, not chat)"
+            )
+
+    def test_video_gen_models_are_none(self):
+        for name in ("veo-3.1-generate-preview", "veo-3.1-fast-generate-preview",
+                     "veo-3.1-lite-generate-preview", "gemini-omni-1.1-flash"):
+            self.assertEqual(
+                self.backend.test_tool_support(name),
+                ToolSupportLevel.NONE,
+                f"{name} should be NONE (video gen, not chat)"
+            )
+
+    def test_music_gen_models_are_none(self):
+        for name in ("lyria-3.5", "lyria-3-pro-preview", "lyria-3-clip-preview",
+                     "lyria-realtime-exp"):
+            self.assertEqual(
+                self.backend.test_tool_support(name),
+                ToolSupportLevel.NONE,
+                f"{name} should be NONE (music gen, not chat)"
+            )
+
+    def test_tts_models_are_none(self):
+        for name in ("gemini-3.8-flash-tts", "gemini-3.8-flash-lite-tts",
+                     "gemini-2.5-flash-preview-tts"):
+            self.assertEqual(
+                self.backend.test_tool_support(name),
+                ToolSupportLevel.NONE,
+                f"{name} should be NONE (TTS, not chat)"
+            )
+
+    def test_live_api_models_are_none(self):
+        """Live API audio-to-audio models — including the tricky 'gemini-3.8-live'
+        that has no trailing dash after 'live'."""
+        for name in ("gemini-3.8-live", "gemini-3.8-live-extended-thinking",
+                     "gemini-3.1-flash-live-preview", "gemini-3.5-live-translate-preview"):
+            self.assertEqual(
+                self.backend.test_tool_support(name),
+                ToolSupportLevel.NONE,
+                f"{name} should be NONE (Live API, not chat)"
+            )
+
+    def test_image_gen_models_are_none(self):
+        for name in ("gemini-3.1-flash-image", "gemini-3-pro-image",
+                     "gemini-3-pro-image-preview", "gemini-3.1-flash-lite-image"):
+            self.assertEqual(
+                self.backend.test_tool_support(name),
+                ToolSupportLevel.NONE,
+                f"{name} should be NONE (image gen, not chat)"
+            )
+
+    def test_robotics_models_are_none(self):
+        for name in ("gemini-robotics-er-2-preview",
+                     "gemini-robotics-er-2-streaming-preview",
+                     "gemini-robotics-er-1.6-preview"):
+            self.assertEqual(
+                self.backend.test_tool_support(name),
+                ToolSupportLevel.NONE,
+                f"{name} should be NONE (robotics, not chat)"
+            )
+
+    def test_transcribe_models_are_none(self):
+        for name in ("gemini-3.5-transcribe", "gemini-3.5-transcribe-live"):
+            self.assertEqual(
+                self.backend.test_tool_support(name),
+                ToolSupportLevel.NONE,
+                f"{name} should be NONE (transcribe, not chat)"
+            )
+
+    def test_misc_non_chat_models_are_none(self):
+        for name in ("gemini-2.5-computer-use-preview-10-2025",
+                     "deep-research-preview-04-2026",
+                     "deep-research-max-preview-04-2026",
+                     "antigravity-preview-09-2026",
+                     "gemma-4-31b-it", "gemma-4-26b-a4b-it",
+                     "aqa"):
+            self.assertEqual(
+                self.backend.test_tool_support(name),
+                ToolSupportLevel.NONE,
+                f"{name} should be NONE (not a chat model)"
+            )
+
+    def test_models_prefix_stripped_in_classification(self):
+        """Defensive: if a 'models/' prefixed ID slips through, classification
+        still works correctly."""
+        self.assertEqual(
+            self.backend.test_tool_support("models/gemini-embedding-001"),
+            ToolSupportLevel.NONE,
+            "Prefixed 'models/gemini-embedding-001' should still be NONE"
+        )
+        self.assertEqual(
+            self.backend.test_tool_support("models/gemini-3.8-flash"),
+            ToolSupportLevel.NATIVE,
+            "Prefixed 'models/gemini-3.8-flash' should still be NATIVE"
+        )
+
+
+class TestFreeTierClassification(unittest.TestCase):
+    """Free-tier eligibility per the FREE_TIER_LIMITS table transcribed from
+    Google AI Studio on 2026-09-24.
+
+    The user manually checked AI Studio's rate-limits page for their Free-tier
+    project (no billing setup). The 20 confirmed-free models are encoded in
+    FREE_TIER_LIMITS with non-zero rpd. Models with rpd=0 are explicitly NOT
+    on the free tier. The _is_free_tier_model() classifier extends this with
+    pattern-based heuristics for variants not in the table.
+
+    Ground truth (per AI Studio, 2026-09-24):
+      ✓ FREE (non-zero limits):
+        Antigravity (60/100K/100), Gemini 2.5 Flash (5/250K/20),
+        Gemini 2.5 Flash Lite (10/250K/20), Gemini 2.5 Flash TTS (3/10K/10),
+        Gemini 3 Flash (5/250K/20), Gemini 3.1 Flash Lite (15/250K/500),
+        Gemini 3.1 Flash TTS (3/10K/10), Gemini 3.5 Flash (5/250K/20),
+        Gemini 3.5 Flash Lite (15/250K/500), Gemini 3.5 Transcribe (3/10K/25),
+        Gemini 3.6/3.7/3.8 Flash (5/250K/20 each),
+        Gemini 3.8 Flash Lite TTS / Flash TTS (3/10K/10 each),
+        Gemini Embedding 1/2 (100/30K/1K),
+        Gemini Robotics ER 2 Preview (5/250K/20),
+        Gemma 4 26B (30/16K/14.4K), Gemma 4 31B (30/16K/[truncated])
+      ✗ NOT FREE (0/0/0):
+        Deep Research variants, Gemini 2 Flash / 2 Flash Lite (legacy),
+        Computer Use Preview, Nano Banana variants (image gen),
+        Gemini 2.5 Pro / 3.1 Pro (Pro = paid), Gemini Omni variants,
+        Veo / Lyria (video/music gen = paid)
+    """
+
+    # ── Confirmed FREE (from AI Studio data, in FREE_TIER_LIMITS table) ──
+
+    def test_chat_flash_models_are_free(self):
+        for name in ("gemini-2.5-flash", "gemini-3.5-flash", "gemini-3.6-flash",
+                     "gemini-3.7-flash", "gemini-3.8-flash", "gemini-3-flash-preview"):
+            self.assertTrue(_is_free_tier_model(name),
+                            f"{name} should be FREE (5 RPM / 250K TPM / 20 RPD per AI Studio)")
+
+    def test_chat_flash_lite_models_are_free_with_higher_rpd(self):
+        # Flash-Lite has 15 RPM / 500 RPD — actually more generous than regular Flash
+        for name in ("gemini-3.1-flash-lite", "gemini-3.5-flash-lite"):
+            self.assertTrue(_is_free_tier_model(name))
+            limits = _get_free_tier_limits(name)
+            self.assertEqual(limits["rpm"], 15)
+            self.assertEqual(limits["rpd"], 500)
+
+    def test_gemma_is_free(self):
+        """Gemma open-source models ARE on the Free tier (generous RPD!).
+        Earlier catalog had them marked non-chat for /chat/completions
+        unverified — but free-tier eligibility is separate from chat capability."""
+        for name in ("gemma-4-26b-a4b-it", "gemma-4-31b-it"):
+            self.assertTrue(_is_free_tier_model(name),
+                            f"{name} should be FREE (30 RPM / 16K TPM / 14.4K RPD per AI Studio)")
+            limits = _get_free_tier_limits(name)
+            self.assertEqual(limits["rpd"], 14_400)
+
+    def test_embeddings_are_free(self):
+        for name in ("gemini-embedding-001", "gemini-embedding-2-preview", "gemini-embedding-2"):
+            self.assertTrue(_is_free_tier_model(name),
+                            f"{name} should be FREE (100 RPM / 30K TPM / 1K RPD per AI Studio)")
+
+    def test_antigravity_is_free(self):
+        for name in ("antigravity-preview-05-2026", "antigravity-preview-09-2026", "antigravity-preview-latest"):
+            self.assertTrue(_is_free_tier_model(name),
+                            f"{name} should be FREE (60 RPM / 100K TPM / 100 RPD per AI Studio)")
+
+    def test_robotics_is_free(self):
+        for name in ("gemini-robotics-er-2-preview",):
+            self.assertTrue(_is_free_tier_model(name),
+                            f"{name} should be FREE (5 RPM / 250K TPM / 20 RPD per AI Studio)")
+
+    def test_transcribe_is_free(self):
+        self.assertTrue(_is_free_tier_model("gemini-3.5-transcribe"))
+        limits = _get_free_tier_limits("gemini-3.5-transcribe")
+        self.assertEqual(limits["rpd"], 25)
+
+    def test_tts_variants_are_free(self):
+        for name in ("gemini-2.5-flash-preview-tts", "gemini-3.1-flash-tts-preview",
+                     "gemini-3.8-flash-tts", "gemini-3.8-flash-lite-tts"):
+            self.assertTrue(_is_free_tier_model(name),
+                            f"{name} should be FREE (3 RPM / 10K TPM / 10 RPD per AI Studio)")
+
+    # ── Confirmed NOT FREE (from AI Studio data, rpd=0 in table) ──
+
+    def test_pro_models_are_not_free(self):
+        for name in ("gemini-2.5-pro", "gemini-3.1-pro-preview",
+                     "gemini-3.1-pro-preview-customtools", "gemini-2.5-pro-preview-tts"):
+            self.assertFalse(_is_free_tier_model(name),
+                             f"{name} should NOT be free (Pro = paid per AI Studio)")
+
+    def test_image_gen_models_are_not_free(self):
+        """Nano Banana / image gen variants show 0/0/0 in AI Studio."""
+        for name in ("gemini-2.5-flash-image", "gemini-3-pro-image",
+                     "gemini-3-pro-image-preview", "gemini-3.1-flash-image",
+                     "gemini-3.1-flash-image-preview", "gemini-3.1-flash-lite-image",
+                     "nano-banana-pro-preview"):
+            self.assertFalse(_is_free_tier_model(name),
+                             f"{name} should NOT be free (image gen = paid)")
+
+    def test_video_gen_models_are_not_free(self):
+        for name in ("veo-3.1-generate-preview", "veo-3.1-fast-generate-preview",
+                     "veo-3.1-lite-generate-preview", "gemini-omni-1.1-flash",
+                     "gemini-omni-flash-preview"):
+            self.assertFalse(_is_free_tier_model(name),
+                             f"{name} should NOT be free (video gen = paid)")
+
+    def test_music_gen_models_are_not_free(self):
+        for name in ("lyria-3.5", "lyria-3-pro-preview", "lyria-3-clip-preview",
+                     "lyria-realtime-exp"):
+            self.assertFalse(_is_free_tier_model(name),
+                             f"{name} should NOT be free (music gen = paid)")
+
+    def test_deep_research_is_not_free(self):
+        for name in ("deep-research-preview-04-2026",
+                     "deep-research-max-preview-04-2026",
+                     "deep-research-pro-preview-12-2025"):
+            self.assertFalse(_is_free_tier_model(name),
+                             f"{name} should NOT be free (agentic = paid)")
+
+    def test_computer_use_is_not_free(self):
+        self.assertFalse(_is_free_tier_model("gemini-2.5-computer-use-preview-10-2025"))
+
+    def test_legacy_2_0_models_are_not_free(self):
+        """Gemini 2.0 / 2 Flash / 2 Flash Lite are listed as 0/0/0 — being shut down."""
+        self.assertFalse(_is_free_tier_model("gemini-2.0-flash"))
+        self.assertFalse(_is_free_tier_model("gemini-2.0-flash-lite"))
+        self.assertFalse(_is_free_tier_model("gemini-flash-latest"))  # alias for Pro
+        self.assertFalse(_is_free_tier_model("gemini-pro-latest"))
+
+    # ── Live API edge cases — only gemini-3.5-transcribe* is free ──
+
+    def test_live_api_variants_not_in_table_are_not_free(self):
+        """Only gemini-3.5-transcribe and -live are explicitly free per AI Studio.
+        Other Live API variants (-live, live-translate) are NOT in the table
+        and should be marked NOT free."""
+        for name in ("gemini-3.8-live", "gemini-3.8-live-extended-thinking",
+                     "gemini-3.1-flash-live-preview", "gemini-3.5-live-translate-preview"):
+            self.assertFalse(_is_free_tier_model(name),
+                             f"{name} should NOT be free (not in AI Studio free-tier table)")
+
+    def test_transcribe_in_table_is_free(self):
+        """gemini-3.5-transcribe and gemini-3.5-transcribe-live are in the table."""
+        for name in ("gemini-3.5-transcribe", "gemini-3.5-transcribe-live"):
+            self.assertTrue(_is_free_tier_model(name))
+
+    # ── Defensive: models/ prefix stripping ──
+
+    def test_models_prefix_stripped_in_free_tier_check(self):
+        """If 'models/' prefix slips through, classifier still works."""
+        self.assertTrue(_is_free_tier_model("models/gemini-3.8-flash"))
+        self.assertFalse(_is_free_tier_model("models/gemini-2.5-pro"))
+        self.assertTrue(_is_free_tier_model("models/gemma-4-31b-it"))
+
+    # ── Catalog consistency check ──
+
+    def test_catalog_free_tier_flags_match_table(self):
+        """Catalog free_tier flags must match the FREE_TIER_LIMITS table."""
+        for name, info in GEMINI_MODELS.items():
+            catalog_says_free = info.get("free_tier", False)
+            table_says_free = _is_free_tier_model(name)
+            self.assertEqual(catalog_says_free, table_says_free,
+                             f"{name}: catalog={catalog_says_free} but table={table_says_free}")
 
 
 class TestBuildBody(unittest.TestCase):

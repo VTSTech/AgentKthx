@@ -80,13 +80,200 @@ from agentkthx.config import (
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Free Tier rate-limit data (ground truth from Google AI Studio)
+# ─────────────────────────────────────────────────────────────────────────────
+# Google does NOT expose a pricing or free-tier endpoint via the API.
+# The rate-limits page (https://ai.google.dev/gemini-api/docs/rate-limits)
+# documents the 4 usage tiers (Free / Tier 1 / Tier 2 / Tier 3) but
+# per-model RPM/TPM/RPD numbers are only visible in the Google AI Studio
+# UI under "Rate limits" (https://aistudio.google.com/rate-limits).
+#
+# The table below was transcribed from AI Studio on 2026-09-24 by VTSTech
+# for a project with no billing setup (Free tier). Models listed with
+# 0/0/0 limits are NOT available on the Free tier — they require paid
+# Tier 1+ access. Models with non-zero limits ARE free.
+#
+# IMPORTANT: This table is the ONLY authoritative source of free-tier
+# eligibility. The /v1beta/openai/models API endpoint does NOT return
+# pricing or free_tier fields. If a model isn't in this table, the
+# _is_free_tier_model() heuristic below decides (with patterns based
+# on the table).
+#
+# To refresh this table on your own account, log in to AI Studio and
+# visit: https://aistudio.google.com/rate-limits
+#
+# Format: "model_id_pattern": {"rpm": int, "tpm": int, "rpd": int}
+# Patterns are matched case-insensitively as substrings of the model ID.
+
+FREE_TIER_LIMITS: dict[str, dict[str, int]] = {
+    # === Text-out chat models (FREE on Free tier) ===
+    "gemini-2.5-flash":          {"rpm": 5,   "tpm": 250_000, "rpd": 20},
+    "gemini-2.5-flash-lite":     {"rpm": 10,  "tpm": 250_000, "rpd": 20},
+    "gemini-3-flash-preview":    {"rpm": 5,   "tpm": 250_000, "rpd": 20},
+    "gemini-3.1-flash-lite":     {"rpm": 15,  "tpm": 250_000, "rpd": 500},
+    "gemini-3.5-flash":          {"rpm": 5,   "tpm": 250_000, "rpd": 20},
+    "gemini-3.5-flash-lite":     {"rpm": 15,  "tpm": 250_000, "rpd": 500},
+    "gemini-3.6-flash":          {"rpm": 5,   "tpm": 250_000, "rpd": 20},
+    "gemini-3.7-flash":          {"rpm": 5,   "tpm": 250_000, "rpd": 20},
+    "gemini-3.8-flash":          {"rpm": 5,   "tpm": 250_000, "rpd": 20},
+    # Note: Gemini 2 Flash / 2 Flash Lite (legacy 2.0) show 0/0/0 — being
+    # shut down. Not on free tier.
+
+    # === Multi-modal generative (TTS variants — FREE on Free tier) ===
+    "gemini-2.5-flash-preview-tts":       {"rpm": 3, "tpm": 10_000, "rpd": 10},
+    "gemini-2.5-pro-preview-tts":         {"rpm": 0, "tpm": 0,       "rpd": 0},  # NOT free
+    "gemini-3.1-flash-tts-preview":       {"rpm": 3, "tpm": 10_000, "rpd": 10},
+    "gemini-3.8-flash-tts":               {"rpm": 3, "tpm": 10_000, "rpd": 10},
+    "gemini-3.8-flash-lite-tts":         {"rpm": 3, "tpm": 10_000, "rpd": 10},
+
+    # === Live API / Transcribe (FREE on Free tier, but uses audio endpoints) ===
+    "gemini-3.5-transcribe":              {"rpm": 3, "tpm": 10_000, "rpd": 25},
+    "gemini-3.5-transcribe-live":         {"rpm": 3, "tpm": 10_000, "rpd": 25},  # inferred
+
+    # === Embeddings (FREE on Free tier) ===
+    "gemini-embedding-001":               {"rpm": 100, "tpm": 30_000, "rpd": 1_000},
+    "gemini-embedding-2-preview":        {"rpm": 100, "tpm": 30_000, "rpd": 1_000},
+    "gemini-embedding-2":                 {"rpm": 100, "tpm": 30_000, "rpd": 1_000},  # inferred
+
+    # === Robotics (FREE on Free tier, but uses specialized robotics endpoint) ===
+    "gemini-robotics-er-2-preview":              {"rpm": 5, "tpm": 250_000, "rpd": 20},
+    "gemini-robotics-er-2-streaming-preview":    {"rpm": 5, "tpm": 250_000, "rpd": 20},  # inferred
+    "gemini-robotics-er-1.6-preview":            {"rpm": 5, "tpm": 250_000, "rpd": 20},  # inferred
+
+    # === Managed agents (FREE on Free tier) ===
+    "antigravity-preview-05-2026":        {"rpm": 60, "tpm": 100_000, "rpd": 100},
+    "antigravity-preview-09-2026":        {"rpm": 60, "tpm": 100_000, "rpd": 100},  # inferred
+    "antigravity-preview-latest":         {"rpm": 60, "tpm": 100_000, "rpd": 100},  # inferred
+
+    # === Gemma open-source models (FREE on Free tier, generous RPD!) ===
+    # These are served via the Gemini API catalog but are actually Google's
+    # open-source Gemma models. They're chat-capable text LLMs in principle,
+    # but UNTESTED via the OpenAI-compat /chat/completions endpoint —
+    # they may require the native Gemma/Vertex API. See TODO in
+    # _NON_CHAT_PATTERNS comment block.
+    "gemma-4-26b-a4b-it":                 {"rpm": 30, "tpm": 16_000, "rpd": 14_400},
+    "gemma-4-31b-it":                     {"rpm": 30, "tpm": 16_000, "rpd": 14_400},  # inferred (truncated in source)
+
+    # === NOT on Free tier (0/0/0 — listed for completeness / future ref) ===
+    "gemini-2.0-flash":                   {"rpm": 0, "tpm": 0, "rpd": 0},  # legacy, being shut down
+    "gemini-2.0-flash-lite":              {"rpm": 0, "tpm": 0, "rpd": 0},  # legacy, being shut down
+    "gemini-2.5-pro":                     {"rpm": 0, "tpm": 0, "rpd": 0},  # Pro = paid
+    "gemini-2.5-pro-preview-tts":        {"rpm": 0, "tpm": 0, "rpd": 0},  # Pro TTS = paid
+    "gemini-3.1-pro-preview":            {"rpm": 0, "tpm": 0, "rpd": 0},  # Pro = paid
+    "gemini-3.1-pro-preview-customtools":{"rpm": 0, "tpm": 0, "rpd": 0},  # Pro = paid
+    "deep-research-preview-04-2026":      {"rpm": 0, "tpm": 0, "rpd": 0},  # paid agentic
+    "deep-research-max-preview-04-2026":  {"rpm": 0, "tpm": 0, "rpd": 0},  # paid agentic
+    "deep-research-pro-preview-12-2025":  {"rpm": 0, "tpm": 0, "rpd": 0},  # paid agentic
+    "gemini-2.5-computer-use-preview-10-2025": {"rpm": 0, "tpm": 0, "rpd": 0},  # paid, native API only
+    "gemini-2.5-flash-image":            {"rpm": 0, "tpm": 0, "rpd": 0},  # Nano Banana (image gen = paid)
+    "gemini-3-pro-image":                {"rpm": 0, "tpm": 0, "rpd": 0},  # Nano Banana Pro (image gen = paid)
+    "gemini-3-pro-image-preview":        {"rpm": 0, "tpm": 0, "rpd": 0},
+    "gemini-3.1-flash-image":            {"rpm": 0, "tpm": 0, "rpd": 0},  # Nano Banana 2 (image gen = paid)
+    "gemini-3.1-flash-image-preview":    {"rpm": 0, "tpm": 0, "rpd": 0},
+    "gemini-3.1-flash-lite-image":       {"rpm": 0, "tpm": 0, "rpd": 0},  # Nano Banana 2 Lite (image gen = paid)
+    "gemini-3.1-flash-lite-image-preview": {"rpm": 0, "tpm": 0, "rpd": 0},
+    "veo-3.1-generate-preview":           {"rpm": 0, "tpm": 0, "rpd": 0},  # video gen = paid
+    "veo-3.1-fast-generate-preview":     {"rpm": 0, "tpm": 0, "rpd": 0},
+    "veo-3.1-lite-generate-preview":     {"rpm": 0, "tpm": 0, "rpd": 0},
+    "gemini-omni-1.1-flash":             {"rpm": 0, "tpm": 0, "rpd": 0},  # video gen = paid
+    "gemini-omni-flash-preview":         {"rpm": 0, "tpm": 0, "rpd": 0},
+    "lyria-3.5":                         {"rpm": 0, "tpm": 0, "rpd": 0},  # music gen = paid
+    "lyria-3-pro-preview":               {"rpm": 0, "tpm": 0, "rpd": 0},
+    "lyria-3-clip-preview":              {"rpm": 0, "tpm": 0, "rpd": 0},
+    "lyria-realtime-exp":                {"rpm": 0, "tpm": 0, "rpd": 0},
+    "aqa":                               {"rpm": 0, "tpm": 0, "rpd": 0},  # Answer Quality Assessment
+}
+
+
+def _is_free_tier_model(model_id: str) -> bool:
+    """Return True if the model has non-zero rate limits on the Free tier.
+
+    Source of truth: Google AI Studio → Rate limits page
+    (https://aistudio.google.com/rate-limits), transcribed 2026-09-24.
+    Google does NOT expose this via API — see the FREE_TIER_LIMITS table
+    above for the per-model numbers.
+
+    Lookup priority:
+      1. Exact match against FREE_TIER_LIMITS table → check rpd > 0
+      2. Heuristic pattern match for known free families
+         (flash / lite / embedding / robotics / antigravity / transcribe / gemma)
+      3. Default: NOT free (safer to mark paid than to mislead user)
+    """
+    if not model_id:
+        return False
+    m = model_id.lower()
+    if m.startswith("models/"):
+        m = m[len("models/"):]
+
+    # 1. Exact match against the FREE_TIER_LIMITS table
+    if m in FREE_TIER_LIMITS:
+        return FREE_TIER_LIMITS[m]["rpd"] > 0
+
+    # 2. Heuristic — patterns proven free by the AI Studio data.
+    # Order matters: check NEGATIVE patterns first (paid overrides).
+    # Paid overrides:
+    if "-pro" in m or "-pro-preview" in m or "-pro-image" in m:
+        return False  # All Pro variants are paid
+    if "-image" in m or "imagen-" in m:
+        return False  # All image gen variants are paid
+    if "veo-" in m or "lyria-" in m or "omni-" in m:
+        return False  # Video / music gen are paid
+    if "computer-use" in m or "deep-research" in m:
+        return False  # Specialized paid endpoints
+    if m.startswith("gemini-2.0") or m == "gemini-flash-latest" or m == "gemini-pro-latest":
+        return False  # Legacy 2.0 (being shut down) / aliases for Pro
+    # Live API override: only gemini-3.5-transcribe* is explicitly free per
+    # AI Studio. Other Live API variants (-live, live-translate) require
+    # paid access or opt-in. Match by "-live" / "live-translate" and only
+    # return True if the model is explicitly in the FREE_TIER_LIMITS table.
+    if "-live" in m or "live-translate" in m:
+        return m in FREE_TIER_LIMITS and FREE_TIER_LIMITS[m]["rpd"] > 0
+
+    # Free families (per AI Studio data):
+    if "flash" in m:
+        return True  # All Flash variants including TTS, Lite
+    if "lite" in m:
+        return True  # Flash-Lite variants
+    if "embedding" in m:
+        return True  # All embeddings
+    if "robotics" in m:
+        return True  # Robotics ER variants
+    if "antigravity" in m:
+        return True  # Managed agent
+    if "transcribe" in m:
+        return True  # Live API / Transcribe (only gemini-3.5-transcribe per AI Studio)
+    if "gemma-" in m:
+        return True  # Gemma open-source
+
+    # 3. Default: unknown → mark as NOT free (safer)
+    return False
+
+
+def _get_free_tier_limits(model_id: str) -> dict[str, int] | None:
+    """Return the per-model free-tier rate limits, or None if unknown.
+
+    Returns ``{"rpm": int, "tpm": int, "rpd": int}`` when the model is
+    on the Free tier; returns ``None`` when it's not free or unknown.
+    Useful for surfacing in the model-listing display or for client-side
+    rate-limit tracking.
+    """
+    if not _is_free_tier_model(model_id):
+        return None
+    m = model_id.lower()
+    if m.startswith("models/"):
+        m = m[len("models/"):]
+    return FREE_TIER_LIMITS.get(m)  # None if not in the table (heuristic-only match)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Gemini model catalog
 # ─────────────────────────────────────────────────────────────────────────────
 # Static metadata used as a fallback when the /models endpoint isn't reachable
 # or when a model isn't listed (e.g. preview models behind a feature flag).
 # Context lengths and key caps per the Gemini docs (Sep 2026).
 # Free-tier models are tagged with `free_tier=True` — GEMINI_FREE_ONLY filters
-# the cached model list to just these.
+# the cached model list to just these. The free_tier flags below MUST match
+# the FREE_TIER_LIMITS table above (which was transcribed from AI Studio).
 GEMINI_MODELS: dict[str, dict] = {
     # === Gemini 3.x family — current flagship generation ===
     "gemini-3.8-flash": {
@@ -248,6 +435,96 @@ def detect_gemini_family(model_name: str) -> dict:
     }
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Chat-capability detection
+# ─────────────────────────────────────────────────────────────────────────────
+# Google's /v1beta/openai/models endpoint returns ALL models — chat,
+# embedding, image generation (Nano Banana), video generation (Veo),
+# music generation (Lyria), audio transcription, robotics, and Gemma
+# open-source variants. Only chat models can be used as AgentKthx backends
+# because they accept ``messages`` and ``tools`` parameters via the
+# /v1beta/openai/chat/completions endpoint. The other model families use
+# different endpoints:
+#
+#   - Image generation (Nano Banana, gemini-2.5-flash-image,
+#     gemini-3-pro-image-preview) → POST /v1beta/openai/images/generations
+#   - Video generation (Veo 3.1 variants, gemini-omni-1.1-flash) → POST /v1beta/openai/videos
+#   - Music generation (Lyria 3.5, Lyria 3 Pro, Lyria RealTime) → different endpoint
+#   - Audio (Live API, TTS, Transcribe) → different endpoints (WebSocket for Live,
+#     /v1beta/openai/audio/transcriptions for Transcribe, native TTS path)
+#   - Embeddings (gemini-embedding-001, gemini-embedding-2-preview) → POST /v1beta/openai/embeddings
+#   - Robotics (gemini-robotics-er-2-preview) → specialized robotics endpoint
+#   - Computer Use (gemini-2.5-computer-use-preview) → native API only
+#   - Deep Research (deep-research-preview, deep-research-max-preview) → agentic endpoint
+#   - Antigravity (antigravity-preview-05-2026) → managed agent endpoint
+#   - Gemma open-source (gemma-4-26b-a4b-it, gemma-4-31b-it) → Google's
+#     Gemma open models served via the Gemini API catalog. These ARE
+#     chat-capable in principle (Gemma is a text model) but they use a
+#     different API surface (Vertex AI / Gemma API) — untested via the
+#     OpenAI-compat /chat/completions endpoint. Tagged non-chat for
+#     safety until verified on a real VM with a real key.
+#
+# Sending a /chat/completions request to a non-chat model returns a 400
+# "model does not support this endpoint" or similar — and the response
+# shape (when it returns at all) doesn't match our parser. So we mark
+# them as NONE in test_tool_support() so users don't accidentally try
+# to chat with an embedding model.
+#
+# TODO: v0.2 — when image I/O support is added, gemini-2.5-flash-image
+# and gemini-3-pro-image-preview become usable via the /images/generations
+# endpoint. That's a separate code path from /chat/completions and needs
+# its own backend method (e.g. generate_image(prompt) → bytes). For now,
+# they're correctly tagged as non-chat.
+#
+# TODO: verify on a real VM whether gemma-4-* models accept /chat/completions
+# requests. If yes, remove "gemma-" from _NON_CHAT_PATTERNS.
+
+# Prefixes / patterns for non-chat models. Matched case-insensitively
+# against the model ID. Order matters: more specific patterns first
+# (e.g. "nano-banana" before "banana" would matter if we had such a case).
+_NON_CHAT_PATTERNS = (
+    "embedding",            # gemini-embedding-001, gemini-embedding-2-preview → /embeddings endpoint
+    "veo-",                  # veo-3.1-generate-preview, veo-3.1-fast-generate-preview → /videos endpoint
+    "lyria-",                # lyria-3.5, lyria-3-pro-preview, lyria-realtime-exp → music gen endpoint
+    "imagen-",               # imagen-4.0-generate (shut down, but still listed) → /images endpoint
+    "robotics-",             # gemini-robotics-er-2-preview → specialized robotics endpoint
+    "transcribe",            # gemini-3.5-transcribe, gemini-3.5-transcribe-live → /audio/transcriptions
+    "live-translate",        # gemini-3.5-live-translate-preview → Live API (WebSocket)
+    "-tts",                  # gemini-3.8-flash-tts, gemini-2.5-flash-preview-tts → native TTS path
+    "-live",                 # gemini-3.8-live, gemini-3.1-flash-live-preview, gemini-3.8-live-extended-thinking → Live API (WebSocket)
+    "-image",                # gemini-3.1-flash-image (Nano Banana), gemini-3-pro-image → /images endpoint
+    "computer-use",          # gemini-2.5-computer-use-preview → native API only (specialized)
+    "deep-research",         # deep-research-preview, deep-research-max-preview → agentic endpoint
+    "antigravity",           # antigravity-preview-05-2026 → managed agent endpoint
+    "aqa",                   # aqa (Answer Quality Assessment — not a chat model)
+    "omni-",                 # gemini-omni-1.1-flash → /videos endpoint (video gen)
+    "gemma-",                # gemma-4-26b-a4b-it, gemma-4-31b-it → TODO: verify on real VM
+)
+
+
+def _is_chat_capable_model(model_id: str) -> bool:
+    """Return True if the model accepts chat-completions requests with tools.
+
+    Google's /v1beta/openai/models endpoint returns ALL model variants
+    (chat, embedding, image gen, video gen, music gen, robotics, audio,
+    Gemma open-source). Only chat models can be used as AgentKthx backends
+    because they accept ``messages`` and ``tools`` parameters via
+    /v1beta/openai/chat/completions. Others use different endpoints
+    (see the comment block above _NON_CHAT_PATTERNS for the full table).
+    """
+    if not model_id:
+        return False
+    m = model_id.lower()
+    # Strip a leading 'models/' prefix if present (defensive — should
+    # already be stripped by _parse_gemini_model).
+    if m.startswith("models/"):
+        m = m[len("models/"):]
+    for pattern in _NON_CHAT_PATTERNS:
+        if pattern in m:
+            return False
+    return True
+
+
 class GeminiBackend(OpenAICompatibleBackend):
     """
     Backend for Google Gemini API (cloud) via OpenAI-compatible endpoint.
@@ -361,20 +638,61 @@ class GeminiBackend(OpenAICompatibleBackend):
     # ─────────────────────────────────────────────────────────────────────
 
     def _parse_gemini_model(self, model_data: dict) -> dict:
-        """Parse OpenAI-compat /models entry into AgentKthx format."""
-        model_id = model_data.get("id") or model_data.get("name") or ""
-        # /openai/models returns context_length and max_completion_tokens
-        # at the top level (OpenAI shape). Fall back to catalog if missing.
-        context_length = model_data.get("context_length") or \
-            model_data.get("context_window") or 1_048_576
-        max_completion = (model_data.get("top_provider") or {}).get("max_completion_tokens") \
-            or model_data.get("max_completion_tokens") or 65_536
+        """Parse OpenAI-compat /models entry into AgentKthx format.
 
-        # Free tier classification — use catalog if available, else heuristic.
+        Gemini's /v1beta/openai/models endpoint returns model IDs prefixed
+        with ``models/`` (e.g. ``models/gemini-3.8-flash``). We strip that
+        prefix so the bare name matches our static catalog — without this,
+        the catalog-merge step would treat ``gemini-3.8-flash`` (catalog)
+        and ``models/gemini-3.8-flash`` (API) as different models and
+        emit both as duplicates.
+
+        The OpenAI-compat /models endpoint also does NOT return per-model
+        ``context_length`` — only the native Gemini API does. So we look
+        up context from our static catalog (which has accurate 1M/2M
+        values), and fall back to the API response shape only if catalog
+        doesn't have it.
+        """
+        raw_id = model_data.get("id") or model_data.get("name") or ""
+        # Strip the 'models/' prefix that Google's OpenAI-compat endpoint
+        # adds to every ID. Without this, our catalog-merge step sees
+        # 'gemini-3.8-flash' (catalog) and 'models/gemini-3.8-flash' (API)
+        # as different entries and emits duplicates.
+        model_id = raw_id[len("models/"):] if raw_id.startswith("models/") else raw_id
+
+        # Context length — try API first (rare), fall back to catalog,
+        # then to 1M default (the common Gemini Flash context).
         catalog = GEMINI_MODELS.get(model_id, {})
-        free_tier = catalog.get("free_tier", "flash" in model_id or "lite" in model_id)
+        context_length = (
+            model_data.get("context_length")
+            or model_data.get("context_window")
+            or catalog.get("context_length")
+            or 1_048_576
+        )
+        max_completion = (
+            (model_data.get("top_provider") or {}).get("max_completion_tokens")
+            or model_data.get("max_completion_tokens")
+            or catalog.get("max_completion_tokens")
+            or 65_536
+        )
+
+        # Free tier classification — use the catalog flag if available,
+        # else fall back to _is_free_tier_model() which uses the
+        # FREE_TIER_LIMITS table (transcribed from AI Studio) plus
+        # pattern-matching for models not in the catalog.
+        if "free_tier" in catalog:
+            free_tier = catalog["free_tier"]
+        else:
+            free_tier = _is_free_tier_model(model_id)
+
+        # Surface the rate limits in details for display / client-side tracking
+        free_limits = _get_free_tier_limits(model_id)
 
         family = catalog.get("family") or detect_gemini_family(model_id)["family"]
+
+        # Non-chat models can't do tool calling. We tag them so
+        # test_tool_support() can return NONE instead of NATIVE.
+        is_chat = _is_chat_capable_model(model_id)
 
         return {
             "name": model_id,
@@ -385,7 +703,9 @@ class GeminiBackend(OpenAICompatibleBackend):
                 "context_length": context_length,
                 "max_completion_tokens": max_completion,
                 "free_tier": free_tier,
-                "supports_thinking": catalog.get("supports_thinking", True),
+                "free_tier_limits": free_limits,  # {"rpm","tpm","rpd"} or None
+                "supports_thinking": catalog.get("supports_thinking", is_chat),
+                "is_chat_model": is_chat,
             },
             "model_data": model_data,
         }
@@ -563,7 +883,24 @@ class GeminiBackend(OpenAICompatibleBackend):
         family: str | None = None,
         force_test: bool = False,
     ) -> ToolSupportLevel:
-        """All current Gemini chat models support native function calling."""
+        """Classify tool support per Gemini model.
+
+        Chat models (gemini-3.x-flash, gemini-2.5-flash, etc.) support
+        native function calling → return ``NATIVE``.
+
+        Non-chat models (embeddings, Veo video gen, Lyria music gen,
+        robotics, transcribe, TTS, Live API, image gen, computer-use,
+        deep-research, antigravity, omni video, Gemma open-source)
+        can't accept chat-completions requests at all → return ``NONE``.
+        Showing them as "✓ native" in the models table was misleading —
+        users would try to chat with them and get a 400.
+
+        The classifier is pattern-based and lives in
+        ``_is_chat_capable_model()`` above. It strips a ``models/`` prefix
+        if present (defensive — ``_parse_gemini_model`` already does this).
+        """
+        if not _is_chat_capable_model(model):
+            return ToolSupportLevel.NONE
         return ToolSupportLevel.NATIVE
 
     # ─────────────────────────────────────────────────────────────────────
