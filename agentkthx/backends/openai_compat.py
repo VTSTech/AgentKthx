@@ -67,6 +67,12 @@ class OpenAICompatibleBackend(BaseBackend):
     streaming SSE — all the shared logic that was previously duplicated
     across OllamaBackend, ZaiBackend, and OpenRouterBackend.
 
+    R06.57 (MAINT-05): ``is_cloud = True`` here marks all concrete
+    subclasses as cloud-hosted by default. ``OllamaBackend`` overrides
+    back to ``False`` because it's a local server (the original parent
+    before R06.55 ARCH-01 extraction). ``LlamaServerBackend`` and
+    ``BitNetBackend`` inherit ``False`` through ``OllamaBackend``.
+
     Concrete backends must implement the abstract methods:
 
     Required (from BaseBackend):
@@ -75,16 +81,60 @@ class OpenAICompatibleBackend(BaseBackend):
 
     Required (from this class):
         - _get_chat_completions_url() → full URL for /chat/completions
-        - _get_auth_headers() → dict of auth headers
-        - _iter_sse_lines(url, body, headers) → iterable of raw SSE line bytes
-        - _get_model_defaults(model) → {"temperature": float, "max_tokens": int}
-        - _jev_call_completions(...) → JEV hook for generate_decision()
-
-    Optional (may inherit):
-        - _build_openai_body() — override only if backend has non-standard body fields
-        - _parse_openai_response() — override only if backend has non-standard response shape
-        - generate_completions_stream() — override only for fundamentally different streaming
+        - _get_auth_headers() → Authorization header dict
+        - _iter_sse_lines(url, body, headers) → generator of raw SSE bytes
+        - _get_model_defaults(model) → {temperature, max_tokens, context_length}
     """
+
+    #: R06.57 (MAINT-05): Cloud-hosted by default. OllamaBackend (local
+    #: server) overrides this to False; LlamaServerBackend + BitNetBackend
+    #: inherit False through OllamaBackend. ZaiBackend, OpenRouterBackend,
+    #: GeminiBackend inherit True.
+    is_cloud: bool = True
+
+    # ─────────────────────────────────────────────────────────────────────
+    # ARCH-03 (R06.57): Shared context-length 400 recovery + num_ctx/32 cap
+    # ─────────────────────────────────────────────────────────────────────
+    # Lifted from OpenRouterBackend (R06.55), GeminiBackend (R06.56), and
+    # ZaiBackend (R06.57) where the same logic was triplicated. Concrete
+    # backends override the regex patterns below if their error message
+    # format differs (Gemini uses "of" instead of "is" + "in the input"
+    # instead of "of text input").
+    #
+    # The cap divisor (32) is empirical — see the comment in
+    # ``_apply_max_tokens_cap`` for the rationale. Override on a concrete
+    # backend only if you have evidence a different divisor is needed.
+
+    #: Regex to extract the max context length from a 400 error body.
+    #: OpenRouter/ZAI: "maximum context length is 262144 tokens"
+    #: Gemini overrides to: "maximum context length of 1048576"
+    _CONTEXT_LENGTH_MAX_PATTERN: str = r"maximum context length is (\d+) tokens"
+
+    #: Regex to extract input tokens from a 400 error body.
+    #: OpenRouter/ZAI: "85421 of text input"
+    #: Gemini overrides to: "1000000 in the input"
+    _CONTEXT_LENGTH_INPUT_PATTERN: str = r"(\d+) of text input"
+
+    #: Regex to extract tool input tokens from a 400 error body. Set to
+    #: ``None`` on backends whose error format doesn't separate tool input
+    #: from text input (Gemini). When None, tool input is treated as 0.
+    #: OpenRouter/ZAI: "305 of tool input"
+    _CONTEXT_LENGTH_TOOL_PATTERN: str | None = r"(\d+) of tool input"
+
+    #: Divisor for the ``num_ctx // N`` max_tokens cap. 32 is empirical —
+    #: see ``_apply_max_tokens_cap`` docstring. Override only with evidence.
+    _MAX_TOKENS_CAP_DIVISOR: int = 32
+
+    #: Safety margin (tokens) subtracted from the calculated safe max_tokens
+    #: to leave room for system prompt growth, tool definitions, response
+    #: framing. Conservative but prevents re-triggering the 400 on the next
+    #: agentic-loop step.
+    _CONTEXT_SAFETY_MARGIN: int = 2048
+
+    #: Floor for the calculated safe max_tokens. If input is so large that
+    #: even 1K output doesn't fit, the agent needs to summarize/prune
+    #: history, not reduce output further.
+    _CONTEXT_SAFE_FLOOR: int = 1024
 
     # ─────────────────────────────────────────────────────────────────────
     # API mode property (was on OllamaBackend, now shared here)
@@ -787,3 +837,137 @@ class OpenAICompatibleBackend(BaseBackend):
         raise NotImplementedError(
             f"{self.__class__.__name__} must implement _get_model_defaults()"
         )
+
+    # ─────────────────────────────────────────────────────────────────────
+    # ARCH-03 (R06.57): Shared context-length 400 recovery helpers
+    # ─────────────────────────────────────────────────────────────────────
+    # These three methods consolidate the previously-triplicated logic from
+    # OpenRouterBackend (R06.55), GeminiBackend (R06.56), and ZaiBackend
+    # (R06.57). Concrete backends override the regex patterns
+    # (``_CONTEXT_LENGTH_MAX_PATTERN`` etc.) and call these helpers from
+    # ``_get_model_defaults`` and ``_iter_sse_lines`` — eliminating ~400
+    # lines of duplicated code and the maintenance burden of keeping three
+    # copies in sync.
+
+    def _apply_max_tokens_cap(
+        self,
+        max_tokens: int,
+        context_length: int,
+        temperature: float,
+    ) -> dict:
+        """Return a model-defaults dict with the ``num_ctx / 32`` cap applied.
+
+        ARCH-03 (R06.57): Lifted from OpenRouterBackend/GeminiBackend/ZaiBackend
+        where the same cap logic was triplicated. Two layers:
+
+        1. **Persisted safe value wins**: if ``self._context_safe_max_tokens``
+           is set (by ``_handle_context_length_400`` after a previous 400),
+           use it directly. This value was calculated from the actual token
+           counts in the error message and is the only value that won't
+           re-trigger the 400.
+        2. **Proactive cap**: ``min(max_tokens, context_length // 32)``.
+           Many cloud models report ``max_completion_tokens`` close to the
+           full ``context_length`` (e.g. OpenRouter :free models with 256K
+           context report 256K max output), leaving no room for input on
+           long agentic runs. ``num_ctx / 32`` (8K on a 256K model) gives
+           97% of context to input.
+
+           EMPIRICAL FINDING (R06.55 testing on nex-agi/nex-n2.5-mini:free,
+           256K context, codebase-audit skill with 30+ tool calls):
+             - num_ctx/4  (75%)  → 400 on step 5  (input ~85K + output ~196K)
+             - num_ctx/8  (12.5%)→ 400 on step 9  (input grew to ~100K)
+             - num_ctx/16 (6%)   → proceeded to step 27+ without 400
+             - num_ctx/32 (3%)   → conservative default for longest tasks
+
+           The reactive ``_handle_context_length_400`` still fires if this
+           proves too large.
+
+        Override ``_MAX_TOKENS_CAP_DIVISOR`` on a concrete backend only if
+        you have evidence a different divisor is needed.
+        """
+        if getattr(self, "_context_safe_max_tokens", None) is not None:
+            return {
+                "temperature": temperature,
+                "max_tokens": self._context_safe_max_tokens,
+                "context_length": context_length,
+            }
+        capped = min(max_tokens, context_length // self._MAX_TOKENS_CAP_DIVISOR)
+        return {
+            "temperature": temperature,
+            "max_tokens": capped,
+            "context_length": context_length,
+        }
+
+    def _calculate_safe_max_tokens(self, error_body: str, body: dict) -> int | None:
+        """Parse a context-length 400 error and compute a safe max_tokens.
+
+        Uses the per-backend regex patterns (``_CONTEXT_LENGTH_MAX_PATTERN``,
+        ``_CONTEXT_LENGTH_INPUT_PATTERN``, ``_CONTEXT_LENGTH_TOOL_PATTERN``)
+        to extract token counts from the error message, then computes:
+
+            safe_max = max_context - input_tokens - tool_tokens - safety_margin
+
+        Floors at ``_CONTEXT_SAFE_FLOOR`` (1024). Returns ``None`` if the
+        computed value is >= the current ``body["max_tokens"]`` (already safe,
+        something else is wrong) or if the regex can't parse the message
+        (caller falls back to a 1/3 reduction).
+
+        ARCH-03 (R06.57): Lifted from OpenRouterBackend/GeminiBackend/ZaiBackend.
+        """
+        import re
+        text = error_body.lower()
+
+        max_match = re.search(self._CONTEXT_LENGTH_MAX_PATTERN, text)
+        input_match = re.search(self._CONTEXT_LENGTH_INPUT_PATTERN, text)
+        tool_match = (
+            re.search(self._CONTEXT_LENGTH_TOOL_PATTERN, text)
+            if self._CONTEXT_LENGTH_TOOL_PATTERN
+            else None
+        )
+
+        if not max_match or not input_match:
+            # Can't parse — fall back to 1/3 reduction (conservative)
+            old_max = body.get("max_tokens", 4096)
+            new_max = max(old_max // 3, 4096)
+            return new_max if new_max < old_max else None
+
+        max_context = int(max_match.group(1))
+        input_tokens = int(input_match.group(1))
+        if tool_match:
+            input_tokens += int(tool_match.group(1))
+
+        safe_max = max_context - input_tokens - self._CONTEXT_SAFETY_MARGIN
+        if safe_max < self._CONTEXT_SAFE_FLOOR:
+            safe_max = self._CONTEXT_SAFE_FLOOR
+
+        old_max = body.get("max_tokens", 4096)
+        if safe_max >= old_max:
+            return None  # already safe, something else is wrong
+        return safe_max
+
+    def _handle_context_length_400(self, error_body: str, body: dict) -> bool:
+        """Parse a context-length 400, persist safe max_tokens, mutate body.
+
+        Returns ``True`` if the caller should retry the request with the
+        updated ``body``, ``False`` if the error isn't a context-length 400
+        or no safe value could be computed (caller should raise).
+
+        Side effects:
+        - Sets ``self._context_safe_max_tokens`` so future
+          ``_get_model_defaults`` / ``_apply_max_tokens_cap`` calls reuse
+          the safe value (prevents the death-spiral of repeated 400s).
+        - Mutates ``body["max_tokens"]`` in place for the retry.
+
+        ARCH-03 (R06.57): Lifted from OpenRouterBackend/GeminiBackend/ZaiBackend
+        ``_iter_sse_lines`` methods where the same parse/persist/retry dance
+        was triplicated. Concrete backends call this from their
+        ``_iter_sse_lines`` 400 branch.
+        """
+        if "context length" not in error_body.lower():
+            return False
+        new_max = self._calculate_safe_max_tokens(error_body, body)
+        if new_max is None:
+            return False
+        body["max_tokens"] = new_max
+        self._context_safe_max_tokens = new_max
+        return True

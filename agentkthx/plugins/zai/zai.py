@@ -443,12 +443,11 @@ class ZaiBackend(OpenAICompatibleBackend):
         """
         Get model-specific defaults from catalog.
 
-        R06.57: Applies the ``num_ctx / 32`` cap to ``max_tokens`` so that
-        long agentic runs don't blow the context window as tool results
-        accumulate in memory. Mirrors OpenRouterBackend (R06.55) and
-        GeminiBackend (R06.56). Also honors a persisted
-        ``_context_safe_max_tokens`` if a previous context-length 400
-        was recovered — see ``_iter_sse_lines``.
+        ARCH-03 (R06.57): Cap + persisted-safe-value logic now inherited
+        from ``OpenAICompatibleBackend._apply_max_tokens_cap``. ZAI's
+        error format matches the base class defaults (``"maximum context
+        length is N tokens"`` + ``"N of text input"`` + ``"N of tool
+        input"``), so no regex override is needed.
 
         Returns:
             dict: temperature, max_tokens, and other model defaults
@@ -458,38 +457,17 @@ class ZaiBackend(OpenAICompatibleBackend):
 
         max_tokens = meta.get("default_max_tokens", 8192)
         context_length = meta.get("context_length", 128000)
+        temperature = meta.get("default_temperature", 0.7)
 
-        # ROB-06 parity: persisted safe max_tokens wins (set by
-        # _iter_sse_lines after a context-length 400).
-        if getattr(self, "_context_safe_max_tokens", None) is not None:
-            safe = self._context_safe_max_tokens
-            if os.environ.get("AGENTKTHX_DEBUG"):
-                print(f"  [ZAI Debug] Using persisted safe max_tokens: {safe}")
-            return {
-                "temperature": meta.get("default_temperature", 0.7),
-                "max_tokens": safe,
-                "context_length": context_length,
-            }
-
-        # Cap max_tokens so input + output fits the context window. ZAI's
-        # catalog reports default_max_tokens up to 128K (close to the full
-        # 128K context_length for GLM-4.5/4.6), leaving no room for input
-        # on long agentic runs. num_ctx/32 (4K on a 128K model) gives 97%
-        # of context to input. Mirrors the empirical R06.55 OpenRouter
-        # finding (nex-agi/nex-n2.5-mini:free, 256K context, codebase-audit
-        # skill with 30+ tool calls). The reactive _iter_sse_lines
-        # context-length 400 retry still fires if this proves too large.
-        capped_max = min(max_tokens, context_length // 32)
-        if capped_max < max_tokens:
-            if os.environ.get("AGENTKTHX_DEBUG"):
+        if os.environ.get("AGENTKTHX_DEBUG"):
+            capped = min(max_tokens, context_length // 32)
+            if capped < max_tokens:
                 print(f"  [ZAI Debug] Capped max_tokens {max_tokens} -> "
-                      f"{capped_max} (context={context_length}, divisor=32)")
+                      f"{capped} (context={context_length}, divisor=32)")
 
-        return {
-            "temperature": meta.get("default_temperature", 0.7),
-            "max_tokens": capped_max,
-            "context_length": context_length,
-        }
+        return self._apply_max_tokens_cap(
+            max_tokens, context_length, temperature=temperature
+        )
 
     # ─────────────────────────────────────────────────────────────────────
     # Generation — always OpenAI Chat-Completions
@@ -711,20 +689,16 @@ class ZaiBackend(OpenAICompatibleBackend):
                 error_body = e.read().decode("utf-8") if e.fp else ""
                 error_msg = error_body.lower() if error_body else ""
 
-                # R06.57: Context-length 400 — parse actual token counts,
-                # calculate safe max_tokens, persist for future calls,
-                # and retry once. Mirrors OpenRouterBackend._iter_sse_lines.
-                if (e.code == 400 and attempt == 0
-                        and "context length" in error_msg):
-                    new_max = self._calculate_safe_max_tokens(error_body, body)
-                    if new_max is not None:
-                        old_max = body.get("max_tokens", 4096)
+                # ARCH-03 (R06.57): Context-length 400 — delegate to the shared
+                # _handle_context_length_400 helper inherited from
+                # OpenAICompatibleBackend. ZAI's error format matches the base
+                # class defaults, so no regex override is needed.
+                if e.code == 400 and attempt == 0:
+                    old_max = body.get("max_tokens", 4096)
+                    if self._handle_context_length_400(error_body, body):
+                        new_max = body["max_tokens"]
                         print(f"  [ZAI-Stream] Context length exceeded — "
                               f"reducing max_tokens {old_max} -> {new_max} and retrying")
-                        body["max_tokens"] = new_max
-                        # Persist so future _build_openai_body() calls use
-                        # the safe value instead of the model default.
-                        self._context_safe_max_tokens = new_max
                         continue
 
                 # Insufficient credits -- auto-fallback to free model
@@ -775,60 +749,9 @@ class ZaiBackend(OpenAICompatibleBackend):
                     pass
             return  # success — don't retry
 
-    def _calculate_safe_max_tokens(self, error_body: str, body: dict) -> int | None:
-        """Parse token counts from a context-length 400 and compute safe max.
-
-        ZAI's error message looks like:
-            "This model's maximum context length is 131072 tokens.
-             However, you requested 140000 tokens (120000 of text input,
-             20000 in the output)."
-
-        Mirrors OpenRouterBackend._calculate_safe_max_tokens with a ZAI-flavored
-        regex (``maximum context length is``). Falls back to a 1/3 reduction
-        if the message format doesn't match.
-        """
-        import re
-        text = error_body.lower()
-
-        # Extract max context length: "maximum context length is 131072 tokens"
-        max_match = re.search(r"maximum context length is (\d+) tokens", text)
-        # Extract input tokens: "120000 of text input"
-        input_match = re.search(r"(\d+) of text input", text)
-        # Also try "tool input" count
-        tool_match = re.search(r"(\d+) of tool input", text)
-        # Extract output tokens requested: "20000 in the output"
-        output_match = re.search(r"(\d+) in the output", text)
-
-        if not max_match or not input_match:
-            # Can't parse — fall back to 1/3 reduction
-            old_max = body.get("max_tokens", 4096)
-            new_max = max(old_max // 3, 4096)
-            return new_max if new_max < old_max else None
-
-        max_context = int(max_match.group(1))
-        input_tokens = int(input_match.group(1))
-        if tool_match:
-            input_tokens += int(tool_match.group(1))
-
-        # Safety margin: 2K tokens for overhead (system prompt growth,
-        # tool definitions, response framing). Conservative but prevents
-        # re-triggering the 400 on the next step.
-        safety_margin = 2048
-
-        safe_max = max_context - input_tokens - safety_margin
-
-        # Floor at 1024 — if input is so large that even 1K output doesn't
-        # fit, the agent needs to summarize/prune history, not reduce
-        # output further.
-        if safe_max < 1024:
-            safe_max = 1024
-
-        # Don't increase beyond the original max_tokens
-        old_max = body.get("max_tokens", 4096)
-        if safe_max >= old_max:
-            return None  # already safe, something else is wrong
-
-        return safe_max
+    # ARCH-03 (R06.57): ``_calculate_safe_max_tokens`` was here — now
+    # inherited from ``OpenAICompatibleBackend``. ZAI's error format matches
+    # the base class default regex patterns, so no override needed.
 
     def generate_completions_stream(
         self,
@@ -995,20 +918,16 @@ class ZaiBackend(OpenAICompatibleBackend):
                 except urllib.error.HTTPError as e2:
                     error_body2 = e2.read().decode("utf-8") if e2.fp else ""
                     raise RuntimeError(f"ZAI HTTP error {e2.code}: {error_body2}")
-            # R06.57: Context-length 400 — parse actual token counts via
-            # _calculate_safe_max_tokens, persist for future agentic-loop
-            # steps, and retry once. Mirrors OpenRouterBackend.generate()
+            # ARCH-03 (R06.57): Context-length 400 — delegate to the shared
+            # _handle_context_length_400 helper inherited from
+            # OpenAICompatibleBackend. Mirrors OpenRouterBackend.generate()
             # at the same error site.
-            elif (e.code == 400
-                    and ("maximum context length" in error_msg
-                         or "context length" in error_msg)):
-                new_max = self._calculate_safe_max_tokens(error_body, body)
-                if new_max is not None:
-                    old_max = body.get("max_tokens", 4096)
+            elif e.code == 400:
+                old_max = body.get("max_tokens", 4096)
+                if self._handle_context_length_400(error_body, body):
+                    new_max = body["max_tokens"]
                     print(f"  [ZAI] Context length exceeded — "
                           f"reducing max_tokens {old_max} -> {new_max} and retrying")
-                    body["max_tokens"] = new_max
-                    self._context_safe_max_tokens = new_max
                     try:
                         req = urllib.request.Request(
                             url,

@@ -113,6 +113,137 @@ Calling `.close()` on a generator that's mid-iteration triggers its `finally` bl
 
 ---
 
+### 🔧 **ARCH-03 — Extracted triplicated 429 retry / `num_ctx/32` cap / `_calculate_safe_max_tokens` into `OpenAICompatibleBackend`**
+
+**Symptom:** The R06.55 (OpenRouter), R06.56 (Gemini), and R06.57 (ZAI parity) work each added the same context-length 400 recovery pattern: a `_calculate_safe_max_tokens` method (parses the error body, computes a safe max_tokens), a `_get_model_defaults` cap (proactively limits max_tokens to `context_length // 32`), and an `_iter_sse_lines` 400 branch (parse/persist/retry dance). Three near-identical copies across three backends — ~400 lines of duplicated code. The R06.56 audit flagged this as ARCH-03; R06.57's ZAI parity work made it worse (now triplicated).
+
+**Fix — three shared methods + three class attributes on `OpenAICompatibleBackend`:**
+
+1. **`_apply_max_tokens_cap(max_tokens, context_length, temperature) -> dict`** — encapsulates the `_get_model_defaults` cap logic. Two layers:
+   - If `self._context_safe_max_tokens` is set (by `_handle_context_length_400` after a previous 400), use it directly.
+   - Else: `min(max_tokens, context_length // self._MAX_TOKENS_CAP_DIVISOR)`.
+
+2. **`_calculate_safe_max_tokens(error_body, body) -> int | None`** — uses the per-backend regex patterns to extract token counts, computes `safe_max = max_context - input_tokens - tool_tokens - safety_margin`, floors at `_CONTEXT_SAFE_FLOOR` (1024), returns `None` if `safe_max >= old_max` (already safe). Falls back to 1/3 reduction if the regex can't parse.
+
+3. **`_handle_context_length_400(error_body, body) -> bool`** — orchestrates the parse/persist/mutate dance. Returns `True` if the caller should retry with the updated `body`, `False` if the error isn't a context-length 400 or no safe value could be computed. Side effects: sets `self._context_safe_max_tokens` (persists across agentic-loop steps), mutates `body["max_tokens"]` for the retry.
+
+**Three class attributes for per-backend customization:**
+
+```python
+_CONTEXT_LENGTH_MAX_PATTERN: str = r"maximum context length is (\d+) tokens"  # OpenRouter/ZAI default
+_CONTEXT_LENGTH_INPUT_PATTERN: str = r"(\d+) of text input"                    # OpenRouter/ZAI default
+_CONTEXT_LENGTH_TOOL_PATTERN: str | None = r"(\d+) of tool input"             # OpenRouter/ZAI default; None on Gemini
+_MAX_TOKENS_CAP_DIVISOR: int = 32          # empirical — see _apply_max_tokens_cap docstring
+_CONTEXT_SAFETY_MARGIN: int = 2048         # tokens subtracted from computed safe_max
+_CONTEXT_SAFE_FLOOR: int = 1024            # floor for safe_max
+```
+
+**GeminiBackend overrides** the three regex patterns because Gemini's error format differs (`"maximum context length of N"` instead of `"is N tokens"`, `"N in the input"` instead of `"N of text input"`, no separate tool input count):
+
+```python
+_CONTEXT_LENGTH_MAX_PATTERN = r"maximum context length of (\d+)"
+_CONTEXT_LENGTH_INPUT_PATTERN = r"(\d+) in the input"
+_CONTEXT_LENGTH_TOOL_PATTERN = None  # Gemini doesn't separate tool input
+```
+
+OpenRouterBackend and ZaiBackend inherit the defaults — their error formats match.
+
+**Refactored 3 backends:**
+
+| Backend | `_get_model_defaults` | `_iter_sse_lines` 400 branch | `_calculate_safe_max_tokens` |
+|---------|----------------------|-------------------------------|------------------------------|
+| OpenRouterBackend | calls `_apply_max_tokens_cap` | calls `_handle_context_length_400` | **removed** (inherited) |
+| GeminiBackend | calls `_apply_max_tokens_cap` | calls `_handle_context_length_400` | **removed** (inherited) |
+| ZaiBackend | calls `_apply_max_tokens_cap` | calls `_handle_context_length_400` (streaming + non-streaming) | **removed** (inherited) |
+
+**Line count impact (verified):**
+
+| File | Before ARCH-03 | After ARCH-03 | Delta |
+|------|----------------|---------------|-------|
+| `backends/openai_compat.py` | 805 | 973 | +168 (shared helpers + class attrs + docstrings) |
+| `plugins/openrouter/openrouter.py` | 1257 | 1158 | -99 |
+| `plugins/gemini/gemini.py` | 1877 | 1845 | -32 |
+| `plugins/zai/zai.py` | 1267 | 1185 | -82 |
+| **Net** | | | **-45 lines** |
+
+Concrete backends shed **213 lines of duplication**; the base class gained **168 lines of shared implementation**. `_calculate_safe_max_tokens` now exists in exactly one place (`openai_compat.py`) — verified by `grep -c "def _calculate_safe_max_tokens"` returning `1` on the base class and `0` on all three concrete backends.
+
+**Regression tests:** +23 new tests in `tests/test_context_length_recovery.py`:
+
+- `TestApplyMaxTokensCap` (5 tests) — cap applies when max_tokens > context/32, no cap when already smaller, persisted safe value wins (even when larger than cap), custom divisor via class attribute
+- `TestCalculateSafeMaxTokensDefaultPatterns` (6 tests) — parses OpenRouter format, parses ZAI format, returns None when safe_max >= original, floors at 1024 when input exceeds context, falls back to 1/3 reduction when regex fails, returns None on 1/3 reduction when already small
+- `TestCalculateSafeMaxTokensGeminiPatterns` (4 tests) — parses Gemini format, Gemini patterns do NOT match OpenRouter format (proves override is applied), Gemini tool pattern is None, default tool pattern is set
+- `TestHandleContextLength400` (4 tests) — returns True + mutates body on context-length 400, returns False on non-context-length 400, returns False when safe_max equals original, case-insensitive "context length" match
+- `TestFifthCloudBackendInheritance` (4 tests) — a fake 5th cloud backend (subclass of OpenAICompatibleBackend with no override) inherits default patterns, can parse OpenRouter errors, gets context-length 400 recovery, gets proactive cap. **Proves a 5th cloud backend gets the full pattern for free** — no copy-paste needed.
+
+**Impact:** Adding a 5th cloud backend (DeepSeek, Together AI, Mistral, etc.) drops from copying ~400 lines of 429 retry / SSE recovery / cap boilerplate to subclassing `OpenAICompatibleBackend` and optionally overriding 3 regex patterns if the error format differs. Eliminates the maintenance burden of keeping three copies in sync — a fix to the retry logic (e.g. honoring a new `Retry-After` variant) now lands in one place. Pairs naturally with MAINT-05 (also closed in R06.57) — both are about backend abstraction hygiene.
+
+---
+
+### 🔧 **MAINT-05 — Generalized backend cloud/local detection via ``is_cloud`` class attribute**
+
+**Symptom:** R06.56 BUG-01 (`agentkthx models --backend gemini` crashed with `ValueError: Gemini backend only supports OpenAI Chat-Completions or JEV (System-One) API modes`) was fixed by patching the hardcoded allowlist at `cli.py:2326` from `("openrouter")` → `("openrouter", "gemini")`. R06.56 BUG-02 (`agentkthx models --backend gemini` showed empty table) was fixed by `replace_all` adding `BackendType.GEMINI` to all 6 cloud-provider allowlist sites. Both fixes preserved the hardcoded architecture rather than generalizing it — a 5th cloud backend (e.g. DeepSeek, Together AI, Mistral La Plateforme — all OpenAI-compat) would hit the same crash class and require the same 8-site edit.
+
+The R06.56 audit (MAINT-05) flagged the 8 hardcoded sites:
+
+| Line | Old code | Purpose |
+|------|----------|---------|
+| 514 | `backend.backend_type in [BackendType.OPENROUTER, BackendType.ZAI, BackendType.GEMINI]` | `cmd_run` cloud-provider default-streaming |
+| 587 | same | `cmd_chat` cloud-provider default-streaming |
+| 645 | same | `_get_catalog_defaults` catalog-based `num_ctx`/`num_predict` |
+| 787 | same | `cmd_run` second cloud check |
+| 1953 | same | `cmd_chat` spinner-suppress cloud check |
+| 1972 | same | `cmd_chat` cloud default stream |
+| 2326 | `if backend_name in ("openrouter", "gemini"):` | `cmd_models` api_mode allowlist |
+| 2380 | `is_cloud_provider = backend.backend_type in [OPENROUTER, ZAI, GEMINI]` | `cmd_models` column layout |
+
+**Fix — three coordinated changes:**
+
+1. **New ``is_cloud: bool`` class attribute on ``BaseBackend`` (default ``False``)** — at `agentkthx/backends/base.py:56`. Defaults to False so any future `BaseBackend` subclass that doesn't go through `OpenAICompatibleBackend` is treated as local — safer than defaulting to True (would silently enable cloud behaviors for unknown backends).
+
+2. **``OpenAICompatibleBackend`` overrides ``is_cloud = True``** — at `agentkthx/backends/openai_compat.py:93`. The R06.55 ARCH-01 extraction was for cloud backends (ZAI, OpenRouter, then Gemini in R06.56). The default is True because that's the common case for new OpenAI-compat backends.
+
+3. **``OllamaBackend`` overrides ``is_cloud = False``** — at `agentkthx/backends/ollama.py:44`. Ollama is the exception — a local server that extends `OpenAICompatibleBackend` (since R06.55 ARCH-01) for shared JEV/body/SSE logic, but is not actually cloud-hosted. `LlamaServerBackend` and `BitNetBackend` inherit False through `OllamaBackend`.
+
+**Class hierarchy resolution (verified at runtime):**
+
+```
+BaseBackend (is_cloud=False)
+└── OpenAICompatibleBackend (is_cloud=True)
+    ├── OllamaBackend (is_cloud=False, override)        ← local server
+    │   ├── LlamaServerBackend (is_cloud=False, inherit) ← local llama.cpp
+    │   └── BitNetBackend (is_cloud=False, inherit)      ← local 1.58-bit
+    ├── ZaiBackend (is_cloud=True, inherit)              ← cloud
+    ├── OpenRouterBackend (is_cloud=True, inherit)       ← cloud
+    └── GeminiBackend (is_cloud=True, inherit)          ← cloud
+```
+
+**8 cli.py sites replaced — each now uses ``getattr(backend, 'is_cloud', False)``:**
+
+| Line | New code | Old hardcoded list |
+|------|----------|---------------------|
+| 523 | `if getattr(backend, 'is_cloud', False):` | `[BackendType.OPENROUTER, BackendType.ZAI, BackendType.GEMINI]` |
+| 595 | `default_stream = getattr(backend, 'is_cloud', False)` | same |
+| 653 | `if not getattr(backend, 'is_cloud', False):` | same |
+| 794 | `is_cloud_provider = getattr(agent.backend, 'is_cloud', False)` | same |
+| 1958 | `_is_cloud = getattr(agent.backend, 'is_cloud', False)` | same |
+| 1975 | `is_cloud_provider = getattr(agent.backend, 'is_cloud', False)` | same |
+| 2336 | `if getattr(_probe_backend, 'is_cloud', False):` | `("openrouter", "gemini")` |
+| 2391 | `is_cloud_provider = getattr(backend, 'is_cloud', False)` | `[OPENROUTER, ZAI, GEMINI]` |
+
+**Why ``getattr(backend, 'is_cloud', False)`` instead of ``backend.is_cloud``?** Defensive fallback for backends that don't have the attribute — e.g. an old plugin written before R06.57, or a `BaseBackend` subclass that doesn't go through `OpenAICompatibleBackend` and forgets to set the attribute. The default `False` is the safe local treatment (no streaming-by-default, OPENRE api_mode, etc.).
+
+**Regression tests:** +13 new tests in `tests/test_is_cloud_attribute.py`:
+
+- `TestIsCloudAttribute` (8 tests) — verifies the class hierarchy resolves `is_cloud` correctly for all 7 built-in backends (BaseBackend, OpenAICompatibleBackend, OllamaBackend, LlamaServerBackend, BitNetBackend, ZaiBackend, OpenRouterBackend, GeminiBackend)
+- `TestFifthCloudBackend` (2 tests) — creates a fake 5th cloud backend by subclassing `OpenAICompatibleBackend` with no override, asserts it inherits `is_cloud = True` automatically. Proves the R06.56 BUG-01/BUG-02 bug class cannot recur — a 5th cloud backend is now a 1-line change (subclass `OpenAICompatibleBackend`), not an 8-site edit across `cli.py`.
+- `TestFifthLocalBackend` (1 test) — creates a fake 5th local backend by subclassing `BaseBackend` directly, asserts it gets `is_cloud = False` by default.
+- `TestCliDefensiveFallback` (2 tests) — asserts `getattr(backend, 'is_cloud', False)` returns False for backends missing the attribute, True when present.
+
+**Impact:** Adding a 5th cloud backend (DeepSeek, Together AI, Mistral, etc.) drops from an 8-site edit + 6 BackendType additions to a 1-line change (subclass `OpenAICompatibleBackend`). Eliminates the recurring "new backend crashes `agentkthx models`" bug class. Pairs naturally with ARCH-03 (extracting the now-triplicated 429 retry / num_ctx/32 cap pattern into `OpenAICompatibleBackend`).
+
+---
+
 ### 🐛 **FIX-02 — Update-check cache TTL reduced from 24h to 1h + `agentkthx version --refresh` flag**
 
 **Symptom (user-reported):** On a pip-installed copy, `agentkthx version` reported "Latest on PyPI: 0.6.54 (up to date)" — even though 0.6.55 and 0.6.56 had been released to PyPI the previous day. The cache file (`~/.agentkthx/update_check.json`) had been populated when 0.6.54 was the latest, and the 24h success TTL meant it would keep serving that stale answer for up to a full day before refetching.
@@ -208,15 +339,20 @@ Or as a notice after `agentkthx run` / `agentkthx chat`:
 
 ### 📦 **Files changed in R06.57**
 
+- `agentkthx/backends/base.py` — MAINT-05 (new `is_cloud: bool = False` class attribute on `BaseBackend` + docstring)
+- `agentkthx/backends/openai_compat.py` — MAINT-05 (override `is_cloud: bool = True` + docstring) + ARCH-03 (new `_apply_max_tokens_cap`, `_calculate_safe_max_tokens`, `_handle_context_length_400` shared methods + 6 class attributes for per-backend regex/divisor/margin/floor customization, +168 lines)
+- `agentkthx/backends/ollama.py` — MAINT-05 (override `is_cloud: bool = False` + docstring)
 - `agentkthx/agent.py` — ROB-05 fix (`_generate_stream` KeyboardInterrupt handler, +12 lines)
-- `agentkthx/plugins/zai/zai.py` — ROB-06 parity (`_get_model_defaults` cap, `_iter_sse_lines` 400 recovery, `_generate_with_auth` 400 recovery, `_calculate_safe_max_tokens`, `__init__` init, +200 lines net)
-- `agentkthx/plugins/openrouter/openrouter.py` — ROB-06 fix (`_iter_sse_lines` and `_stream_request` try/finally response.close(), +20 lines net)
-- `agentkthx/plugins/gemini/gemini.py` — ROB-06 fix (`_iter_sse_lines` and `_stream_request` try/finally response.close(), +20 lines net)
+- `agentkthx/plugins/zai/zai.py` — ROB-06 parity (`_get_model_defaults` cap, `_iter_sse_lines` 400 recovery, `_generate_with_auth` 400 recovery, `__init__` init) + ARCH-03 (refactored to use shared `_apply_max_tokens_cap` + `_handle_context_length_400`, removed `_calculate_safe_max_tokens`, -82 lines net)
+- `agentkthx/plugins/openrouter/openrouter.py` — ROB-06 fix (`_iter_sse_lines` and `_stream_request` try/finally response.close()) + ARCH-03 (refactored to use shared `_apply_max_tokens_cap` + `_handle_context_length_400`, removed `_calculate_safe_max_tokens`, -99 lines net)
+- `agentkthx/plugins/gemini/gemini.py` — ROB-06 fix (`_iter_sse_lines` and `_stream_request` try/finally response.close()) + ARCH-03 (overrode 3 regex class attributes, refactored to use shared `_apply_max_tokens_cap` + `_handle_context_length_400`, removed `_calculate_safe_max_tokens`, -32 lines net)
 - `agentkthx/update_check.py` — FIX-01 (new `_fetch_github_latest_version`, `github_latest_version` field in result, `format_notice` pip-installed dev track, +90 lines net) + FIX-02 (`SUCCESS_TTL` 24h→1h, `FAILURE_TTL` 6h→15min, +20 lines of revised comments)
-- `agentkthx/cli.py` — `cmd_version` updated to show "GitHub main: X.Y.Z" line for pip installs (+12 lines) + new `--refresh` flag on the `version` subparser wired through to `check_for_update(force=...)` (+9 lines) + "daily-cached"→"hourly-cached" comment updates
-- `README.md` — DOC-01 fix (new `### Gemini Configuration` subsection + Gemini block in master env-var table + AGENTKTHX_BACKEND mention, +50 lines net)
+- `agentkthx/cli.py` — MAINT-05 (8 hardcoded allowlists replaced with `getattr(backend, 'is_cloud', False)`, +~30 lines of revised comments) + `cmd_version` updated to show "GitHub main: X.Y.Z" line for pip installs (+12 lines) + new `--refresh` flag on the `version` subparser wired through to `check_for_update(force=...)` (+9 lines) + "daily-cached"→"hourly-cached" comment updates
+- `README.md` — DOC-01 fix (new `### Gemini Configuration` subsection + Gemini block in master env-var table + AGENTKTHX_BACKEND mention, +50 lines net) + "daily cache"→"hourly cache" + `agentkthx version --refresh` mention
 - `tests/test_update_check.py` — +20 new tests (74 total, was 54): +11 for FIX-01 (parsing variants, format_notice pip-installed dev track) + 9 for FIX-02 (TestCacheTTL asserting 1h/15min TTLs, TestForceRefresh asserting `force=True` bypasses cache). 6 existing tests updated for new URL counts.
-- `audit/brief.md`, `audit/audit.md` — refreshed to mark ROB-05, ROB-06, DOC-01 as closed; note FIX-01
+- `tests/test_is_cloud_attribute.py` (NEW, MAINT-05) — 13 tests verifying the class hierarchy resolves `is_cloud` correctly + fake 5th cloud/local backend tests + defensive getattr fallback tests
+- `tests/test_context_length_recovery.py` (NEW, ARCH-03) — 23 tests verifying the shared `_apply_max_tokens_cap` / `_calculate_safe_max_tokens` / `_handle_context_length_400` helpers work correctly with default patterns (OpenRouter/ZAI) + Gemini's overridden patterns + a fake 5th cloud backend inherits everything automatically
+- `audit/brief.md`, `audit/audit.md` — refreshed to mark ROB-05, ROB-06, MAINT-05, ARCH-03, DOC-01 as closed; note FIX-01, FIX-02
 - `pyproject.toml` — version bump 0.6.56 → 0.6.57
 - `agentkthx/__init__.py` — version bump R06.56 → R06.57
 - `docs/CHANGELOG.md` — this entry
@@ -226,11 +362,13 @@ Or as a notice after `agentkthx run` / `agentkthx chat`:
 ### 🧪 **TEST-01 — Test suite (R06.57 final)**
 
 - **R06.56 baseline:** 766 passed, 9 skipped, 0 failed
-- **R06.57 final:** **786 passed**, 9 skipped, 0 failed — no regressions
-- **+20 new tests total:**
+- **R06.57 final:** **822 passed**, 9 skipped, 0 failed — no regressions
+- **+56 new tests total:**
   - +11 in new `TestFetchGithubLatestVersion` + `TestFormatNotice` classes (FIX-01) — parsing variants, response close, cache reuse, negative caching, pip-installed dev track fires / dedup / both-tracks-in-one-block variants
   - +7 in new `TestCacheTTL` class (FIX-02) — asserts `SUCCESS_TTL == 3600`, `FAILURE_TTL == 900`, fresh/stale boundaries at 30min / 1h+1s / 10min / 15min+1s
   - +2 in new `TestForceRefresh` class (FIX-02) — asserts `force=True` refetches all sources despite fresh cache (pip install path + git checkout path)
+  - +13 in new `tests/test_is_cloud_attribute.py` (MAINT-05) — verifies `is_cloud` class hierarchy resolves correctly for all 7 built-in backends + fake 5th cloud/local backend tests + defensive `getattr` fallback tests
+  - +23 in new `tests/test_context_length_recovery.py` (ARCH-03) — verifies the shared `_apply_max_tokens_cap` / `_calculate_safe_max_tokens` / `_handle_context_length_400` helpers work correctly with default patterns (OpenRouter/ZAI) + Gemini's overridden patterns + a fake 5th cloud backend inherits everything automatically
   - 6 existing `TestCheckForUpdate` tests updated for new URL-count behavior (pip installs now hit 2 URLs, git checkouts hit 3)
 - No regressions — all 766 pre-existing tests pass unchanged
 

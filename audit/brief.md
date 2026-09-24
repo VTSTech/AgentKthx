@@ -29,7 +29,7 @@ agentkthx/                    → Main package
 ├── agent_mode.py             → AgentMode/AgentState/TaskPlan (R05.x agentic plan mode)
 ├── orchestrator.py           → Multi-agent orchestrator (AgentCard, fallbacks)
 ├── cli.py (4079 lines)       → CLI — see MAINT-01 (monolith, +278 lines in R06.56).
-│                              MAINT-05 (NEW): 8 hardcoded backend allowlists; BUG-01/02 were patches.
+│                              MAINT-05 CLOSED R06.57: now uses `is_cloud` class attribute.
 ├── colors.py                 → ANSI color helpers + glyph mode (AGENTKTHX_GLYPHS env var)
 ├── config.py                 → Env-var-driven config (AGENTKTHX_* + GEMINI_* env vars)
 ├── shared_args.py            → Shared argparse definitions + SharedConfig dataclass
@@ -112,7 +112,7 @@ agentkthx/                    → Main package
 
 | File | Purpose | Why It Matters |
 |------|---------|----------------|
-| `agentkthx/cli.py` (4079 lines) | CLI — all subcommands, slash commands, banner, footer | Flagged MAINT-01 (monolithic, +278 lines in R06.56). MAINT-05: 8 hardcoded backend allowlists — adding 5th cloud backend requires 8 edits. Any CLI change lands here. |
+| `agentkthx/cli.py` (4079 lines) | CLI — all subcommands, slash commands, banner, footer | Flagged MAINT-01 (monolithic, +278 lines in R06.56). MAINT-05 CLOSED R06.57: 8 hardcoded backend allowlists replaced with `getattr(backend, 'is_cloud', False)`. Any CLI change lands here. |
 | `agentkthx/agent.py` (3119 lines) | Agent class — agentic loop, tool calling, streaming | Flagged MAINT-04. `_run_core()` (line 649, ~727 lines) and `_run_core_streaming()` (line 2399, ~602 lines) are near-duplicates. Debug-check divergence WORSENED: 36 vs 7 (was 31 vs 7), gap = 29 (was 24). UX-01 changes (reasoning panel state at lines 2139-2143, helpers at 2145/2154) exist ONLY in streaming path. |
 | `agentkthx/backends/openai_compat.py` (789 lines) | Shared OpenAI-compat base class | JEV dispatch, `_build_openai_body()`, `_parse_openai_response()`, `generate_completions_stream()`. PERF-03: `think` param accepted (line 620) but never forwarded to `_build_openai_body()` (line 669-683). |
 | `agentkthx/backends/ollama.py` (1344 lines) | OllamaBackend — native + OpenAI mode | Parent of LlamaServerBackend. Has its own `generate_completions_stream` (logprobs support). |
@@ -219,7 +219,9 @@ update_check.py → checks PyPI + GitHub for updates
 
 - **`agentkthx/agent.py` is 3119 lines** (MAINT-04, worsened +243 in R06.56) — `_run_core()` (~727 lines) and `_run_core_streaming()` (~602 lines) are near-duplicates. The streaming version is missing **29** `if self.debug` checks (was 24). UX-01 reasoning panel state (lines 2139-2143) and helpers (lines 2145, 2154) exist ONLY in streaming path. Any future fix to the agentic loop must be applied in TWO places.
 
-- **8 hardcoded backend allowlists in `cli.py`** (MAINT-05, NEW) — lines 514, 587, 645, 787, 1953, 1972, 2326, 2380. The R06.56 BUG-01 fix changed `("openrouter")` → `("openrouter", "gemini")` at line 2326 — a patch, not a generalization. A 5th cloud backend would hit the same crash. The 6 BackendType.GEMINI additions (BUG-02 `replace_all`) are also patches.
+- **ARCH-03 CLOSED R06.57**: Triplicated 429 retry / `num_ctx/32` cap / `_calculate_safe_max_tokens` pattern lifted to `OpenAICompatibleBackend` as 3 shared methods (`_apply_max_tokens_cap`, `_calculate_safe_max_tokens`, `_handle_context_length_400`) + 6 class attributes (`_CONTEXT_LENGTH_MAX_PATTERN`, `_CONTEXT_LENGTH_INPUT_PATTERN`, `_CONTEXT_LENGTH_TOOL_PATTERN`, `_MAX_TOKENS_CAP_DIVISOR`, `_CONTEXT_SAFETY_MARGIN`, `_CONTEXT_SAFE_FLOOR`). Concrete backends (OpenRouter, Gemini, ZAI) shed 213 lines of duplication; Gemini overrides 3 regex patterns for its different error format. `_calculate_safe_max_tokens` now exists in exactly 1 place. +23 regression tests in `tests/test_context_length_recovery.py`.
+
+- ~~**8 hardcoded backend allowlists in `cli.py`** (MAINT-05, NEW)~~ — ✓ CLOSED R06.57. All 8 sites at lines 514, 587, 645, 787, 1953, 1972, 2326, 2380 now use `getattr(backend, 'is_cloud', False)`. New `is_cloud` class attribute on `BaseBackend` (default False), `OpenAICompatibleBackend` (override True), `OllamaBackend` (override back to False). A 5th cloud backend is now a 1-line change (subclass `OpenAICompatibleBackend`) instead of an 8-site edit. +13 regression tests in `tests/test_is_cloud_attribute.py`.
 
 - ~~**OpenRouter & Gemini streaming leak HTTP connections** (ROB-06, NEW)~~ — ✓ CLOSED R06.57. All 4 sites now have `try: ... finally: response.close()` matching ZAI's pattern: `openrouter.py:_iter_sse_lines` (1146-1158), `openrouter.py:_stream_request` (801-818), `gemini.py:_iter_sse_lines` (1473-1486), `gemini.py:_stream_request` (1426-1444). Combined with ROB-05's `stream_gen.close()` on Ctrl+C, the streaming cleanup contract is now uniform across all 4 cloud backends.
 
@@ -271,7 +273,7 @@ update_check.py → checks PyPI + GitHub for updates
 
 - **`cli.py` split** (MAINT-01) — 4079-line monolith. No modules split yet. Grew +278 lines in R06.56.
 - **`agent.py` split** (MAINT-04) — 3119-line file with duplicated agentic loop. `_run_core` + `_run_core_streaming` should converge or split into `agent_loop.py`. Debug divergence now 29 (was 24).
-- **Backend allowlists hardcoded** (MAINT-05, NEW) — 8 sites in cli.py. Should use `is_cloud` class attribute or `isinstance(backend, OpenAICompatibleBackend)`.
+- ~~**Backend allowlists hardcoded** (MAINT-05, NEW)~~ — ✓ CLOSED R06.57. 8 sites in cli.py now use `getattr(backend, 'is_cloud', False)`. New `is_cloud` class attribute on `BaseBackend` (default False) / `OpenAICompatibleBackend` (True) / `OllamaBackend` (False).
 - **Streaming `_iter_sse_lines` connection leak** (ROB-06, NEW) — OpenRouter and Gemini lack try/finally. ZAI has the pattern.
 - **Streaming KeyboardInterrupt connection leak** (ROB-05) — HTTP response not closed on Ctrl+C mid-stream.
 - **Dead `think` parameter** (PERF-03) — `_generate_stream()` accepts but never forwards.
@@ -302,7 +304,7 @@ update_check.py → checks PyPI + GitHub for updates
 
 ```
 $ ZAI_API_KEY=test_dummy_key_12345 GEMINI_API_KEY=test_dummy_key_12345 python -m pytest tests/ -q
-786 passed, 9 skipped, 0 failed in 1.89s
+822 passed, 9 skipped, 0 failed in 1.86s
 ```
 
 Test files (total):
@@ -317,6 +319,8 @@ Test files (total):
 - `tests/test_thinking_args.py` (429 lines) — thinking argument parsing, per-backend forwarding
 - `tests/test_builtins.py` (421 lines) — calculator, shell, file I/O tools
 - `tests/test_update_check.py` (~660 lines, 74 tests, +20 in R06.57) — update checking, version comparison, caching, FIX-01 pip-installed dev track via raw __init__.py, FIX-02 1h/15min TTL + `--refresh` flag
+- `tests/test_is_cloud_attribute.py` (NEW, MAINT-05) — 13 tests verifying `is_cloud` class hierarchy + 5th backend inheritance + defensive getattr fallback
+- `tests/test_context_length_recovery.py` (NEW, ARCH-03) — 23 tests verifying shared `_apply_max_tokens_cap` / `_calculate_safe_max_tokens` / `_handle_context_length_400` with default patterns (OpenRouter/ZAI) + Gemini's overridden patterns + 5th cloud backend inheritance
 - `tests/test_spec_compliance.py` (382 lines) — OpenAI spec compliance, streaming, logprobs
 - `tests/test_streaming.py` (359 lines) — _generate_stream, tool_call accumulation, AgentRun return
 - `tests/test_agent.py` (282 lines) — agent loop, tool dispatch, memory

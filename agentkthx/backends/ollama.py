@@ -31,7 +31,17 @@ class OllamaBackend(OpenAICompatibleBackend):
     logic is inherited from one place. Ollama-specific functionality
     (native ``/api/chat`` OPENRE mode, model management, logprobs)
     stays here.
+
+    R06.57 (MAINT-05): ``is_cloud = False`` overrides the
+    ``OpenAICompatibleBackend`` default. Ollama is a local server —
+    no rate limits, no billing, supports native OPENRE mode. The CLI
+    uses this to skip cloud-specific defaults (streaming-by-default,
+    catalog-based num_ctx/num_predict, cloud column layout in
+    cmd_models, OPENAI api_mode default in cmd_models).
     """
+
+    #: R06.57 (MAINT-05): Local server — overrides OpenAICompatibleBackend's True.
+    is_cloud: bool = False
 
     def __init__(
         self,

@@ -785,6 +785,17 @@ class GeminiBackend(OpenAICompatibleBackend):
     _429_BACKOFF_BASE = 5.0
     _429_BACKOFF_CAP = 90.0
 
+    # ARCH-03 (R06.57): Gemini's context-length 400 error uses a different
+    # message format than OpenRouter/ZAI. Override the shared regex patterns
+    # so the inherited ``_calculate_safe_max_tokens`` parses correctly.
+    # Gemini error: "Request exceeds the maximum context length of 1048576
+    # tokens. You requested 1100000 tokens (1000000 in the input, 100000
+    # in the output)." — note "of" (not "is") and "in the input" (not
+    # "of text input"), and no separate "tool input" count.
+    _CONTEXT_LENGTH_MAX_PATTERN: str = r"maximum context length of (\d+)"
+    _CONTEXT_LENGTH_INPUT_PATTERN: str = r"(\d+) in the input"
+    _CONTEXT_LENGTH_TOOL_PATTERN: str | None = None  # Gemini doesn't separate tool input
+
     def __init__(
         self,
         base_url: str | None = None,
@@ -1058,7 +1069,13 @@ class GeminiBackend(OpenAICompatibleBackend):
         return 1_048_576  # 1M is the Gemini default for flash models
 
     def _get_model_defaults(self, model: str) -> dict:
-        """Return per-model temperature / max_tokens defaults."""
+        """Return per-model temperature / max_tokens defaults.
+
+        ARCH-03 (R06.57): Cap + persisted-safe-value logic now inherited
+        from ``OpenAICompatibleBackend._apply_max_tokens_cap``. This method
+        just resolves the per-model max_tokens/context_length from cache
+        or catalog and delegates the cap decision.
+        """
         # Cache hit
         if self._model_cache:
             for m in self._model_cache:
@@ -1066,48 +1083,23 @@ class GeminiBackend(OpenAICompatibleBackend):
                     details = m["details"]
                     max_tokens = details.get("max_completion_tokens", 65_536)
                     context_length = details.get("context_length", 1_048_576)
-
-                    # ROB-06 parity: persisted safe max_tokens wins.
-                    if self._context_safe_max_tokens is not None:
-                        return {
-                            "temperature": 1.0,
-                            "max_tokens": self._context_safe_max_tokens,
-                            "context_length": context_length,
-                        }
-
-                    # Cap to leave room for input growth (mirrors OpenRouter
-                    # R06.55 empirical finding on long agentic runs).
-                    capped = min(max_tokens, context_length // 32)
-                    return {
-                        "temperature": 1.0,  # Gemini default
-                        "max_tokens": capped,
-                        "context_length": context_length,
-                    }
+                    return self._apply_max_tokens_cap(
+                        max_tokens, context_length, temperature=1.0
+                    )
 
         # Catalog fallback
         if model in GEMINI_MODELS:
             info = GEMINI_MODELS[model]
             max_tokens = info.get("max_completion_tokens", 65_536)
             context_length = info.get("context_length", 1_048_576)
-            # ROB-06 parity: persisted safe max_tokens wins.
-            if self._context_safe_max_tokens is not None:
-                return {
-                    "temperature": 1.0,
-                    "max_tokens": self._context_safe_max_tokens,
-                    "context_length": context_length,
-                }
-            return {
-                "temperature": 1.0,
-                "max_tokens": min(max_tokens, context_length // 32),
-                "context_length": context_length,
-            }
+            return self._apply_max_tokens_cap(
+                max_tokens, context_length, temperature=1.0
+            )
 
         # Final fallback — sensible defaults for unknown Gemini models.
-        return {
-            "temperature": 1.0,
-            "max_tokens": 65_536,
-            "context_length": 1_048_576,
-        }
+        # Note: cap is still applied (1M context / 32 = 32K, vs 65K default
+        # → 32K wins). Persisted safe value also honored.
+        return self._apply_max_tokens_cap(65_536, 1_048_576, temperature=1.0)
 
     def test_tool_support(
         self,
@@ -1450,9 +1442,11 @@ class GeminiBackend(OpenAICompatibleBackend):
     def _iter_sse_lines(self, url: str, body: dict, headers: dict):
         """Make a streaming POST to Gemini's /chat/completions.
 
-        Mirrors OpenRouterBackend's _iter_sse_lines with context-length 400
-        recovery (ROB-06) — parses actual token counts from the error
-        message, calculates a safe max_tokens, persists it, and retries once.
+        ARCH-03 (R06.57): Context-length 400 recovery now delegates to the
+        shared ``_handle_context_length_400`` helper inherited from
+        ``OpenAICompatibleBackend``. The per-backend regex patterns
+        (``_CONTEXT_LENGTH_MAX_PATTERN`` etc. overridden above) make the
+        shared helper parse Gemini's error format correctly.
         """
         for attempt in range(2):
             req = urllib.request.Request(
@@ -1465,16 +1459,13 @@ class GeminiBackend(OpenAICompatibleBackend):
                 response = urllib.request.urlopen(req, timeout=self.config.timeout)
             except urllib.error.HTTPError as e:
                 error_body = e.read().decode("utf-8") if e.fp else ""
-                # ROB-06 parity: context-length 400 → reduce max_tokens + retry
-                if (e.code == 400 and attempt == 0
-                        and "context length" in error_body.lower()):
-                    new_max = self._calculate_safe_max_tokens(error_body, body)
-                    if new_max is not None:
-                        old_max = body.get("max_tokens", 4096)
+                # ARCH-03 (R06.57): shared context-length 400 handler
+                if e.code == 400 and attempt == 0:
+                    old_max = body.get("max_tokens", 4096)
+                    if self._handle_context_length_400(error_body, body):
+                        new_max = body["max_tokens"]
                         print(f"  [Gemini-Stream] Context length exceeded — "
                               f"reducing max_tokens {old_max} → {new_max} and retrying")
-                        body["max_tokens"] = new_max
-                        self._context_safe_max_tokens = new_max
                         continue
                 raise RuntimeError(f"Gemini HTTP error {e.code}: {error_body}")
             except urllib.error.URLError as e:
@@ -1495,40 +1486,10 @@ class GeminiBackend(OpenAICompatibleBackend):
                     pass
             return  # success — don't retry
 
-    def _calculate_safe_max_tokens(self, error_body: str, body: dict) -> int | None:
-        """Parse token counts from a context-length 400 and compute safe max.
-
-        Gemini's error message looks like:
-            "Request exceeds the maximum context length of 1048576 tokens.
-             You requested 1100000 tokens (1000000 in the input, 100000 in
-             the output)."
-        """
-        import re
-        text = error_body.lower()
-        max_match = re.search(r"maximum context length of (\d+)", text)
-        input_match = re.search(r"(\d+) in the input", text)
-        output_match = re.search(r"(\d+) in the output", text)
-
-        if not max_match or not input_match:
-            old_max = body.get("max_tokens", 4096)
-            new_max = max(old_max // 3, 4096)
-            return new_max if new_max < old_max else None
-
-        max_context = int(max_match.group(1))
-        input_tokens = int(input_match.group(1))
-        if output_match:
-            requested_output = int(output_match.group(1))
-        else:
-            requested_output = body.get("max_tokens", 4096)
-
-        safety_margin = 2048
-        safe_max = max_context - input_tokens - safety_margin
-        if safe_max < 1024:
-            safe_max = 1024
-        old_max = body.get("max_tokens", 4096)
-        if safe_max >= old_max:
-            return None
-        return safe_max
+    # ARCH-03 (R06.57): ``_calculate_safe_max_tokens`` was here — now
+    # inherited from ``OpenAICompatibleBackend``. The per-backend regex
+    # patterns (``_CONTEXT_LENGTH_MAX_PATTERN`` etc. above) make the
+    # inherited method parse Gemini's error format correctly.
 
     # ─────────────────────────────────────────────────────────────────────
     # generate() — main entry point

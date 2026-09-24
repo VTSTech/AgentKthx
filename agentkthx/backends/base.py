@@ -35,7 +35,25 @@ class BaseBackend(ABC):
     - generate_stream(): Stream generated text
     - list_models(): List available models
     - test_tool_support(): Test model's tool support capability
+
+    R06.57 (MAINT-05): ``is_cloud`` class attribute distinguishes cloud-hosted
+    backends (ZAI, OpenRouter, Gemini — remote API, billed, rate-limited,
+    OpenAI-compat only) from local backends (Ollama, llama-server, BitNet —
+    local server, native /api/chat support, no rate limits). The CLI uses
+    this to decide default streaming, catalog-based defaults, column layout
+    in ``cmd_models``, and default api_mode — without hardcoding backend
+    names or BackendType values. Adding a 5th cloud backend is now a
+    1-line change (subclass OpenAICompatibleBackend) instead of an 8-site
+    edit across cli.py.
     """
+
+    #: R06.57 (MAINT-05): True for cloud-hosted backends. Override on
+    #: concrete local backends (OllamaBackend sets False). Defaults to
+    #: False here so any future BaseBackend subclass that doesn't go
+    #: through OpenAICompatibleBackend is treated as local — safer than
+    #: defaulting to True (would silently enable cloud behaviors for
+    #: unknown backends).
+    is_cloud: bool = False
 
     def __init__(
         self,

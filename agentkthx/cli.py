@@ -516,10 +516,11 @@ def _build_agent(args: argparse.Namespace, config) -> Agent:
 
     # Initialize backend with proper API mode
     backend = get_backend(backend_name, timeout=timeout, api_mode=api_mode)
-    
+
     # Default API mode: cloud providers use OpenAI, local providers use OpenResponses
-    from .core.types import BackendType
-    if hasattr(backend, 'backend_type') and backend.backend_type in [BackendType.OPENROUTER, BackendType.ZAI, BackendType.GEMINI]:
+    # R06.57 (MAINT-05): replaced hardcoded [OPENROUTER, ZAI, GEMINI] list with
+    # backend.is_cloud — a 5th cloud backend will automatically get this behavior.
+    if getattr(backend, 'is_cloud', False):
         api_mode = getattr(args, "api_mode", "openai")
         # Re-initialize backend with correct API mode for cloud providers
         backend = get_backend(backend_name, timeout=timeout, api_mode=api_mode)
@@ -589,11 +590,9 @@ def _build_agent(args: argparse.Namespace, config) -> Agent:
     )
     
     # Enable streaming by default for cloud providers
-    from .core.types import BackendType
-    default_stream = (
-        hasattr(backend, 'backend_type') and 
-        backend.backend_type in [BackendType.OPENROUTER, BackendType.ZAI, BackendType.GEMINI]
-    )
+    # R06.57 (MAINT-05): replaced hardcoded [OPENROUTER, ZAI, GEMINI] list
+    # with backend.is_cloud — a 5th cloud backend will automatically stream.
+    default_stream = getattr(backend, 'is_cloud', False)
     
     # Resolve --thinking CLI arg to (think, reasoning_effort)
     # off  → (False, None)   — disable thinking entirely (fastest, best for JEV)
@@ -643,14 +642,15 @@ def _build_agent(args: argparse.Namespace, config) -> Agent:
 def _get_catalog_defaults(backend, model: str) -> dict:
     """
     Get model defaults from backend catalog if available.
-    
+
     Returns:
         dict: num_ctx and num_predict defaults from catalog
     """
-    from .core.types import BackendType
-    
     # Only apply catalog defaults for cloud providers
-    if not hasattr(backend, 'backend_type') or backend.backend_type not in [BackendType.OPENROUTER, BackendType.ZAI, BackendType.GEMINI]:
+    # R06.57 (MAINT-05): replaced hardcoded [OPENROUTER, ZAI, GEMINI] list
+    # with backend.is_cloud — a 5th cloud backend will automatically get
+    # catalog-based defaults if it implements _get_model_defaults.
+    if not getattr(backend, 'is_cloud', False):
         return {}
     
     try:
@@ -789,11 +789,9 @@ def cmd_run(args: argparse.Namespace) -> int:
     try:
         # Enable streaming by default for cloud providers, but respect
         # explicit --stream / --no-stream from the user.
-        from .core.types import BackendType
-        is_cloud_provider = (
-            hasattr(agent.backend, 'backend_type') and 
-            agent.backend.backend_type in [BackendType.OPENROUTER, BackendType.ZAI, BackendType.GEMINI]
-        )
+        # R06.57 (MAINT-05): replaced hardcoded [OPENROUTER, ZAI, GEMINI] list
+        # with backend.is_cloud — a 5th cloud backend will automatically stream.
+        is_cloud_provider = getattr(agent.backend, 'is_cloud', False)
         explicit_stream = getattr(args, 'stream', None)
         if explicit_stream is True:
             stream = True
@@ -1955,11 +1953,9 @@ def cmd_chat(args: argparse.Namespace) -> int:
         spinner_t = None
         # Pre-compute stream flag so we know whether to suppress the spinner.
         # This must mirror the logic used below when calling agent.run().
-        from .core.types import BackendType
-        _is_cloud = (
-            hasattr(agent.backend, 'backend_type') and
-            agent.backend.backend_type in [BackendType.OPENROUTER, BackendType.ZAI, BackendType.GEMINI]
-        )
+        # R06.57 (MAINT-05): replaced hardcoded [OPENROUTER, ZAI, GEMINI] list
+        # with backend.is_cloud — a 5th cloud backend will automatically stream.
+        _is_cloud = getattr(agent.backend, 'is_cloud', False)
         _explicit = getattr(args, 'stream', None)
         _will_stream = (
             _explicit is True or
@@ -1974,11 +1970,9 @@ def cmd_chat(args: argparse.Namespace) -> int:
             #   --stream       → always stream (even for local backends)
             #   --no-stream    → never stream (even for cloud providers)
             #   (neither)      → stream for cloud providers, non-stream for local
-            from .core.types import BackendType
-            is_cloud_provider = (
-                hasattr(agent.backend, 'backend_type') and
-                agent.backend.backend_type in [BackendType.OPENROUTER, BackendType.ZAI, BackendType.GEMINI]
-            )
+            # R06.57 (MAINT-05): replaced hardcoded [OPENROUTER, ZAI, GEMINI] list
+            # with backend.is_cloud — a 5th cloud backend will automatically stream.
+            is_cloud_provider = getattr(agent.backend, 'is_cloud', False)
             explicit_stream = getattr(args, 'stream', None)
             if explicit_stream is True:
                 stream = True
@@ -2330,13 +2324,20 @@ def cmd_models(args: argparse.Namespace) -> int:
     modes_display = ["openre", "openai"]
 
     # Use appropriate API mode for the backend
+    # R06.57 (MAINT-05): replaced hardcoded ("openrouter", "gemini") allowlist
+    # with backend.is_cloud check — a 5th cloud backend will automatically
+    # default to OPENAI mode without needing to edit this list.
     from .core.types import ApiMode
-    if backend_name in ("openrouter", "gemini"):
-        # OpenRouter and Gemini only support OpenAI Chat-Completions
+    # Instantiate a temporary backend to check is_cloud. Pass api_mode=None
+    # to avoid the validation error (some backends raise ValueError on OPENRE).
+    # Backends with is_cloud=True get OPENAI; local backends get OPENRE
+    # (their native /api/chat mode).
+    _probe_backend = get_backend(backend_name, api_mode=ApiMode.OPENAI)
+    if getattr(_probe_backend, 'is_cloud', False):
         api_mode = ApiMode.OPENAI
     else:
         api_mode = ApiMode.OPENRE
-    
+
     backend = get_backend(backend_name, api_mode=api_mode)  # default for list_models etc.
 
     if not isinstance(backend, OllamaBackend):
@@ -2384,12 +2385,10 @@ def cmd_models(args: argparse.Namespace) -> int:
     FAMILY_W = 12
 
     # Detect backend type early — cloud providers need different column layout
-    from .core.types import BackendType
-    is_cloud_provider = backend.backend_type in [
-        BackendType.OPENROUTER,
-        BackendType.ZAI,
-        BackendType.GEMINI,
-    ]
+    # R06.57 (MAINT-05): replaced hardcoded [OPENROUTER, ZAI, GEMINI] list
+    # with backend.is_cloud — a 5th cloud backend will automatically get
+    # the cloud column layout (wider NAME_W, no Size/Family columns).
+    is_cloud_provider = getattr(backend, 'is_cloud', False)
 
     # Cloud providers have longer model names (e.g.
     # "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free" = 49 chars)
