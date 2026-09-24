@@ -272,6 +272,14 @@ def add_agent_args(
         help="Truncation behavior for context overflow (default: auto)",
     )
     parser.add_argument(
+        "--compaction",
+        default="auto",
+        help="Memory compaction threshold as %% of context window (default: auto=85%%). "
+             "When token usage exceeds this %% of num_ctx, older messages are compacted "
+             "(tool results truncated, content summarized) instead of dropped. "
+             "Use 'off' or '0' to disable, or a number like '90' for 90%%.",
+    )
+    parser.add_argument(
         "--stream",
         action="store_true",
         default=None,

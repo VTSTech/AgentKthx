@@ -258,6 +258,56 @@ class Memory:
 
         self._messages = systems + non_system
 
+    def compact_messages(self, keep_count: int = 10) -> int:
+        """Compact older messages to reduce token usage without dropping context.
+
+        Instead of pruning (dropping messages entirely), this method preserves
+        tool-call context by truncating older messages while keeping recent ones
+        intact. This is the ROB-06 "memory pressure" path for long agentic runs
+        where input alone exceeds the context window.
+
+        What compaction does:
+        - System messages: always kept intact
+        - Recent N messages (keep_count): kept intact
+        - Older messages: content truncated to first 200 chars, tool results
+          truncated to first 200 chars + "[compacted]" marker. Tool call names
+          and args are preserved (they're small and essential for context).
+
+        Args:
+            keep_count: Number of recent non-system messages to keep intact.
+
+        Returns:
+            Number of messages that were compacted.
+        """
+        systems = [m for m in self._messages if m.role == "system"]
+        non_system = [m for m in self._messages if m.role != "system"]
+
+        if len(non_system) <= keep_count:
+            return 0  # nothing to compact
+
+        # Split into "to compact" (older) and "to keep" (recent)
+        to_compact = non_system[:-keep_count] if keep_count > 0 else non_system
+        to_keep = non_system[-keep_count:] if keep_count > 0 else []
+
+        compacted_count = 0
+        for msg in to_compact:
+            # Compact content — truncate to 200 chars
+            if msg.content and len(msg.content) > 200:
+                msg.content = msg.content[:200] + "\n[compacted]"
+                compacted_count += 1
+
+            # Compact tool_calls — keep name + args (small), but they're
+            # already compact (args are usually short). Don't truncate.
+            # The real token cost is in tool results, which are in the
+            # "tool" role messages.
+
+            # For tool results (role="tool"), the content is the result
+            # which can be very large (file contents, command output).
+            # Already handled above by truncating msg.content.
+
+        self._messages = systems + to_compact + to_keep
+        return compacted_count
+
     def __len__(self) -> int:
         return len(self._messages)
 

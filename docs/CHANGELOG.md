@@ -179,6 +179,68 @@ requires = ["setuptools>=61.0", "wheel"]
 
 ---
 
+### 🧠 **Memory Compaction — `--compaction` parameter with auto context-pressure detection**
+
+Long agentic runs (30+ tool calls, 200K+ input tokens) can exceed the context window even with the `num_ctx/32` max_tokens cap. The old behavior was to prune (drop) older messages — losing tool-call context the model needs to stay oriented.
+
+**New `--compaction` CLI parameter:**
+
+| Value | Behavior |
+|-------|----------|
+| `auto` (default) | Compaction at 85% of `num_ctx` |
+| `85` | Compaction at 85% |
+| `90` | Compaction at 90% (less aggressive) |
+| `off` / `0` | Compaction disabled |
+
+Usage: `agentkthx chat --compaction 90` or `agentkthx chat --compaction off`
+
+**Three-layer defense:**
+
+1. **Preventive compaction** (`Agent._check_compaction()`) — Before each `_generate_stream()` call in the agentic loop, the agent estimates total token count (`total_chars // 4`) across all messages in memory. If it exceeds `num_ctx * threshold`, older messages are compacted:
+   ```
+   [Compaction] 15 messages compacted (~220K tokens → threshold 222K of 262K context)
+   ```
+
+2. **Reactive compaction** (context-length 400 handler) — If the 400 still fires, `compact_messages()` is called again with more aggressive truncation:
+   ```
+   [Context] Input exceeded context window — compacted 12 messages
+   ```
+
+3. **max_tokens reduction** (`_iter_sse_lines`) — The existing R06.55 reactive handler still fires if compaction isn't sufficient — reduces `max_tokens` from the error message's token counts and retries.
+
+**What compaction does (not dropping):**
+
+`Memory.compact_messages(keep_count=10)` preserves the message history but truncates content:
+- **System messages**: always kept intact
+- **Recent 10 messages**: kept intact (current context the model is working with)
+- **Older messages**: content truncated to 200 chars + `[compacted]` marker
+- **Tool call names + args**: preserved (they're small and essential)
+- **Tool results**: truncated to 200 chars + `[compacted]`
+
+The model can still see *what* it did (tool names, args, truncated results) without the full file contents consuming the context window.
+
+**Impact** — Long agentic runs (30+ file reads, 200K+ input tokens) no longer die mid-run on context-length 400s. The model retains awareness of prior actions through compacted summaries instead of losing context entirely to pruning.
+
+---
+
+### 📊 **Session token % in status footer**
+
+The chat mode status footer (line 2) now shows the current session's context usage as a percentage:
+
+```
+🔌 openrouter 📈 ↑802.7k ↓535.1k ctx 42%
+```
+
+- **Green** (0–59%): comfortable headroom
+- **Yellow** (60–84%): approaching compaction threshold
+- **Red** (85%+): compaction threshold reached — compaction will trigger on next generate
+
+The percentage is calculated as `(session_tokens_in + session_tokens_out) / num_ctx * 100`, capped at 100%.
+
+**Impact** — Users can see at a glance when they're approaching the context window limit, before the compaction system kicks in.
+
+---
+
 
 
 ## [R06.54] - 2026-09-22

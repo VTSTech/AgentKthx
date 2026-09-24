@@ -257,6 +257,15 @@ class Agent:
         if self.debug:
             print(f"[Agent] Truncation mode: {self.truncation}")
 
+        # ROB-06: Memory compaction threshold.
+        # When estimated token usage exceeds this fraction of num_ctx,
+        # older messages are compacted (content truncated, tool results
+        # shortened) instead of dropped. Parsed from --compaction CLI arg.
+        # "auto" = 0.85 (85%), "off"/"0" = disabled, or a float like 0.90.
+        self._compaction_threshold = 0.85  # default: auto = 85%
+        if self.debug:
+            print(f"[Agent] Compaction threshold: {int(self._compaction_threshold * 100)}%")
+
         # Initialize backend
         if backend is None:
             self.backend = get_default_backend()
@@ -1971,6 +1980,56 @@ Final Answer: <the answer>
     # can reuse all of the non-streaming loop's logic (tool dispatch,
     # error recovery, finish_reason handling, memory tracking).
 
+    def _check_compaction(self) -> int:
+        """Check if memory needs compaction and compact if over threshold.
+
+        Estimates the total token count of all messages in memory and
+        compares against ``num_ctx * _compaction_threshold``. If over
+        threshold, calls ``memory.compact_messages()`` to truncate older
+        messages while keeping recent ones intact.
+
+        ROB-06: This is the preventive compaction path — it runs before
+        each generate call to avoid context-length 400s on long agentic
+        runs. The reactive path (in _iter_sse_lines) still handles the
+        case where compaction wasn't enough.
+
+        Returns:
+            Number of messages that were compacted (0 if none needed).
+        """
+        if getattr(self, "_compaction_threshold", 0.85) >= 1.0:
+            return 0  # compaction disabled
+
+        # Estimate total tokens: ~4 chars per token (rough heuristic)
+        total_chars = 0
+        for msg in self.memory:
+            content = getattr(msg, 'content', '') or ''
+            total_chars += len(content)
+            # Also count tool_calls (small but present)
+            tc = getattr(msg, 'tool_calls', None)
+            if tc:
+                total_chars += len(json.dumps(tc, ensure_ascii=False))
+        estimated_tokens = total_chars // 4
+
+        # Get context limit
+        ctx = self.num_ctx or 8192
+        threshold_tokens = int(ctx * getattr(self, "_compaction_threshold", 0.85))
+
+        if estimated_tokens <= threshold_tokens:
+            return 0  # under threshold, no compaction needed
+
+        # Over threshold — compact older messages
+        # Keep the most recent 10 messages intact
+        keep_count = 10
+        compacted = self.memory.compact_messages(keep_count=keep_count)
+
+        if compacted > 0:
+            print(f"  [Compaction] {compacted} messages compacted "
+                  f"(~{estimated_tokens // 1000}K tokens → "
+                  f"threshold {threshold_tokens // 1000}K of "
+                  f"{ctx // 1000}K context)")
+
+        return compacted
+
     def _generate_stream(self) -> dict:
         """Stream a response from the backend, printing deltas to stdout.
 
@@ -2312,6 +2371,12 @@ Final Answer: <the answer>
             if self.debug:
                 print(f"[Step {step_num + 1}] (streaming)")
 
+            # ROB-06: Check if memory needs compaction before generating.
+            # This prevents context-length 400s on long agentic runs by
+            # compacting older messages when estimated token usage exceeds
+            # the compaction threshold (default 85% of num_ctx).
+            self._check_compaction()
+
             # Streaming generate with API resilience retry
             gen_response = None
             _api_failure = 0
@@ -2323,6 +2388,22 @@ Final Answer: <the answer>
                 except KeyboardInterrupt:
                     raise
                 except Exception as e:
+                    # ROB-06: Context-length 400 where input alone exceeds
+                    # the context window. The _iter_sse_lines retry already
+                    # reduced max_tokens, but if the INPUT is larger than
+                    # the context, no max_tokens reduction can help.
+                    # Compact memory (truncate old tool results) and retry.
+                    # This is the "memory pressure" path that triggers on
+                    # long agentic runs (30+ file reads) when the preventive
+                    # compaction wasn't aggressive enough.
+                    err_str = str(e)
+                    if ("context length" in err_str.lower()
+                            and _api_failure == 0):
+                        compacted = self.memory.compact_messages(keep_count=10)
+                        if compacted > 0:
+                            print(f"  [Context] Input exceeded context "
+                                  f"window — compacted {compacted} messages")
+                            continue  # retry with compacted memory
                     _api_failure += 1
                     _transient = is_transient_api_error(e)
                     _exhausted = _transient and _api_failure > self.max_api_retries

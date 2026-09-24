@@ -522,6 +522,21 @@ def _build_agent(args: argparse.Namespace, config) -> Agent:
         print(f"[AgentKthx] Truncation mode: {truncation}")
         print(f"[AgentKthx] API mode: {api_mode}")
 
+    # Parse compaction threshold (--compaction auto=85% / off / N)
+    compaction_arg = getattr(args, "compaction", "auto")
+    if compaction_arg in ("off", "0", "disabled"):
+        compaction_threshold = 1.0  # never compact (100% = always under)
+    elif compaction_arg == "auto" or compaction_arg is None:
+        compaction_threshold = 0.85
+    else:
+        try:
+            pct = float(compaction_arg)
+            compaction_threshold = pct / 100.0 if pct > 1.0 else pct
+        except (ValueError, TypeError):
+            compaction_threshold = 0.85  # fallback to auto
+    if args.debug:
+        print(f"[AgentKthx] Compaction: {int(compaction_threshold * 100)}% of num_ctx")
+
     # Build tools
     # In JEV mode, tools are irrelevant — decisions never call tools
     # (generate_decision() always passes tools=None to the backend).
@@ -612,6 +627,8 @@ def _build_agent(args: argparse.Namespace, config) -> Agent:
     # Stash loaded skill names on the agent so /skills and /status can show them
     # (Agent itself doesn't track skill names — only the prompt gets injected)
     agent._loaded_skills = loaded_skills
+    # Set compaction threshold from --compaction arg
+    agent._compaction_threshold = compaction_threshold
     return agent
 
 
@@ -973,7 +990,7 @@ def cmd_chat(args: argparse.Namespace) -> int:
         return ' '.join(parts)
 
     def _footer_line2() -> str:
-        """Build the second footer line: backend, token usage, debug flag."""
+        """Build the second footer line: backend, token usage, context %, debug flag."""
         backend = getattr(agent.backend, 'backend_type', None)
         bname = backend.value if backend and hasattr(backend, 'value') else str(backend) if backend else '?'
         def _fmt_tok(n):
@@ -982,12 +999,24 @@ def cmd_chat(args: argparse.Namespace) -> int:
                 return f"{n/1000:.1f}k"
             return str(n)
         tok_str = f"\u2191{_fmt_tok(_session_tokens_in)} \u2193{_fmt_tok(_session_tokens_out)}"
+        # Session context usage percentage: (in + out) / num_ctx
+        _total_session = _session_tokens_in + _session_tokens_out
+        _ctx = agent.num_ctx or 8192
+        _ctx_pct = min(100, int((_total_session / _ctx) * 100)) if _ctx > 0 else 0
+        # Color the percentage based on usage level
+        if _ctx_pct >= 85:
+            _ctx_pct_str = red(f"{_ctx_pct}%")
+        elif _ctx_pct >= 60:
+            _ctx_pct_str = yellow(f"{_ctx_pct}%")
+        else:
+            _ctx_pct_str = green(f"{_ctx_pct}%")
         _e_be    = '\U0001f50c'
         _e_tok   = '\U0001f4c8'
         _e_dbg   = '\U0001f41b'
         parts = [
             f"{dim(_e_be)} {green(bname)}",
             f"{dim(_e_tok)} {yellow(tok_str)}",
+            f"{dim('ctx')} {_ctx_pct_str}",
         ]
         if agent.debug:
             parts.append(f"{red(_e_dbg + ' debug')}")
