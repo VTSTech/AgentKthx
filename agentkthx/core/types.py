@@ -70,6 +70,7 @@ class BackendType(Enum):
     BITNET = "bitnet"
     ZAI = "zai"
     OPENROUTER = "openrouter"
+    GEMINI = "gemini"
 
 
 class ApiMode(Enum):

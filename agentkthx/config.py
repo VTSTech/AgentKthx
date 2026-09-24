@@ -77,6 +77,23 @@ OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 OPENROUTER_DEFAULT_MODEL = os.environ.get("OPENROUTER_DEFAULT_MODEL", "anthropic/claude-3.5-sonnet")
 OPENROUTER_FREE_ONLY = os.environ.get("OPENROUTER_FREE_ONLY", "").lower() in ("1", "true", "yes")
 
+# Gemini plugin (agentkthx/plugins/gemini/)
+# Google AI Studio / Gemini API via OpenAI-compatible endpoint.
+# Trailing slash on base URL matters — OpenAI SDK appends paths like
+# "/chat/completions" without a leading slash. We preserve it here.
+GEMINI_BASE_URL = os.environ.get("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/")
+# GEMINI_API_KEY is the documented env var. GOOGLE_API_KEY is accepted
+# as a fallback, mirroring Google's own SDK precedence.
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY", "")
+GEMINI_DEFAULT_MODEL = os.environ.get("GEMINI_DEFAULT_MODEL", "gemini-3.8-flash")
+GEMINI_FREE_ONLY = os.environ.get("GEMINI_FREE_ONLY", "").lower() in ("1", "true", "yes")
+# Default thinking level for Gemini 3.x (cannot be fully disabled).
+# One of: "minimal", "low", "medium", "high". Set to "" to leave unset.
+GEMINI_THINKING_LEVEL = os.environ.get("GEMINI_THINKING_LEVEL", "")
+# Default service tier: "standard" (default), "flex" (cheaper, slower),
+# "priority" (faster, costs more). Free tier ignores this.
+GEMINI_SERVICE_TIER = os.environ.get("GEMINI_SERVICE_TIER", "standard")
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # BACKEND SELECTION
@@ -103,6 +120,8 @@ elif AGENTKTHX_BACKEND == "zai":
     DEFAULT_MODEL = os.environ.get("AGENTKTHX_MODEL", "glm-5.1")
 elif AGENTKTHX_BACKEND == "openrouter":
     DEFAULT_MODEL = os.environ.get("AGENTKTHX_MODEL", "anthropic/claude-3.5-sonnet")
+elif AGENTKTHX_BACKEND == "gemini":
+    DEFAULT_MODEL = os.environ.get("AGENTKTHX_MODEL", "gemini-3.8-flash")
 else:
     DEFAULT_MODEL = os.environ.get("AGENTKTHX_MODEL", "qwen2.5:0.5b")
 
