@@ -119,7 +119,7 @@ The codebase declared `dependencies = []` in `pyproject.toml` with a "Zero depen
 
 **Verification** — `grep -rn "import requests" agentkthx/` returns zero results. All remaining `requests` references in the codebase are comments, docstrings, or unrelated identifiers (`total_requests`, `too_many_requests`). The `pyproject.toml` declaration `dependencies = []` is now accurate.
 
-**Impact** — Users on minimal Python installs (e.g. `python3-minimal` on Debian/Ubuntu without `requests` pre-installed) can now use OpenRouter without a confusing silent plugin-load failure. The zero-dependency claim is true for the first time since OpenRouter was added.
+**Impact** — Users on minimal Python installs (e.g. `python3-minimal` on Debian/Ubuntu without `requests` pre-installed) can now use OpenRouter without a confusing silent plugin-load failure. The zero-dependency claim is true for the first time since OpenRouter was added. (~4 days ago)
 
 ---
 
