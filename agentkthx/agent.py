@@ -2511,6 +2511,31 @@ Final Answer: <the answer>
                         ))
                         break
 
+                    # R06.55: Print tool call + result inline during streaming
+                    # so the user sees progress as it happens (not just at
+                    # the post-run summary). Matches the CLI's _print_agent_steps
+                    # format: [N] tool name {args} → result
+                    try:
+                        args_str = json.dumps(tool_args, ensure_ascii=False)
+                    except (TypeError, ValueError):
+                        args_str = str(tool_args)
+                    if len(args_str) > 120:
+                        args_str = args_str[:117] + "..."
+                    result_str = str(result)
+                    if len(result_str) > 200:
+                        result_str = result_str[:197] + "..."
+                    sys.stdout.write(
+                        f"\n  \033[90m[{tool_calls + 1}]\033[0m "
+                        f"\033[36mtool\033[0m "
+                        f"\033[33m{tool_name}\033[0m "
+                        f"\033[90m{args_str}\033[0m\n"
+                    )
+                    if result_str:
+                        sys.stdout.write(
+                            f"      \033[90m\u2192 {result_str}\033[0m\n"
+                        )
+                    sys.stdout.flush()
+
                     tool_calls += 1
                     is_error = is_error_result(str(result))
                     if is_error:

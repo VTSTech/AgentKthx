@@ -123,6 +123,62 @@ The codebase declared `dependencies = []` in `pyproject.toml` with a "Zero depen
 
 ---
 
+### 🛡️ **ROB-06 — Context-length 400 handling for OpenRouter streaming**
+
+OpenRouter `:free` models with large context windows (e.g. `nex-agi/nex-n2.5-mini:free`, 256K context) report `max_completion_tokens` close to the full context length. When the agentic loop accumulates tool results in memory, the input grows until `input_tokens + max_tokens` exceeds the context limit → HTTP 400 "maximum context length" → agent dies.
+
+**Three-layer fix:**
+
+1. **Preventive cap in `_get_model_defaults()`** — `max_tokens` is capped at `context_length // 32` (3% of context). Empirical testing showed:
+   - `num_ctx/4` (75%) → 400 on step 5
+   - `num_ctx/8` (12.5%) → 400 on step 9
+   - `num_ctx/16` (6%) → proceeded to step 27+
+   - `num_ctx/32` (3%) → conservative default for longest tasks
+
+   For a 256K model: `max_tokens = 8192`, leaving 253952 tokens for input.
+
+2. **Reactive retry in `_iter_sse_lines()`** — If the 400 still fires (input grew beyond the 97% reserve), the error message is parsed to extract actual token counts:
+   ```
+   "This endpoint's maximum context length is 262144 tokens.
+    However, you requested about 282334 tokens (85421 of text input,
+    305 of tool input, 196608 in the output)."
+   ```
+   Extracts `max_context=262144`, `input_tokens=85726`, calculates `safe_max = 262144 - 85726 - 2048 = 174370`. Retries with the safe value.
+
+3. **Persisted safe value** — The calculated `max_tokens` is stored on `self._context_safe_max_tokens` and checked by the base class `generate_completions_stream()` (in `openai_compat.py`). This overrides both explicit `max_tokens` from the agent and model_config defaults, so future agentic-loop steps use the safe value without re-triggering the 400.
+
+**Tests** — 672 passed, 6 skipped, 0 failed (existing tests cover the retry logic via mocked `urllib.request.urlopen`).
+
+**Impact** — Long agentic runs (30+ tool calls, 200K+ input tokens) no longer die mid-run on OpenRouter `:free` models with large context windows.
+
+---
+
+### 🎨 **Streaming tool output — inline tool calls + results during streaming**
+
+Previously, streaming mode only showed the model's text output. Tool calls were invisible until the post-run `_print_agent_steps()` summary. On long runs (50+ steps), the user had no feedback that the agent was making progress.
+
+**Added inline tool display to `_run_core_streaming()`** — After each tool executes, its call + result is printed to stdout immediately:
+
+```
+AgentKthx: Let me start by examining the repository structure...
+
+  [1] tool shell {"command": "ls -la /home/vtstech/workspace/AgentKthx"}
+      → total 108
+drwxrwxr-x 13 vtstech vtstech  4096 Sep 23 21:45 ...
+
+  [2] tool read_file {"file_path": "/home/vtstech/workspace/AgentKthx/pyproject.toml"}
+      → [build-system]
+requires = ["setuptools>=61.0", "wheel"]
+...
+```
+
+- Tool number in dim grey, "tool" label in cyan, tool name in yellow, arguments in dim grey (truncated to 120 chars), result in dim grey with `→` prefix (truncated to 200 chars).
+- Post-run `_print_agent_steps()` summary is now **suppressed in streaming mode** to avoid duplication. Non-streaming mode is unchanged.
+
+**Impact** — Users running long agentic audits with `--stream` now see real-time progress (tool calls + results as they happen) instead of waiting for the run to complete.
+
+---
+
 
 
 ## [R06.54] - 2026-09-22

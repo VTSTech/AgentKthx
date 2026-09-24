@@ -1681,22 +1681,21 @@ def cmd_chat(args: argparse.Namespace) -> int:
         # itself is the progress indicator (typewriter effect on stdout), and a
         # spinning cursor on stderr would visually compete with it.
         spinner_t = None
-        if not agent.debug:
-            # Pre-compute stream flag so we know whether to suppress the spinner.
-            # This must mirror the logic used below when calling agent.run().
-            from .core.types import BackendType
-            _is_cloud = (
-                hasattr(agent.backend, 'backend_type') and
-                agent.backend.backend_type in [BackendType.OPENROUTER, BackendType.ZAI]
-            )
-            _explicit = getattr(args, 'stream', None)
-            _will_stream = (
-                _explicit is True or
-                (_explicit is None and _is_cloud)
-            )
-            if not _will_stream:
-                print()  # blank line before spinner
-                spinner_t = _spinner_start()
+        # Pre-compute stream flag so we know whether to suppress the spinner.
+        # This must mirror the logic used below when calling agent.run().
+        from .core.types import BackendType
+        _is_cloud = (
+            hasattr(agent.backend, 'backend_type') and
+            agent.backend.backend_type in [BackendType.OPENROUTER, BackendType.ZAI]
+        )
+        _explicit = getattr(args, 'stream', None)
+        _will_stream = (
+            _explicit is True or
+            (_explicit is None and _is_cloud)
+        )
+        if not agent.debug and not _will_stream:
+            print()  # blank line before spinner
+            spinner_t = _spinner_start()
         try:
             # Enable streaming by default for cloud providers, but respect
             # explicit --stream / --no-stream from the user.
@@ -1745,8 +1744,11 @@ def cmd_chat(args: argparse.Namespace) -> int:
             _session_tokens_out += int(step.tokens_used * 0.4)
         # Print tool-call summary so the user sees what the agent did,
         # not just the final answer. Skipped in debug mode (agent already
-        # printed verbose step output).
-        _print_agent_steps(result, debug=agent.debug, show_reasoning=getattr(agent, '_show_reasoning', False))
+        # printed verbose step output) AND in streaming mode (tool calls
+        # are printed inline as they execute — the post-run summary would
+        # be redundant).
+        if not _will_stream:
+            _print_agent_steps(result, debug=agent.debug, show_reasoning=getattr(agent, '_show_reasoning', False))
 
         # Detect empty final answers — the agent ran but produced no
         # response text. This usually means the model hit a rate limit
