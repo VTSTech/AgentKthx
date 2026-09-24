@@ -2033,8 +2033,26 @@ Final Answer: <the answer>
         compacted = self.memory.compact_messages(keep_count=keep_count)
 
         if compacted > 0:
+            # Recalculate actual token usage after compaction — the running
+            # totals are cumulative and don't reflect the reduction. Recount
+            # from the (now compacted) memory so the footer's ctx % drops.
+            post_chars = 0
+            for msg in self.memory:
+                c = getattr(msg, 'content', '') or ''
+                post_chars += len(c)
+                tc = getattr(msg, 'tool_calls', None)
+                if tc:
+                    post_chars += len(json.dumps(tc, ensure_ascii=False))
+            post_tokens = post_chars // 4
+            # Reset running totals to the post-compaction state.
+            # Split ~90% input / ~10% output since most of the context
+            # is input (tool results, system prompt, conversation).
+            self._running_tokens_in = int(post_tokens * 0.9)
+            self._running_tokens_out = int(post_tokens * 0.1)
+
             print(f"  [Compaction] {compacted} messages compacted "
-                  f"(~{estimated_tokens // 1000}K tokens → "
+                  f"(~{estimated_tokens // 1000}K → "
+                  f"~{post_tokens // 1000}K tokens, "
                   f"threshold {threshold_tokens // 1000}K of "
                   f"{ctx // 1000}K context)")
 
@@ -2419,8 +2437,20 @@ Final Answer: <the answer>
                             and _api_failure == 0):
                         compacted = self.memory.compact_messages(keep_count=10)
                         if compacted > 0:
+                            # Recalculate running totals after reactive compaction
+                            post_chars = 0
+                            for msg in self.memory:
+                                c = getattr(msg, 'content', '') or ''
+                                post_chars += len(c)
+                                tc = getattr(msg, 'tool_calls', None)
+                                if tc:
+                                    post_chars += len(json.dumps(tc, ensure_ascii=False))
+                            post_tokens = post_chars // 4
+                            self._running_tokens_in = int(post_tokens * 0.9)
+                            self._running_tokens_out = int(post_tokens * 0.1)
                             print(f"  [Context] Input exceeded context "
-                                  f"window — compacted {compacted} messages")
+                                  f"window — compacted {compacted} messages "
+                                  f"(~{post_tokens // 1000}K tokens remaining)")
                             continue  # retry with compacted memory
                     _api_failure += 1
                     _transient = is_transient_api_error(e)

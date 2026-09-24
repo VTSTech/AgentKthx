@@ -241,6 +241,40 @@ The percentage is calculated as `(session_tokens_in + session_tokens_out) / num_
 
 ---
 
+### 📊 **Real-time token tracking during streaming**
+
+The footer's token counts (`↑` input, `↓` output) and context percentage (`ctx N%`) now update **during** the agentic loop, not just after `agent.run()` returns. Previously all three showed `0` until the run completed.
+
+**Three fixes:**
+
+1. **Usage chunk capture** — The final SSE chunk from OpenRouter (with `choices: []` but `usage: {...}`) was being discarded by `generate_completions_stream()` with a bare `continue`. Now captured as a `_usage` key in the yielded chunk, picked up by `_generate_stream()`, and returned in the response dict's `usage` field.
+
+2. **Running token totals on Agent** — Added `self._running_tokens_in/out` on the Agent, updated after each step in `_run_core_streaming()`. A `_on_step_callback` fires after each step, which the CLI registers to call `_update_footer()` — the persistent footer redraws with live token counts and context %.
+
+3. **Token estimation fallback for `:free` models** — Some OpenRouter `:free` models don't return a usage chunk even when `stream_options.include_usage=true` is sent. If `total_tokens` is 0 after a step, AgentKthx estimates tokens from message content (`chars ÷ 4`) so the footer still updates with approximate counts.
+
+**Compaction recalculation** — After compaction (both preventive and reactive), the running token totals are **recalculated** from the actual post-compaction memory state. Previously the totals were cumulative and never decreased — the footer would show `ctx 100%` even after compaction reduced usage to 30%. Now it recalculates and the percentage drops to reflect reality:
+
+```
+  [Compaction] 27 messages compacted (~235K → ~78K tokens, threshold 222K of 262K context)
+```
+
+Footer updates from `ctx 100%` (red) → `ctx 30%` (green).
+
+**Reactive compaction on context-length 400** — If the preventive compaction wasn't aggressive enough and a 400 "context length" error still fires, the reactive handler calls `compact_messages()` again with more aggressive truncation. Running totals are recalculated, and the request is retried with the compacted memory. This handles the case where input alone exceeds the context window (e.g. 272K input on a 262K model).
+
+```
+  [Context] Input exceeded context window — compacted 12 messages (~78K tokens remaining)
+```
+
+**`_will_stream` UnboundLocalError fix** — `--debug` mode crashed after the first response with `UnboundLocalError: cannot access local variable '_will_stream'`. The variable was defined inside the `if not agent.debug:` block and never set when debug was on. Moved outside the `if` so it's always defined.
+
+**OpenRouter API docs updated** — `docs/OPENROUTER_API_TECHNICAL_REFERENCE.md` was stale: it said "AgentKthx currently does **not** set `stream_options.include_usage`" (fixed in R06.53) and listed streaming usage as "future work". Updated to reflect that it's now implemented, with a note about `:free` model fallback. Troubleshooting matrix updated for both streaming-usage and reasoning-content rows.
+
+**Impact** — Users running long agentic audits see real-time progress in the footer: token counts climbing, context % changing color (green → yellow → red), and dropping back down after compaction. No more guessing whether the run is making progress or stuck.
+
+---
+
 
 
 ## [R06.54] - 2026-09-22
