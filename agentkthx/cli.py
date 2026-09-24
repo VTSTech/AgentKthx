@@ -2088,8 +2088,8 @@ def cmd_models(args: argparse.Namespace) -> int:
 
     # Use appropriate API mode for the backend
     from .core.types import ApiMode
-    if backend_name == "openrouter":
-        # OpenRouter only supports OpenAI Chat-Completions
+    if backend_name in ("openrouter", "gemini"):
+        # OpenRouter and Gemini only support OpenAI Chat-Completions
         api_mode = ApiMode.OPENAI
     else:
         api_mode = ApiMode.OPENRE

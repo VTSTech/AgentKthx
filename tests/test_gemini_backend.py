@@ -249,6 +249,32 @@ class TestBackendInit(unittest.TestCase):
         result = self.backend.test_tool_support("gemini-3.8-flash")
         self.assertEqual(result, ToolSupportLevel.NATIVE)
 
+    def test_openre_api_mode_normalized_to_openai(self):
+        """Regression: cmd_models in the CLI hardcoded api_mode=ApiMode.OPENRE
+        for any backend that wasn't 'openrouter' — Gemini would have crashed
+        on `agentkthx models --backend gemini` before the fix.
+        We now silently normalize OPENRE → OPENAI (Gemini has only one wire
+        format anyway)."""
+        with patch.object(GeminiBackend, "list_models", return_value=[]):
+            with patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}, clear=False):
+                b = GeminiBackend(api_mode=ApiMode.OPENRE)
+        # After normalization, the backend's api_mode is OPENAI
+        self.assertEqual(b.api_mode, ApiMode.OPENAI)
+
+    def test_string_api_mode_accepted(self):
+        """String api_mode (e.g. 'openai' from CLI argparse) is coerced to enum."""
+        with patch.object(GeminiBackend, "list_models", return_value=[]):
+            with patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}, clear=False):
+                b = GeminiBackend(api_mode="openai")
+        self.assertEqual(b.api_mode, ApiMode.OPENAI)
+
+    def test_jev_api_mode_accepted(self):
+        """JEV mode works — wraps underlying chat-completions call."""
+        with patch.object(GeminiBackend, "list_models", return_value=[]):
+            with patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}, clear=False):
+                b = GeminiBackend(api_mode=ApiMode.JEV)
+        self.assertEqual(b.api_mode, ApiMode.JEV)
+
 
 class TestBuildBody(unittest.TestCase):
     """_build_openai_body() Gemini-specific extras."""

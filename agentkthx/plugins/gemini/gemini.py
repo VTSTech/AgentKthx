@@ -296,19 +296,19 @@ class GeminiBackend(OpenAICompatibleBackend):
             if not resolved_url.endswith("/"):
                 resolved_url += "/"
 
-        # Gemini only exposes the OpenAI-compat endpoint. JEV mode works
-        # because it wraps the underlying chat-completions call.
+        # Gemini only exposes the OpenAI-compat endpoint. We accept any
+        # api_mode here (OPENAI, OPENRE, JEV) without raising — the actual
+        # wire format is always OpenAI Chat-Completions; OPENRE is silently
+        # treated as OPENAI for back-compat with CLI code paths that default
+        # to OPENRE for unknown backends. JEV wraps the underlying call.
+        # This is intentionally more permissive than OpenRouterBackend's
+        # strict check — Gemini has only one wire format, so the api_mode
+        # is informational, not a hard constraint.
         if isinstance(api_mode, str):
             api_mode = ApiMode(api_mode.lower())
-        if api_mode == ApiMode.JEV:
-            pass  # accepted — _jev_call_completions routes through generate()
-        elif api_mode == ApiMode.OPENAI:
-            pass
-        else:
-            raise ValueError(
-                "Gemini backend only supports OpenAI Chat-Completions "
-                "or JEV (System-One) API modes"
-            )
+        # Normalize: OPENRE → OPENAI (Gemini can't speak OpenResponses)
+        if api_mode == ApiMode.OPENRE:
+            api_mode = ApiMode.OPENAI
 
         super().__init__(config=config, base_url=resolved_url, api_mode=api_mode)
 
