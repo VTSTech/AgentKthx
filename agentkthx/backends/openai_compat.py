@@ -708,8 +708,13 @@ class OpenAICompatibleBackend(BaseBackend):
 
             choices = chunk.get("choices", []) or []
             if not choices:
-                # Final usage-only chunk (no choices) — skip; the agent
-                # loop doesn't need usage during streaming display.
+                # Final usage-only chunk (no choices) — capture usage data
+                # for token tracking. This chunk arrives when
+                # stream_options.include_usage=True (PERF-02).
+                chunk_usage = chunk.get("usage")
+                if chunk_usage and isinstance(chunk_usage, dict):
+                    yield {"delta": "", "tool_calls": None,
+                           "finish_reason": None, "_usage": chunk_usage}
                 continue
             choice = choices[0]
             delta = choice.get("delta", {}) or {}

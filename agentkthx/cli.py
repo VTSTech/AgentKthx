@@ -998,9 +998,14 @@ def cmd_chat(args: argparse.Namespace) -> int:
             if n >= 1000:
                 return f"{n/1000:.1f}k"
             return str(n)
-        tok_str = f"\u2191{_fmt_tok(_session_tokens_in)} \u2193{_fmt_tok(_session_tokens_out)}"
+        # Use agent's running totals (updated during the streaming loop)
+        # instead of the post-run _session_tokens_in/out closure vars
+        # which only update after agent.run() returns.
+        _tok_in = getattr(agent, '_running_tokens_in', 0) or _session_tokens_in
+        _tok_out = getattr(agent, '_running_tokens_out', 0) or _session_tokens_out
+        tok_str = f"\u2191{_fmt_tok(_tok_in)} \u2193{_fmt_tok(_tok_out)}"
         # Session context usage percentage: (in + out) / num_ctx
-        _total_session = _session_tokens_in + _session_tokens_out
+        _total_session = _tok_in + _tok_out
         _ctx = agent.num_ctx or 8192
         _ctx_pct = min(100, int((_total_session / _ctx) * 100)) if _ctx > 0 else 0
         # Color the percentage based on usage level
@@ -1186,6 +1191,9 @@ def cmd_chat(args: argparse.Namespace) -> int:
     # path (quit, EOF, Ctrl+C, unexpected exception) so the terminal is
     # never left in a broken scroll-region state.
     _setup_footer_region()
+    # Register footer-refresh callback so the persistent footer updates
+    # token counts and context % during streaming (not just after the run).
+    agent._on_step_callback = lambda step, tin, tout: _update_footer()
     # In-memory last-message recall (R06.4): no history file.
     # Previously used readline.read_history_file(~/.agentkthx_history) +
     # write_history_file() on every prompt, which grew unboundedly

@@ -266,6 +266,16 @@ class Agent:
         if self.debug:
             print(f"[Agent] Compaction threshold: {int(self._compaction_threshold * 100)}%")
 
+        # Running token totals — updated during the agentic loop so the
+        # CLI footer can show real-time token usage and context %.
+        # Reset at the start of each run() call.
+        self._running_tokens_in = 0
+        self._running_tokens_out = 0
+        # Optional callback invoked after each step completes, used by
+        # the CLI to refresh the persistent footer during streaming.
+        # Signature: callback(step_num, tokens_in, tokens_out)
+        self._on_step_callback = None
+
         # Initialize backend
         if backend is None:
             self.backend = get_default_backend()
@@ -2169,6 +2179,11 @@ Final Answer: <the answer>
                     fr = chunk.get("finish_reason")
                     if fr:
                         finish_reason = fr
+                    # Capture usage from the final usage-only chunk
+                    # (arrives when stream_options.include_usage=True)
+                    chunk_usage = chunk.get("_usage")
+                    if chunk_usage:
+                        usage = chunk_usage
                     # Content delta — print immediately
                     if delta:
                         _emit_prefix_once()
@@ -2366,6 +2381,9 @@ Final Answer: <the answer>
         _last_tool_name = None
         _terminated = False
         self._error_tracker.reset()
+        # Reset running token totals for this run
+        self._running_tokens_in = 0
+        self._running_tokens_out = 0
 
         for step_num in range(self.max_steps):
             if self.debug:
@@ -2434,6 +2452,24 @@ Final Answer: <the answer>
             native_tool_calls = gen_response.get("tool_calls", [])
             tokens = gen_response.get("usage", {}).get("total_tokens", 0)
             total_tokens += tokens
+
+            # Update running token totals for real-time footer display.
+            # Split ~60% prompt / ~40% completion (rough heuristic matching
+            # the CLI's post-run accumulation logic).
+            self._running_tokens_in += int(tokens * 0.6)
+            self._running_tokens_out += int(tokens * 0.4)
+
+            # Refresh the CLI footer if a callback is registered
+            if getattr(self, '_on_step_callback', None):
+                try:
+                    self._on_step_callback(
+                        step_num + 1,
+                        self._running_tokens_in,
+                        self._running_tokens_out,
+                    )
+                except Exception:
+                    pass  # footer update failure must not break the run
+
             reasoning_content = gen_response.get("reasoning_content", "") or ""
 
             if gen_response.get("_cancelled"):
