@@ -156,6 +156,239 @@ Plus appendices: OpenAI-compat limitations (beta gaps), region availability (200
 
 ---
 
+### 🐛 **BUG-02 — `agentkthx models --backend gemini` showed empty table (cloud-provider allowlist missing GEMINI)**
+
+**Symptom:** After BUG-01 was fixed, `agentkthx models --backend gemini` printed "Total: 10 models" with zero rows in the table — the model count was correct but no rows displayed.
+
+**Root cause:** `cli.py:2145` had a cloud-provider allowlist:
+```python
+is_cloud_provider = backend.backend_type in [BackendType.OPENROUTER, BackendType.ZAI]
+```
+GEMINI was NOT in this list. The `cmd_models` display loop had two branches:
+- `if isinstance(backend, OllamaBackend) and not is_cloud_provider:` → Gemini is not Ollama, skipped
+- `elif is_cloud_provider:` → Gemini not in list, skipped
+
+Both branches skipped Gemini → 0 rows printed despite `list_models()` returning 10 entries.
+
+**Fix:** Added `BackendType.GEMINI` to all 6 occurrences of the cloud-provider allowlist in `cli.py` (lines 514, 587, 645, 787, 1726, 1745, 2145). Used `replace_all` so no occurrence was missed.
+
+**Side benefit of fixing all 6 sites:** Gemini also now gets default-streaming=True (lines 587, 787, 1726, 1745) — matches OpenRouter/ZAI behavior; catalog-based `num_ctx`/`num_predict` defaults (line 645); correct `api_mode=OPENAI` initialization in `cmd_run`/`cmd_chat` paths (line 514).
+
+**Regression test:** `test_gemini_is_cloud_provider` in `TestBackendInit` — asserts GEMINI is in the cloud-provider set used by cli.py.
+
+---
+
+### 🆕 **FEAT-02 — Free-tier data embedded from Google AI Studio**
+
+**Problem:** Gemini's API has NO pricing or free-tier endpoint. The rate-limits docs page (https://ai.google.dev/gemini-api/docs/rate-limits) documents the 4 usage tiers but says per-model RPM/TPM/RPD is "viewed in Google AI Studio" — not exposed via API. Without this data, `GEMINI_FREE_ONLY` filtering was based on a naive heuristic (`"flash" in model_id or "lite" in model_id`) that missed Gemma, Embeddings, Robotics, Antigravity, and Transcribe.
+
+**Source of truth:** VTSTech manually visited https://aistudio.google.com/rate-limits for their Free-tier project (no billing setup) on 2026-09-24 and transcribed the rate-limit table for all 71 models Google exposes.
+
+**Implementation:**
+
+New `FREE_TIER_LIMITS` constant table (53 entries) in `agentkthx/plugins/gemini/gemini.py` with the format `{"rpm": int, "tpm": int, "rpd": int}` per model. Models with `rpd=0` are explicitly NOT on the free tier (recorded for completeness / future reference).
+
+New `_is_free_tier_model(model_id)` classifier — 3-step lookup:
+1. Exact match against `FREE_TIER_LIMITS` table → check `rpd > 0`
+2. Heuristic pattern matching for known free families:
+   - Free families: `flash`, `lite`, `embedding`, `robotics`, `antigravity`, `transcribe`, `gemma-`
+   - Paid overrides: `-pro`, `-pro-preview`, `-pro-image`, `-image`, `imagen-`, `veo-`, `lyria-`, `omni-`, `computer-use`, `deep-research`, `gemini-2.0` (legacy), `gemini-flash-latest` (alias for Pro), `gemini-pro-latest`
+   - Live API override: only `gemini-3.5-transcribe*` is explicitly free per AI Studio; other `-live` / `live-translate` variants default to NOT free unless explicitly in the table
+3. Default: NOT free (safer than mislabeling as free)
+
+New `_get_free_tier_limits(model_id)` helper — returns the per-model rate limits dict or None. Used by `_parse_gemini_model()` to surface `free_tier_limits` in the model details dict for display / client-side rate-limit tracking.
+
+**Confirmed FREE (20 models with non-zero limits):**
+
+| Model family | RPM | TPM | RPD |
+|---------------|-----|-----|-----|
+| Antigravity variants | 60 | 100K | 100 |
+| Gemini 2.5 Flash | 5 | 250K | 20 |
+| Gemini 2.5 Flash Lite | 10 | 250K | 20 |
+| Gemini 2.5 Flash TTS | 3 | 10K | 10 |
+| Gemini 3 Flash | 5 | 250K | 20 |
+| Gemini 3.1 Flash Lite | 15 | 250K | 500 |
+| Gemini 3.1 Flash TTS | 3 | 10K | 10 |
+| Gemini 3.5 Flash | 5 | 250K | 20 |
+| Gemini 3.5 Flash Lite | 15 | 250K | 500 |
+| Gemini 3.5 Transcribe | 3 | 10K | 25 |
+| Gemini 3.6 / 3.7 / 3.8 Flash | 5 | 250K | 20 |
+| Gemini 3.8 Flash Lite TTS / Flash TTS | 3 | 10K | 10 |
+| Gemini Embedding 1 / 2 | 100 | 30K | 1K |
+| Gemini Robotics ER 2 Preview | 5 | 250K | 20 |
+| Gemma 4 26B | 30 | 16K | 14,400 |
+| Gemma 4 31B | 30 | 16K | 14,400 |
+
+**Confirmed PAID (0/0/0 limits — require Tier 1+):**
+- All Pro variants (gemini-2.5-pro, gemini-3.1-pro-preview, gemini-3.1-pro-preview-customtools, gemini-2.5-pro-preview-tts)
+- All image gen (Nano Banana: gemini-2.5-flash-image, gemini-3-pro-image*, gemini-3.1-flash-image*, gemini-3.1-flash-lite-image*)
+- All video gen (Veo 3.1 variants, gemini-omni-1.1-flash, gemini-omni-flash-preview)
+- All music gen (Lyria 3.5, Lyria 3 Pro, Lyria 3 Clip, Lyria RealTime)
+- Computer Use (gemini-2.5-computer-use-preview-10-2025)
+- Deep Research variants (deep-research-preview-04-2026, deep-research-max-preview-04-2026, deep-research-pro-preview-12-2025)
+- Legacy 2.0 (gemini-2.0-flash, gemini-2.0-flash-lite — being shut down)
+- AQA (Answer Quality Assessment)
+
+**Catalog consistency:** `test_catalog_free_tier_flags_match_table` asserts that the `free_tier` flags in the static `GEMINI_MODELS` catalog match the `FREE_TIER_LIMITS` table — they MUST agree.
+
+**Tests:** +19 regression tests in `TestFreeTierClassification` — covers all 20 free models, all paid overrides, Live API edge cases, `models/` prefix stripping, and catalog consistency.
+
+**To refresh this table on your own account:** Visit https://aistudio.google.com/rate-limits (requires login). The table is the ONLY authoritative source — Gemini's API does NOT expose pricing or free-tier info.
+
+---
+
+### 🆕 **FEAT-03 — Gemma `<thought>...</thought>` inline tag parser**
+
+**Problem:** Gemma 4 (gemma-4-26b-a4b-it, gemma-4-31b-it) emits its reasoning wrapped in inline `<thought>...</thought>` tags instead of using the OpenAI `reasoning_content` field that Gemini 3.x uses. Without parsing, the raw `<thought>` blocks leaked into the user-facing content stream — visible as raw tags mixed into the answer.
+
+**Example (actual VM output):**
+```
+<thought>*   User's name/identity: VTSTech.
+    *   Goal: Greeting/Introduction.
+    ...
+    *   "Hello, VTSTech. How can I assist you today?"</thought>Hello, VTSTech. How can I assist you today?
+```
+
+**Implementation:**
+
+New `ThoughtTagParser` class — stateful streaming parser with two-state machine:
+- State `OUTSIDE`: emit text to `content`. On seeing `<thought>`, switch to `INSIDE`.
+- State `INSIDE`: emit text to `reasoning_content`. On seeing `</thought>`, switch to `OUTSIDE`.
+- Partial tags at chunk boundaries (e.g. `<tho` at end of chunk) are buffered and re-examined on the next `feed()` call.
+- Stray closing tags (`</thought>` without a matching `<thought>`) in OUTSIDE state are STRIPPED (not emitted as content) — handles malformed Gemma output.
+- Unclosed `<thought>` at end of stream → flushed via `flush()` as reasoning (model forgot to close — surface the reasoning anyway).
+- Multiple `<thought>...</thought>` blocks may appear in sequence.
+
+Parameterized via `OPENING_TAG` / `CLOSING_TAG` class constants — extensible to future models with other tag formats (e.g. DeepSeek-R1 with `ILD...` tags would just need `_uses_thought_tags()` to detect them and a subclass with different constants).
+
+New `_uses_thought_tags(model_id)` detector — currently returns True for `gemma-*` model IDs, False for everything else.
+
+New `_parse_thought_tags_from_complete_text(text)` one-shot parser for the non-streaming `generate()` path — same semantics as the streaming parser but operates on the complete response text.
+
+**Integration points in `GeminiBackend`:**
+- `generate()` (non-streaming): After `_parse_openai_response()`, runs `_parse_thought_tags_from_complete_text()` on `parsed["content"]` if model uses thought tags. Updates `parsed["content"]` and `parsed["reasoning_content"]` accordingly. Happens before the empty-response check.
+- `generate_completions_stream()` (new override): For non-Gemma models, delegates to `super()` unchanged. For Gemma models, wraps the parent generator with a `ThoughtTagParser` instance that survives across the chunk loop. Routes `content_delta` vs `reasoning_delta` per chunk. Flushes at end of stream. Handles PERF-02 usage-only chunks (passes through unchanged).
+
+**Tests:** +16 regression tests in `TestThoughtTagParser` covering:
+- Non-streaming: simple `<thought>...</thought>`, no tags passes through, user's actual VM output, malformed stray closing tag stripped, unclosed at end, multiple blocks, empty block
+- Streaming: simple split, partial opening tag (split mid-tag), partial closing tag (split mid-tag), no tags passes through, unclosed at end flushed, empty input
+
+Plus +3 tests in `TestUsesThoughtTags` for the detector.
+
+---
+
+### 🆕 **FEAT-04 — Gemma verified chat-capable, removed from non-chat list**
+
+**Before:** Gemma was tagged non-chat (`"gemma-"` in `_NON_CHAT_PATTERNS`) with a TODO: "verify on real VM whether gemma-4-* models accept /chat/completions requests".
+
+**Verification:** User ran `agentkthx chat -m gemma-4-26b-a4b-it --backend gemini` on real VM and got a successful response — Gemma IS chat-capable via `/v1beta/openai/chat/completions`.
+
+**Fix:** Removed `"gemma-"` from `_NON_CHAT_PATTERNS`. Updated comment block to note: "VERIFIED 2026-09-24 (VTSTech on real VM): gemma-4-* IS chat-capable via /v1beta/openai/chat/completions. Kept OUT of _NON_CHAT_PATTERNS. Gemma uses `<thought>...</thought>` inline tags for reasoning — handled by ThoughtTagParser below."
+
+**Tests:** Updated `TestChatCapabilityClassification::test_misc_non_chat_models_are_none` to remove Gemma from the "should be NONE" list. Added `test_gemma_models_are_chat_capable` asserting Gemma returns `NATIVE`.
+
+---
+
+### 🎨 **UX-01 — Reasoning display layout: panel above AgentKthx: prompt, no duplicates**
+
+**Problem (reported by user after FEAT-03 + FEAT-04):** Reasoning was being shown TWICE in streaming output:
+1. Inline in dim-grey (`\033[90m...\033[0m`) under the `AgentKthx:` prefix during streaming (existing behavior for thinking models with `--think` flag)
+2. As a `reasoning:` panel below the answer after streaming completed (cmd_chat's post-stream display)
+
+User's request: "display the reasoning: above the AgentKthx: prompt and have AgentKthx: prompt show the white text in the response. Also we are showing it twice, ideally reasoning: prompt gets streaming output and we can skip the current first display (maybe because I put --think)".
+
+**Fix in `agentkthx/agent.py:_run_core_streaming()`:**
+
+Added two new state variables:
+- `_reasoning_panel_started` (False initially) — tracks whether the `reasoning:` header has been emitted
+- `_reasoning_first_line_emitted` (False initially) — used for 4-space indent on first line
+
+Added two new helpers:
+- `_emit_reasoning_panel_header()` — emits `  reasoning:\n` once per stream (dim-grey), idempotent
+- `_indent_reasoning_delta(delta)` — returns delta with proper 4-space indentation:
+  - First delta ever: prepend `"    "` (4 spaces) so first line is indented under `reasoning:`
+  - Every delta: replace `"\n"` with `"\n    "` so mid-delta newlines also get indented
+
+Modified `_emit_prefix_once()` — if a reasoning panel was started, emit a leading newline before the `AgentKthx:` prefix so they don't run together.
+
+Modified the reasoning-delta print site to:
+- Call `_emit_reasoning_panel_header()` (instead of `_emit_prefix_once()`)
+- Pass the delta through `_indent_reasoning_delta()` before printing
+- Don't emit the `AgentKthx:` prefix when reasoning arrives (only emit on content)
+
+**Fix in `agentkthx/cli.py:cmd_chat`:**
+
+Replaced the post-stream reasoning panel logic — for the streaming path (`if _will_stream:`), no longer prints the `reasoning:` panel after the answer (since it was already streamed above the prefix). Only adds a trailing blank line for visual separation. Non-streaming path unchanged.
+
+**Resulting layout:**
+```
+You: <user input>
+  reasoning:                              ← panel above AgentKthx: prompt
+    <reasoning line 1, 4-space indented>
+    <reasoning line 2>
+    ...
+AgentKthx: <white text answer only>       ← no inline reasoning, no duplicate panel
+```
+
+**Verified on real VM by user:** "Good job, it displays correctly now."
+
+---
+
+### 📚 **DOC-02 — Code comments documenting endpoint mapping + free-tier source**
+
+Added a comprehensive comment block above `_NON_CHAT_PATTERNS` in `agentkthx/plugins/gemini/gemini.py` documenting the endpoint each non-chat model family uses:
+
+| Model family | Endpoint used | Accepts `/chat/completions`? |
+|--------------|---------------|------------------------------|
+| Chat (gemini-3.x-flash, 2.5-flash, etc.) | `POST /v1beta/openai/chat/completions` | ✓ yes |
+| Image gen (Nano Banana, gemini-*-image) | `POST /v1beta/openai/images/generations` | ✗ no |
+| Video gen (Veo, Omni) | `POST /v1beta/openai/videos` | ✗ no |
+| Music gen (Lyria) | Different endpoint | ✗ no |
+| Audio (Live API, TTS, Transcribe) | WebSocket / native TTS / `/audio/transcriptions` | ✗ no |
+| Embeddings | `POST /v1beta/openai/embeddings` | ✗ no |
+| Robotics | Specialized robotics endpoint | ✗ no |
+| Computer Use | Native API only | ✗ no |
+| Deep Research | Agentic endpoint | ✗ no |
+| Antigravity | Managed agent endpoint | ✗ no |
+| Gemma open-source | `POST /v1beta/openai/chat/completions` (verified on real VM) | ✓ yes |
+
+Added comment block above `FREE_TIER_LIMITS` documenting:
+- Google does NOT expose pricing or free-tier endpoint via API
+- The rate-limits docs page documents tiers but not per-model RPM/TPM/RPD
+- The table was transcribed from AI Studio on 2026-09-24 by VTSTech
+- AI Studio URL: https://aistudio.google.com/rate-limits
+- Refresh instructions for future contributors
+
+Updated each pattern in `_NON_CHAT_PATTERNS` with an inline comment showing the endpoint it maps to (e.g. `"-image" → /images endpoint`).
+
+Added v0.2 TODO: "when image I/O support is added, gemini-2.5-flash-image and gemini-3-pro-image-preview become usable via the /images/generations endpoint. That's a separate code path from /chat/completions and needs its own backend method (e.g. generate_image(prompt) → bytes). For now, they're correctly tagged as non-chat."
+
+---
+
+### 🧪 **TEST-02 — Test suite growth (R06.56 final)**
+
+- **R06.55 (baseline):** 710 passed, 9 skipped, 0 failed
+- **R06.56 final:** **766 passed**, 9 skipped, 0 failed
+- **+56 new tests total:**
+  - +38 Gemini unit tests (initial plugin ship in TEST-01)
+  - +3 Gemini live-API tests (skipped unless `GEMINI_API_KEY` + `GEMINI_RUN_LIVE_TESTS=1` opt-in)
+  - +1 test for `test_gemini_is_cloud_provider` (BUG-02 regression)
+  - +3 tests for `test_openre_api_mode_normalized_to_openai`, `test_string_api_mode_accepted`, `test_jev_api_mode_accepted` (BUG-01 tolerance)
+  - +4 tests for `TestModelIdPrefixStripping` (FEAT-02 polish — `models/` prefix stripping)
+  - +11 tests for `TestChatCapabilityClassification` (FEAT-04 + non-chat model families)
+  - +19 tests for `TestFreeTierClassification` (FEAT-02 — covers all 20 free models, paid overrides, Live API edge cases, catalog consistency)
+  - +3 tests for `TestUsesThoughtTags` (FEAT-03 detector)
+  - +13 tests for `TestThoughtTagParser` (FEAT-03 — non-streaming + streaming, partial tags, malformed, unclosed, multi-block)
+- **No regressions** — all 710 pre-existing tests still pass unchanged
+
+---
+
+### 📦 **DIST-02 — Updated deployable zip**
+
+`AgentKthx-gemini-plugin.zip` (879 KB, 211 files, sha256 `4f3a356e2ba27d21…`) — refreshed zip with all R06.56 changes (BUG-02 fix, FEAT-02 free-tier data, FEAT-03 Gemma parser, FEAT-04 Gemma chat-capable, UX-01 reasoning layout, DOC-02 comments). Excludes `.git/` and `__pycache__/`. Verified by extracting to `/tmp` and running the full test suite (766 passed, 9 skipped). Distributed via the session's preview panel at `/AgentKthx-gemini-plugin.zip`.
+
+---
+
 ### 🚧 **Known Limitations (v0.1)**
 
 - **Thought-signature stateful continuation NOT yet implemented** — multi-turn agent loops will re-derive reasoning each turn, costing ~2-3× more reasoning tokens on Gemini 3.x. The `thought_signature` parameter is plumbed through `_build_openai_body()` and the hooks are in place; v0.2 will add the accumulator in `generate_completions_stream()`.
@@ -168,12 +401,14 @@ Plus appendices: OpenAI-compat limitations (beta gaps), region availability (200
 
 - **+1 new cloud backend** (Gemini) — first addition since R06.41's plugin system
 - **+4 new files** in `agentkthx/plugins/gemini/` + `tests/test_gemini_backend.py`
-- **+2 patched existing files** (`agentkthx/core/types.py`, `agentkthx/config.py`) + 1 CLI patch (`agentkthx/cli.py:2091`)
+- **+3 patched existing files** (`agentkthx/core/types.py`, `agentkthx/config.py`, `agentkthx/cli.py` — 7 distinct sites)
 - **+1 new reference doc** (`docs/GEMINI_API_TECHNICAL_REFERENCE.md`, 1553 lines)
-- **+41 new unit tests** + 3 live-API tests
-- **1 bug fixed** (BUG-01: cmd_models crashed on Gemini with hardcoded OPENRE)
-- **3 regression tests** guard against reintroduction of BUG-01
-- **713 tests passing** (was 710), 0 failing, no regressions
+- **+56 new tests** (41 initial plugin + 3 live-API + 12 follow-ups for BUG-01 tolerance + 1 for BUG-02 cloud-provider + 4 for `models/` prefix stripping + 11 for chat-capability + 19 for free-tier classification + 3 for thought-tag detector + 13 for ThoughtTagParser)
+- **2 bugs fixed** (BUG-01: api_mode crash from hardcoded OPENRE; BUG-02: empty model table from cloud-provider allowlist missing GEMINI)
+- **4 new features** (FEAT-01: Gemini backend itself; FEAT-02: free-tier data from AI Studio; FEAT-03: Gemma `<thought>` tag parser; FEAT-04: Gemma verified chat-capable)
+- **1 UX improvement** (UX-01: reasoning panel above `AgentKthx:` prompt, no duplicates)
+- **2 doc improvements** (DOC-01: reference doc; DOC-02: endpoint mapping + free-tier source comments)
+- **766 tests passing** (was 710), 0 failing, no regressions
 
 ---
 
