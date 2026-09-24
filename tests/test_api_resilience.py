@@ -14,6 +14,8 @@ two-layer resilience:
 Written by VTSTech — https://www.vts-tech.org
 """
 
+import json
+
 import pytest
 
 from agentkthx import Agent
@@ -224,6 +226,12 @@ class TestAgentRetriesTransientErrors:
 # ============================================================================
 
 class _FakeResponse:
+    """Legacy fake for requests-style responses (kept for reference).
+
+    ROB-04: After the urllib migration, tests use _fake_urlopen_side_effect
+    below instead. This class is retained for any tests that still
+    construct it directly.
+    """
     def __init__(self, status_code, body=None, headers=None):
         self.status_code = status_code
         self._body = body if body is not None else {
@@ -234,6 +242,82 @@ class _FakeResponse:
 
     def json(self):
         return self._body
+
+
+def _fake_urlopen_side_effect(responses):
+    """Build a side_effect for monkeypatched urllib.request.urlopen.
+
+    Args:
+        responses: list of (status_code, body_dict, headers_dict) tuples.
+                   status_code >= 400 → raises HTTPError.
+                   status_code < 400 → returns a context manager with .read().
+
+    Returns:
+        A callable suitable as the `side_effect` or replacement for
+        `urllib.request.urlopen`.
+    """
+    import urllib.error
+    call_count = [0]
+
+    class _FakeSuccess:
+        def __init__(self, body_dict):
+            self._data = json.dumps(body_dict).encode("utf-8")
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return False
+        def read(self):
+            return self._data
+
+    def _side_effect(req, timeout=None):
+        idx = call_count[0]
+        call_count[0] += 1
+        if idx >= len(responses):
+            # Default to success if called more than expected
+            return _FakeSuccess({
+                "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}]
+            })
+        status, body, hdrs = responses[idx]
+        if status >= 400:
+            body_bytes = json.dumps(body).encode("utf-8") if body else b""
+            err = urllib.error.HTTPError(
+                url=req.full_url if hasattr(req, "full_url") else "http://test",
+                code=status,
+                msg="Error",
+                hdrs=_FakeHeaders(hdrs or {}),
+                fp=_FakeBytesIO(body_bytes),
+            )
+            raise err
+        return _FakeSuccess(body or {
+            "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}]
+        })
+
+    return _side_effect, call_count
+
+
+class _FakeHeaders:
+    """Minimal http.client.HTTPMessage replacement for HTTPError."""
+    def __init__(self, hdrs):
+        self._hdrs = hdrs
+    def get(self, key, default=""):
+        return self._hdrs.get(key, default)
+
+
+class _FakeBytesIO:
+    """Minimal file-like object for HTTPError.fp (so .read() and .close() work)."""
+    def __init__(self, data):
+        self._data = data
+        self._pos = 0
+    def read(self, n=-1):
+        if n == -1:
+            result = self._data[self._pos:]
+            self._pos = len(self._data)
+        else:
+            result = self._data[self._pos:self._pos + n]
+            self._pos += len(result)
+        return result
+    def close(self):
+        pass
 
 
 @pytest.fixture
@@ -253,29 +337,27 @@ def openrouter_plugin():
 
 class TestOpenRouter429Retry:
     def test_429_then_success(self, openrouter_plugin, monkeypatch):
-        calls = []
-        monkeypatch.setattr(
-            "agentkthx.plugins.openrouter.openrouter.requests.post",
-            lambda url, **kw: calls.append(url) or (
-                _FakeResponse(429, {"error": {"message": "Provider returned error"}},
-                              {"Retry-After": "1"})
-                if len(calls) < 3 else _FakeResponse(200)
-            ),
-        )
+        responses = [
+            (429, {"error": {"message": "Provider returned error"}}, {"Retry-After": "1"}),
+            (429, {"error": {"message": "Provider returned error"}}, {"Retry-After": "1"}),
+            (200, {"choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}]}, None),
+        ]
+        side_effect, call_count = _fake_urlopen_side_effect(responses)
+        monkeypatch.setattr("urllib.request.urlopen", side_effect)
         monkeypatch.setattr(
             "agentkthx.plugins.openrouter.openrouter.time.sleep", lambda s: None)
         out = openrouter_plugin._make_api_request("chat/completions", {"x": 1})
         assert out["choices"][0]["message"]["content"] == "ok"
-        assert len(calls) == 3
+        assert call_count[0] == 3
 
     def test_429_exponential_backoff_when_no_header(self, openrouter_plugin, monkeypatch):
-        calls = []
-        monkeypatch.setattr(
-            "agentkthx.plugins.openrouter.openrouter.requests.post",
-            lambda url, **kw: calls.append(url) or (
-                _FakeResponse(429) if len(calls) < 2 else _FakeResponse(200)
-            ),
-        )
+        responses = [
+            (429, None, None),
+            (429, None, None),
+            (200, {"choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}]}, None),
+        ]
+        side_effect, call_count = _fake_urlopen_side_effect(responses)
+        monkeypatch.setattr("urllib.request.urlopen", side_effect)
         slept = []
         monkeypatch.setattr(
             "agentkthx.plugins.openrouter.openrouter.time.sleep",
@@ -286,50 +368,48 @@ class TestOpenRouter429Retry:
 
     def test_429_exhausted_raises_with_budget(self, openrouter_plugin, monkeypatch):
         monkeypatch.setenv("OPENROUTER_MAX_429_RETRIES", "2")
-        monkeypatch.setattr(
-            "agentkthx.plugins.openrouter.openrouter.requests.post",
-            lambda url, **kw: _FakeResponse(
-                429, {"error": {"message": "Provider returned error"}}),
-        )
+        responses = [
+            (429, {"error": {"message": "Provider returned error"}}, None),
+        ] * 3
+        side_effect, call_count = _fake_urlopen_side_effect(responses)
+        monkeypatch.setattr("urllib.request.urlopen", side_effect)
         monkeypatch.setattr(
             "agentkthx.plugins.openrouter.openrouter.time.sleep", lambda s: None)
         with pytest.raises(RuntimeError, match="Retried 2 times"):
             openrouter_plugin._make_api_request("chat/completions", {"x": 1})
 
     def test_502_retried_then_success(self, openrouter_plugin, monkeypatch):
-        calls = []
-        monkeypatch.setattr(
-            "agentkthx.plugins.openrouter.openrouter.requests.post",
-            lambda url, **kw: calls.append(url) or (
-                _FakeResponse(502, {"error": {"message": "Bad gateway"}})
-                if len(calls) < 2 else _FakeResponse(200)
-            ),
-        )
+        responses = [
+            (502, {"error": {"message": "Bad gateway"}}, None),
+            (502, {"error": {"message": "Bad gateway"}}, None),
+            (200, {"choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}]}, None),
+        ]
+        side_effect, call_count = _fake_urlopen_side_effect(responses)
+        monkeypatch.setattr("urllib.request.urlopen", side_effect)
         monkeypatch.setattr(
             "agentkthx.plugins.openrouter.openrouter.time.sleep", lambda s: None)
         out = openrouter_plugin._make_api_request("chat/completions", {"x": 1})
         assert out["choices"][0]["message"]["content"] == "ok"
 
     def test_400_not_retried(self, openrouter_plugin, monkeypatch):
-        calls = []
-        monkeypatch.setattr(
-            "agentkthx.plugins.openrouter.openrouter.requests.post",
-            lambda url, **kw: calls.append(url) or _FakeResponse(
-                400, {"error": {"message": "invalid request"}}),
-        )
+        responses = [
+            (400, {"error": {"message": "invalid request"}}, None),
+        ]
+        side_effect, call_count = _fake_urlopen_side_effect(responses)
+        monkeypatch.setattr("urllib.request.urlopen", side_effect)
         with pytest.raises(RuntimeError, match="400"):
             openrouter_plugin._make_api_request("chat/completions", {"x": 1})
-        assert len(calls) == 1  # no retry on a bad request
+        assert call_count[0] == 1  # no retry on a bad request
 
     def test_401_not_retried(self, openrouter_plugin, monkeypatch):
-        calls = []
-        monkeypatch.setattr(
-            "agentkthx.plugins.openrouter.openrouter.requests.post",
-            lambda url, **kw: calls.append(url) or _FakeResponse(401),
-        )
+        responses = [
+            (401, None, None),
+        ]
+        side_effect, call_count = _fake_urlopen_side_effect(responses)
+        monkeypatch.setattr("urllib.request.urlopen", side_effect)
         with pytest.raises(RuntimeError, match="authentication"):
             openrouter_plugin._make_api_request("chat/completions", {"x": 1})
-        assert len(calls) == 1
+        assert call_count[0] == 1
 
     def test_default_budget_is_six(self, openrouter_plugin, monkeypatch):
         monkeypatch.delenv("OPENROUTER_MAX_429_RETRIES", raising=False)

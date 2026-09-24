@@ -99,7 +99,7 @@ def is_transient_api_error(exc: BaseException) -> bool:
     (worth retrying after a back-off) or permanent (fail immediately).
 
     Classification is text-based on ``str(exc)`` because backends raise plain
-    ``RuntimeError``/``requests`` exceptions carrying the upstream message.
+    ``RuntimeError`` exceptions carrying the upstream message.
     """
     msg = str(exc).lower()
     if not msg:

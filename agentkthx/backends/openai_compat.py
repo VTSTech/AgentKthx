@@ -677,7 +677,7 @@ class OpenAICompatibleBackend(BaseBackend):
                   f"tools={len(tools) if tools else 0}, stream=True")
 
         # Each backend's _iter_sse_lines handles its own HTTP transport
-        # (urllib direct, requests with retry, etc.) and yields raw SSE
+        # (urllib direct, urllib with retry, etc.) and yields raw SSE
         # line bytes. This method parses them uniformly.
         for line_bytes in self._iter_sse_lines(url, body, headers):
             if not line_bytes:
@@ -755,7 +755,7 @@ class OpenAICompatibleBackend(BaseBackend):
         - OllamaBackend: ``urllib.request.urlopen`` direct
         - ZaiBackend: ``urllib.request.urlopen`` with error recovery
           (insufficient credits → free fallback, no-tools → ReAct)
-        - OpenRouterBackend: ``requests.post(stream=True)`` with 429 retry
+        - OpenRouterBackend: ``urllib.request.urlopen`` with 429 retry
 
         Yields:
             Raw bytes lines from the SSE stream (e.g. ``b'data: {...}\\n'``).

@@ -104,6 +104,25 @@ Local-backend layout (Ollama) is unchanged — still shows Size + Family columns
 
 ---
 
+### 🧹 **ROB-04 — `requests` dependency removed, zero-dependency claim restored**
+
+The codebase declared `dependencies = []` in `pyproject.toml` with a "Zero dependencies! Uses Python stdlib only." comment, but `OpenRouterBackend` imported and used the third-party `requests` library at module level. If `requests` wasn't installed, the OpenRouter plugin failed to load silently with a generic "failed to load plugin 'openrouter': No module named 'requests'" warning that didn't tell the user how to fix it.
+
+**Rewrote all 4 `requests` usage sites in `openrouter.py` to stdlib `urllib.request`:**
+
+1. **Module-level import** — `import requests` → `import urllib.request` + `import urllib.error`
+2. **`list_models()`** — `requests.get()` → `urllib.request.Request` + `urllib.request.urlopen()` + `json.loads(resp.read())`
+3. **`_make_api_request()` (non-streaming, ~120 lines)** — The big one. `requests.post()` returns a Response with `.status_code` / `.headers` / `.json()`. `urllib.request.urlopen()` raises `HTTPError` on non-2xx. Rewrote the retry loop to catch `HTTPError` and extract `.code` / `.headers` / `.read()`. Same 429/502/503/504 retry logic with Retry-After + exponential backoff, same 401 auth error, same 4xx/5xx error extraction. Added `URLError` catch for network-level errors.
+4. **`_stream_request()` + `_iter_sse_lines()`** — `requests.post(stream=True)` + `response.iter_lines()` → `urllib.request.urlopen()` + iterate response directly (urllib response objects are iterable, yielding lines)
+
+**Tests** — 6 tests in `tests/test_api_resilience.py::TestOpenRouter429Retry` rewritten. Replaced `_FakeResponse` (requests-style with `.status_code`/`.json()`) with `_fake_urlopen_side_effect()` helper that builds a sequence of `(status, body, headers)` tuples. On 2xx: returns a context manager with `.read()`. On 4xx/5xx: raises `urllib.error.HTTPError` with `.code`, `.headers`, `.fp`. Added `_FakeHeaders` and `_FakeBytesIO` helper classes. All `monkeypatch.setattr` targets changed from `requests.post` to `urllib.request.urlopen`.
+
+**Verification** — `grep -rn "import requests" agentkthx/` returns zero results. All remaining `requests` references in the codebase are comments, docstrings, or unrelated identifiers (`total_requests`, `too_many_requests`). The `pyproject.toml` declaration `dependencies = []` is now accurate.
+
+**Impact** — Users on minimal Python installs (e.g. `python3-minimal` on Debian/Ubuntu without `requests` pre-installed) can now use OpenRouter without a confusing silent plugin-load failure. The zero-dependency claim is true for the first time since OpenRouter was added.
+
+---
+
 
 
 ## [R06.54] - 2026-09-22

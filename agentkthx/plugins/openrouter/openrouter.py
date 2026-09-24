@@ -34,9 +34,10 @@ from __future__ import annotations
 import json
 import os
 import time
+import urllib.request
+import urllib.error
 from typing import Any, Generator, Optional
 
-import requests
 from agentkthx.backends.base import BaseBackend, BackendConfig
 from agentkthx.backends.openai_compat import OpenAICompatibleBackend
 from agentkthx.core.types import BackendType, ToolSupportLevel, ApiMode
@@ -378,14 +379,13 @@ class OpenRouterBackend(OpenAICompatibleBackend):
             if self.api_key:
                 headers["Authorization"] = f"Bearer {self.api_key}"
             
-            response = requests.get(
+            req = urllib.request.Request(
                 f"{self.base_url}/models",
                 headers=headers,
-                timeout=10  # Shorter timeout for model listing
+                method="GET",
             )
-            response.raise_for_status()
-            
-            models_data = response.json()
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                models_data = json.loads(resp.read().decode("utf-8"))
             available_models = []
             
             # Parse API response using live data
@@ -619,80 +619,97 @@ class OpenRouterBackend(OpenAICompatibleBackend):
         # worth waiting out (R06.54). We honor Retry-After and fall back to an
         # exponential schedule so the agent outlives provider hiccups instead
         # of dying mid-run.
+        #
+        # ROB-04 (R06.56): rewritten from `requests` to stdlib
+        # `urllib.request` to preserve the zero-dependency claim. urllib
+        # raises HTTPError on non-2xx status, so we catch it and extract
+        # status / headers / body the same way requests gave us
+        # .status_code / .headers / .json() / .text.
         max_retries = self._max_429_retries()
         last_retryable_error = None
         for attempt in range(max_retries + 1):
-            response = requests.post(
+            req = urllib.request.Request(
                 url,
-                json=data,
+                data=json.dumps(data).encode("utf-8"),
                 headers=headers,
-                timeout=self.config.timeout
+                method="POST",
             )
-
-            # ---- 429 Rate Limit / transient 5xx: wait and retry ----
-            retryable = (
-                response.status_code == 429
-                or response.status_code in (502, 503, 504)
-            )
-            if retryable:
-                error_msg = (
-                    "Rate limit exceeded"
-                    if response.status_code == 429
-                    else f"Provider error {response.status_code}"
-                )
-                retry_after_raw = response.headers.get("Retry-After", "")
+            try:
+                with urllib.request.urlopen(req, timeout=self.config.timeout) as resp:
+                    # Success — read and parse the JSON body
+                    return json.loads(resp.read().decode("utf-8"))
+            except urllib.error.HTTPError as e:
+                status_code = e.code
+                # Read body once — e.fp can only be consumed once
+                body_bytes = e.read() if e.fp else b""
+                body_text = body_bytes.decode("utf-8", errors="replace") if body_bytes else ""
+                # Parse JSON body if possible (for error messages)
+                err_data = None
                 try:
-                    error_data = response.json()
-                    if "error" in error_data:
-                        inner = error_data["error"]
-                        error_msg = (inner.get("message", inner)
-                                     if isinstance(inner, dict) else str(inner))
-                    elif "message" in error_data:
-                        error_msg = error_data["message"]
-                except Exception:
+                    if body_text:
+                        err_data = json.loads(body_text)
+                except (json.JSONDecodeError, ValueError):
                     pass
-                last_retryable_error = error_msg
 
-                # Honor Retry-After when parseable; otherwise back off
-                # exponentially (5s → 10s → 20s → 40s → 80s → 90s cap).
-                retry_after = None
-                if retry_after_raw:
-                    try:
-                        retry_after = float(retry_after_raw)
-                    except (ValueError, TypeError):
-                        retry_after = None
-                if retry_after is None:
-                    retry_after = self._429_backoff(attempt + 1)
-                retry_after = min(max(retry_after, 1.0), self._429_BACKOFF_CAP)
+                # ---- 429 Rate Limit / transient 5xx: wait and retry ----
+                retryable = (
+                    status_code == 429
+                    or status_code in (502, 503, 504)
+                )
+                if retryable:
+                    error_msg = (
+                        "Rate limit exceeded"
+                        if status_code == 429
+                        else f"Provider error {status_code}"
+                    )
+                    retry_after_raw = e.headers.get("Retry-After", "")
+                    if isinstance(err_data, dict):
+                        if "error" in err_data:
+                            inner = err_data["error"]
+                            error_msg = (inner.get("message", inner)
+                                         if isinstance(inner, dict) else str(inner))
+                        elif "message" in err_data:
+                            error_msg = err_data["message"]
+                    last_retryable_error = error_msg
 
-                if attempt < max_retries:
-                    # R06.54: always visible — the user must SEE that the
-                    # harness is patiently waiting instead of silently dying.
-                    print(f"  [OpenRouter] {response.status_code} — {error_msg}. "
-                          f"Retrying in {retry_after:.0f}s "
-                          f"(attempt {attempt + 1}/{max_retries + 1})...")
-                    time.sleep(retry_after)
-                    continue
-                else:
-                    # Exhausted retries — raise the error.
+                    # Honor Retry-After when parseable; otherwise back off
+                    # exponentially (5s → 10s → 20s → 40s → 80s → 90s cap).
+                    retry_after = None
+                    if retry_after_raw:
+                        try:
+                            retry_after = float(retry_after_raw)
+                        except (ValueError, TypeError):
+                            retry_after = None
+                    if retry_after is None:
+                        retry_after = self._429_backoff(attempt + 1)
+                    retry_after = min(max(retry_after, 1.0), self._429_BACKOFF_CAP)
+
+                    if attempt < max_retries:
+                        # R06.54: always visible — the user must SEE that the
+                        # harness is patiently waiting instead of silently dying.
+                        print(f"  [OpenRouter] {status_code} — {error_msg}. "
+                              f"Retrying in {retry_after:.0f}s "
+                              f"(attempt {attempt + 1}/{max_retries + 1})...")
+                        time.sleep(retry_after)
+                        continue
+                    else:
+                        # Exhausted retries — raise the error.
+                        raise RuntimeError(
+                            f"OpenRouter rate limit: {error_msg}. "
+                            f"Retried {max_retries} times. "
+                            f"Try again in {retry_after:.0f} seconds."
+                        )
+
+                # ---- 401 Auth error ----
+                if status_code == 401:
                     raise RuntimeError(
-                        f"OpenRouter rate limit: {error_msg}. "
-                        f"Retried {max_retries} times. "
-                        f"Try again in {retry_after:.0f} seconds."
+                        "OpenRouter authentication failed. Please check your "
+                        "OPENROUTER_API_KEY environment variable."
                     )
 
-            # ---- 401 Auth error ----
-            if response.status_code == 401:
-                raise RuntimeError(
-                    "OpenRouter authentication failed. Please check your "
-                    "OPENROUTER_API_KEY environment variable."
-                )
-
-            # ---- Any other 4xx/5xx error ----
-            if response.status_code >= 400:
-                upstream_msg = ""
-                try:
-                    err_data = response.json()
+                # ---- Any other 4xx/5xx error ----
+                if status_code >= 400:
+                    upstream_msg = ""
                     if isinstance(err_data, dict):
                         err_field = err_data.get("error")
                         if isinstance(err_field, dict):
@@ -704,43 +721,41 @@ class OpenRouterBackend(OpenAICompatibleBackend):
                         else:
                             upstream_msg = str(err_data)
                     else:
-                        upstream_msg = str(err_data)
-                except Exception:
-                    upstream_msg = response.text[:500]
+                        upstream_msg = body_text[:500]
 
-                if len(upstream_msg) > 500:
-                    upstream_msg = upstream_msg[:500] + "..."
+                    if len(upstream_msg) > 500:
+                        upstream_msg = upstream_msg[:500] + "..."
 
-                raise RuntimeError(
-                    f"OpenRouter API error {response.status_code}: {upstream_msg}"
-                )
+                    raise RuntimeError(
+                        f"OpenRouter API error {status_code}: {upstream_msg}"
+                    )
 
-            # Success
-            return response.json()
-
-        # Should never reach here (loop exits via return or raise above).
-        raise RuntimeError(
-            f"OpenRouter rate limit: {last_retryable_error}. "
-            f"Retried {max_retries} times."
-        )
+            except urllib.error.URLError as e:
+                # Network-level error (DNS, connection refused, timeout)
+                raise RuntimeError(f"OpenRouter connection error: {e.reason}")
 
     def _stream_request(self, url: str, data: dict, headers: dict) -> Generator[dict, None, None]:
-        """Handle streaming requests."""
-        response = requests.post(
+        """Handle streaming requests (ROB-04: stdlib urllib, not requests)."""
+        req = urllib.request.Request(
             url,
-            json=data,
+            data=json.dumps(data).encode("utf-8"),
             headers=headers,
-            timeout=self.config.timeout,
-            stream=True
+            method="POST",
         )
-        response.raise_for_status()
+        try:
+            response = urllib.request.urlopen(req, timeout=self.config.timeout)
+        except urllib.error.HTTPError as e:
+            error_body = e.read().decode("utf-8") if e.fp else ""
+            raise RuntimeError(f"OpenRouter HTTP error {e.code}: {error_body}")
+        except urllib.error.URLError as e:
+            raise RuntimeError(f"OpenRouter connection error: {e.reason}")
 
-        for line in response.iter_lines():
+        for line in response:
             if line:
-                line = line.decode('utf-8')
-                if line.startswith('data: '):
-                    json_str = line[6:]
-                    if json_str.strip() == '[DONE]':
+                line_str = line.decode("utf-8")
+                if line_str.startswith("data: "):
+                    json_str = line_str[6:]
+                    if json_str.strip() == "[DONE]":
                         continue
                     try:
                         chunk = json.loads(json_str)
@@ -1025,16 +1040,25 @@ class OpenRouterBackend(OpenAICompatibleBackend):
     def _iter_sse_lines(self, url: str, body: dict, headers: dict):
         """Make a streaming POST to OpenRouter's /chat/completions.
 
-        Uses requests.post with stream=True and yields raw SSE line bytes.
-        The base class generate_completions_stream() parses these lines.
+        ROB-04 (R06.56): uses stdlib `urllib.request.urlopen` (not `requests`)
+        to preserve the zero-dependency claim. The base class
+        `generate_completions_stream()` parses these lines.
         """
-        import requests as _requests
-        response = _requests.post(
-            url, json=body, headers=headers,
-            timeout=self.config.timeout, stream=True,
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(body).encode("utf-8"),
+            headers=headers,
+            method="POST",
         )
-        response.raise_for_status()
-        for line in response.iter_lines():
+        try:
+            response = urllib.request.urlopen(req, timeout=self.config.timeout)
+        except urllib.error.HTTPError as e:
+            error_body = e.read().decode("utf-8") if e.fp else ""
+            raise RuntimeError(f"OpenRouter HTTP error {e.code}: {error_body}")
+        except urllib.error.URLError as e:
+            raise RuntimeError(f"OpenRouter connection error: {e.reason}")
+
+        for line in response:
             yield line
 
     # _get_model_defaults() already exists on OpenRouterBackend (uses _model_cache)

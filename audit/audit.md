@@ -44,7 +44,7 @@ The test suite has 672 passed, 6 skipped, 0 failed tests. Security practices rem
 |----|----------|----------|--------|-------|
 | MAINT-01 | **High** | Maintainability | OPEN | `cli.py` is 3801 lines — monolithic CLI with no module splitting |
 | MAINT-04 | **Medium** | Maintainability | OPEN (NEW) | `agent.py` is 2876 lines — `_run_core()` and `_run_core_streaming()` are near-duplicates with divergent debug output |
-| ROB-04 | **Medium** | Robustness | OPEN (NEW) | `requests` dependency violates zero-dependency claim — OpenRouter plugin fails silently if missing |
+| ROB-04 | ~~Medium~~ | Robustness | ✓ CLOSED R06.56 | `requests` dependency removed — OpenRouter now uses stdlib `urllib.request` |
 | ROB-05 | Low | Robustness | OPEN (NEW) | KeyboardInterrupt during streaming doesn't close HTTP connections |
 | PERF-03 | Low | Performance | OPEN (NEW) | `_generate_stream()` has a dead `think` parameter — accepted but never forwarded |
 | FEAT-01 | Medium | New Feature | OPEN | No provider routing preferences for OpenRouter |
@@ -62,7 +62,7 @@ The test suite has 672 passed, 6 skipped, 0 failed tests. Security practices rem
 | PERF-02 | ~~Low~~ | Performance | ✓ CLOSED R06.53 | `stream_options.include_usage` on streaming requests |
 | ARCH-01 | ~~Medium~~ | Architecture | ✓ CLOSED R06.55 | `OpenAICompatibleBackend` extracted — ZAI/OpenRouter no longer inherit OllamaBackend |
 
-**Severity distribution**: 1 High (MAINT-01), 3 Medium, 4 Low (excluding closed findings). Of the 9 still-open: 1 High, 3 Medium, 4 Low.
+**Severity distribution**: 1 High (MAINT-01), 2 Medium, 4 Low (excluding closed findings). Of the 8 still-open: 1 High, 2 Medium, 4 Low.
 
 ---
 
