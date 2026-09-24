@@ -99,14 +99,14 @@ def print_banner() -> None:
 # Update Check (pip-style "new release available" notice)
 # ============================================================================
 
-# Result of the daily-cached PyPI update check for this process, stashed by
+# Result of the hourly-cached PyPI update check for this process, stashed by
 # main() so the notice can be printed under the chat banner (cmd_chat) and
 # after non-interactive commands (post-run) without hitting the network twice.
 _LAST_UPDATE_CHECK = None
 
 
 def _run_update_check(timeout: float = 1.0) -> None:
-    """Run the daily-cached update check once; stash the result. Never raises."""
+    """Run the hourly-cached update check once; stash the result. Never raises."""
     global _LAST_UPDATE_CHECK
     try:
         from .update_check import check_for_update
@@ -347,7 +347,15 @@ def create_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("update", help="Update AgentKthx to the latest version from GitHub")
 
     # Version command
-    subparsers.add_parser("version", help="Show version information")
+    _version_parser = subparsers.add_parser("version", help="Show version information")
+    # R06.57: --refresh bypasses the update_check cache so users can force a
+    # fresh fetch from PyPI + GitHub without manually deleting
+    # ~/.agentkthx/update_check.json. Useful when a new release was just
+    # published and the 1h cache hasn't expired yet.
+    _version_parser.add_argument(
+        "--refresh", action="store_true",
+        help="Bypass the update-check cache and fetch fresh from PyPI/GitHub",
+    )
 
     return parser
 
@@ -2990,16 +2998,18 @@ def cmd_version(args: argparse.Namespace) -> int:
     print(f"   {dim('Author:')}  {cyan(__author__)}")
     print(f"   {dim('Repo:')}    {dim('https://github.com/VTSTech/AgentKthx')}")
 
-    # Latest releases (daily-cached checks — silent on failure / opt-out):
+    # Latest releases (hourly-cached checks — silent on failure / opt-out):
     # stable track via PyPI, development track via GitHub main commits
     # (the commit line only appears for git checkouts, which have a baseline).
     #
     # R06.57: pip-installed users now also see a "GitHub main:" version line
     # (parsed from raw.githubusercontent.com/.../__init__.py) — surfaces
     # dev releases that haven't been pushed to PyPI yet.
+    # R06.57: --refresh flag bypasses the 1h cache for fresh fetches.
+    _force_refresh = getattr(args, "refresh", False)
     try:
         from .update_check import base_version, check_for_update, git_hash, is_newer
-        _latest_info = check_for_update(timeout=1.0)
+        _latest_info = check_for_update(timeout=1.0, force=_force_refresh)
     except Exception:
         _latest_info = None
     if _latest_info:
@@ -4047,9 +4057,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         parser.print_help()
         return 0
 
-    # Update check — daily-cached PyPI query, silent on failure / opt-out
-    # (AGENTKTHX_NO_UPDATE_CHECK=1). `version` does its own inline check;
-    # `update` obviously doesn't need one.
+    # Update check — hourly-cached PyPI query, silent on failure / opt-out
+    # (AGENTKTHX_NO_UPDATE_CHECK=1). `version` does its own inline check
+    # (and honors --refresh); `update` obviously doesn't need one.
     if args.command not in ("version", "update"):
         _run_update_check()
 

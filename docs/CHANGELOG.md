@@ -113,6 +113,48 @@ Calling `.close()` on a generator that's mid-iteration triggers its `finally` bl
 
 ---
 
+### 🐛 **FIX-02 — Update-check cache TTL reduced from 24h to 1h + `agentkthx version --refresh` flag**
+
+**Symptom (user-reported):** On a pip-installed copy, `agentkthx version` reported "Latest on PyPI: 0.6.54 (up to date)" — even though 0.6.55 and 0.6.56 had been released to PyPI the previous day. The cache file (`~/.agentkthx/update_check.json`) had been populated when 0.6.54 was the latest, and the 24h success TTL meant it would keep serving that stale answer for up to a full day before refetching.
+
+**Root cause:** `agentkthx/update_check.py` had:
+
+```python
+SUCCESS_TTL = 24 * 3600   # 24h — too long for an actively-developed project
+FAILURE_TTL = 6 * 3600    # 6h  — proportionally too long for negative cache
+```
+
+The cache file already included a `checked_at` timestamp per cycle, and `_cache_fresh(entry, cached_ts, now)` already compared `now - cached_ts` against the TTL. The plumbing was correct; the constant was just too conservative. For a project that cuts multiple releases per day during active development (R06.50→R06.56 in 4 days), a 24h TTL guarantees users will see stale data on every release after the first one in a 24h window.
+
+**Fix — three coordinated changes:**
+
+1. **`SUCCESS_TTL` reduced from 24h to 1h** (`agentkthx/update_check.py:68`). The cache file records `checked_at` per cycle; if `now - checked_at >= 3600`, the entry is refetched on the next `agentkthx` invocation. Users running `agentkthx` multiple times in a single hour still benefit from the cache; users running it the next hour see fresh data.
+
+2. **`FAILURE_TTL` reduced from 6h to 15min** (`agentkthx/update_check.py:73`). Proportionally scaled to match the success-TTL reduction. Transient failures (rate-limited GitHub API, PyPI blip) get retried sooner than successful entries need refreshing — preserves the "don't hammer on failure" property while not letting a 6h-old transient failure hide a now-fixed source.
+
+3. **New `--refresh` flag on `agentkthx version`** — bypasses the update-check cache for all sources and fetches fresh from PyPI + GitHub. Useful when a user knows a release just happened and doesn't want to wait for the 1h TTL or manually `rm ~/.agentkthx/update_check.json`. Wires through to the existing `check_for_update(force=True)` Python API.
+
+   ```bash
+   agentkthx version --refresh
+   ```
+
+**Updated documentation:**
+- `agentkthx/update_check.py` module docstring: "At most one network round per source per hour (R06.57: was 24h)" + "Failed sources are negatively cached for 15 min (R06.57: was 6h)" + new bullet for `--refresh`
+- `agentkthx/cli.py:cmd_version` comment: "daily-cached" → "hourly-cached" + note about `--refresh`
+- `agentkthx/cli.py` module-level `_LAST_UPDATE_CHECK` comment: "daily-cached" → "hourly-cached"
+- `agentkthx/cli.py:main` startup-check comment: "daily-cached" → "hourly-cached" + note that `version` honors `--refresh`
+- `README.md` Features section: "daily cache" → "hourly cache" + mentions `agentkthx version --refresh`
+
+**Tests:** +9 new tests in `tests/test_update_check.py` (74 total, was 65):
+- New `TestCacheTTL` class (7 tests): asserts `SUCCESS_TTL == 3600`, `FAILURE_TTL == 900`, `FAILURE_TTL < SUCCESS_TTL`, success-entry fresh at 30min / stale at 1h+1s, failure-entry fresh at 10min / stale at 15min+1s
+- New `TestForceRefresh` class (2 tests): asserts `force=True` refetches PyPI + GitHub raw init despite a fresh cache (pip install path), and refetches all 3 sources including the commits API (git checkout path)
+
+Existing tests that use `SUCCESS_TTL` and `FAILURE_TTL` constants directly (e.g. `test_stale_cache_triggers_refetch`, `test_negative_cache_expires`) auto-adjusted to the new values without changes.
+
+**Impact:** Users no longer need to wait up to 24h to see a newly-released version, and can force a refresh on demand with `agentkthx version --refresh` when they know a release just happened. Closes the "PyPI is out of date" confusion — the cache was the bug, not PyPI.
+
+---
+
 ### 🐛 **FIX-01 — Pip-installed users now see dev releases (agentkthx update / version)**
 
 **Symptom (user-reported):** On a pip-installed copy of `agentkthx 0.6.54`, running `agentkthx update` (or `agentkthx version`) said "Latest on PyPI: 0.6.54 (up to date)" — but R06.55, R06.56, R06.57 had all been committed to GitHub main. The user had no way to know these dev releases existed.
@@ -132,9 +174,9 @@ But that meant pip-installed users had zero visibility into dev releases.
 
 **Fix — three coordinated changes in `agentkthx/update_check.py`:**
 
-1. **New `_fetch_github_latest_version(timeout)` function** — fetches `https://raw.githubusercontent.com/VTSTech/AgentKthx/main/agentkthx/__init__.py` and regex-extracts `__version__ = "X.Y.Z"`. Returns the bare version string (no git suffix). Handles double-quoted, single-quoted, and git-suffix-stripped forms. Raises on missing assignment / empty version / network failure (caller caches the failure for 6h).
+1. **New `_fetch_github_latest_version(timeout)` function** — fetches `https://raw.githubusercontent.com/VTSTech/AgentKthx/main/agentkthx/__init__.py` and regex-extracts `__version__ = "X.Y.Z"`. Returns the bare version string (no git suffix). Handles double-quoted, single-quoted, and git-suffix-stripped forms. Raises on missing assignment / empty version / network failure (caller caches the failure for 15min — see FIX-02 for the TTL reduction from 6h).
 
-2. **New `github_latest_version` field in `check_for_update` result** — runs for everyone (pip installs AND git checkouts). Cached as `github_version` entry (24h TTL on success, 6h on failure). Independent of the existing `github_sha` field which is git-checkout-only.
+2. **New `github_latest_version` field in `check_for_update` result** — runs for everyone (pip installs AND git checkouts). Cached as `github_version` entry (1h TTL on success, 15min on failure — see FIX-02). Independent of the existing `github_sha` field which is git-checkout-only.
 
 3. **`format_notice` now surfaces dev releases for pip installs** — if `github_latest_version` is newer than the installed version, the dev track fires with a `pip install --force-reinstall git+https://github.com/VTSTech/AgentKthx.git` command (instead of the SHA-based `agentkthx update` for git checkouts). Skipped when the PyPI stable track already surfaced a version >= the dev version (dedup — avoids duplicate "you're behind" notices when stable catches up to dev).
 
@@ -158,7 +200,7 @@ Or as a notice after `agentkthx run` / `agentkthx chat`:
    Development: 0.6.54 → 0.6.57 on GitHub main — Run: pip install --force-reinstall git+https://github.com/VTSTech/AgentKthx.git
 ```
 
-**Tests:** +11 new tests in `tests/test_update_check.py` (65 total, was 54). New `TestFetchGithubLatestVersion` class covers parsing variants (double/single quotes, git-suffix stripping, missing assignment, empty version, response close). New `TestFormatNotice` tests cover the pip-installed dev track (fires when version is newer, suppressed when PyPI already covers it, fires when dev is ahead of stable). Existing tests updated for the new URL-count behavior (pip installs now hit 2 URLs instead of 1, git checkouts hit 3 instead of 2).
+**Tests:** +11 new tests in `tests/test_update_check.py` (74 total after FIX-02, was 54 before R06.57). New `TestFetchGithubLatestVersion` class covers parsing variants (double/single quotes, git-suffix stripping, missing assignment, empty version, response close). New `TestFormatNotice` tests cover the pip-installed dev track (fires when version is newer, suppressed when PyPI already covers it, fires when dev is ahead of stable). Existing tests updated for the new URL-count behavior (pip installs now hit 2 URLs instead of 1, git checkouts hit 3 instead of 2). FIX-02 added 9 more tests (`TestCacheTTL` + `TestForceRefresh`), bringing the file total to 74.
 
 **Impact:** Pip-installed users now have full visibility into dev releases. R06.55, R06.56, R06.57+ will all be surfaced via the version-number comparison, with an actionable install command. Closes the "I didn't know there were newer releases" gap.
 
@@ -170,10 +212,10 @@ Or as a notice after `agentkthx run` / `agentkthx chat`:
 - `agentkthx/plugins/zai/zai.py` — ROB-06 parity (`_get_model_defaults` cap, `_iter_sse_lines` 400 recovery, `_generate_with_auth` 400 recovery, `_calculate_safe_max_tokens`, `__init__` init, +200 lines net)
 - `agentkthx/plugins/openrouter/openrouter.py` — ROB-06 fix (`_iter_sse_lines` and `_stream_request` try/finally response.close(), +20 lines net)
 - `agentkthx/plugins/gemini/gemini.py` — ROB-06 fix (`_iter_sse_lines` and `_stream_request` try/finally response.close(), +20 lines net)
-- `agentkthx/update_check.py` — FIX-01 (new `_fetch_github_latest_version`, `github_latest_version` field in result, `format_notice` pip-installed dev track, +90 lines net)
-- `agentkthx/cli.py` — `cmd_version` updated to show "GitHub main: X.Y.Z" line for pip installs (+12 lines)
+- `agentkthx/update_check.py` — FIX-01 (new `_fetch_github_latest_version`, `github_latest_version` field in result, `format_notice` pip-installed dev track, +90 lines net) + FIX-02 (`SUCCESS_TTL` 24h→1h, `FAILURE_TTL` 6h→15min, +20 lines of revised comments)
+- `agentkthx/cli.py` — `cmd_version` updated to show "GitHub main: X.Y.Z" line for pip installs (+12 lines) + new `--refresh` flag on the `version` subparser wired through to `check_for_update(force=...)` (+9 lines) + "daily-cached"→"hourly-cached" comment updates
 - `README.md` — DOC-01 fix (new `### Gemini Configuration` subsection + Gemini block in master env-var table + AGENTKTHX_BACKEND mention, +50 lines net)
-- `tests/test_update_check.py` — +11 new tests for the new pip-installed dev track + 6 existing tests updated for new URL counts
+- `tests/test_update_check.py` — +20 new tests (74 total, was 54): +11 for FIX-01 (parsing variants, format_notice pip-installed dev track) + 9 for FIX-02 (TestCacheTTL asserting 1h/15min TTLs, TestForceRefresh asserting `force=True` bypasses cache). 6 existing tests updated for new URL counts.
 - `audit/brief.md`, `audit/audit.md` — refreshed to mark ROB-05, ROB-06, DOC-01 as closed; note FIX-01
 - `pyproject.toml` — version bump 0.6.56 → 0.6.57
 - `agentkthx/__init__.py` — version bump R06.56 → R06.57
@@ -184,10 +226,11 @@ Or as a notice after `agentkthx run` / `agentkthx chat`:
 ### 🧪 **TEST-01 — Test suite (R06.57 final)**
 
 - **R06.56 baseline:** 766 passed, 9 skipped, 0 failed
-- **R06.57 final:** **777 passed**, 9 skipped, 0 failed — no regressions
-- **+11 new tests total:**
-  - +7 in new `TestFetchGithubLatestVersion` class (FIX-01) — parsing variants, response close, cache reuse, negative caching
-  - +4 in `TestFormatNotice` (FIX-01) — pip-installed dev track fires / dedup / both-tracks-in-one-block variants
+- **R06.57 final:** **786 passed**, 9 skipped, 0 failed — no regressions
+- **+20 new tests total:**
+  - +11 in new `TestFetchGithubLatestVersion` + `TestFormatNotice` classes (FIX-01) — parsing variants, response close, cache reuse, negative caching, pip-installed dev track fires / dedup / both-tracks-in-one-block variants
+  - +7 in new `TestCacheTTL` class (FIX-02) — asserts `SUCCESS_TTL == 3600`, `FAILURE_TTL == 900`, fresh/stale boundaries at 30min / 1h+1s / 10min / 15min+1s
+  - +2 in new `TestForceRefresh` class (FIX-02) — asserts `force=True` refetches all sources despite fresh cache (pip install path + git checkout path)
   - 6 existing `TestCheckForUpdate` tests updated for new URL-count behavior (pip installs now hit 2 URLs, git checkouts hit 3)
 - No regressions — all 766 pre-existing tests pass unchanged
 

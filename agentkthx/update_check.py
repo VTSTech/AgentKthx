@@ -16,10 +16,14 @@ GitHub *commits* API is the source of truth for the dev track):
 
 Behavior (same policy as pip / npm / AWS CLI):
 
-  - At most one network round per source per 24h; results cached in
+  - At most one network round per source per hour (R06.57: was 24h — too
+    long, hid recent releases from users); results cached in
     ~/.agentkthx/update_check.json (per-source entries, shared timestamp).
-  - Failed sources are negatively cached for 6h so offline users never stall,
-    and each source fails independently and silently.
+  - Failed sources are negatively cached for 15 min (R06.57: was 6h) so
+    offline users never stall, and each source fails independently and
+    silently.
+  - Force a refresh with ``agentkthx version --refresh`` (bypasses cache
+    for all sources, R06.57) or by deleting the cache file.
   - Opt out entirely with AGENTKTHX_NO_UPDATE_CHECK=1 (also true/yes/on).
 
 Zero dependencies — stdlib urllib only.
@@ -54,10 +58,19 @@ GITHUB_RAW_INIT_URL = "https://raw.githubusercontent.com/VTSTech/AgentKthx/main/
 #: Cache location — follows the established ~/.agentkthx/ user-data convention.
 DEFAULT_CACHE_FILE = Path.home() / ".agentkthx" / "update_check.json"
 
-#: Fresh-check TTL: at most one request per source per day.
-SUCCESS_TTL = 24 * 3600
-#: Negative-cache TTL for failed checks: retry after 6h, not on every startup.
-FAILURE_TTL = 6 * 3600
+#: Fresh-check TTL: at most one request per source per hour. Kept short so
+#: users notice new releases (stable on PyPI, dev on GitHub main) the next
+#: time they run `agentkthx` rather than waiting a full day. The cache file
+#: (~/.agentkthx/update_check.json) records ``checked_at`` per cycle; if
+#: ``now - checked_at >= SUCCESS_TTL`` the entry is refetched. R06.57:
+#: reduced from 24h to 1h after user-reported confusion where a 24h-cached
+#: "0.6.54 on PyPI" hid the fact that 0.6.55+0.6.56 had been released.
+SUCCESS_TTL = 3600
+#: Negative-cache TTL for failed checks: retry after 15 min, not on every
+#: startup. Shorter than SUCCESS_TTL so transient failures (rate-limited
+#: GitHub API, PyPI blip) get retried sooner than successful entries
+#: need refreshing. R06.57: reduced from 6h to 15min proportionally.
+FAILURE_TTL = 900
 
 #: indirection so tests can monkeypatch the network call
 _urlopen = urllib.request.urlopen

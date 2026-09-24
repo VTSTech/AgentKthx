@@ -229,6 +229,8 @@ update_check.py → checks PyPI + GitHub for updates
 
 - **FIX-01 (R06.57, user-reported)** — Pip-installed users now see dev releases. New `_fetch_github_latest_version()` in `update_check.py` fetches `https://raw.githubusercontent.com/VTSTech/AgentKthx/main/agentkthx/__init__.py` and parses `__version__ = "X.Y.Z"`. `format_notice` surfaces the dev track for pip installs with a `pip install --force-reinstall git+...` command. `cmd_version` shows a new "GitHub main: X.Y.Z" line. Surfaces R06.55+, R06.56+, R06.57+ that aren't on PyPI. +11 new tests in `test_update_check.py` (65 total, was 54).
 
+- **FIX-02 (R06.57, user-reported)** — Update-check cache TTL reduced from 24h to 1h (success) / 6h to 15min (failure). Fixes user-reported "PyPI says 0.6.54 but 0.6.55+0.6.56 are out" stale-cache bug. The cache file already had `checked_at`; the constant was just too conservative for an actively-developed project that cuts multiple releases per day. New `agentkthx version --refresh` flag bypasses the cache for on-demand refresh without manually deleting `~/.agentkthx/update_check.json`. +9 new tests (`TestCacheTTL` asserting 1h/15min boundaries, `TestForceRefresh` asserting `force=True` refetches all sources). 786 total tests, was 766.
+
 - **ZAI now has `num_ctx/32` cap + 400 recovery** (R06.57, ROB-06 parity) — `zai.py:_get_model_defaults` caps `max_tokens` to `context_length // 32` (mirrors OpenRouter R06.55 + Gemini R06.56). `_iter_sse_lines` and `_generate_with_auth` both now have context-length 400 recovery with `_calculate_safe_max_tokens` + `_context_safe_max_tokens` persistence. All 3 cloud backends (OpenRouter, Gemini, ZAI) now share this pattern — extraction to `OpenAICompatibleBackend` is the long-term fix (ARCH-03).
 
 - **`_generate_stream()` has a dead `think` parameter** (PERF-03) — accepted at `openai_compat.py:620` but never forwarded to `_build_openai_body()` at line 669-683. Misleading API surface. Affects all OpenAI-compat backends (ZAI, OpenRouter, Gemini).
@@ -300,7 +302,7 @@ update_check.py → checks PyPI + GitHub for updates
 
 ```
 $ ZAI_API_KEY=test_dummy_key_12345 GEMINI_API_KEY=test_dummy_key_12345 python -m pytest tests/ -q
-777 passed, 9 skipped, 0 failed in 1.86s
+786 passed, 9 skipped, 0 failed in 1.89s
 ```
 
 Test files (total):
@@ -314,7 +316,7 @@ Test files (total):
 - `tests/test_api_resilience.py` (443 lines, rewritten R06.55) — API error resilience, urllib mock transport
 - `tests/test_thinking_args.py` (429 lines) — thinking argument parsing, per-backend forwarding
 - `tests/test_builtins.py` (421 lines) — calculator, shell, file I/O tools
-- `tests/test_update_check.py` (~570 lines, 65 tests, +11 in R06.57) — update checking, version comparison, caching, FIX-01 pip-installed dev track via raw __init__.py
+- `tests/test_update_check.py` (~660 lines, 74 tests, +20 in R06.57) — update checking, version comparison, caching, FIX-01 pip-installed dev track via raw __init__.py, FIX-02 1h/15min TTL + `--refresh` flag
 - `tests/test_spec_compliance.py` (382 lines) — OpenAI spec compliance, streaming, logprobs
 - `tests/test_streaming.py` (359 lines) — _generate_stream, tool_call accumulation, AgentRun return
 - `tests/test_agent.py` (282 lines) — agent loop, tool dispatch, memory
