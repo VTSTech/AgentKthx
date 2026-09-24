@@ -459,10 +459,14 @@ def detect_gemini_family(model_name: str) -> dict:
 #   - Antigravity (antigravity-preview-05-2026) → managed agent endpoint
 #   - Gemma open-source (gemma-4-26b-a4b-it, gemma-4-31b-it) → Google's
 #     Gemma open models served via the Gemini API catalog. These ARE
-#     chat-capable in principle (Gemma is a text model) but they use a
-#     different API surface (Vertex AI / Gemma API) — untested via the
-#     OpenAI-compat /chat/completions endpoint. Tagged non-chat for
-#     safety until verified on a real VM with a real key.
+#     chat-capable via /v1beta/openai/chat/completions — verified on a
+#     real VM by VTSTech on 2026-09-24 (gemma-4-26b-a4b-it responded
+#     successfully to a chat-completions request). However, Gemma uses
+#     inline <thought>...</thought> tags for reasoning instead of the
+#     OpenAI reasoning_content field — see ThoughtTagParser below for
+#     the streaming parser that routes the tag content to
+#     reasoning_content so the existing AgentKthx UI shows it as a
+#     collapsible "thought" panel.
 #
 # Sending a /chat/completions request to a non-chat model returns a 400
 # "model does not support this endpoint" or similar — and the response
@@ -476,8 +480,10 @@ def detect_gemini_family(model_name: str) -> dict:
 # its own backend method (e.g. generate_image(prompt) → bytes). For now,
 # they're correctly tagged as non-chat.
 #
-# TODO: verify on a real VM whether gemma-4-* models accept /chat/completions
-# requests. If yes, remove "gemma-" from _NON_CHAT_PATTERNS.
+# VERIFIED 2026-09-24 (VTSTech on real VM): gemma-4-* IS chat-capable via
+# /v1beta/openai/chat/completions. Kept OUT of _NON_CHAT_PATTERNS. Gemma
+# uses <thought>...</thought> inline tags for reasoning — handled by
+# ThoughtTagParser below.
 
 # Prefixes / patterns for non-chat models. Matched case-insensitively
 # against the model ID. Order matters: more specific patterns first
@@ -498,7 +504,12 @@ _NON_CHAT_PATTERNS = (
     "antigravity",           # antigravity-preview-05-2026 → managed agent endpoint
     "aqa",                   # aqa (Answer Quality Assessment — not a chat model)
     "omni-",                 # gemini-omni-1.1-flash → /videos endpoint (video gen)
-    "gemma-",                # gemma-4-26b-a4b-it, gemma-4-31b-it → TODO: verify on real VM
+    # NOTE: gemma-* IS chat-capable via /chat/completions — verified on real VM
+    # by VTSTech 2026-09-24 (gemma-4-26b-a4b-it responded to a chat-completions
+    # request and emitted a thinking + answer response). Kept OUT of
+    # _NON_CHAT_PATTERNS. Gemma uses inline <thought>...</thought> tags for
+    # reasoning instead of the OpenAI reasoning_content field — see
+    # ThoughtTagParser below.
 )
 
 
@@ -523,6 +534,227 @@ def _is_chat_capable_model(model_id: str) -> bool:
         if pattern in m:
             return False
     return True
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Inline <thought>...</thought> tag parser (Gemma family)
+# ─────────────────────────────────────────────────────────────────────────────
+# Gemma 4 (and potentially other models in the future) wraps its reasoning
+# in inline <thought>...</thought> tags instead of using the OpenAI
+# reasoning_content field that Gemini 3.x uses. Without parsing these tags,
+# the raw <thought> blocks would show up in the user-facing content stream
+# (see https://github.com/VTSTech/AgentKthx/issues for the bug report).
+#
+# This parser runs as a post-processing step on each streaming chunk:
+#   - Text inside <thought>...</thought> blocks → routed to reasoning_content
+#   - Text outside the tags → routed to content (the actual answer)
+#
+# The parser is stateful because:
+#   - The opening <thought> tag might arrive in one chunk and the closing
+#     </thought> in another (or across many chunks).
+#   - Models occasionally emit malformed output — stray <thought> tags
+#     without a matching </thought>, or vice versa. We handle these
+#     gracefully (stray tags are passed through as content).
+#   - Multiple <thought>...</thought> blocks may appear in sequence.
+#
+# Verified working on real VM (2026-09-24) with gemma-4-26b-a4b-it.
+
+
+def _uses_thought_tags(model_id: str) -> bool:
+    """Return True if the model uses inline <thought>...</thought> tags
+    for reasoning instead of the OpenAI reasoning_content field.
+
+    Currently: Gemma 4 variants (gemma-4-26b-a4b-it, gemma-4-31b-it).
+    Other Gemini chat models use the native reasoning_content field and
+    don't need this parser.
+
+    Extending this to other models (e.g. DeepSeek-R1 with its <think> tags)
+    would only require adding patterns here — the ThoughtTagParser is
+    parameterized via the OPENING_TAG and CLOSING_TAG constants.
+    """
+    if not model_id:
+        return False
+    m = model_id.lower()
+    if m.startswith("models/"):
+        m = m[len("models/"):]
+    return m.startswith("gemma-")
+
+
+class ThoughtTagParser:
+    """Stateful streaming parser for inline <thought>...</thought> blocks.
+
+    Feed chunks via ``.feed(text)`` — returns ``(content_delta, reasoning_delta)``
+    for each chunk. Call ``.flush()`` at the end of the stream to emit any
+    buffered content.
+
+    Algorithm:
+      - State OUTSIDE: accumulate text to content. When we see "<thought>",
+        switch to INSIDE state and start a new reasoning block.
+      - State INSIDE: accumulate text to reasoning_content. When we see
+        "</thought>", switch to OUTSIDE state.
+      - Partial tags at chunk boundaries (e.g. "<tho" at end of chunk)
+        are buffered and re-examined on the next feed() call.
+
+    Malformed output handling:
+      - Stray "</thought>" without a matching "<thought>" → emitted as
+        literal text in content (so the user sees the model's actual output)
+      - Unclosed "<thought>" at end of stream → flushed via flush() as
+        reasoning_content (the model's reasoning is shown even if it forgot
+        to close the tag)
+      - Nested tags, double tags, etc. — not specially handled; the first
+        "</thought>" after a "<thought>" closes the block.
+    """
+
+    OPENING_TAG = "<thought>"
+    CLOSING_TAG = "</thought>"
+
+    def __init__(self) -> None:
+        # "outside" = emitting content; "inside" = emitting reasoning_content
+        self._state: str = "outside"
+        # Buffer for partial tags that span chunk boundaries.
+        # Always ≤ max(len(OPENING_TAG), len(CLOSING_TAG)) - 1 = 9 chars.
+        self._buffer: str = ""
+
+    def feed(self, text: str) -> tuple[str, str]:
+        """Process one chunk of text.
+
+        Returns ``(content_delta, reasoning_delta)`` — text to append to
+        the visible content stream and to the reasoning stream respectively.
+        Either may be empty string if all the chunk's text belonged to the
+        other stream.
+        """
+        if not text:
+            return ("", "")
+
+        # Prepend the leftover buffer from the previous chunk.
+        text = self._buffer + text
+        self._buffer = ""
+
+        content_parts: list[str] = []
+        reasoning_parts: list[str] = []
+        i = 0
+        n = len(text)
+
+        while i < n:
+            if self._state == "outside":
+                # Look for the opening tag from position i.
+                open_idx = text.find(self.OPENING_TAG, i)
+                # Also look for a stray closing tag (model emitted </thought>
+                # without a matching <thought> — happens with malformed output).
+                # We check this FIRST because if it precedes any opening tag,
+                # we should skip it (don't let it leak into content).
+                close_idx = text.find(self.CLOSING_TAG, i)
+                if close_idx != -1 and (open_idx == -1 or close_idx < open_idx):
+                    # Stray closing tag — emit content before it, skip the tag
+                    content_parts.append(text[i:close_idx])
+                    i = close_idx + len(self.CLOSING_TAG)
+                    # Stay in OUTSIDE state — re-loop to look for next tag
+                    continue
+                if open_idx == -1:
+                    # No opening tag found. Check if the tail of `text`
+                    # could be the start of an opening tag (partial match).
+                    partial_len = self._suffix_is_tag_prefix(text, i, self.OPENING_TAG)
+                    if partial_len > 0:
+                        # Buffer the partial tag for the next feed() call.
+                        # Emit content before it now.
+                        content_parts.append(text[i:n - partial_len])
+                        self._buffer = text[n - partial_len:]
+                    else:
+                        # No partial tag — emit everything as content.
+                        content_parts.append(text[i:])
+                    break
+                else:
+                    # Found opening tag — emit content before it, switch state.
+                    content_parts.append(text[i:open_idx])
+                    i = open_idx + len(self.OPENING_TAG)
+                    self._state = "inside"
+            else:  # state == "inside"
+                # Look for the closing tag from position i.
+                idx = text.find(self.CLOSING_TAG, i)
+                if idx == -1:
+                    # No closing tag found. Check for partial closing tag.
+                    partial_len = self._suffix_is_tag_prefix(text, i, self.CLOSING_TAG)
+                    if partial_len > 0:
+                        reasoning_parts.append(text[i:n - partial_len])
+                        self._buffer = text[n - partial_len:]
+                    else:
+                        reasoning_parts.append(text[i:])
+                    break
+                else:
+                    # Found closing tag — emit reasoning before it, switch state.
+                    reasoning_parts.append(text[i:idx])
+                    i = idx + len(self.CLOSING_TAG)
+                    self._state = "outside"
+
+        return ("".join(content_parts), "".join(reasoning_parts))
+
+    def flush(self) -> tuple[str, str]:
+        """Emit any buffered content at the end of the stream.
+
+        Called when the upstream is done sending. Returns
+        ``(content_delta, reasoning_delta)`` containing whatever was
+        buffered. If we were inside a <thought> block when the stream ended,
+        the buffered content is emitted as reasoning (model forgot to close
+        the tag — surface the reasoning anyway rather than hiding it).
+        """
+        if not self._buffer:
+            return ("", "")
+        # Buffer exists because we were waiting for a complete tag.
+        # Treat the buffered partial-tag text as literal content/reasoning
+        # (whichever state we were in).
+        if self._state == "outside":
+            return (self._buffer, "")
+        else:
+            return ("", self._buffer)
+
+    @staticmethod
+    def _suffix_is_tag_prefix(text: str, start: int, tag: str) -> int:
+        """Check if text[start:] ends with a prefix of `tag`.
+
+        Returns the length of the matching prefix (0..len(tag)-1), or 0 if
+        no match. We check progressively shorter suffixes — e.g. for
+        tag="<thought>" and text ending in "<th", we'd return 3.
+
+        Used to detect partial tags at chunk boundaries (e.g. "<tho" might
+        be the start of "<thought>" in the next chunk).
+        """
+        # Look at the last k chars of text[start:] and see if they're
+        # a prefix of `tag`.
+        max_k = min(len(tag) - 1, len(text) - start)
+        for k in range(max_k, 0, -1):
+            suffix = text[-k:]
+            if tag.startswith(suffix):
+                return k
+        return 0
+
+
+def _parse_thought_tags_from_complete_text(text: str) -> tuple[str, str]:
+    """One-shot parser for non-streaming responses.
+
+    Returns ``(content, reasoning)`` — the same shape as ThoughtTagParser
+    but for already-complete responses where we have the full text in
+    one piece. Used by generate() (non-streaming path).
+
+    Same semantics as the streaming parser: text inside <thought>...</thought>
+    goes to reasoning, text outside goes to content. Unclosed <thought> at
+    end of text → flushed as reasoning (model forgot to close).
+    """
+    if not text or "<thought>" not in text:
+        return (text, "")
+    parser = ThoughtTagParser()
+    content_parts: list[str] = []
+    reasoning_parts: list[str] = []
+    c, r = parser.feed(text)
+    if c:
+        content_parts.append(c)
+    if r:
+        reasoning_parts.append(r)
+    c, r = parser.flush()
+    if c:
+        content_parts.append(c)
+    if r:
+        reasoning_parts.append(r)
+    return ("".join(content_parts), "".join(reasoning_parts))
 
 
 class GeminiBackend(OpenAICompatibleBackend):
@@ -1373,6 +1605,24 @@ class GeminiBackend(OpenAICompatibleBackend):
         parsed = self._parse_openai_response(raw_response)
         parsed["latency_ms"] = latency_ms
 
+        # Gemma-family post-processing: parse inline <thought>...</thought>
+        # tags from content into reasoning_content. Gemma uses these inline
+        # tags instead of the OpenAI reasoning_content field that Gemini
+        # 3.x uses. Without this, the raw <thought> blocks would show up
+        # in the user-facing content stream.
+        if _uses_thought_tags(model) and parsed["content"]:
+            content_text, reasoning_text = _parse_thought_tags_from_complete_text(parsed["content"])
+            if reasoning_text:
+                # Append to any existing reasoning_content (rare for Gemma
+                # but possible if the model also emits native reasoning_content)
+                existing_rc = parsed.get("reasoning_content", "") or ""
+                parsed["reasoning_content"] = existing_rc + reasoning_text
+            parsed["content"] = content_text
+            if os.environ.get("AGENTKTHX_DEBUG"):
+                print(f"  [Gemini.ThoughtTags] model={model} → "
+                      f"content_len={len(parsed['content'])}, "
+                      f"reasoning_len={len(parsed.get('reasoning_content', ''))}")
+
         # Synthesize a finish_reason if missing (Gemini usually includes one).
         if parsed["finish_reason"] is None:
             if parsed["tool_calls"]:
@@ -1384,6 +1634,9 @@ class GeminiBackend(OpenAICompatibleBackend):
 
         # Empty-response detection — surface as error so the agent loop
         # can show something went wrong instead of "AgentKthx: " with no body.
+        # Note: for Gemma, after thought-tag parsing, content might be empty
+        # if the model emitted ONLY reasoning (rare, but possible). We still
+        # raise here — the user should see the issue and rephrase.
         if not parsed["content"].strip() and not parsed["tool_calls"]:
             raise RuntimeError(
                 f"Gemini returned an empty response (no content, no tool_calls). "
@@ -1478,6 +1731,105 @@ class GeminiBackend(OpenAICompatibleBackend):
             "function calling is not supported",
         )
         return any(ind in err_lower for ind in indicators)
+
+    # ─────────────────────────────────────────────────────────────────────
+    # generate_completions_stream() override — Gemma <thought> tag parsing
+    # ─────────────────────────────────────────────────────────────────────
+
+    def generate_completions_stream(
+        self,
+        model: str,
+        messages: list[dict],
+        tools: list[Tool] | None = None,
+        temperature: float = 0.7,
+        max_tokens: int = 2048,
+        **kwargs,
+    ) -> Generator[dict, None, None]:
+        """Streaming with Gemma-family <thought> tag parsing.
+
+        For non-Gemma models: delegates to the inherited
+        ``OpenAICompatibleBackend.generate_completions_stream()`` unchanged.
+
+        For Gemma models (and any future model that emits inline
+        ``<thought>...</thought>`` tags): wraps the inherited generator
+        with a stateful ``ThoughtTagParser`` that routes the tag content
+        to ``reasoning_content`` so the existing AgentKthx UI shows it
+        as a collapsible "thought" panel — instead of letting the raw
+        tags leak into the user-facing content stream.
+        """
+        if not _uses_thought_tags(model):
+            # Pass through unchanged — model uses native reasoning_content
+            yield from super().generate_completions_stream(
+                model=model,
+                messages=messages,
+                tools=tools,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                **kwargs,
+            )
+            return
+
+        # Gemma path — wrap parent's generator with ThoughtTagParser.
+        # The parser is stateful so it survives across the chunk loop.
+        parser = ThoughtTagParser()
+
+        if os.environ.get("AGENTKTHX_DEBUG"):
+            print(f"  [Gemini.ThoughtTags-Stream] model={model} — "
+                  f"thought-tag parser active")
+
+        for chunk in super().generate_completions_stream(
+            model=model,
+            messages=messages,
+            tools=tools,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **kwargs,
+        ):
+            delta = chunk.get("delta", "") or ""
+            tool_calls = chunk.get("tool_calls")
+            finish_reason = chunk.get("finish_reason")
+            existing_reasoning = chunk.get("reasoning_content", "") or ""
+            usage = chunk.get("_usage")  # PERF-02 final usage chunk
+
+            # PERF-02 usage-only chunk — pass through unchanged
+            if usage and not delta and not tool_calls and not finish_reason:
+                yield chunk
+                continue
+
+            # Parse <thought> tags from this chunk's delta
+            content_delta, reasoning_delta = parser.feed(delta)
+
+            # Combine with any existing native reasoning_content (rare for
+            # Gemma but possible if the model also emits native reasoning).
+            combined_reasoning = ""
+            if existing_reasoning:
+                combined_reasoning += existing_reasoning
+            if reasoning_delta:
+                combined_reasoning += reasoning_delta
+
+            yield_chunk: dict = {
+                "delta": content_delta,
+                "tool_calls": tool_calls,
+                "finish_reason": finish_reason,
+            }
+            if combined_reasoning:
+                yield_chunk["reasoning_content"] = combined_reasoning
+            yield yield_chunk
+
+        # End of stream — flush any buffered partial-tag content.
+        # This handles the case where the model left a "<tho" or similar
+        # partial tag at the end (state == "outside" → emit as content,
+        # state == "inside" → emit as reasoning — model forgot to close).
+        content_flush, reasoning_flush = parser.flush()
+        if content_flush or reasoning_flush:
+            yield_chunk = {
+                "delta": content_flush,
+                "tool_calls": None,
+                "finish_reason": None,
+            }
+            if reasoning_flush:
+                yield_chunk["reasoning_content"] = reasoning_flush
+            yield yield_chunk
 
     # ─────────────────────────────────────────────────────────────────────
     # generate_stream() — text-only streaming convenience wrapper

@@ -31,6 +31,9 @@ from agentkthx.plugins.gemini.gemini import (
     _is_free_tier_model,
     _get_free_tier_limits,
     _is_chat_capable_model,
+    _uses_thought_tags,
+    ThoughtTagParser,
+    _parse_thought_tags_from_complete_text,
 )
 from agentkthx.core.models import Tool, ToolParam
 from agentkthx.core.types import BackendType, ToolSupportLevel, ApiMode
@@ -441,12 +444,23 @@ class TestChatCapabilityClassification(unittest.TestCase):
                      "deep-research-preview-04-2026",
                      "deep-research-max-preview-04-2026",
                      "antigravity-preview-09-2026",
-                     "gemma-4-31b-it", "gemma-4-26b-a4b-it",
                      "aqa"):
             self.assertEqual(
                 self.backend.test_tool_support(name),
                 ToolSupportLevel.NONE,
                 f"{name} should be NONE (not a chat model)"
+            )
+
+    def test_gemma_models_are_chat_capable(self):
+        """VERIFIED 2026-09-24 on real VM: gemma-4-* models ARE chat-capable
+        via /v1beta/openai/chat/completions. They use inline <thought> tags
+        for reasoning (see ThoughtTagParser) — but they DO accept chat
+        requests with tools → return NATIVE in test_tool_support."""
+        for name in ("gemma-4-26b-a4b-it", "gemma-4-31b-it"):
+            self.assertEqual(
+                self.backend.test_tool_support(name),
+                ToolSupportLevel.NATIVE,
+                f"{name} should be NATIVE (verified chat-capable on real VM)"
             )
 
     def test_models_prefix_stripped_in_classification(self):
@@ -625,6 +639,224 @@ class TestFreeTierClassification(unittest.TestCase):
             table_says_free = _is_free_tier_model(name)
             self.assertEqual(catalog_says_free, table_says_free,
                              f"{name}: catalog={catalog_says_free} but table={table_says_free}")
+
+
+class TestUsesThoughtTags(unittest.TestCase):
+    """_uses_thought_tags() detector — currently Gemma 4 variants only."""
+
+    def test_gemma_models_use_thought_tags(self):
+        for name in ("gemma-4-26b-a4b-it", "gemma-4-31b-it"):
+            self.assertTrue(_uses_thought_tags(name),
+                            f"{name} should use <thought> tags for reasoning")
+
+    def test_gemini_models_do_not_use_thought_tags(self):
+        """Gemini 3.x / 2.5 use the native OpenAI reasoning_content field,
+        not inline <thought> tags."""
+        for name in ("gemini-3.8-flash", "gemini-3.1-pro-preview",
+                     "gemini-2.5-flash", "gemini-2.5-pro"):
+            self.assertFalse(_uses_thought_tags(name),
+                            f"{name} should NOT use <thought> tags (uses native reasoning_content)")
+
+    def test_models_prefix_stripped(self):
+        """If 'models/' prefix slips through, detector still works."""
+        self.assertTrue(_uses_thought_tags("models/gemma-4-31b-it"))
+        self.assertFalse(_uses_thought_tags("models/gemini-3.8-flash"))
+
+
+class TestThoughtTagParser(unittest.TestCase):
+    """ThoughtTagParser — streaming <thought>...</thought> tag parser for Gemma.
+
+    Gemma 4 wraps its reasoning in inline <thought>...</thought> tags instead
+    of using the OpenAI reasoning_content field. The parser routes tag content
+    to reasoning_content so AgentKthx can show it as a collapsible "thought"
+    panel — instead of letting raw tags leak into the visible content stream.
+    """
+
+    # ── Non-streaming one-shot parser ──
+
+    def test_complete_text_simple(self):
+        """One <thought> block + answer after."""
+        text = "<thought>reasoning here</thought>actual answer"
+        content, reasoning = _parse_thought_tags_from_complete_text(text)
+        self.assertEqual(content, "actual answer")
+        self.assertEqual(reasoning, "reasoning here")
+
+    def test_complete_text_no_tags(self):
+        """No <thought> tags → content passes through unchanged, reasoning empty."""
+        text = "Just a normal response."
+        content, reasoning = _parse_thought_tags_from_complete_text(text)
+        self.assertEqual(content, text)
+        self.assertEqual(reasoning, "")
+
+    def test_complete_text_user_actual_output(self):
+        """The exact output the user pasted from real Gemma on the VM."""
+        text = (
+            "<thought>*   User's name/identity: VTSTech.\n"
+            "    *   Goal: Greeting/Introduction.\n"
+            "    *   Instruction: Answer directly and accurately.\n"
+            "\n"
+            "    *   Acknowledge the user's greeting and identity.\n"
+            "    *   Maintain the persona of AI AgentKthx (direct and accurate).\n"
+            "\n"
+            "    *   *Option 1:* Hello VTSTech. How can I help you? (Simple, direct).\n"
+            "    *   *Option 2:* Nice to meet you, VTSTech. I am AI AgentKthx. (Personalized).\n"
+            "\n"
+            '    *   "Hello, VTSTech. How can I assist you today?"</thought>'
+            "Hello, VTSTech. How can I assist you today?"
+        )
+        content, reasoning = _parse_thought_tags_from_complete_text(text)
+        self.assertEqual(content, "Hello, VTSTech. How can I assist you today?")
+        self.assertIn("User's name/identity: VTSTech", reasoning)
+        self.assertIn("AI AgentKthx", reasoning)
+        # The <thought> tags themselves should NOT appear in either output
+        self.assertNotIn("<thought>", content)
+        self.assertNotIn("</thought>", content)
+        self.assertNotIn("<thought>", reasoning)
+        self.assertNotIn("</thought>", reasoning)
+
+    def test_malformed_stray_closing_tag_stripped(self):
+        """Gemma sometimes emits a stray </thought> without a matching opening.
+        The parser should strip it from content (not let raw tags leak)."""
+        # Construct: <thought>reasoning...Response: X. <thought>
+        #            </thought>Actual answer.</thought>
+        text = (
+            "<thought>The user is asking for my name.\n"
+            "Response: My name is AI AgentKthx. <thought>\n"
+            "</thought>My name is AI AgentKthx.</thought>"
+        )
+        content, reasoning = _parse_thought_tags_from_complete_text(text)
+        # Content should NOT contain any raw tags
+        self.assertEqual(content, "My name is AI AgentKthx.")
+        self.assertNotIn("<thought>", content)
+        self.assertNotIn("</thought>", content)
+        # Reasoning should have the model's actual thought process
+        self.assertIn("The user is asking for my name", reasoning)
+        self.assertIn("AI AgentKthx", reasoning)
+
+    def test_unclosed_thought_at_end(self):
+        """Model forgot to close the <thought> tag — surface the reasoning
+        anyway (don't hide it just because the model was sloppy)."""
+        text = "<thought>the model never closed this"
+        content, reasoning = _parse_thought_tags_from_complete_text(text)
+        self.assertEqual(content, "")
+        self.assertEqual(reasoning, "the model never closed this")
+
+    def test_multiple_thought_blocks(self):
+        """Multiple <thought>...</thought> blocks in sequence."""
+        text = "<thought>thought 1</thought>answer 1<thought>thought 2</thought>answer 2"
+        content, reasoning = _parse_thought_tags_from_complete_text(text)
+        self.assertEqual(content, "answer 1answer 2")
+        self.assertEqual(reasoning, "thought 1thought 2")
+
+    def test_empty_thought_block(self):
+        """Empty <thought></thought> → empty reasoning, content passes through."""
+        text = "<thought></thought>just the answer"
+        content, reasoning = _parse_thought_tags_from_complete_text(text)
+        self.assertEqual(content, "just the answer")
+        self.assertEqual(reasoning, "")
+
+    # ── Streaming parser (chunk-by-chunk) ──
+
+    def test_streaming_simple_split(self):
+        """Stream the response in chunks where tags are intact in single chunks."""
+        parser = ThoughtTagParser()
+        chunks = ["<thought>", "reasoning here", "</thought>", "actual answer"]
+        content_parts = []
+        reasoning_parts = []
+        for chunk in chunks:
+            c, r = parser.feed(chunk)
+            if c: content_parts.append(c)
+            if r: reasoning_parts.append(r)
+        c, r = parser.flush()
+        if c: content_parts.append(c)
+        if r: reasoning_parts.append(r)
+        self.assertEqual("".join(content_parts), "actual answer")
+        self.assertEqual("".join(reasoning_parts), "reasoning here")
+
+    def test_streaming_partial_opening_tag(self):
+        """Opening tag split across chunks: '<tho' + 'ught>'."""
+        parser = ThoughtTagParser()
+        chunks = ["<tho", "ught>", "my reasoning", "</thought>", "final answer"]
+        content_parts = []
+        reasoning_parts = []
+        for chunk in chunks:
+            c, r = parser.feed(chunk)
+            if c: content_parts.append(c)
+            if r: reasoning_parts.append(r)
+        c, r = parser.flush()
+        if c: content_parts.append(c)
+        if r: reasoning_parts.append(r)
+        # The partial "<tho" should NOT leak into content — it's buffered
+        # until the rest of the tag arrives.
+        self.assertNotIn("<tho", "".join(content_parts))
+        self.assertNotIn("ught>", "".join(content_parts))
+        self.assertEqual("".join(content_parts), "final answer")
+        self.assertEqual("".join(reasoning_parts), "my reasoning")
+
+    def test_streaming_partial_closing_tag(self):
+        """Closing tag split across chunks: '</th' + 'ought>'."""
+        parser = ThoughtTagParser()
+        chunks = ["<thought>", "my reasoning", "</th", "ought>", "final answer"]
+        content_parts = []
+        reasoning_parts = []
+        for chunk in chunks:
+            c, r = parser.feed(chunk)
+            if c: content_parts.append(c)
+            if r: reasoning_parts.append(r)
+        c, r = parser.flush()
+        if c: content_parts.append(c)
+        if r: reasoning_parts.append(r)
+        self.assertNotIn("</th", "".join(content_parts))
+        self.assertNotIn("ought>", "".join(content_parts))
+        self.assertEqual("".join(content_parts), "final answer")
+        self.assertEqual("".join(reasoning_parts), "my reasoning")
+
+    def test_streaming_no_tags_passes_through(self):
+        """Non-Gemma response (no <thought> tags) → content passes through,
+        reasoning stays empty. This is the common case for Gemini 3.x."""
+        parser = ThoughtTagParser()
+        text = "Just a normal streaming response from gemini-3.8-flash."
+        content_parts = []
+        reasoning_parts = []
+        # Simulate streaming in 10-char chunks
+        for i in range(0, len(text), 10):
+            chunk = text[i:i+10]
+            c, r = parser.feed(chunk)
+            if c: content_parts.append(c)
+            if r: reasoning_parts.append(r)
+        c, r = parser.flush()
+        if c: content_parts.append(c)
+        if r: reasoning_parts.append(r)
+        self.assertEqual("".join(content_parts), text)
+        self.assertEqual("".join(reasoning_parts), "")
+
+    def test_streaming_unclosed_at_end(self):
+        """Stream ends with an open <thought> tag — flush should emit
+        the reasoning anyway (don't hide it)."""
+        parser = ThoughtTagParser()
+        chunks = ["<thought>", "ongoing reasoning that never closes"]
+        content_parts = []
+        reasoning_parts = []
+        for chunk in chunks:
+            c, r = parser.feed(chunk)
+            if c: content_parts.append(c)
+            if r: reasoning_parts.append(r)
+        c, r = parser.flush()
+        if c: content_parts.append(c)
+        if r: reasoning_parts.append(r)
+        # All the reasoning was buffered — flush emits it
+        self.assertEqual("".join(content_parts), "")
+        self.assertEqual("".join(reasoning_parts), "ongoing reasoning that never closes")
+
+    def test_streaming_empty_input(self):
+        """Empty chunks should return empty deltas."""
+        parser = ThoughtTagParser()
+        c, r = parser.feed("")
+        self.assertEqual(c, "")
+        self.assertEqual(r, "")
+        c, r = parser.flush()
+        self.assertEqual(c, "")
+        self.assertEqual(r, "")
 
 
 class TestBuildBody(unittest.TestCase):
