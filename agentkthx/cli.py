@@ -1260,7 +1260,8 @@ def cmd_chat(args: argparse.Namespace) -> int:
             print(f"  {cyan('/clear')}      Clear conversation memory")
             print(f"  {cyan('/debug')}      Toggle debug output on/off")
             print(f"  {cyan('/help')}       Show this help message")
-            print(f"  {cyan('/model')}      Show or change the model (e.g. /model glm-4.7-flash)")
+            print(f"  {cyan('/model')}      Show or change the model (e.g. /model gemini-3.8-flash)")
+            print(f"  {cyan('/models')}     List all available models from the current backend (✓ = current)")
             print(f"  {cyan('/param')}      Show or set generation parameters (temp, top_p, top_k, etc.)")
             print(f"  {cyan('/security')}   Show or set security mode (max|off)")
             print(f"  {cyan('/skills')}     Show available skills (✓ = loaded)")
@@ -1808,6 +1809,88 @@ def cmd_chat(args: argparse.Namespace) -> int:
                 agent._runtime_kwargs[name] = value
 
             print(green(f"Set {name} = {value!r}"))
+            continue
+
+        # ── /models slash command ──────────────────────────────────────────
+        # List all available models from the current backend. Shows:
+        #   ✓ = current model
+        #   free / paid markers (from free_tier flag)
+        #   chat / non-chat markers (from is_chat_model flag)
+        #   ⚠ = deprecated (e.g. gemini-2.5-* for new users)
+        # Usage:
+        #   /models                     — list all models
+        #   /models free                — list only free-tier models
+        #   /models chat                — list only chat-capable models
+        #   /models free chat           — both filters (AND)
+        if user_input == "/models" or user_input.startswith("/models "):
+            filter_parts = user_input.split()[1:] if user_input != "/models" else []
+            filter_free = "free" in filter_parts
+            filter_chat = "chat" in filter_parts
+
+            # Get the model list from the backend
+            try:
+                models = agent.backend.list_models()
+            except Exception as e:
+                print(red(f"Failed to list models: {e}"))
+                continue
+
+            if not models:
+                print(yellow("No models available from this backend."))
+                continue
+
+            # Apply filters
+            if filter_free:
+                models = [m for m in models if m.get("details", {}).get("free_tier", False)]
+            if filter_chat:
+                models = [m for m in models if m.get("details", {}).get("is_chat_model", True)]
+
+            if not models:
+                print(yellow("No models match the filter."))
+                continue
+
+            current_model = agent.model
+            backend_name = getattr(agent.backend, 'backend_type', None)
+            backend_str = backend_name.value if hasattr(backend_name, 'value') else str(backend_name)
+
+            filter_desc = ""
+            if filter_free and filter_chat:
+                filter_desc = " (free + chat only)"
+            elif filter_free:
+                filter_desc = " (free tier only)"
+            elif filter_chat:
+                filter_desc = " (chat-capable only)"
+
+            print(f"{bold(f'Available models')} ({backend_str}, {len(models)} total{filter_desc}):")
+            for m in models:
+                name = m.get("name", "unknown")
+                details = m.get("details", {})
+                ctx = details.get("context_length", 0)
+                ctx_str = f"{ctx // 1024}K" if ctx >= 1000 else str(ctx)
+                is_free = details.get("free_tier", False)
+                is_chat = details.get("is_chat_model", True)
+                is_current = name == current_model
+
+                # Build markers
+                markers = []
+                if is_current:
+                    markers.append(green("✓"))
+                else:
+                    markers.append(dim("○"))
+                markers.append(green("free") if is_free else red("paid"))
+                markers.append(cyan("chat") if is_chat else dim("non-chat"))
+                # Deprecated check (gemini-2.5-* models restricted for new users)
+                if name.startswith("gemini-2.5") and name != current_model:
+                    markers.append(yellow("⚠deprecated"))
+
+                marker_str = " ".join(markers)
+                print(f"  {marker_str} {name:<45} {dim(ctx_str):>8}")
+
+            print()
+            print(dim(f"  Current: {current_model}"))
+            filter_hint = "free, chat" if not (filter_free or filter_chat) else ""
+            if filter_hint:
+                print(dim(f"  Filters: /models {filter_hint}"))
+            print(dim(f"  Switch with: /model <name>"))
             continue
 
         if user_input == "/model":
