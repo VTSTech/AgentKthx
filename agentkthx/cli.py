@@ -511,7 +511,7 @@ def _build_agent(args: argparse.Namespace, config) -> Agent:
     
     # Default API mode: cloud providers use OpenAI, local providers use OpenResponses
     from .core.types import BackendType
-    if hasattr(backend, 'backend_type') and backend.backend_type in [BackendType.OPENROUTER, BackendType.ZAI]:
+    if hasattr(backend, 'backend_type') and backend.backend_type in [BackendType.OPENROUTER, BackendType.ZAI, BackendType.GEMINI]:
         api_mode = getattr(args, "api_mode", "openai")
         # Re-initialize backend with correct API mode for cloud providers
         backend = get_backend(backend_name, timeout=timeout, api_mode=api_mode)
@@ -584,7 +584,7 @@ def _build_agent(args: argparse.Namespace, config) -> Agent:
     from .core.types import BackendType
     default_stream = (
         hasattr(backend, 'backend_type') and 
-        backend.backend_type in [BackendType.OPENROUTER, BackendType.ZAI]
+        backend.backend_type in [BackendType.OPENROUTER, BackendType.ZAI, BackendType.GEMINI]
     )
     
     # Resolve --thinking CLI arg to (think, reasoning_effort)
@@ -642,7 +642,7 @@ def _get_catalog_defaults(backend, model: str) -> dict:
     from .core.types import BackendType
     
     # Only apply catalog defaults for cloud providers
-    if not hasattr(backend, 'backend_type') or backend.backend_type not in [BackendType.OPENROUTER, BackendType.ZAI]:
+    if not hasattr(backend, 'backend_type') or backend.backend_type not in [BackendType.OPENROUTER, BackendType.ZAI, BackendType.GEMINI]:
         return {}
     
     try:
@@ -784,7 +784,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         from .core.types import BackendType
         is_cloud_provider = (
             hasattr(agent.backend, 'backend_type') and 
-            agent.backend.backend_type in [BackendType.OPENROUTER, BackendType.ZAI]
+            agent.backend.backend_type in [BackendType.OPENROUTER, BackendType.ZAI, BackendType.GEMINI]
         )
         explicit_stream = getattr(args, 'stream', None)
         if explicit_stream is True:
@@ -1723,7 +1723,7 @@ def cmd_chat(args: argparse.Namespace) -> int:
         from .core.types import BackendType
         _is_cloud = (
             hasattr(agent.backend, 'backend_type') and
-            agent.backend.backend_type in [BackendType.OPENROUTER, BackendType.ZAI]
+            agent.backend.backend_type in [BackendType.OPENROUTER, BackendType.ZAI, BackendType.GEMINI]
         )
         _explicit = getattr(args, 'stream', None)
         _will_stream = (
@@ -1742,7 +1742,7 @@ def cmd_chat(args: argparse.Namespace) -> int:
             from .core.types import BackendType
             is_cloud_provider = (
                 hasattr(agent.backend, 'backend_type') and
-                agent.backend.backend_type in [BackendType.OPENROUTER, BackendType.ZAI]
+                agent.backend.backend_type in [BackendType.OPENROUTER, BackendType.ZAI, BackendType.GEMINI]
             )
             explicit_stream = getattr(args, 'stream', None)
             if explicit_stream is True:
@@ -2142,7 +2142,11 @@ def cmd_models(args: argparse.Namespace) -> int:
 
     # Detect backend type early — cloud providers need different column layout
     from .core.types import BackendType
-    is_cloud_provider = backend.backend_type in [BackendType.OPENROUTER, BackendType.ZAI]
+    is_cloud_provider = backend.backend_type in [
+        BackendType.OPENROUTER,
+        BackendType.ZAI,
+        BackendType.GEMINI,
+    ]
 
     # Cloud providers have longer model names (e.g.
     # "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free" = 49 chars)

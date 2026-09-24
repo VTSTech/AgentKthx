@@ -1,8 +1,8 @@
-# ⚛️ AgentKthx R06.55
+# ⚛️ AgentKthx R06.56
 
 **Status: Alpha**
 
-A minimal, hackable agentic framework for autonomous AI agents. Runs **locally** with [Ollama](https://ollama.com), **in the cloud** with [OpenRouter](https://openrouter.ai) and [ZAI](https://api.z.ai). Extensible via a manifest-based **plugin system** for additional backends and features.
+A minimal, hackable agentic framework for autonomous AI agents. Runs **locally** with [Ollama](https://ollama.com), **in the cloud** with [OpenRouter](https://openrouter.ai), [ZAI](https://api.z.ai), and [Google Gemini](https://ai.google.dev/gemini-api/docs). Extensible via a manifest-based **plugin system** for additional backends and features.
 
 Inspired by the architecture of OpenClaw, rebuilt from scratch for local-first operation.
 

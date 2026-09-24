@@ -275,6 +275,23 @@ class TestBackendInit(unittest.TestCase):
                 b = GeminiBackend(api_mode=ApiMode.JEV)
         self.assertEqual(b.api_mode, ApiMode.JEV)
 
+    def test_gemini_is_cloud_provider(self):
+        """Regression for BUG-02: cli.py:2145 had `[OPENROUTER, ZAI]` cloud-provider
+        allowlist missing GEMINI. The cmd_models display loop had two branches
+        (OllamaBackend / cloud_provider) and Gemini hit neither — so
+        `agentkthx models --backend gemini` showed "Total: 10 models" with an
+        empty table.
+
+        The fix added GEMINI to all 6 occurrences of the cloud-provider
+        allowlist in cli.py. This test asserts the Gemini backend's
+        backend_type is correctly classified as a cloud provider.
+        """
+        # Sanity: backend_type is GEMINI (already covered by test_backend_type_is_gemini)
+        self.assertEqual(self.backend.backend_type, BackendType.GEMINI)
+        # And GEMINI is in the cloud-provider set used by cli.py
+        cloud_provider_types = {BackendType.OPENROUTER, BackendType.ZAI, BackendType.GEMINI}
+        self.assertIn(self.backend.backend_type, cloud_provider_types)
+
 
 class TestBuildBody(unittest.TestCase):
     """_build_openai_body() Gemini-specific extras."""

@@ -5,6 +5,178 @@ All notable changes to AgentKthx will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [R06.56] - 2026-09-24
+
+### 🆕 **FEAT-01 — Gemini cloud backend (`agentkthx/plugins/gemini/`)**
+
+First new cloud provider since R06.41's plugin system. Adds Google Gemini API support via its OpenAI-compatible endpoint at `https://generativelanguage.googleapis.com/v1beta/openai/`. Gemini joins OpenRouter and ZAI as a first-class cloud backend with a free tier (5 RPM / 250k TPM / 1500 RPD on `gemini-3.8-flash`, no credit card required).
+
+**New plugin — `agentkthx/plugins/gemini/`:**
+- `plugin.json` (1.3 KB) — v0.2 manifest, `env_prefix: GEMINI`, registers `--backend gemini` CLI flag, `provides.backends.gemini → gemini.GeminiBackend`, `compatibility.agentkthx >= 0.5.0`.
+- `__init__.py` (794 B) — `register()`/`unregister()` with lazy import of `GeminiBackend` so import-time failures don't break the plugin system.
+- `gemini.py` (53 KB, ~720 lines) — `GeminiBackend(OpenAICompatibleBackend)` with:
+  - **10-model static catalog** (gemini-3.8-flash, 3.7, 3.6, 3.5-flash + lite, 3.1-pro-preview, 2.5-pro/flash/flash-lite) with context lengths (1M Flash, 2M Pro), free_tier flags, thinking capability metadata
+  - `detect_gemini_family()` pattern-matcher (gemini-3.x / 2.5 / 2.0 / unknown)
+  - `list_models()` with 1-hour cache + `GEMINI_FREE_ONLY` filter + catalog fallback when `/models` endpoint fails
+  - `get_model_max_context()` + `_get_model_defaults()` with ROB-06 context-safe `max_tokens` persistence
+  - `_build_openai_body()` override enforcing `reasoning_effort` ↔ `extra_body.google.thinking_config` mutual exclusivity; routes extras via `extra_body.google.*` (`thinking_config`, `cached_content`, `thought_signature`)
+  - `_make_api_request()` with `429 RESOURCE_EXHAUSTED` + `502`/`503`/`504` retry, `Retry-After` honoring, exponential backoff (5s → 90s cap), `GEMINI_MAX_429_RETRIES` env override, `spend_limit_exceeded` detection (60s min wait), 401/403 actionable migration messages (mentions the Sept 2026 standard → auth-key migration)
+  - `_iter_sse_lines()` with ROB-06 context-length 400 recovery — parses Gemini's "X in the input, Y in the output" error format, calculates safe `max_tokens`, persists, retries once
+  - `test_tool_support()` returns `NATIVE` for all current Gemini chat models
+  - `generate()` with ReAct fallback path (defensive — all current Gemini chat models support native tools, but the path is kept for safety), JEV dispatch via inherited `_maybe_jev_dispatch()`
+  - `_jev_call_completions()` that flips `api_mode` to `OPENAI` temporarily to avoid infinite recursion, forces `reasoning_effort="minimal"` for decisions (saves tokens on Gemini 3.x which can't fully disable thinking)
+  - `generate_stream()` delegates to inherited `generate_completions_stream()` and yields text deltas
+
+**New env vars (`agentkthx/config.py`):**
+
+| Env var | Default | Purpose |
+|---------|---------|---------|
+| `GEMINI_BASE_URL` | `https://generativelanguage.googleapis.com/v1beta/openai/` | OpenAI-compat endpoint (trailing slash preserved) |
+| `GEMINI_API_KEY` | (empty) | API key; `GOOGLE_API_KEY` accepted as fallback (mirrors Google's SDK precedence) |
+| `GEMINI_DEFAULT_MODEL` | `gemini-3.8-flash` | Default model when `--model` is omitted |
+| `GEMINI_FREE_ONLY` | `false` | Restrict model list to free-tier models |
+| `GEMINI_THINKING_LEVEL` | (unset) | Default thinking level for Gemini 3.x: `minimal` \| `low` \| `medium` \| `high` |
+| `GEMINI_SERVICE_TIER` | `standard` | Inference tier: `standard` \| `flex` (cheaper, slower) \| `priority` (faster, paid) |
+
+**BackendType enum — `agentkthx/core/types.py`:**
+- Added `GEMINI = "gemini"` value. Single-line addition, no behavior change to existing backends.
+
+**CLI — `agentkthx/cli.py`:**
+- Added Gemini to the `cmd_models` api_mode allowlist: `if backend_name in ("openrouter", "gemini")`. Previously the CLI hardcoded `ApiMode.OPENRE` for any backend that wasn't `openrouter`, which crashed Gemini on `agentkthx models --backend gemini` (see BUG-01 below).
+
+**Default model wiring — `agentkthx/config.py`:**
+- New branch in the `DEFAULT_MODEL` switch: `elif AGENTKTHX_BACKEND == "gemini": DEFAULT_MODEL = os.environ.get("AGENTKTHX_MODEL", "gemini-3.8-flash")`.
+
+**Usage:**
+
+```bash
+# Set your key (free at https://aistudio.google.com/api-key)
+export GEMINI_API_KEY=...
+
+# CLI
+agentkthx chat --backend gemini --model gemini-3.8-flash
+agentkthx run "What is 15 * 8?" --backend gemini --model gemini-2.5-flash
+
+# Python API
+from agentkthx import Agent
+agent = Agent(model="gemini-3.8-flash", backend="gemini", tools=["calculator"])
+result = agent.run("What is 15 * 8?")
+```
+
+**Gemini-specific features wired up:**
+- Native thinking config — `reasoning_effort` (OpenAI-style: `none`/`low`/`medium`/`high`/`minimal`) OR `extra_body.google.thinking_config` (Gemini-native: `thinking_level`/`thinking_budget`/`include_thoughts`/`thought_signature`). Mutual exclusivity enforced in `_build_openai_body()`.
+- Gemini 3.x cannot disable thinking — best you can do is `minimal`. Gemini 2.5 can disable via `reasoning_effort="none"` or `thinking_budget=0`.
+- `service_tier` routing — `standard` / `flex` (cheaper, slower) / `priority` (paid, faster). Free tier ignores this.
+- `cached_content` + `thought_signature` routing via `extra_body.google.*` (thought-signature stateful continuation is NOT yet implemented — see Known Limitations below).
+- `429 RESOURCE_EXHAUSTED` retry — 6 attempts, 5s→90s exponential backoff, honors `Retry-After` header. Spend-limit 429s get 60s min wait (10-min rolling window).
+- `403` actionable error — surfaces the Sept 2026 standard → auth-key migration message instead of silently retrying.
+- `GEMINI_FREE_ONLY` filter for the model list — restricts to the 8 free-tier models (all 3.x flash variants + 2.5 flash + 2.5 flash-lite).
+
+**Tests — `tests/test_gemini_backend.py` (20 KB, 41 tests + 3 live-API tests):**
+- `TestParseOpenAiResponse` (7 tests) — tool_calls parsing, malformed args, reasoning_content, provider-error surfacing
+- `TestModelFamilyDetection` (4 tests) — 3.x, 2.5, 2.0, unknown
+- `TestBackendInit` (9 tests) — backend_type, base_url slash handling, auth headers (no HTTP-Referer/X-Title), chat URL joins cleanly, api_mode tolerance (3 regression tests added for BUG-01)
+- `TestBuildBody` (7 tests) — service_tier forwarding, thinking_config routing via extra_body, mutual exclusivity, cached_content, thought_signature
+- `TestCalculateSafeMaxTokens` (4 tests) — Gemini error format parsing, floor at 1024, returns None when already safe, fallback to third-reduction on unparsable
+- `TestModelDefaults` (4 tests) — catalog lookup, Pro model 2M context, `_context_safe_max_tokens` override (both cache-hit and catalog-fallback paths), unknown model fallback
+- `TestRetryHelpers` (3 tests) — default 6 retries, env override, backoff schedule (5s→90s cap)
+- `TestToolsNotSupportedError` (3 tests) — canonical detection, function_calling variant, unrelated error ignored
+- `TestLiveGeminiAPI` (3 tests, skipped unless `GEMINI_API_KEY=<real_key>` + `GEMINI_RUN_LIVE_TESTS=1`) — `list_models`, basic_chat, function_calling
+
+Live-API tests use a stricter skip condition than other backends: they require BOTH a real-looking key (≥20 chars, doesn't start with `test`) AND explicit `GEMINI_RUN_LIVE_TESTS=1` opt-in. This prevents accidental real-API calls during normal `pytest` runs.
+
+---
+
+### 🐛 **BUG-01 — `agentkthx models --backend gemini` crashed (api_mode hardcoded to OPENRE)**
+
+**Symptom:** Running `agentkthx models --backend gemini` (or with `--api openai`) raised:
+```
+ValueError: Gemini backend only supports OpenAI Chat-Completions or JEV (System-One) API modes
+```
+
+**Root cause:** `cli.py:2091` had a one-backend allowlist — `if backend_name == "openrouter": api_mode = ApiMode.OPENAI; else: api_mode = ApiMode.OPENRE`. Every backend that wasn't `openrouter` got `ApiMode.OPENRE` hardcoded, and the `--api` flag (captured in `api_mode_arg`) was only used for `modes_to_test` later — never propagated to override `api_mode` at the `get_backend()` call site. So both `agentkthx models --backend gemini` and `agentkthx models --backend gemini --api openai` passed `api_mode=ApiMode.OPENRE` to `GeminiBackend.__init__`, which (mirroring `OpenRouterBackend`'s strict check) rejected it with a `ValueError`.
+
+`OpenRouterBackend` worked only because the CLI special-cased it. Gemini, being a new backend, hit the `else` branch.
+
+**Two-part fix (defense in depth):**
+
+1. **`cli.py:2091`** — Changed the allowlist to include Gemini:
+   ```python
+   if backend_name in ("openrouter", "gemini"):
+       api_mode = ApiMode.OPENAI
+   else:
+       api_mode = ApiMode.OPENRE
+   ```
+
+2. **`agentkthx/plugins/gemini/gemini.py`** — Softened `GeminiBackend.__init__`'s api_mode check. Instead of raising on `OPENRE` (the original strict check, mirroring `OpenRouterBackend`), it silently normalizes `OPENRE → OPENAI`. Gemini has only one wire format anyway, so the strict check served no real purpose — the actual `generate()` flow only cares about `JEV` vs not-`JEV`. The defensive fix means any future CLI code path that doesn't special-case Gemini (e.g. `cmd_chat`, `cmd_run` if they exist with similar patterns) won't break Gemini either.
+
+   This is intentionally more permissive than `OpenRouterBackend`'s strict check. The asymmetry is justified: OpenRouter's strict check is preserved for backward compatibility and stability, while Gemini ships with the more defensive pattern from day one.
+
+**Regression tests added (3 new in `TestBackendInit`):**
+- `test_openre_api_mode_normalized_to_openai` — reproduces the exact bug, verifies `OPENRE` becomes `OPENAI` after construction
+- `test_string_api_mode_accepted` — covers the argparse-string path (`api_mode="openai"`)
+- `test_jev_api_mode_accepted` — covers JEV still working (no regression to JEV dispatch)
+
+---
+
+### 📚 **DOC-01 — `docs/GEMINI_API_TECHNICAL_REFERENCE.md` (1553 lines, 64 KB)**
+
+11-section technical reference doc grounded in 11 live Gemini docs pages fetched via web reader (Sep 24 2026):
+
+1. Authentication & Endpoint Details — base URLs, two API-key types (standard being retired Sept 2026, auth-key migration), `Authorization: Bearer` vs `x-goog-api-key`
+2. Request/Response Structure — full OpenAI-compat schema + Gemini-specific `extra_body.google.*` surface
+3. Model Family Specifications — 10-model catalog with `MODEL_CONFIGS` dict, `detect_model_family()` pattern-matcher
+4. Function Calling Implementation — tool schema, parallel function calls, `tool_choice` semantics, supported tool types (function / google_search / url_context / code_execution / computer_use)
+5. Streaming & Real-time Features — SSE format, thought-signature streaming events, `stream_options.include_usage`, tool-call delta accumulation
+6. Error Codes & Recovery — gRPC code mapping table, `GeminiErrorHandler` + `GeminiRetryHandler` implementations
+7. Rate Limiting & Concurrency — 4 limit dimensions (RPM/TPM/RPD/spend), Free-tier reality table, spend-based rate limit table (Free / Tier 1-3), client-side `GeminiClientRateLimiter` implementation
+8. Multimodal Content Handling — content part types, validation, `GeminiMultimodalHandler`, native Files API for >20MB inputs
+9. Thinking & Reasoning Configuration — parameter mapping table (`reasoning_effort` ↔ `thinking_level` ↔ `thinking_budget`), how to disable thinking per family, thought-signature stateful continuation pattern
+10. Implementation Notes for AgentKthx — `GeminiBackend` integration skeleton, auto-detection, tool schema compatibility, context management, integration test plan
+11. Troubleshooting Matrix — symptom/cause/solution table, `GeminiDebugHandler`, `GeminiPerformanceMonitor`
+
+Plus appendices: OpenAI-compat limitations (beta gaps), region availability (200+ countries, notable absences), reasoning-effort token-cost reference.
+
+---
+
+### 🧪 **TEST-01 — Test suite growth**
+
+- **R06.55:** 710 passed, 9 skipped (live-API across backends), 0 failed
+- **R06.56:** **713 passed**, 9 skipped, 0 failed
+- **+3 new Gemini unit tests** (api_mode tolerance regression coverage for BUG-01)
+- **+38 new Gemini unit tests** total (full Gemini test suite shipped in v0.1)
+- **+3 new Gemini live-API tests** (skipped unless `GEMINI_API_KEY` + `GEMINI_RUN_LIVE_TESTS=1` opt-in)
+- **No regressions** — all 710 pre-existing tests still pass unchanged
+
+---
+
+### 📦 **DIST-01 — Deployable zip**
+
+`AgentKthx-gemini-plugin.zip` (839 KB, 211 files, sha256 `4b45411e2a7917fc…`) — complete repo with Gemini plugin installed, excludes `.git/` and `__pycache__/`. Verified by extracting to `/tmp` and running the full test suite (713 passed, 9 skipped). Distributed via the session's preview panel at `/AgentKthx-gemini-plugin.zip`.
+
+---
+
+### 🚧 **Known Limitations (v0.1)**
+
+- **Thought-signature stateful continuation NOT yet implemented** — multi-turn agent loops will re-derive reasoning each turn, costing ~2-3× more reasoning tokens on Gemini 3.x. The `thought_signature` parameter is plumbed through `_build_openai_body()` and the hooks are in place; v0.2 will add the accumulator in `generate_completions_stream()`.
+- **Native Files API (multipart upload for >20MB inputs) NOT wired in** — would require separate `@google/genai` SDK code path. OpenAI-compat `/chat/completions` is the only surface used.
+- **Live API / Computer Use / native Interactions endpoint NOT in scope** — would require native SDK fallback. Documented in `GEMINI_API_TECHNICAL_REFERENCE.md` Appendix.
+
+---
+
+### 📊 **Summary**
+
+- **+1 new cloud backend** (Gemini) — first addition since R06.41's plugin system
+- **+4 new files** in `agentkthx/plugins/gemini/` + `tests/test_gemini_backend.py`
+- **+2 patched existing files** (`agentkthx/core/types.py`, `agentkthx/config.py`) + 1 CLI patch (`agentkthx/cli.py:2091`)
+- **+1 new reference doc** (`docs/GEMINI_API_TECHNICAL_REFERENCE.md`, 1553 lines)
+- **+41 new unit tests** + 3 live-API tests
+- **1 bug fixed** (BUG-01: cmd_models crashed on Gemini with hardcoded OPENRE)
+- **3 regression tests** guard against reintroduction of BUG-01
+- **713 tests passing** (was 710), 0 failing, no regressions
+
+---
+
 ## [R06.55] - 2026-09-23 9:18:11 PM
 
 ### 🏗️ **ARCH-01 — OpenAICompatibleBackend extracted (backend inheritance decoupled)**
