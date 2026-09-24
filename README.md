@@ -1,4 +1,4 @@
-# ⚛️ AgentKthx R06.56
+# ⚛️ AgentKthx R06.57
 
 **Status: Alpha**
 
@@ -377,6 +377,45 @@ agentkthx models --backend openrouter
 OPENROUTER_FREE_ONLY=1 agentkthx models --backend openrouter
 ```
 
+### Gemini Configuration
+
+Google Gemini API backend via its OpenAI-compatible endpoint. Provides access to Gemini 3.x, Gemini 2.5, and Gemma 4 chat models. Free tier available (5 RPM / 250,000 TPM / 1,500 RPD on `gemini-3.8-flash`, no credit card required).
+
+#### Environment Variables
+
+```bash
+export GEMINI_API_KEY="your_api_key_here"                                  # Required (or GOOGLE_API_KEY)
+export GEMINI_BASE_URL="https://generativelanguage.googleapis.com/v1beta/openai/"  # Optional (default)
+export GEMINI_DEFAULT_MODEL="gemini-3.8-flash"                              # Optional
+export GEMINI_FREE_ONLY="1"                                                 # Optional (filter to free-tier models)
+export GEMINI_THINKING_LEVEL="minimal"                                      # Optional: minimal|low|medium|high (Gemini 3.x)
+export GEMINI_SERVICE_TIER="standard"                                       # Optional: standard|flex|priority
+export GEMINI_MAX_429_RETRIES="6"                                           # Optional (default 6, 5s→90s backoff)
+```
+
+`GEMINI_API_KEY` is the documented env var. `GOOGLE_API_KEY` is accepted as a fallback (mirrors Google's SDK precedence).
+
+#### Usage Examples
+
+```bash
+# Basic usage with free-tier model
+agentkthx chat --backend gemini --model gemini-3.8-flash --tools calculator
+
+# Gemini 2.5 (can fully disable thinking)
+agentkthx chat --backend gemini --model gemini-2.5-flash
+
+# Gemma 4 open-source model (uses inline <thought>...</thought> tags for reasoning)
+agentkthx chat --backend gemini --model gemma-4-26b-a4b-it --think
+
+# List available models (10-model static catalog with free-tier markers)
+agentkthx models --backend gemini
+
+# Free-tier models only
+GEMINI_FREE_ONLY=1 agentkthx models --backend gemini
+```
+
+See [docs/GEMINI_API_TECHNICAL_REFERENCE.md](docs/GEMINI_API_TECHNICAL_REFERENCE.md) for the full 11-section reference (auth, models, function calling, streaming, error codes, rate limits, multimodal, thinking config, integration notes, troubleshooting, 71-model catalog with free-tier data transcribed from Google AI Studio).
+
 ### Chat-Completions Streaming
 
 ```python
@@ -538,7 +577,7 @@ In chat mode, toggle at runtime:
 Environment variables:
 
 ```bash
-# Backend URLs
+# Backend URLs and per-backend settings
 OLLAMA_BASE_URL=https://your-ollama-server.com    # Default: http://localhost:11434
 LLAMA_SERVER_BASE_URL=http://localhost:8764     # llama-server URL (default: 8764)
 
@@ -552,6 +591,15 @@ ZAI_API_KEY=sk-...                                # ZAI API key (required)
 ZAI_FREE_ONLY=true                               # Restrict to free models only
 ZAI_FREE_FALLBACK_MODEL=glm-4.5-flash            # Fallback when credits run out
 
+# Gemini plugin
+GEMINI_API_KEY=...                                # Required (or GOOGLE_API_KEY)
+GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/  # Optional (default)
+GEMINI_DEFAULT_MODEL=gemini-3.8-flash             # Optional
+GEMINI_FREE_ONLY=1                                # Optional (filter to free-tier models)
+GEMINI_THINKING_LEVEL=minimal                     # Optional: minimal|low|medium|high (Gemini 3.x)
+GEMINI_SERVICE_TIER=standard                      # Optional: standard|flex|priority
+GEMINI_MAX_429_RETRIES=6                          # Optional (default 6, 5s→90s backoff)
+
 # ACP plugin
 ACP_BASE_URL=http://localhost:8766                 # ACP server URL
 
@@ -561,7 +609,7 @@ TURBOQUANT_PORT=8764                               # TurboQuant server port
 TURBOQUANT_CTX=8192                                # Context window size
 
 # Agent settings
-AGENTKTHX_BACKEND=ollama      # Default backend: ollama, llama-server, bitnet, zai, ...
+AGENTKTHX_BACKEND=ollama      # Default backend: ollama, llama-server, bitnet, zai, gemini, ...
 AGENTKTHX_MODEL=qwen2.5:0.5b  # Default model
 AGENTKTHX_MAX_STEPS=10        # Maximum reasoning steps
 AGENTKTHX_DEBUG=false         # Enable debug output

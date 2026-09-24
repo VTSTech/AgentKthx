@@ -2340,7 +2340,18 @@ Final Answer: <the answer>
                         if chunk.get("finish_reason"):
                             finish_reason = chunk["finish_reason"]
         except KeyboardInterrupt:
-            # User cancelled mid-stream
+            # User cancelled mid-stream. Close the stream generator
+            # explicitly so the underlying HTTP connection is released
+            # deterministically rather than waiting for GC. Without this,
+            # the urllib response in the backend's _iter_sse_lines is
+            # abandoned mid-iteration and may stay open until GC runs,
+            # which can exhaust connection limits on long sessions with
+            # many Ctrl+C interrupts. See ROB-05 (R06.57).
+            try:
+                if 'stream_gen' in locals() and stream_gen is not None:
+                    stream_gen.close()
+            except Exception:
+                pass
             # Newline so the next prompt isn't on the same line
             sys.stdout.write("\n")
             sys.stdout.flush()

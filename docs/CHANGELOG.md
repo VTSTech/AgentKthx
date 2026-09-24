@@ -5,6 +5,104 @@ All notable changes to AgentKthx will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [R06.57] - 2026-09-25
+
+### 🐛 **ROB-05 — Streaming KeyboardInterrupt now closes the HTTP connection**
+
+**Symptom:** When the user hit `Ctrl+C` mid-stream, `_generate_stream()` in `agentkthx/agent.py` caught the `KeyboardInterrupt` and returned a cancelled-response dict immediately — but the underlying stream generator (from `backend.generate_completions_stream()` or `backend.generate_stream()`) was abandoned without `.close()`. The HTTP response object inside the backend's `_iter_sse_lines` was therefore left open until Python's garbage collector happened to finalize the generator. On long-running chat sessions with many interrupts, this could exhaust connection pool slots.
+
+**Root cause:** The `except KeyboardInterrupt:` handler at `agent.py:2342` only wrote a newline and returned:
+
+```python
+except KeyboardInterrupt:
+    sys.stdout.write("\n")
+    sys.stdout.flush()
+    return { ... "_cancelled": True }
+```
+
+The `stream_gen` local (assigned at line 2231 for OpenAI-compat path and line 2318 for native path) was never explicitly released.
+
+**Fix (`agentkthx/agent.py:2342-2365`):** Added a `stream_gen.close()` call before the newline + return:
+
+```python
+except KeyboardInterrupt:
+    try:
+        if 'stream_gen' in locals() and stream_gen is not None:
+            stream_gen.close()
+    except Exception:
+        pass
+    sys.stdout.write("\n")
+    sys.stdout.flush()
+    return { ... "_cancelled": True }
+```
+
+Calling `.close()` on a generator that's mid-iteration triggers its `finally` block — which, for ZAI's `_iter_sse_lines` at `zai.py:705-712`, deterministically closes the underlying `urllib.request` response. (OpenRouter and Gemini's `_iter_sse_lines` do not yet have this `finally` block — tracked separately as ROB-06 in the audit.)
+
+**Impact:** HTTP connections are released immediately on user cancellation, preventing potential connection pool exhaustion on long-running chat sessions. Pairs naturally with the planned ROB-06 fix (adding `try/finally response.close()` to OpenRouter and Gemini's `_iter_sse_lines`) — once both are in place, Ctrl+C mid-stream will deterministically close the connection on every cloud backend.
+
+---
+
+### 📚 **DOC-01 — Gemini env vars now documented in README Configuration section**
+
+**Symptom:** The 6 `GEMINI_*` env vars (`GEMINI_API_KEY`, `GEMINI_BASE_URL`, `GEMINI_DEFAULT_MODEL`, `GEMINI_FREE_ONLY`, `GEMINI_THINKING_LEVEL`, `GEMINI_SERVICE_TIER`) plus the implicit `GEMINI_MAX_429_RETRIES` were correctly declared in `agentkthx/config.py:84-95`, in the plugin manifest `agentkthx/plugins/gemini/plugin.json:18-28`, and in the `gemini.py` module docstring (lines 19-27) — but were NOT surfaced in the README's Configuration section. Users discovering Gemini via the README had to read the source or open `docs/GEMINI_API_TECHNICAL_REFERENCE.md` to configure it.
+
+**Fix (two parts):**
+
+1. **New `### Gemini Configuration` subsection in `README.md`** (between OpenRouter Configuration and Chat-Completions Streaming) — mirrors the OpenRouter Configuration format with an `#### Environment Variables` block listing all 7 env vars with defaults, and an `#### Usage Examples` block with 5 common Gemini invocations (free-tier model, Gemini 2.5, Gemma 4 with `<thought>` tag parser, model listing, `GEMINI_FREE_ONLY` filter). Links to `docs/GEMINI_API_TECHNICAL_REFERENCE.md` for the full 11-section reference.
+
+2. **Existing `## Configuration` section** — added a Gemini plugin block to the consolidated env-var table (lines 593-600), so users scrolling the master env-var list also see Gemini settings in context with the other backends. Also updated the `AGENTKTHX_BACKEND` line to mention `gemini` as a valid backend name.
+
+**Impact:** Users can now configure Gemini from the README alone — no source-reading required. Closes the discovery gap flagged in the R06.56 audit (DOC-01).
+
+---
+
+### 🆕 **ROB-06 parity — ZAI backend gets the `num_ctx/32` max_tokens cap + context-length 400 recovery**
+
+**Symptom:** ZAI's `_get_model_defaults()` (in `agentkthx/plugins/zai/zai.py`) returned `meta.get("default_max_tokens", 8192)` directly from the model catalog — with no cap relative to `context_length`. For GLM-4.5/4.6 models that report `default_max_tokens=131072` against a 128K `context_length`, this left essentially zero room for input on long agentic runs (where tool results accumulate in memory and input grows). The same class of bug bit OpenRouter in R06.55 — it was fixed there with the empirical `num_ctx/32` cap and a reactive 400-recovery path.
+
+**Fix — three coordinated changes in `agentkthx/plugins/zai/zai.py`:**
+
+1. **`_get_model_defaults()` now caps `max_tokens`** to `context_length // 32`, mirroring OpenRouter (R06.55) and Gemini (R06.56). A 128K-context GLM-4.6 model now defaults to `max_tokens=4096` (3% of context) instead of `131072` (102% of context — guaranteed 400 on any non-trivial input). The empirical rationale (from R06.55 testing on `nex-agi/nex-n2.5-mini:free`, 256K context, codebase-audit skill with 30+ tool calls) is preserved in the comment: `num_ctx/4` → 400 on step 5, `num_ctx/8` → 400 on step 9, `num_ctx/16` → step 27+, `num_ctx/32` → conservative default for longest tasks.
+
+2. **`_iter_sse_lines()` now handles context-length 400** with the same retry pattern: parse actual token counts from the error body via `_calculate_safe_max_tokens()`, persist the safe value on `self._context_safe_max_tokens`, mutate `body["max_tokens"]`, and retry once. The persisted value is then honored by all future `_get_model_defaults()` calls in the same agentic run, preventing the death-spiral of repeated 400s. Existing ZAI-specific recovery paths (429 insufficient-credits fallback, 400 does-not-support-tools ReAct fallback) are preserved unchanged.
+
+3. **`_generate_with_auth()` (non-streaming path) now handles context-length 400** with the same retry pattern, matching `OpenRouterBackend.generate()` at the same error site. This catches the case where the user runs `agentkthx run` (non-streaming) and hits the 400 — previously ZAI would just raise `RuntimeError: ZAI HTTP error 400: ...` with no recovery.
+
+4. **`_calculate_safe_max_tokens()`** — new helper that parses ZAI's error message format (`"This model's maximum context length is 131072 tokens. However, you requested 140000 tokens (120000 of text input, 20000 in the output)."`), extracts `max_context`, `input_tokens`, `tool_tokens`, and computes `safe_max = max_context - input_tokens - 2048` (2K safety margin). Floors at 1024, caps at the original `max_tokens`. Falls back to a 1/3 reduction if the regex doesn't match. Mirrors `OpenRouterBackend._calculate_safe_max_tokens` line-for-line except for the regex (ZAI uses `"maximum context length is"`; OpenRouter uses the same pattern; Gemini uses `"maximum context length of"`).
+
+5. **`__init__` now initializes `self._context_safe_max_tokens: int | None = None`** so the attribute always exists (matches OpenRouterBackend and GeminiBackend).
+
+**Status of "all backends should use this pattern":**
+- ✅ OpenRouterBackend — R06.55 (`openrouter.py:520-578`, `:1103-1205`)
+- ✅ GeminiBackend — R06.56 (`gemini.py:1060-1110`, `:1440-1510`)
+- ✅ ZaiBackend — R06.57 (this change, `zai.py:434-484`, `:684-831`, `:998-1025`)
+- ⏸ OllamaBackend — intentionally excluded. Local Ollama doesn't return HTTP 400 context-length errors (it truncates internally), and its `num_ctx` option (default 4096) has different semantics from a cloud provider's reported `context_length`. Family-based `max_tokens=2048` defaults are already conservative.
+
+**Note:** This is the third copy of the `_make_request_with_retry + _calculate_safe_max_tokens` pattern. The R06.56 audit (ARCH-03) flagged this duplication — extracting it to `OpenAICompatibleBackend` is the long-term fix. For R06.57, parity was prioritized over abstraction.
+
+**Impact:** Long-running ZAI agentic runs no longer 400 on step 5-10 when tool results accumulate. The reactive recovery means even an aggressively-set `--max-tokens` won't kill the run — the first 400 triggers a safe recalculation, and all subsequent steps reuse the persisted value.
+
+---
+
+### 🧪 **TEST-01 — Test suite**
+
+- **R06.56 baseline:** 766 passed, 9 skipped, 0 failed
+- **R06.57 final:** **766 passed**, 9 skipped, 0 failed — no regressions
+- The R06.57 changes are additive behavior (cap + recovery path + close-on-cancel) — no existing test paths were modified. The new code paths trigger only on real HTTP 400s and real Ctrl+C interrupts, which the mocked unit tests don't exercise. Live-API tests would be needed for full coverage; that's tracked separately as TEST-01 in the audit.
+
+---
+
+### 📦 **Files changed in R06.57**
+
+- `agentkthx/agent.py` — ROB-05 fix (`_generate_stream` KeyboardInterrupt handler, +12 lines)
+- `agentkthx/plugins/zai/zai.py` — ROB-06 parity (`_get_model_defaults` cap, `_iter_sse_lines` 400 recovery, `_generate_with_auth` 400 recovery, `_calculate_safe_max_tokens`, `__init__` init, +200 lines net)
+- `README.md` — DOC-01 fix (new `### Gemini Configuration` subsection + Gemini block in master env-var table + AGENTKTHX_BACKEND mention, +50 lines net)
+- `pyproject.toml` — version bump 0.6.56 → 0.6.57
+- `agentkthx/__init__.py` — version bump R06.56 → R06.57
+- `docs/CHANGELOG.md` — this entry
+
+---
+
 ## [R06.56] - 2026-09-24 1:35:20 PM
 
 ### 🆕 **FEAT-01 — Gemini cloud backend (`agentkthx/plugins/gemini/`)**

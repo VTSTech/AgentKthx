@@ -1,10 +1,12 @@
 # Improvement & Enhancement Audit
 
-**AgentKthx v0.6.56 (R06.56)**
+**AgentKthx v0.6.57 (R06.57)**
 
 **Repository:** https://github.com/VTSTech/AgentKthx  
 **Author:** VTSTech | **License:** MIT | **Date:** 2026-09-25  
-**Status:** 13 Open Findings | 7 Categories | SEC, ROB, MAINT, PERF, FEAT, ARCH, TEST, DOC
+**Status:** 11 Open Findings | 8 Categories | SEC, ROB, MAINT, PERF, FEAT, ARCH, TEST, DOC
+
+> **R06.57 delta (2026-09-25):** Closed ROB-05 (streaming KeyboardInterrupt now calls `stream_gen.close()` in `agent.py:2342-2365`), closed DOC-01 (Gemini env vars now documented in README Configuration section + master env-var table), and brought ZAI to parity with OpenRouter/Gemini on the `num_ctx/32` max_tokens cap + context-length 400 recovery pattern (`zai.py:_get_model_defaults`, `_iter_sse_lines`, `_generate_with_auth`, `_calculate_safe_max_tokens`). Test suite still 766 passed, 9 skipped, 0 failed. See `docs/CHANGELOG.md` for the full R06.57 entry.
 
 ---
 
@@ -50,15 +52,15 @@ The test suite has grown from 710 (R06.55 release) to **766 passed, 9 skipped, 0
 | FEAT-01 | Medium | New Feature | OPEN | No provider routing preferences for OpenRouter |
 | FEAT-03 | Medium | New Feature | OPEN (NEW, acknowledged v0.1 limitation) | Gemini thought-signature stateful continuation NOT implemented — multi-turn loops re-derive reasoning (~2-3x token cost) |
 | TEST-01 | Medium | Testing | OPEN | No integration tests — all tests are mocked unit tests; BUG-01/02 caught by manual VM testing |
-| ROB-05 | Low | Robustness | OPEN | KeyboardInterrupt during streaming doesn't close HTTP connections |
-| ROB-06 | Low | Robustness | OPEN (NEW) | OpenRouter & Gemini `_iter_sse_lines` lack `try/finally response.close()` — ZAI has the correct pattern |
+| ROB-06 | Low | Robustness | OPEN (NEW) | OpenRouter & Gemini `_iter_sse_lines` lack `try/finally response.close()` — ZAI has the correct pattern. **R06.57 note:** ZAI's existing `try/finally` now also benefits from ROB-05's `stream_gen.close()` on Ctrl+C. OpenRouter and Gemini still need the `try/finally` added. |
 | PERF-03 | Low | Performance | OPEN | `_generate_stream()` has a dead `think` parameter — accepted but never forwarded |
 | FEAT-02 | Low | New Feature | OPEN (sub-issue worsened) | `/param` matrix hardcoded; Gemini excluded from 5 params |
 | ARCH-02 | Low | Architecture | OPEN | No coverage measurement configured |
-| ARCH-03 | Low | Architecture | OPEN (NEW) | ~400 lines of 429 retry / SSE recovery duplicated between OpenRouter and Gemini |
-| DOC-01 | Low | Documentation | OPEN (NEW) | Gemini env vars not documented in README Configuration section |
+| ARCH-03 | Low | Architecture | OPEN (NEW, worsened in R06.57) | ~400 lines of 429 retry / SSE recovery / `num_ctx/32` cap duplicated across OpenRouter, Gemini, AND now ZAI (R06.57 parity). Extracting to `OpenAICompatibleBackend` is the long-term fix. |
+| ~~ROB-05~~ | ~~Low~~ | Robustness | ✓ CLOSED R06.57 | KeyboardInterrupt during streaming doesn't close HTTP connections — fixed in `agent.py:2342-2365` via `stream_gen.close()` |
+| ~~DOC-01~~ | ~~Low~~ | Documentation | ✓ CLOSED R06.57 | Gemini env vars not documented in README Configuration section — fixed with new `### Gemini Configuration` subsection + master env-var table block |
 
-**Severity distribution**: 1 High (MAINT-01), 5 Medium (MAINT-04, MAINT-05, FEAT-01, FEAT-03, TEST-01), 7 Low.
+**Severity distribution (R06.57)**: 1 High (MAINT-01), 5 Medium (MAINT-04, MAINT-05, FEAT-01, FEAT-03, TEST-01), 5 Low. **2 findings closed in R06.57** (ROB-05, DOC-01).
 
 **Findings closed since R06.55 audit**:
 - ~~ROB-04~~ (Medium → CLOSED R06.55): `requests` dependency removed — OpenRouter migrated to stdlib `urllib.request`. Verified: `import urllib.request` at line 37-38, no `import requests` anywhere in module.

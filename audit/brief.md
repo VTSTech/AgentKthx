@@ -1,6 +1,6 @@
 # Codebase Intelligence Brief: AgentKthx
 
-> Generated: 2026-09-25 | Auditor: Super Z (running codebase-audit skill) | Version: R06.56 (0.6.56) | Commit: cf9f134
+> Generated: 2026-09-25 (updated R06.57) | Auditor: Super Z (running codebase-audit skill) | Version: R06.57 (0.6.57) | Commit: pending
 
 ---
 
@@ -13,7 +13,7 @@
 | **Entry Point** | `agentkthx/__main__.py` → `agentkthx.cli:main()` — installed as `agentkthx` console script |
 | **Build/Run** | `pip install -e .` (dev) or `pip install agentkthx` (PyPI). Run with `agentkthx chat` / `agentkthx run "<prompt>"` / `python -m agentkthx ...` |
 | **Test Command** | `ZAI_API_KEY=test_dummy_key_12345 GEMINI_API_KEY=test_dummy_key_12345 python -m pytest tests/ -q` (env vars required for cloud backend imports) |
-| **Current Version** | 0.6.56 (R06.56) |
+| **Current Version** | 0.6.57 (R06.57) |
 
 ---
 
@@ -221,13 +221,15 @@ update_check.py → checks PyPI + GitHub for updates
 
 - **8 hardcoded backend allowlists in `cli.py`** (MAINT-05, NEW) — lines 514, 587, 645, 787, 1953, 1972, 2326, 2380. The R06.56 BUG-01 fix changed `("openrouter")` → `("openrouter", "gemini")` at line 2326 — a patch, not a generalization. A 5th cloud backend would hit the same crash. The 6 BackendType.GEMINI additions (BUG-02 `replace_all`) are also patches.
 
-- **OpenRouter & Gemini streaming leak HTTP connections** (ROB-06, NEW) — `_iter_sse_lines` and `_stream_request` in both backends lack `try: ... finally: response.close()`. ZAI does it correctly at `zai.py:705-712`. Combined with ROB-05 (Ctrl+C mid-stream abandons generator), connection pool can exhaust on long sessions.
+- **OpenRouter & Gemini streaming leak HTTP connections** (ROB-06, NEW) — `_iter_sse_lines` and `_stream_request` in both backends lack `try: ... finally: response.close()`. ZAI does it correctly at `zai.py:705-712`. **R06.57 note:** ROB-05's `stream_gen.close()` (now in `agent.py:2342-2365`) triggers ZAI's `finally` block deterministically on Ctrl+C — ZAI's leak is now plugged. OpenRouter and Gemini still need the `try/finally` added to their `_iter_sse_lines`.
+
+- ~~**`_generate_stream()` KeyboardInterrupt doesn't close HTTP** (ROB-05)~~ — ✓ CLOSED R06.57. `agent.py:2342-2365` now calls `stream_gen.close()` before returning the cancelled-response dict.
+
+- ~~**Gemini env vars not in README** (DOC-01)~~ — ✓ CLOSED R06.57. README now has a `### Gemini Configuration` subsection (lines 379-416) with all 7 env vars + usage examples, plus a Gemini block in the master env-var table (lines 593-600).
+
+- **ZAI now has `num_ctx/32` cap + 400 recovery** (R06.57, ROB-06 parity) — `zai.py:_get_model_defaults` caps `max_tokens` to `context_length // 32` (mirrors OpenRouter R06.55 + Gemini R06.56). `_iter_sse_lines` and `_generate_with_auth` both now have context-length 400 recovery with `_calculate_safe_max_tokens` + `_context_safe_max_tokens` persistence. All 3 cloud backends (OpenRouter, Gemini, ZAI) now share this pattern — extraction to `OpenAICompatibleBackend` is the long-term fix (ARCH-03).
 
 - **`_generate_stream()` has a dead `think` parameter** (PERF-03) — accepted at `openai_compat.py:620` but never forwarded to `_build_openai_body()` at line 669-683. Misleading API surface. Affects all OpenAI-compat backends (ZAI, OpenRouter, Gemini).
-
-- **`_generate_stream()` KeyboardInterrupt doesn't close HTTP** (ROB-05) — `agent.py:2342-2354` catches `KeyboardInterrupt` and returns immediately. The stream generator is abandoned without `.close()`.
-
-- **Gemini thought-signature continuation NOT implemented** (FEAT-03, NEW) — `gemini.py:50-52` documents this as a v0.1 limitation. Multi-turn agent loops re-derive reasoning from scratch each turn, costing ~2-3x more reasoning tokens. The `thought_signature` kwarg is forwarded in `_build_openai_body()` (lines 1242-1243) but no accumulator captures signatures from response chunks.
 
 - **PARAM_MATRIX excludes Gemini from 5 params** (FEAT-02 sub-issue) — `cli.py:1519-1622` `top_k`/`seed`/`n`/`presence_penalty`/`frequency_penalty` backend sets don't include `"gemini"`. Likely a bug — Gemini's OpenAI-compat endpoint accepts these. Verify on real VM.
 
