@@ -54,24 +54,18 @@ class TestZaiStreamMethodOverride(unittest.TestCase):
         )
 
     def test_method_uses_zai_endpoint(self):
-        """Method body must reference ZAI's /api/paas/v4/chat/completions,
+        """_get_chat_completions_url must return ZAI's endpoint path,
         not OllamaBackend's /v1/chat/completions path."""
-        import inspect
-        src = inspect.getsource(ZaiBackend.generate_completions_stream)
-        self.assertIn("/api/paas/v4/chat/completions", src)
-        self.assertIn("Bearer", src, "ZAI requires Bearer token auth")
+        b = _make_zai_backend()
+        url = b._get_chat_completions_url()
+        self.assertIn("/api/paas/v4/chat/completions", url)
+        self.assertNotIn("/v1/chat/completions", url)
 
     def test_method_does_not_use_ollama_path(self):
-        """Method body must NOT build URL via self.base_url + /v1/chat/..."""
-        import inspect
-        src = inspect.getsource(ZaiBackend.generate_completions_stream)
-        # The wrong pattern would be: f"{self.base_url}/v1/chat/completions"
-        # Our override uses f"{self.base_url}/api/paas/v4/chat/completions"
-        # so /v1/chat/completions must NOT appear as a URL builder.
-        # (It might appear in a comment, so check it's not in an f-string.)
-        # Conservative check: ensure the ZAI path appears, /v1 path doesn't
-        # appear in an f-string URL construction.
-        self.assertIn("/api/paas/v4/chat/completions", src)
+        """_get_chat_completions_url must NOT contain /v1/chat/completions."""
+        b = _make_zai_backend()
+        url = b._get_chat_completions_url()
+        self.assertNotIn("/v1/chat/completions", url)
 
 
 class TestZaiStreamMethodShape(unittest.TestCase):

@@ -2100,29 +2100,38 @@ def cmd_models(args: argparse.Namespace) -> int:
     CTX_W = 12
     TOOLS_W = 12  # fits "✓ native"
     FAMILY_W = 12
-    sep_len = 4 + NAME_W + SIZE_W + CTX_W + TOOLS_W + TOOLS_W + FAMILY_W + 10
+
+    # Detect backend type early — cloud providers need different column layout
+    from .core.types import BackendType
+    is_cloud_provider = backend.backend_type in [BackendType.OPENROUTER, BackendType.ZAI]
+
+    # Cloud providers have longer model names (e.g.
+    # "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free" = 49 chars)
+    # and don't show Size/Family columns. Widen NAME_W so names don't
+    # overflow and push the Context column out of alignment.
+    if is_cloud_provider:
+        NAME_W = 50  # accommodates longest OpenRouter model names
+        sep_len = 2 + NAME_W + 1 + CTX_W + 2 + TOOLS_W + 2 + TOOLS_W  # 81
+    else:
+        sep_len = 2 + NAME_W + 1 + SIZE_W + 1 + CTX_W + 2 + TOOLS_W + 2 + TOOLS_W + 2 + FAMILY_W  # 106
 
     print()
-    print(f"{bright_cyan('⚛ AgentKthx')} - Available Models")
+    print(f"{bright_cyan('\u2696 AgentKthx')} - Available Models")
     print(dim(f"  Backend: {backend.base_url}"))
     if args.tool_support:
         mode_label = ", ".join(modes_to_test)
         print(dim(f"  Testing: {mode_label}"))
     if acp:
-        print(f"  {dim('ACP:')} {green('✓ Connected')} ({acp.base_url})")
+        print(f"  {dim('ACP:')} {green('\u2713 Connected')} ({acp.base_url})")
     print(dim("-" * sep_len))
-    # Build header based on backend type
-    from .core.types import BackendType
-    is_cloud_provider = backend.backend_type in [BackendType.OPENROUTER, BackendType.ZAI]
-    
+
     if not is_cloud_provider:
-        # Ollama and other local backends - show family column
+        # Ollama and other local backends - show family column + size
         header = f"  {'Name':<{NAME_W}} {'Size':>{SIZE_W}}  {'Context':>{CTX_W}}  {'openre':>{TOOLS_W}}  {'openai':>{TOOLS_W}}  {'Family':<{FAMILY_W}}"
     else:
-        # Cloud providers - skip family column since it's in the model name
-        header = f"  {'Name':<{NAME_W}} {'Size':>{SIZE_W}}  {'Context':>{CTX_W}}  {'openre':>{TOOLS_W}}  {'openai':>{TOOLS_W}}"
-        sep_len = 4 + NAME_W + SIZE_W + CTX_W + TOOLS_W + TOOLS_W + 10
-    
+        # Cloud providers - skip Size column (always 'unknown') and Family column (encoded in name)
+        header = f"  {'Name':<{NAME_W}} {'Context':>{CTX_W}}  {'openre':>{TOOLS_W}}  {'openai':>{TOOLS_W}}"
+
     print(header)
     print(dim("-" * sep_len))
 
@@ -2144,10 +2153,6 @@ def cmd_models(args: argparse.Namespace) -> int:
         size_col = f"{size_gb:>6.2f} GB"
         ctx_col = pad_colored(dim(ctx_str), CTX_W, 'right')
 
-        # Detect if this is a cloud provider backend
-        from .core.types import BackendType
-        is_cloud_provider = backend.backend_type in [BackendType.OPENROUTER, BackendType.ZAI]
-        
         # Handle Ollama with full tool support testing (not cloud providers)
         if isinstance(backend, OllamaBackend) and not is_cloud_provider:
             results = {}  # mode -> status string
@@ -2258,7 +2263,7 @@ def cmd_models(args: argparse.Namespace) -> int:
                 # Overwrite the "Testing..." line with the final row
                 tool_re = pad_colored(_tool_status(results.get("openre", "untested")), TOOLS_W, 'right')
                 tool_ai = pad_colored(_tool_status(results.get("openai", "untested")), TOOLS_W, 'right')
-                print(f"\r  {name_col} {size_col}  {ctx_col}  {tool_re}  {tool_ai}  {dim('(' + family + ')')}")
+                print(f"\r  {name_col} {ctx_col}  {tool_re}  {tool_ai}")
                 
                 # Log per-model test result to ACP
                 if acp:
@@ -2266,7 +2271,7 @@ def cmd_models(args: argparse.Namespace) -> int:
                     re_status = results.get('openre', '?')
                     ai_status = results.get('openai', '?')
                     acp.log_chat("user", f"Testing tool support...")
-                    acp.log_chat("assistant", f"openre={re_status} openai={ai_status} | {size_gb:.2f} GB | ctx {max_ctx}")
+                    acp.log_chat("assistant", f"openre={re_status} openai={ai_status} | ctx {max_ctx}")
             else:
                 # Read from cache or show default tool support for cloud providers
                 results = {}
@@ -2279,8 +2284,7 @@ def cmd_models(args: argparse.Namespace) -> int:
                             results[mode] = cached.value
                 
                 # For cloud providers, provide intelligent default tool support status
-                from .core.types import BackendType
-                if backend.backend_type in [BackendType.OPENROUTER, BackendType.ZAI]:
+                if is_cloud_provider:
                     # Cloud providers have already validated tool support - always default to native
                     # Override any cached results since cloud providers have confirmed tool support
                     results = {"openre": "native", "openai": "native"}
@@ -2289,13 +2293,13 @@ def cmd_models(args: argparse.Namespace) -> int:
                     if not results:
                         results = {"openre": "untested", "openai": "untested"}
                 
-                from .core.types import BackendType
                 tool_re = pad_colored(_tool_status(results.get("openre", "untested")), TOOLS_W, 'right')
                 tool_ai = pad_colored(_tool_status(results.get("openai", "untested")), TOOLS_W, 'right')
-                if backend.backend_type == BackendType.OLLAMA:
+                if not is_cloud_provider:
                     print(f"  {name_col} {size_col}  {ctx_col}  {tool_re}  {tool_ai}  {dim('(' + family + ')')}")
                 else:
-                    print(f"  {name_col} {size_col}  {ctx_col}  {tool_re}  {tool_ai}")
+                    # Cloud provider: no Size column, no Family column
+                    print(f"  {name_col} {ctx_col}  {tool_re}  {tool_ai}")
 
     print(dim("-" * sep_len))
     print(f"Total: {bright_green(str(len(models)))} models")
@@ -3155,7 +3159,7 @@ def cmd_modelfile(args: argparse.Namespace) -> int:
         return 1
 
     model = args.model or config.default_model
-    print(bold(f"\n⚛️ AgentKthx Modelfile") + dim(" · Written by VTSTech · https://www.vts-tech.org"))
+    print(bold(f"\n⚛️ AgentKthx Modelfile") + dim(" · Written by VTSTech · https://kthx.vts-tech.org"))
     print()
 
     try:
@@ -3217,7 +3221,7 @@ def cmd_skills(args: argparse.Namespace) -> int:
     loader = SkillLoader()
     skills = loader.list_skills()
 
-    print(bold(f"\n⚛️ AgentKthx Skills") + dim(" · Written by VTSTech · https://www.vts-tech.org"))
+    print(bold(f"\n⚛️ AgentKthx Skills") + dim(" · Written by VTSTech · https://kthx.vts-tech.org"))
 
     if not skills:
         print(yellow("  No skills found."))

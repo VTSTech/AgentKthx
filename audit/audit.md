@@ -4,7 +4,7 @@
 
 **Repository:** https://github.com/VTSTech/AgentKthx  
 **Author:** VTSTech | **License:** MIT | **Date:** 2026-09-22  
-**Status:** 10 Open Findings | 7 Categories | SEC, ROB, MAINT, PERF, FEAT, ARCH, TEST
+**Status:** 9 Open Findings | 7 Categories | SEC, ROB, MAINT, PERF, FEAT, ARCH, TEST
 
 ---
 
@@ -29,7 +29,9 @@
 
 AgentKthx is a 35,250+ line Python framework for autonomous AI agents with zero external dependencies — built entirely on the standard library. Since R06.41, the codebase has evolved to version R06.54 with significant improvements:
 
-- **R06.54 (Current)**: ZAI streaming fix — same bug class as R06.53 OpenRouter streaming 404, applied the same override pattern to `ZaiBackend.generate_completions_stream()` so ZAI streaming hits `/api/paas/v4/chat/completions` instead of the inherited OllamaBackend `/v1/chat/completions` (which 404s). 9 new tests added.
+- **R06.55 (Current, stashed)**: ARCH-01 closed — extracted `OpenAICompatibleBackend` base class from `OllamaBackend`. ZAI and OpenRouter no longer inherit from OllamaBackend. 534 lines of duplicated code removed (JEV methods, body construction, response parsing, streaming SSE). New shared base class is 709 lines.
+
+- **R06.54**: ZAI streaming fix — same bug class as R06.53 OpenRouter streaming 404, applied the same override pattern to `ZaiBackend.generate_completions_stream()` so ZAI streaming hits `/api/paas/v4/chat/completions` instead of the inherited OllamaBackend `/v1/chat/completions` (which 404s). 9 new tests added.
 
 - **R06.53**: Cleanup + streaming pass — closed MAINT-03 (stale `AGENTNOVA_*` refs in OpenRouter doc), ROB-02 (last bare `except:` in `orchestrator.py`), PERF-02 (`stream_options.include_usage` on OpenRouter streaming), PERF-01 (real streaming display via `_generate_stream()` + `_run_core_streaming()`). Also fixed live bugs: `You:` prompt EOL wrap, `agentkthx update` PEP 668 prompt for `--break-system-packages`. 25 new tests added.
 
@@ -61,11 +63,11 @@ The test suite now has **479 passed, 6 skipped, 0 failed** tests. Security pract
 | PERF-02 | ~~Low~~ | Performance | ✓ CLOSED R06.53 | `stream_options.include_usage` now sent on OpenRouter streaming requests |
 | FEAT-01 | Medium | New Feature | OPEN | No provider routing preferences for OpenRouter |
 | FEAT-02 | Low | New Feature | OPEN | `/param` matrix hardcoded, not extensible via plugins |
-| ARCH-01 | Medium | Architecture | OPEN | Backend inheritance couples ZAI/OpenRouter to OllamaBackend internals |
+| ARCH-01 | ~~Medium~~ | Architecture | ✓ CLOSED R06.55 | `OpenAICompatibleBackend` mixin extracted — ZAI/OpenRouter no longer inherit OllamaBackend internals |
 | ARCH-02 | Low | Architecture | OPEN | No coverage measurement configured |
 | TEST-01 | Medium | Testing | PARTIALLY ADDRESSED | No integration tests — all tests are mocked unit tests (improved) |
 
-**Severity distribution**: 1 High (MAINT-01), 4 Medium, 5 Low (excluding closed findings). Of the 10 still-open: 1 High, 4 Medium, 5 Low.
+**Severity distribution**: 1 High (MAINT-01), 3 Medium, 5 Low (excluding closed findings). Of the 9 still-open: 1 High, 3 Medium, 5 Low.
 
 ---
 
@@ -296,19 +298,35 @@ The `/param` slash command's parameter support matrix is a hardcoded dict inside
 
 ### Architecture
 
-#### ARCH-01: Backend inheritance couples ZAI/OpenRouter to OllamaBackend internals
+#### ARCH-01: Backend inheritance couples ZAI/OpenRouter to OllamaBackend internals — CLOSED in R06.55
 
 | Property | Value |
 |----------|-------|
-| **Severity** | Medium |
+| **Severity** | ~~Medium~~ → Resolved |
 | **Category** | Architecture |
-| **File(s)** | `agentkthx/plugins/zai/zai.py`, `agentkthx/plugins/openrouter/openrouter.py` |
+| **File(s)** | `agentkthx/backends/openai_compat.py` (NEW), `agentkthx/backends/ollama.py`, `agentkthx/plugins/zai/zai.py`, `agentkthx/plugins/openrouter/openrouter.py` |
+| **Status (R06.55)** | ✓ CLOSED — `OpenAICompatibleBackend` extracted
 
-Both `ZaiBackend` and `OpenRouterBackend` inherit from `OllamaBackend`. This means any change to `OllamaBackend.generate()` affects all three backends, and the JEV dispatch is inherited.
+**Status:** CLOSED in R06.55. A new intermediate base class `OpenAICompatibleBackend` (709 lines, `agentkthx/backends/openai_compat.py`) sits between `BaseBackend` and the concrete backends. It provides:
 
-**Recommendation:** Consider extracting a `ChatCompletionsMixin` or `OpenAICompatibleBackend` base class that provides the shared OpenAI-format body construction and response parsing, without the Ollama-specific `/api/chat` native path.
+- **JEV dispatch** — `generate_decision()`, `_maybe_jev_dispatch()`, `_build_jev_messages()`, `_parse_jev_response()`, `_serialize_state()`, `_JEV_SYSTEM_PROMPT`. Previously on `OllamaBackend`, inherited by ZAI/OpenRouter.
+- **Body construction** — `_build_openai_body(stream=False)` with PERF-02 `stream_options.include_usage`. Previously duplicated on OpenRouter (its own version) and Ollama (inline in `generate_completions()`).
+- **Response parsing** — `_parse_openai_response()` with tool_calls parsing + `_raw_arguments` fallback. Previously only on OpenRouterBackend.
+- **Streaming SSE** — `generate_completions_stream()` that calls abstract hooks (`_get_chat_completions_url()`, `_get_auth_headers()`, `_iter_sse_lines()`) and parses SSE uniformly. Previously duplicated on ZAI (R06.54) and OpenRouter (R06.53) — both overrides existed solely because the inherited OllamaBackend version built the wrong URL.
+- **api_mode property** — getter/setter previously on OllamaBackend, now shared.
 
-**Impact:** Reduces coupling, makes backend-specific changes safer, prevents the class of recursion bugs seen in R06.2.
+Class hierarchy after refactor:
+
+```
+BaseBackend (abstract)
+└── OpenAICompatibleBackend (shared OpenAI-compat logic)
+    ├── OllamaBackend (native /api/chat + OpenAI-compat /v1)
+    │   └── LlamaServerBackend (native llama.cpp)
+    ├── ZaiBackend (/api/paas/v4/chat/completions + Bearer auth)
+    └── OpenRouterBackend (/chat/completions + Bearer + HTTP-Referer)
+```
+
+**Impact:** 534 lines of duplicated code removed from concrete backends. The R06.53/R06.54 streaming 404 bug class is now structurally impossible — each backend provides `_get_chat_completions_url()` (returns its own endpoint), and the shared `generate_completions_stream()` uses it. No backend can accidentally inherit another's URL builder.
 
 ---
 

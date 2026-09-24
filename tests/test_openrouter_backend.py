@@ -83,7 +83,7 @@ class TestParseOpenAiResponse(unittest.TestCase):
         self.assertEqual(out["tool_calls"][0]["arguments"], {"expression": "2+2"})
 
     def test_handles_malformed_arguments_gracefully(self):
-        """Malformed JSON arguments don't crash — wrapped in _raw."""
+        """Malformed JSON arguments don't crash — wrapped in _raw_arguments."""
         raw = {
             "choices": [{
                 "message": {
@@ -101,8 +101,8 @@ class TestParseOpenAiResponse(unittest.TestCase):
             }],
         }
         out = OpenRouterBackend._parse_openai_response(raw)
-        # Should NOT crash; _raw fallback surfaces the bad payload.
-        self.assertEqual(out["tool_calls"][0]["arguments"], {"_raw": "not-valid-json{"})
+        # Should NOT crash; _raw_arguments fallback surfaces the bad payload.
+        self.assertEqual(out["tool_calls"][0]["arguments"], {"_raw_arguments": "not-valid-json{"})
 
     def test_no_choices_raises(self):
         """Missing choices raises RuntimeError so the chat loop can surface it."""
@@ -251,34 +251,43 @@ class TestBuildOpenAiBody(unittest.TestCase):
 
 
 class TestOpenRouterStreamMethodOverride(unittest.TestCase):
-    """PERF-01: OpenRouterBackend must override generate_completions_stream.
+    """ARCH-01: OpenRouterBackend must provide correct streaming hooks.
 
-    The inherited OllamaBackend.generate_completions_stream builds the URL
-    as ``{self.base_url}/v1/chat/completions`` which on OpenRouter yields
-    ``https://openrouter.ai/api/v1/v1/chat/completions`` — a doubled /v1
-    that returns HTTP 404. OpenRouterBackend must define its own method
-    that uses _make_api_request(stream=True) instead.
+    After ARCH-01, generate_completions_stream is inherited from
+    OpenAICompatibleBackend. OpenRouter must implement:
+    - _get_chat_completions_url() → correct endpoint
+    - _get_auth_headers() → Bearer + HTTP-Referer + X-Title
+    - _iter_sse_lines() → streaming HTTP transport
     """
 
-    def test_method_is_defined_on_openrouter_not_inherited(self):
-        from agentkthx.backends.ollama import OllamaBackend
-        # generate_completions_stream must be in OpenRouterBackend's own
-        # __dict__ (defined on the class itself), not inherited.
-        self.assertIn(
-            "generate_completions_stream",
-            OpenRouterBackend.__dict__,
-            "OpenRouterBackend must override generate_completions_stream — "
-            "otherwise it inherits OllamaBackend's URL builder which produces "
-            "a doubled /v1 path on OpenRouter (404 error).",
-        )
+    def _backend(self):
+        b = OpenRouterBackend.__new__(OpenRouterBackend)
+        b._base_url = "https://openrouter.ai/api/v1"
+        b.api_key = "test-key"
+        return b
 
-    def test_method_uses_openrouter_url_builder(self):
-        """Smoke test: confirm the method body references _make_api_request
-        (the OpenRouter-native URL builder), not OllamaBackend's urllib path."""
-        import inspect
-        src = inspect.getsource(OpenRouterBackend.generate_completions_stream)
-        self.assertIn("_make_api_request", src)
-        self.assertIn("chat/completions", src)
+    def test_get_chat_completions_url_uses_openrouter_path(self):
+        """_get_chat_completions_url must return OpenRouter's /chat/completions.
+        The doubled /v1/v1 bug (R06.53) must NOT be present."""
+        b = self._backend()
+        url = b._get_chat_completions_url()
+        self.assertIn("chat/completions", url)
+        # The R06.53 bug was {base_url}/v1/chat/completions which on
+        # OpenRouter produces /api/v1/v1/chat/completions (doubled /v1).
+        self.assertNotIn("/v1/v1", url)
+
+    def test_get_auth_headers_include_bearer_and_referer(self):
+        """_get_auth_headers must include Bearer token + HTTP-Referer + X-Title."""
+        b = self._backend()
+        headers = b._get_auth_headers()
+        self.assertIn("Authorization", headers)
+        self.assertIn("Bearer test-key", headers["Authorization"])
+        self.assertIn("HTTP-Referer", headers)
+        self.assertIn("X-Title", headers)
+
+    def test_has_iter_sse_lines(self):
+        """OpenRouterBackend must implement _iter_sse_lines for streaming."""
+        self.assertIn("_iter_sse_lines", OpenRouterBackend.__dict__)
 
 
 class TestIsToolsNotSupportedError(unittest.TestCase):

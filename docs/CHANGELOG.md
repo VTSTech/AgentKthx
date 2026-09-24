@@ -5,7 +5,71 @@ All notable changes to AgentKthx will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [R06.54] - 2026-09-22 4:25:38 PM
+## [R06.55] - 2026-09-22 (stashed — not yet published)
+
+### 🏗️ **ARCH-01 — OpenAICompatibleBackend extracted (backend inheritance decoupled)**
+
+Both `ZaiBackend` and `OpenRouterBackend` inherited from `OllamaBackend`. This meant any change to `OllamaBackend.generate()` affected all three backends, and the JEV dispatch was inherited. The R06.53/R06.54 streaming 404 bugs were a direct consequence — both backends inherited `generate_completions_stream` from `OllamaBackend`, which built the URL as `{base_url}/v1/chat/completions`. On ZAI that's a non-existent path (nginx 404); on OpenRouter that's a doubled `/v1` (also 404). Both required per-backend overrides that were nearly identical 200-line methods.
+
+**New `OpenAICompatibleBackend`** (`agentkthx/backends/openai_compat.py`, 709 lines) — intermediate base class between `BaseBackend` (fully abstract) and the concrete backends. Provides the shared OpenAI-compat functionality that was previously duplicated on or inherited from `OllamaBackend`:
+
+- **JEV dispatch** — `generate_decision()`, `_maybe_jev_dispatch()`, `_build_jev_messages()`, `_parse_jev_response()`, `_serialize_state()`, `_JEV_SYSTEM_PROMPT`. Previously on `OllamaBackend`, inherited by ZAI/OpenRouter — even though they have nothing to do with Ollama's native `/api/chat` path.
+- **Body construction** — `_build_openai_body(stream=False)` with PERF-02 `stream_options.include_usage`. Previously duplicated: OpenRouter had its own version, ZAI built inline, Ollama built inline in `generate_completions()`.
+- **Response parsing** — `_parse_openai_response()` with tool_calls parsing + `_raw_arguments` fallback. Previously only on `OpenRouterBackend` as a static method.
+- **Streaming SSE** — `generate_completions_stream()` that calls abstract hooks (`_get_chat_completions_url()`, `_get_auth_headers()`, `_iter_sse_lines()`) and parses SSE uniformly. Previously duplicated on ZAI (R06.54) and OpenRouter (R06.53) — both overrides existed solely because the inherited OllamaBackend version built the wrong URL.
+- **`api_mode` property** — getter/setter previously on OllamaBackend, now shared.
+
+**Abstract hooks** each concrete backend must implement:
+
+| Hook | Purpose | Ollama | ZAI | OpenRouter |
+|------|---------|--------|-----|------------|
+| `_get_chat_completions_url()` | Returns endpoint URL | `{base_url}/v1/chat/completions` | `{base_url}/api/paas/v4/chat/completions` | `{base_url}/chat/completions` |
+| `_get_auth_headers()` | Returns auth headers | `{}` (no auth) | `{Authorization: Bearer ...}` | `{Authorization, HTTP-Referer, X-Title}` |
+| `_iter_sse_lines(url, body, headers)` | Makes HTTP POST, yields raw SSE bytes | `urllib.request.urlopen` | `urllib.request.urlopen` + error recovery | `requests.post(stream=True)` |
+| `_get_model_defaults(model)` | Returns `{temperature, max_tokens}` | Family-based lookup | Catalog lookup | Cache-based lookup |
+| `_jev_call_completions(...)` | JEV hook for `generate_decision()` | Delegates to `generate_completions()` | Routes through `_generate_with_auth()` | Routes through `_make_api_request()` |
+
+**Class hierarchy after refactor:**
+
+```
+BaseBackend (abstract)
+└── OpenAICompatibleBackend (shared OpenAI-compat logic — NEW)
+    ├── OllamaBackend (native /api/chat + OpenAI-compat /v1)
+    │   └── LlamaServerBackend (native llama.cpp)
+    ├── ZaiBackend (/api/paas/v4/chat/completions + Bearer auth)
+    └── OpenRouterBackend (/chat/completions + Bearer + HTTP-Referer)
+```
+
+**Changes to each backend:**
+
+- **`OllamaBackend`**: Changed parent from `BaseBackend` to `OpenAICompatibleBackend`. Removed `_JEV_SYSTEM_PROMPT`, `_serialize_state`, `_build_jev_messages`, `_parse_jev_response`, `generate_decision`, `_maybe_jev_dispatch`, `api_mode` property/setter (all now inherited). Added `_get_chat_completions_url`, `_get_auth_headers`, `_iter_sse_lines`, `_get_model_defaults`. Kept `_jev_call_completions` (delegates to `generate_completions`), `generate_completions_stream` (Ollama-specific with logprobs/think support), native `generate`/`generate_stream`/`generate_completions`, model management methods. **233 lines removed.**
+
+- **`ZaiBackend`**: Changed parent from `OllamaBackend` to `OpenAICompatibleBackend`. Removed `generate_completions_stream` override (R06.54 — now inherited from base). Added `_get_chat_completions_url`, `_get_auth_headers`, `_iter_sse_lines` (with ZAI error recovery: insufficient credits → free fallback, no-tools → ReAct). Thin `generate_completions_stream` override handles ZAI_FREE_ONLY then delegates to `super()`. Added `base_url` property (was inherited from OllamaBackend). Added `os.environ["AGENTKTHX_API_MODE"]` set (was in OllamaBackend `__init__`). **90 lines removed.**
+
+- **`OpenRouterBackend`**: Changed parent from `OllamaBackend` to `OpenAICompatibleBackend`. Removed `generate_completions_stream` override (R06.53 — now inherited from base). Removed `_build_openai_body` override (now inherited — base class version is identical). Removed `_parse_openai_response` override (now inherited — base class version is identical). Removed `api_mode` property (now inherited). Added `_get_chat_completions_url`, `_get_auth_headers`, `_iter_sse_lines` (uses `requests.post(stream=True)`), `generate_stream` (delegates to `generate_completions_stream` and yields text deltas — was inherited from OllamaBackend). Kept `_make_api_request` (non-streaming with 429 retry), `_stream_request` (backward compat), `_get_model_defaults` (cache-based), `_jev_call_completions`, `generate`. **211 lines removed.**
+
+**`isinstance` check improvements:**
+
+The `isinstance(backend, OllamaBackend)` checks in `cli.py` (lines 2060, 2152, 3149) are now more accurate:
+- `agentkthx models` warning ("works best with Ollama backend") now correctly fires for ZAI/OpenRouter (previously they passed the isinstance check because they inherited from OllamaBackend)
+- `agentkthx modelfile` correctly rejects ZAI/OpenRouter (Ollama-specific feature)
+- `LlamaServerBackend` still inherits from `OllamaBackend` — its isinstance checks are unchanged
+
+**The R06.53/R06.54 streaming 404 bug class is now structurally impossible.** Each backend provides `_get_chat_completions_url()` (returns its own endpoint), and the shared `generate_completions_stream()` uses it. No backend can accidentally inherit another's URL builder. If a new cloud plugin is added in the future, it only needs to implement the four abstract hooks — the streaming, body construction, response parsing, and JEV dispatch are all inherited.
+
+**Tests** — 672 passed, 6 skipped, 0 failed (was 671 — added 1 test for `_iter_sse_lines` presence on OpenRouter). Updated 5 existing tests to check `_get_chat_completions_url()` instead of `generate_completions_stream` source code (the URL is now in the hook, not in the method body). Updated 1 test to expect `_raw_arguments` instead of `_raw` (the base class uses the more descriptive key name).
+
+**Summary:**
+- **534 lines of duplicated code removed** from concrete backends
+- **709 lines** of new shared base class
+- **Net**: +175 lines, but 534 lines of duplication eliminated — the shared code is in one place, not three
+- **9 open findings** remaining (was 10) — ARCH-01 closed
+
+---
+
+
+
+## [R06.54] - 2026-09-22
 
 ### 🐛 **BUG: ZAI streaming hit HTTP 404 via inherited OllamaBackend method**
 
@@ -43,7 +107,7 @@ The R06.53 streaming infrastructure (`Agent._generate_stream()` + `_run_core_str
 
 
 
-## [R06.53] - 2026-09-22 3:53:13 PM
+## [R06.53] - 2026-09-22
 
 
 ### ⚡ **PERF-01 — Real Streaming Display (typewriter effect)**
