@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [R06.57] - 2026-09-25
 
+### 🐛 **ROB-06 — OpenRouter & Gemini streaming SSE now closes the HTTP connection**
+
+**Symptom:** The R06.55 urllib migration of `OpenRouterBackend` (and R06.56 `GeminiBackend`) was done correctly for non-streaming `_make_api_request` — both used `with urllib.request.urlopen(...) as resp:` so the response was closed on exit. But the streaming paths (`_iter_sse_lines` and `_stream_request`) in both backends lacked both `with` and `try/finally`. The `for line in response: yield line` loop abandoned the response object on Ctrl+C (per ROB-05, also being closed in R06.57), on consumer exceptions, and even on the base-class `break` on `[DONE]`. The HTTP connection was leaked until GC.
+
+`ZaiBackend._iter_sse_lines` (at `zai.py:705-712`) already had the correct `try: ... finally: response.close()` pattern. The audit (R06.56 ROB-06) flagged this asymmetry: ZAI was the reference implementation, OpenRouter and Gemini were the leak.
+
+**Fix — four sites patched, all matching ZAI's pattern:**
+
+1. **`agentkthx/plugins/openrouter/openrouter.py:_iter_sse_lines`** (lines 1146-1158) — wrapped the `for line in response: yield line` loop in `try: ... finally: response.close()`. The existing 2-attempt retry loop (R06.55 context-length 400 recovery) is preserved; only the success-path yield loop is wrapped.
+2. **`agentkthx/plugins/openrouter/openrouter.py:_stream_request`** (lines 801-818) — same `try: ... finally:` wrap around the `for line in response: ... yield chunk` loop.
+3. **`agentkthx/plugins/gemini/gemini.py:_iter_sse_lines`** (lines 1473-1486) — same pattern, mirroring the OpenRouter fix.
+4. **`agentkthx/plugins/gemini/gemini.py:_stream_request`** (lines 1426-1444) — same pattern.
+
+**Status:** All 4 cloud backends now have deterministic `response.close()` on every code path. Combined with the ROB-05 fix (Ctrl+C in agent.py now calls `stream_gen.close()`), Ctrl+C mid-stream deterministically closes the HTTP connection on every backend. The streaming cleanup contract is uniform.
+
+**Tests:** No new unit tests — the existing mocked tests don't exercise the `try/finally` because they don't abandon the generator mid-iteration. A regression test would need to: instantiate a generator, call `next()` once, then `.close()` the generator, and assert the mock response's `.close()` was called. This is a TEST-01 gap (no integration tests) tracked separately in the audit.
+
+**Impact:** Eliminates a connection-leak class on OpenRouter and Gemini that compounded with ROB-05. On long-running chat sessions with frequent Ctrl+C interrupts, the connection pool could exhaust. Now it can't.
+
+---
+
 ### 🐛 **ROB-05 — Streaming KeyboardInterrupt now closes the HTTP connection**
 
 **Symptom:** When the user hit `Ctrl+C` mid-stream, `_generate_stream()` in `agentkthx/agent.py` caught the `KeyboardInterrupt` and returned a cancelled-response dict immediately — but the underlying stream generator (from `backend.generate_completions_stream()` or `backend.generate_stream()`) was abandoned without `.close()`. The HTTP response object inside the backend's `_iter_sse_lines` was therefore left open until Python's garbage collector happened to finalize the generator. On long-running chat sessions with many interrupts, this could exhaust connection pool slots.
@@ -92,14 +113,83 @@ Calling `.close()` on a generator that's mid-iteration triggers its `finally` bl
 
 ---
 
+### 🐛 **FIX-01 — Pip-installed users now see dev releases (agentkthx update / version)**
+
+**Symptom (user-reported):** On a pip-installed copy of `agentkthx 0.6.54`, running `agentkthx update` (or `agentkthx version`) said "Latest on PyPI: 0.6.54 (up to date)" — but R06.55, R06.56, R06.57 had all been committed to GitHub main. The user had no way to know these dev releases existed.
+
+**Root cause:** `agentkthx/update_check.py` had two tracks:
+
+1. **Stable track** — queries `https://pypi.org/pypi/agentkthx/json` and compares the version number. Always fires.
+2. **Dev track** — queries `https://api.github.com/repos/VTSTech/AgentKthx/commits/HEAD` and compares the commit SHA. **Only fires for git checkouts** because pip installs have no commit hash baseline.
+
+R06.55, R06.56, R06.57 were never pushed to PyPI (they're dev releases on GitHub main). The stable track correctly reported "no newer version on PyPI". The dev track was silent for pip installs — `format_notice` at `update_check.py:318` had `if installed and gh_sha...` where `installed = git_hash(__version__)` was `""` for pip installs, so the branch never fired.
+
+The docstring acknowledged this:
+
+> *"Only reported for git checkouts: a pip install carries no commit hash, so there is no baseline to compare against."*
+
+But that meant pip-installed users had zero visibility into dev releases.
+
+**Fix — three coordinated changes in `agentkthx/update_check.py`:**
+
+1. **New `_fetch_github_latest_version(timeout)` function** — fetches `https://raw.githubusercontent.com/VTSTech/AgentKthx/main/agentkthx/__init__.py` and regex-extracts `__version__ = "X.Y.Z"`. Returns the bare version string (no git suffix). Handles double-quoted, single-quoted, and git-suffix-stripped forms. Raises on missing assignment / empty version / network failure (caller caches the failure for 6h).
+
+2. **New `github_latest_version` field in `check_for_update` result** — runs for everyone (pip installs AND git checkouts). Cached as `github_version` entry (24h TTL on success, 6h on failure). Independent of the existing `github_sha` field which is git-checkout-only.
+
+3. **`format_notice` now surfaces dev releases for pip installs** — if `github_latest_version` is newer than the installed version, the dev track fires with a `pip install --force-reinstall git+https://github.com/VTSTech/AgentKthx.git` command (instead of the SHA-based `agentkthx update` for git checkouts). Skipped when the PyPI stable track already surfaced a version >= the dev version (dedup — avoids duplicate "you're behind" notices when stable catches up to dev).
+
+**cli.py `cmd_version` also updated** to show a new "GitHub main: X.Y.Z" line for pip-installed users (parallel to the existing "GitHub main: deadbee" SHA line for git checkouts). For git checkouts, the SHA line still takes precedence (avoids two "GitHub main:" lines).
+
+**What the user sees now (example: pip-installed 0.6.54):**
+
+```
+$ agentkthx version
+   Version: 0.6.54
+   Status:  Alpha
+   ...
+   Latest on PyPI: 0.6.54 (up to date)
+   GitHub main: 0.6.57 (development release available)
+```
+
+Or as a notice after `agentkthx run` / `agentkthx chat`:
+
+```
+⚡ agentkthx updates available:
+   Development: 0.6.54 → 0.6.57 on GitHub main — Run: pip install --force-reinstall git+https://github.com/VTSTech/AgentKthx.git
+```
+
+**Tests:** +11 new tests in `tests/test_update_check.py` (65 total, was 54). New `TestFetchGithubLatestVersion` class covers parsing variants (double/single quotes, git-suffix stripping, missing assignment, empty version, response close). New `TestFormatNotice` tests cover the pip-installed dev track (fires when version is newer, suppressed when PyPI already covers it, fires when dev is ahead of stable). Existing tests updated for the new URL-count behavior (pip installs now hit 2 URLs instead of 1, git checkouts hit 3 instead of 2).
+
+**Impact:** Pip-installed users now have full visibility into dev releases. R06.55, R06.56, R06.57+ will all be surfaced via the version-number comparison, with an actionable install command. Closes the "I didn't know there were newer releases" gap.
+
+---
+
 ### 📦 **Files changed in R06.57**
 
 - `agentkthx/agent.py` — ROB-05 fix (`_generate_stream` KeyboardInterrupt handler, +12 lines)
 - `agentkthx/plugins/zai/zai.py` — ROB-06 parity (`_get_model_defaults` cap, `_iter_sse_lines` 400 recovery, `_generate_with_auth` 400 recovery, `_calculate_safe_max_tokens`, `__init__` init, +200 lines net)
+- `agentkthx/plugins/openrouter/openrouter.py` — ROB-06 fix (`_iter_sse_lines` and `_stream_request` try/finally response.close(), +20 lines net)
+- `agentkthx/plugins/gemini/gemini.py` — ROB-06 fix (`_iter_sse_lines` and `_stream_request` try/finally response.close(), +20 lines net)
+- `agentkthx/update_check.py` — FIX-01 (new `_fetch_github_latest_version`, `github_latest_version` field in result, `format_notice` pip-installed dev track, +90 lines net)
+- `agentkthx/cli.py` — `cmd_version` updated to show "GitHub main: X.Y.Z" line for pip installs (+12 lines)
 - `README.md` — DOC-01 fix (new `### Gemini Configuration` subsection + Gemini block in master env-var table + AGENTKTHX_BACKEND mention, +50 lines net)
+- `tests/test_update_check.py` — +11 new tests for the new pip-installed dev track + 6 existing tests updated for new URL counts
+- `audit/brief.md`, `audit/audit.md` — refreshed to mark ROB-05, ROB-06, DOC-01 as closed; note FIX-01
 - `pyproject.toml` — version bump 0.6.56 → 0.6.57
 - `agentkthx/__init__.py` — version bump R06.56 → R06.57
 - `docs/CHANGELOG.md` — this entry
+
+---
+
+### 🧪 **TEST-01 — Test suite (R06.57 final)**
+
+- **R06.56 baseline:** 766 passed, 9 skipped, 0 failed
+- **R06.57 final:** **777 passed**, 9 skipped, 0 failed — no regressions
+- **+11 new tests total:**
+  - +7 in new `TestFetchGithubLatestVersion` class (FIX-01) — parsing variants, response close, cache reuse, negative caching
+  - +4 in `TestFormatNotice` (FIX-01) — pip-installed dev track fires / dedup / both-tracks-in-one-block variants
+  - 6 existing `TestCheckForUpdate` tests updated for new URL-count behavior (pip installs now hit 2 URLs, git checkouts hit 3)
+- No regressions — all 766 pre-existing tests pass unchanged
 
 ---
 

@@ -44,6 +44,12 @@ from . import __version__
 
 PYPI_JSON_URL = "https://pypi.org/pypi/agentkthx/json"
 GITHUB_COMMITS_URL = "https://api.github.com/repos/VTSTech/AgentKthx/commits/HEAD"
+# R06.57: raw URL for the version string in __init__.py on GitHub main.
+# Used for the pip-installed dev track — pip installs have no commit hash
+# baseline, so we compare the installed version number directly against the
+# version number declared in __init__.py on main. This surfaces dev releases
+# (R06.55, R06.56, R06.57, ...) that haven't been pushed to PyPI yet.
+GITHUB_RAW_INIT_URL = "https://raw.githubusercontent.com/VTSTech/AgentKthx/main/agentkthx/__init__.py"
 
 #: Cache location — follows the established ~/.agentkthx/ user-data convention.
 DEFAULT_CACHE_FILE = Path.home() / ".agentkthx" / "update_check.json"
@@ -190,6 +196,48 @@ def _fetch_github_sha(timeout: float) -> str:
     return sha
 
 
+def _fetch_github_latest_version(timeout: float) -> str:
+    """Fetch the version string declared in __init__.py on GitHub main.
+
+    R06.57: Pip-installed users have no git commit hash to compare against
+    the dev track, so the SHA-based comparison in format_notice silently
+    skips them. Fetching raw.githubusercontent.com/.../__init__.py and
+    parsing ``__version__ = "X.Y.Z"`` gives us a version-number baseline
+    they can be compared against, surfacing dev releases (R06.55+,
+    R06.56+, ...) that haven't been pushed to PyPI yet.
+
+    Returns the bare version string (e.g. ``"0.6.57"``), no git suffix.
+    Raises on any network / parse problem — caller caches the failure.
+    """
+    import re
+    req = urllib.request.Request(
+        GITHUB_RAW_INIT_URL,
+        headers={
+            "User-Agent": f"agentkthx/{base_version()} (update-check)",
+            "Accept": "text/plain; charset=utf-8",
+        },
+    )
+    resp = _urlopen(req, timeout=timeout)
+    try:
+        text = resp.read().decode("utf-8", errors="replace")
+    finally:
+        try:
+            resp.close()
+        except Exception:
+            pass
+    # Match: __version__ = "0.6.57"  # R06.57
+    #        __version__ = "0.6.57"
+    #        __version__='0.6.57'
+    #        __version__ = ""          (empty → caught below as "empty")
+    m = re.search(r"""__version__\s*=\s*['"]([^'"]*)['"]""", text)
+    if not m:
+        raise ValueError("GitHub __init__.py has no __version__ assignment")
+    version = m.group(1).strip()
+    if not version:
+        raise ValueError("GitHub __init__.py __version__ is empty")
+    return base_version(version)
+
+
 def _cache_fresh(entry, cached_ts: float, now: float) -> bool:
     """True if a per-source cache entry is still inside its TTL."""
     if not isinstance(entry, dict):
@@ -212,18 +260,21 @@ def check_for_update(
 
     Returns:
         {
-          "pypi_latest": "0.6.51" | None,     # latest stable on PyPI
-          "github_sha":  "<full sha>" | None, # latest commit on GitHub main
-          "from_git":    bool,                # installed copy is a git checkout
-          "source":      "cache" | "network", # where the answer(s) came from
+          "pypi_latest": "0.6.51" | None,      # latest stable on PyPI
+          "github_sha":  "<full sha>" | None,    # latest commit on GitHub main (git checkouts only)
+          "github_latest_version": "0.6.57" | None,  # R06.57: __init__.py version on main
+          "from_git":    bool,                   # installed copy is a git checkout
+          "source":      "cache" | "network",    # where the answer(s) came from
           "checked_at":  epoch,
         }
         None when AGENTKTHX_NO_UPDATE_CHECK is set.
 
     Each source resolves independently: one may answer from cache while the
     other is refetched; one may fail (cached as an error for 6h) without
-    affecting the other. The GitHub dev-track check only runs for git
-    checkouts — pip installs have no commit hash to compare against.
+    affecting the other. The GitHub SHA check only runs for git checkouts
+    (pip installs have no commit hash to compare against); the GitHub
+    version-number check (R06.57) runs for everyone so pip-installed users
+    can see dev releases that haven't been pushed to PyPI yet.
 
     Args:
         force:      bypass caches and hit both endpoints (still silent on failure)
@@ -248,6 +299,7 @@ def check_for_update(
     result = {
         "pypi_latest": None,
         "github_sha": None,
+        "github_latest_version": None,  # R06.57
         "from_git": from_git,
         "source": "network",
         "checked_at": now,
@@ -266,7 +318,7 @@ def check_for_update(
         except Exception:
             fresh["pypi"] = {"error": True}
 
-    # --- Track 2: development (GitHub main commits) ------------------------
+    # --- Track 2a: development (GitHub main commit SHA) — git checkouts only
     # Only meaningful with a commit baseline: pip installs skip it entirely.
     if from_git:
         entry = cached.get("github")
@@ -279,6 +331,24 @@ def check_for_update(
                 fresh["github"] = {"sha": result["github_sha"]}
             except Exception:
                 fresh["github"] = {"error": True}
+
+    # --- Track 2b: development (GitHub main __init__.py version) — everyone
+    # R06.57: Pip-installed users have no commit hash baseline, so the SHA
+    # comparison silently skips them. Fetching the version number declared
+    # in __init__.py on main gives them a baseline they can be compared
+    # against — surfaces dev releases (R06.55+, R06.56+, ...) that haven't
+    # been pushed to PyPI. Git checkouts also benefit: if the SHA fetch
+    # failed but the version fetch succeeded, we still have a signal.
+    entry = cached.get("github_version")
+    if not force and _cache_fresh(entry, cached_ts, now):
+        result["github_latest_version"] = entry.get("version")
+        result["source"] = "cache"
+    else:
+        try:
+            result["github_latest_version"] = _fetch_github_latest_version(timeout)
+            fresh["github_version"] = {"version": result["github_latest_version"]}
+        except Exception:
+            fresh["github_version"] = {"error": True}
 
     # Persist this cycle: fresh entries win, still-valid cached entries stay.
     _write_cache(cache_file, {**cached, **fresh, "checked_at": now})
@@ -298,8 +368,13 @@ def format_notice(result: Optional[dict], current: str = "") -> Optional[str]:
            Stable: 0.6.50 → 0.6.51 — Run: pip install --upgrade agentkthx
            Development: new commits on GitHub main (f754294) — Run: agentkthx update
 
-    Returns None when: no result, no track has anything newer, or the only
-    signal is a dev-track commit for a pip-installed copy (no baseline).
+    R06.57: For pip-installed users (no git hash), the dev track now also
+    fires when the version number in __init__.py on GitHub main is newer
+    than the installed version — surfaces dev releases that haven't been
+    pushed to PyPI yet:
+        Development: 0.6.54 → 0.6.57 on GitHub main — Run: pip install --force-reinstall git+https://github.com/VTSTech/AgentKthx.git
+
+    Returns None when: no result, no track has anything newer.
     """
     if not result:
         return None
@@ -314,11 +389,40 @@ def format_notice(result: Optional[dict], current: str = "") -> Optional[str]:
         stable_cmd = "agentkthx update" if installed else "pip install --upgrade agentkthx"
         lines.append(f"Stable: {cur} \u2192 {pypi_latest} \u2014 Run: {stable_cmd}")
 
+    # R06.57: GitHub dev track — two complementary baselines.
+    # - Git checkouts: compare commit SHAs (existing path).
+    # - Pip installs:  compare version numbers from __init__.py on main
+    #                  (new path — surfaces dev releases not on PyPI).
     gh_sha = str(result.get("github_sha") or "").strip().lower()
+    gh_version = str(result.get("github_latest_version") or "").strip()
+
     if installed and gh_sha and not gh_sha.startswith(installed):
+        # Git checkout path — SHA-based detection (unchanged since R06.51).
         lines.append(
             f"Development: new commits on GitHub main ({gh_sha[:7]}) \u2014 Run: agentkthx update"
         )
+    elif gh_version and is_newer(gh_version, cur):
+        # R06.57: Pip-installed path — version-number detection. The
+        # ``pip install --force-reinstall git+...`` command grabs the
+        # latest main HEAD regardless of what's on PyPI.
+        #
+        # Skip the dev notice when the PyPI stable track already surfaced
+        # an upgrade to a version >= gh_version — i.e. stable has caught
+        # up to dev, so the dev track adds no extra signal. (Example: PyPI
+        # is 0.6.57 and GitHub main is also 0.6.57 — the stable notice
+        # already covers it. But if PyPI is 0.6.55 and GitHub is 0.6.57,
+        # we still want to surface the dev track because it's newer.)
+        pypi_already_covers_dev = (
+            pypi_latest
+            and is_newer(pypi_latest, cur)            # PyPI is firing an upgrade notice
+            and not is_newer(gh_version, pypi_latest)  # gh_version <= pypi_latest
+        )
+        if not pypi_already_covers_dev:
+            cmd = "agentkthx update" if installed else \
+                  "pip install --force-reinstall git+https://github.com/VTSTech/AgentKthx.git"
+            lines.append(
+                f"Development: {cur} \u2192 {gh_version} on GitHub main \u2014 Run: {cmd}"
+            )
 
     if not lines:
         return None

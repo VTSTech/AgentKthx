@@ -779,7 +779,11 @@ class OpenRouterBackend(OpenAICompatibleBackend):
                 raise RuntimeError(f"OpenRouter connection error: {e.reason}")
 
     def _stream_request(self, url: str, data: dict, headers: dict) -> Generator[dict, None, None]:
-        """Handle streaming requests (ROB-04: stdlib urllib, not requests)."""
+        """Handle streaming requests (ROB-04: stdlib urllib, not requests).
+
+        ROB-06 (R06.57): try/finally so the urllib response is closed
+        deterministically when the generator is abandoned mid-iteration.
+        """
         req = urllib.request.Request(
             url,
             data=json.dumps(data).encode("utf-8"),
@@ -794,18 +798,24 @@ class OpenRouterBackend(OpenAICompatibleBackend):
         except urllib.error.URLError as e:
             raise RuntimeError(f"OpenRouter connection error: {e.reason}")
 
-        for line in response:
-            if line:
-                line_str = line.decode("utf-8")
-                if line_str.startswith("data: "):
-                    json_str = line_str[6:]
-                    if json_str.strip() == "[DONE]":
-                        continue
-                    try:
-                        chunk = json.loads(json_str)
-                        yield chunk
-                    except json.JSONDecodeError:
-                        continue
+        try:
+            for line in response:
+                if line:
+                    line_str = line.decode("utf-8")
+                    if line_str.startswith("data: "):
+                        json_str = line_str[6:]
+                        if json_str.strip() == "[DONE]":
+                            continue
+                        try:
+                            chunk = json.loads(json_str)
+                            yield chunk
+                        except json.JSONDecodeError:
+                            continue
+        finally:
+            try:
+                response.close()
+            except Exception:
+                pass
 
     def test_tool_support(
         self,
@@ -1143,8 +1153,19 @@ class OpenRouterBackend(OpenAICompatibleBackend):
             except urllib.error.URLError as e:
                 raise RuntimeError(f"OpenRouter connection error: {e.reason}")
 
-            for line in response:
-                yield line
+            # ROB-06 (R06.57): try/finally so the urllib response is
+            # closed deterministically when the generator is abandoned
+            # mid-iteration (Ctrl+C per ROB-05, an exception inside the
+            # consumer, or the base-class break on [DONE]). Mirrors
+            # ZaiBackend._iter_sse_lines at zai.py:705-712.
+            try:
+                for line in response:
+                    yield line
+            finally:
+                try:
+                    response.close()
+                except Exception:
+                    pass
             return  # success — don't retry
 
     def _calculate_safe_max_tokens(self, error_body: str, body: dict) -> int | None:

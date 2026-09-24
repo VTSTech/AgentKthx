@@ -2993,6 +2993,10 @@ def cmd_version(args: argparse.Namespace) -> int:
     # Latest releases (daily-cached checks — silent on failure / opt-out):
     # stable track via PyPI, development track via GitHub main commits
     # (the commit line only appears for git checkouts, which have a baseline).
+    #
+    # R06.57: pip-installed users now also see a "GitHub main:" version line
+    # (parsed from raw.githubusercontent.com/.../__init__.py) — surfaces
+    # dev releases that haven't been pushed to PyPI yet.
     try:
         from .update_check import base_version, check_for_update, git_hash, is_newer
         _latest_info = check_for_update(timeout=1.0)
@@ -3012,6 +3016,15 @@ def cmd_version(args: argparse.Namespace) -> int:
                 print(f"   {dim('GitHub main:')} {bright_green(_gh[:7])} {yellow('(development release available)')}")
             else:
                 print(f"   {dim('GitHub main:')} {_gh[:7]} {dim('(up to date)')}")
+        # R06.57: pip-installed dev track — version-number comparison
+        _gh_version = str(_latest_info.get("github_latest_version") or "").strip()
+        if _gh_version and not (_gh and _installed):
+            # Only show this line if the SHA-based path above didn't fire
+            # (avoids two "GitHub main:" lines for git checkouts).
+            if is_newer(_gh_version, base_version(__version__)):
+                print(f"   {dim('GitHub main:')} {bright_green(_gh_version)} {yellow('(development release available)')}")
+            else:
+                print(f"   {dim('GitHub main:')} {_gh_version} {dim('(up to date)')}")
     print()
 
     return 0

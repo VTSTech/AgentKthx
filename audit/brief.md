@@ -221,11 +221,13 @@ update_check.py → checks PyPI + GitHub for updates
 
 - **8 hardcoded backend allowlists in `cli.py`** (MAINT-05, NEW) — lines 514, 587, 645, 787, 1953, 1972, 2326, 2380. The R06.56 BUG-01 fix changed `("openrouter")` → `("openrouter", "gemini")` at line 2326 — a patch, not a generalization. A 5th cloud backend would hit the same crash. The 6 BackendType.GEMINI additions (BUG-02 `replace_all`) are also patches.
 
-- **OpenRouter & Gemini streaming leak HTTP connections** (ROB-06, NEW) — `_iter_sse_lines` and `_stream_request` in both backends lack `try: ... finally: response.close()`. ZAI does it correctly at `zai.py:705-712`. **R06.57 note:** ROB-05's `stream_gen.close()` (now in `agent.py:2342-2365`) triggers ZAI's `finally` block deterministically on Ctrl+C — ZAI's leak is now plugged. OpenRouter and Gemini still need the `try/finally` added to their `_iter_sse_lines`.
+- ~~**OpenRouter & Gemini streaming leak HTTP connections** (ROB-06, NEW)~~ — ✓ CLOSED R06.57. All 4 sites now have `try: ... finally: response.close()` matching ZAI's pattern: `openrouter.py:_iter_sse_lines` (1146-1158), `openrouter.py:_stream_request` (801-818), `gemini.py:_iter_sse_lines` (1473-1486), `gemini.py:_stream_request` (1426-1444). Combined with ROB-05's `stream_gen.close()` on Ctrl+C, the streaming cleanup contract is now uniform across all 4 cloud backends.
 
 - ~~**`_generate_stream()` KeyboardInterrupt doesn't close HTTP** (ROB-05)~~ — ✓ CLOSED R06.57. `agent.py:2342-2365` now calls `stream_gen.close()` before returning the cancelled-response dict.
 
 - ~~**Gemini env vars not in README** (DOC-01)~~ — ✓ CLOSED R06.57. README now has a `### Gemini Configuration` subsection (lines 379-416) with all 7 env vars + usage examples, plus a Gemini block in the master env-var table (lines 593-600).
+
+- **FIX-01 (R06.57, user-reported)** — Pip-installed users now see dev releases. New `_fetch_github_latest_version()` in `update_check.py` fetches `https://raw.githubusercontent.com/VTSTech/AgentKthx/main/agentkthx/__init__.py` and parses `__version__ = "X.Y.Z"`. `format_notice` surfaces the dev track for pip installs with a `pip install --force-reinstall git+...` command. `cmd_version` shows a new "GitHub main: X.Y.Z" line. Surfaces R06.55+, R06.56+, R06.57+ that aren't on PyPI. +11 new tests in `test_update_check.py` (65 total, was 54).
 
 - **ZAI now has `num_ctx/32` cap + 400 recovery** (R06.57, ROB-06 parity) — `zai.py:_get_model_defaults` caps `max_tokens` to `context_length // 32` (mirrors OpenRouter R06.55 + Gemini R06.56). `_iter_sse_lines` and `_generate_with_auth` both now have context-length 400 recovery with `_calculate_safe_max_tokens` + `_context_safe_max_tokens` persistence. All 3 cloud backends (OpenRouter, Gemini, ZAI) now share this pattern — extraction to `OpenAICompatibleBackend` is the long-term fix (ARCH-03).
 
@@ -298,7 +300,7 @@ update_check.py → checks PyPI + GitHub for updates
 
 ```
 $ ZAI_API_KEY=test_dummy_key_12345 GEMINI_API_KEY=test_dummy_key_12345 python -m pytest tests/ -q
-766 passed, 9 skipped, 0 failed in 1.56s
+777 passed, 9 skipped, 0 failed in 1.86s
 ```
 
 Test files (total):
@@ -312,7 +314,7 @@ Test files (total):
 - `tests/test_api_resilience.py` (443 lines, rewritten R06.55) — API error resilience, urllib mock transport
 - `tests/test_thinking_args.py` (429 lines) — thinking argument parsing, per-backend forwarding
 - `tests/test_builtins.py` (421 lines) — calculator, shell, file I/O tools
-- `tests/test_update_check.py` (398 lines) — update checking, version comparison, caching
+- `tests/test_update_check.py` (~570 lines, 65 tests, +11 in R06.57) — update checking, version comparison, caching, FIX-01 pip-installed dev track via raw __init__.py
 - `tests/test_spec_compliance.py` (382 lines) — OpenAI spec compliance, streaming, logprobs
 - `tests/test_streaming.py` (359 lines) — _generate_stream, tool_call accumulation, AgentRun return
 - `tests/test_agent.py` (282 lines) — agent loop, tool dispatch, memory

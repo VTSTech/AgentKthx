@@ -1404,7 +1404,11 @@ class GeminiBackend(OpenAICompatibleBackend):
                 raise RuntimeError(f"Gemini connection error: {e.reason}")
 
     def _stream_request(self, url: str, data: dict, headers: dict) -> Generator[dict, None, None]:
-        """Streaming POST — yields parsed SSE chunk dicts."""
+        """Streaming POST — yields parsed SSE chunk dicts.
+
+        ROB-06 (R06.57): try/finally so the urllib response is closed
+        deterministically when the generator is abandoned mid-iteration.
+        """
         req = urllib.request.Request(
             url,
             data=json.dumps(data).encode("utf-8"),
@@ -1419,19 +1423,25 @@ class GeminiBackend(OpenAICompatibleBackend):
         except urllib.error.URLError as e:
             raise RuntimeError(f"Gemini connection error: {e.reason}")
 
-        for line in response:
-            if not line:
-                continue
-            line_str = line.decode("utf-8", errors="replace") if isinstance(line, bytes) else line
-            if not line_str.startswith("data: "):
-                continue
-            json_str = line_str[6:].strip()
-            if json_str == "[DONE]":
-                continue
+        try:
+            for line in response:
+                if not line:
+                    continue
+                line_str = line.decode("utf-8", errors="replace") if isinstance(line, bytes) else line
+                if not line_str.startswith("data: "):
+                    continue
+                json_str = line_str[6:].strip()
+                if json_str == "[DONE]":
+                    continue
+                try:
+                    yield json.loads(json_str)
+                except json.JSONDecodeError:
+                    continue
+        finally:
             try:
-                yield json.loads(json_str)
-            except json.JSONDecodeError:
-                continue
+                response.close()
+            except Exception:
+                pass
 
     # ─────────────────────────────────────────────────────────────────────
     # OpenAICompatibleBackend abstract SSE hook
@@ -1470,8 +1480,19 @@ class GeminiBackend(OpenAICompatibleBackend):
             except urllib.error.URLError as e:
                 raise RuntimeError(f"Gemini connection error: {e.reason}")
 
-            for line in response:
-                yield line
+            # ROB-06 (R06.57): try/finally so the urllib response is
+            # closed deterministically when the generator is abandoned
+            # mid-iteration (Ctrl+C per ROB-05, an exception inside the
+            # consumer, or the base-class break on [DONE]). Mirrors
+            # ZaiBackend._iter_sse_lines at zai.py:705-712.
+            try:
+                for line in response:
+                    yield line
+            finally:
+                try:
+                    response.close()
+                except Exception:
+                    pass
             return  # success — don't retry
 
     def _calculate_safe_max_tokens(self, error_body: str, body: dict) -> int | None:
