@@ -66,6 +66,12 @@ agentkthx/
 │   ├── zai/                  # ZAI cloud API plugin
 │   │   ├── plugin.json       # Manifest (type: backend, provides: zai)
 │   │   └── zai.py             # ZaiBackend: GLM models via ZAI API, 13-model catalog
+│   ├── gemini/               # Google Gemini cloud API plugin (R06.56)
+│   │   ├── plugin.json       # Manifest (type: backend, provides: gemini)
+│   │   ├── __init__.py       # register()/unregister() entrypoints
+│   │   └── gemini.py          # GeminiBackend: 71-model catalog, <thought> tag parser,
+│   │                         # free-tier data from AI Studio, thinking config routing,
+│   │                         # 429 retry with spend-limit detection
 │   ├── turboquant/           # TurboQuant server management plugin
 │   │   ├── plugin.json       # Manifest (type: feature, provides: turbo CLI command)
 │   │   └── turbo.py           # Server lifecycle, Ollama model registry, GGUF parsing
@@ -469,6 +475,8 @@ The `--backend` flag selects which backend to use:
 | `llama-server` / `llama_server` | native | `LlamaServerBackend` | llama.cpp HTTP server / TurboQuant |
 | `bitnet` | plugin | `BitNetPlugin` | BitNet 1.58b models via llama.cpp |
 | `zai` | plugin | `ZaiBackend` | ZAI cloud API (GLM models) |
+| `openrouter` | plugin | `OpenRouterBackend` | OpenRouter cloud API (500+ models) |
+| `gemini` | plugin | `GeminiBackend` | Google Gemini API (71 models, free tier, Gemma) |
 
 Plugin backends are automatically discovered and loaded on first use. See `docs/PLUGIN_SPEC.md` for the full plugin specification.
 
@@ -561,6 +569,26 @@ agentkthx chat --backend zai --model glm-5.1
 
 ---
 
+### Gemini Backend (`plugins/gemini/`) (R06.56)
+
+The Gemini backend is a plugin that provides `GeminiBackend`, inheriting from `OpenAICompatibleBackend` (the shared base class extracted in R06.55). It connects to Google's OpenAI-compatible endpoint at `https://generativelanguage.googleapis.com/v1beta/openai/` and supports all Gemini 3.x, Gemini 2.5, and Gemma 4 models.
+
+Key features:
+- **71-model live catalog** from the `/models` endpoint (with static catalog fallback for 10 core models when the API is unreachable)
+- **Free-tier data embedded** from Google AI Studio — 20 confirmed free models with actual RPM/TPM/RPD numbers (no API endpoint exposes pricing; data transcribed manually)
+- **`<thought>` tag parser** for Gemma — stateful streaming parser routes inline `<thought>...</thought>` blocks to `reasoning_content` so AgentKthx shows them as collapsible "thought" panels (same UX as Gemini 3.x native thinking)
+- **Thinking config routing** — `reasoning_effort` ↔ `extra_body.google.thinking_config` mutual exclusivity enforced; `service_tier` routing (standard/flex/priority)
+- **429 RESOURCE_EXHAUSTED retry** with `Retry-After` honoring, exponential backoff (5s→90s cap), spend-limit detection (60s min wait for paid tiers)
+- **ROB-06 context-length 400 recovery** — parses Gemini's "X in the input, Y in the output" error format, calculates safe `max_tokens`, persists across calls
+- **Chat-capability classifier** — `_NON_CHAT_PATTERNS` identifies non-chat models (embeddings, video gen, music gen, robotics, etc.) and marks them `✗ none` in `test_tool_support()` so users don't accidentally try to chat with an embedding model
+- **`GEMINI_FREE_ONLY` filter** — restrict model list to the 20 confirmed free-tier models
+
+Configuration env vars: `GEMINI_API_KEY` (or `GOOGLE_API_KEY` fallback), `GEMINI_BASE_URL`, `GEMINI_DEFAULT_MODEL`, `GEMINI_FREE_ONLY`, `GEMINI_THINKING_LEVEL`, `GEMINI_SERVICE_TIER`.
+
+See `docs/GEMINI_API_TECHNICAL_REFERENCE.md` for the 1553-line technical reference covering all endpoints, error codes, rate limits, and implementation details.
+
+---
+
 ## Plugin System (R05.0)
 
 The plugin system enables extending AgentKthx with additional backends, CLI commands, and configuration without modifying the core framework. See `docs/PLUGIN_SPEC.md` for the full specification.
@@ -616,6 +644,8 @@ Each plugin ships a `plugin.json` manifest:
 | `acp` | feature | ACP v1.0.6 integration (audit logging, session monitoring) |
 | `bitnet` | backend | `bitnet` backend (LlamaServerBackend with bitnet_mode) |
 | `zai` | backend | `zai` backend (GLM models via ZAI API, 13-model catalog) |
+| `openrouter` | backend | `openrouter` backend (500+ models via OpenRouter API) |
+| `gemini` | backend | `gemini` backend (71 Gemini/Gemma models, free-tier data, `<thought>` tag parser) |
 | `turboquant` | feature | `turbo` CLI command (server lifecycle, model registry) |
 | `test-plugin` | feature | `test-backend` backend, `plugin-test` CLI command |
 

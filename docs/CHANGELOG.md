@@ -389,6 +389,77 @@ Added v0.2 TODO: "when image I/O support is added, gemini-2.5-flash-image and ge
 
 ---
 
+### 🆕 **FEAT-05 — `/models`, `/tool`, `/skill` slash commands for mid-session management**
+
+Three new slash commands added to chat mode for managing models, tools, and skills without restarting the session:
+
+**`/models` (NEW)** — Lists all available models from the current backend with:
+- `✓` marker for the current model, `○` for others
+- `free` / `paid` markers (from `free_tier` flag in model details)
+- `chat` / `non-chat` markers (from `is_chat_model` flag)
+- `⚠deprecated` for `gemini-2.5-*` models (see FEAT-06 below)
+- Context length (formatted as K)
+- Optional filters: `/models free` (free-tier only), `/models chat` (chat-capable only), `/models free chat` (both, AND)
+
+Example:
+```
+Available models (gemini, 13 total):
+  ✓ free chat   gemini-3.8-flash      1024K
+  ○ free chat   gemini-3.5-flash      1024K
+  ○ free chat ⚠deprecated gemini-2.5-flash  1024K
+  ...
+
+  Current: gemini-3.8-flash
+  Switch with: /model <name>
+```
+
+**`/tool` (NEW)** — Loads tools mid-session. Supports comma-separated list (same syntax as `--tools`):
+```
+/tool                          — show usage + currently loaded
+/tool shell                    — load one tool
+/tool shell,read_file,write_file  — load multiple
+```
+Uses fuzzy matching (threshold=0.6) for typo suggestions. Calls `agent.tools.register_tool(tool)` — no system prompt update needed (tool definitions are sent per-request via the `tools` field in `/chat/completions`).
+
+**`/skill` (NEW)** — Loads skills mid-session. Same comma-separated syntax:
+```
+/skill                                — show usage + currently loaded
+/skill codebase-audit                 — load one skill
+/skill codebase-audit,crypto-signals  — load multiple
+```
+Appends `# Skill: {name}\n{instructions}` to `agent._custom_system_prompt` and updates the memory's system message — the agent picks up the skill on the next message, no restart needed.
+
+**`/tools` (CHANGED)** — Now shows ALL available tools (from `make_builtin_registry()`) instead of just loaded ones. `✓` for loaded, `○` for available-but-not-loaded. Footer: `X/Y tools loaded. Use /tool <name,name,...> to load more.`
+
+**`/skills` (CHANGED)** — Now always shows ALL available skills with `✓`/`○` markers. Previously only showed available skills when none were loaded.
+
+**`/help` (UPDATED)** — Added entries for `/models`, `/tool`, and `/skill` with examples.
+
+---
+
+### ⚠️ **FEAT-06 — `gemini-2.5-*` deprecation warning for new users**
+
+**Discovery:** Running `agentkthx chat -m gemini-2.5-flash --backend gemini` on a fresh Google account returns HTTP 404:
+```json
+{
+  "error": {
+    "code": 404,
+    "message": "This model models/gemini-2.5-flash is no longer available to new users. Please update your code to use models/gemini-3.6-flash for the latest features and improvements.",
+    "status": "NOT_FOUND"
+  }
+}
+```
+
+This confirms Google's restriction documented on the models page: "To ensure reliable performance for everyone, we are limiting access to the 2.5 models to users who have actively used them in the past. These models are not deprecated and will continue to be served until further notice through the API. For any new projects, use our latest models: 3.5 Flash-Lite or 3.8 Flash."
+
+**Affected models:** `gemini-2.5-flash`, `gemini-2.5-flash-lite`, `gemini-2.5-pro`, `gemini-2.5-flash-image`, `gemini-2.5-pro-preview-tts`, and all other `gemini-2.5-*` variants. These still appear in AI Studio's rate-limits table with non-zero limits (5 RPM / 250K TPM / 20 RPD for Flash), but the actual API rejects new users with 404.
+
+**Recommended alternatives:** `gemini-3.8-flash` (current flagship, same 1M context, free tier), `gemini-3.6-flash`, `gemini-3.5-flash`, `gemini-3.5-flash-lite` (15 RPM / 500 RPD — most generous Flash), or `gemma-4-31b-it` (30 RPM / 16K TPM / 14,400 RPD — most generous overall).
+
+**Mitigation in `/models`:** The `⚠deprecated` marker shows on all `gemini-2.5-*` models, warning the user before they try to chat with one (saves a 404 round-trip). The marker is a client-side heuristic (`name.startswith("gemini-2.5")`) — Google doesn't expose deprecation status via API.
+
+---
+
 ### 🚧 **Known Limitations (v0.1)**
 
 - **Thought-signature stateful continuation NOT yet implemented** — multi-turn agent loops will re-derive reasoning each turn, costing ~2-3× more reasoning tokens on Gemini 3.x. The `thought_signature` parameter is plumbed through `_build_openai_body()` and the hooks are in place; v0.2 will add the accumulator in `generate_completions_stream()`.
@@ -405,9 +476,10 @@ Added v0.2 TODO: "when image I/O support is added, gemini-2.5-flash-image and ge
 - **+1 new reference doc** (`docs/GEMINI_API_TECHNICAL_REFERENCE.md`, 1553 lines)
 - **+56 new tests** (41 initial plugin + 3 live-API + 12 follow-ups for BUG-01 tolerance + 1 for BUG-02 cloud-provider + 4 for `models/` prefix stripping + 11 for chat-capability + 19 for free-tier classification + 3 for thought-tag detector + 13 for ThoughtTagParser)
 - **2 bugs fixed** (BUG-01: api_mode crash from hardcoded OPENRE; BUG-02: empty model table from cloud-provider allowlist missing GEMINI)
-- **4 new features** (FEAT-01: Gemini backend itself; FEAT-02: free-tier data from AI Studio; FEAT-03: Gemma `<thought>` tag parser; FEAT-04: Gemma verified chat-capable)
+- **6 new features** (FEAT-01: Gemini backend; FEAT-02: free-tier data from AI Studio; FEAT-03: Gemma `<thought>` tag parser; FEAT-04: Gemma verified chat-capable; FEAT-05: `/models` + `/tool` + `/skill` slash commands; FEAT-06: `gemini-2.5-*` deprecation warning)
 - **1 UX improvement** (UX-01: reasoning panel above `AgentKthx:` prompt, no duplicates)
 - **2 doc improvements** (DOC-01: reference doc; DOC-02: endpoint mapping + free-tier source comments)
+- **3 new slash commands** (`/models`, `/tool`, `/skill`) + 2 changed (`/tools`, `/skills` — now show all available, not just loaded)
 - **766 tests passing** (was 710), 0 failing, no regressions
 
 ---

@@ -356,3 +356,51 @@ Context: Max context window from model API
 Tool support columns show openre (OpenResponses) and openai (Chat-Completions) results.
 Use --tool-support to test both API modes. --tool-support --api openai to test only Chat-Completions.
 ```
+
+---
+
+## Unit Test Suite (R06.56)
+
+The unit test suite uses `pytest` and covers backend parsing, tool-call construction, streaming, retry logic, and model classification. Run with:
+
+```bash
+pytest tests/                          # All tests
+pytest tests/test_gemini_backend.py    # Gemini plugin only
+pytest tests/test_openrouter_backend.py # OpenRouter only
+pytest tests/test_zai_streaming.py     # ZAI streaming only
+```
+
+**Current state (R06.56): 766 passed, 9 skipped, 0 failed.**
+
+### Gemini Plugin Tests (94 tests in `tests/test_gemini_backend.py`)
+
+| Test Class | Tests | What It Covers |
+|------------|:-----:|----------------|
+| `TestParseOpenAiResponse` | 7 | tool_calls parsing, malformed args, reasoning_content, provider-error surfacing |
+| `TestModelFamilyDetection` | 4 | gemini-3.x, 2.5, 2.0, unknown pattern matching |
+| `TestBackendInit` | 9 | backend_type, base_url slash handling, auth headers, api_mode tolerance (BUG-01 regression) |
+| `TestModelIdPrefixStripping` | 4 | `models/` prefix stripping, catalog lookup after strip |
+| `TestChatCapabilityClassification` | 11 | chat vs non-chat model classification (embeddings, video gen, TTS, robotics, etc.) |
+| `TestFreeTierClassification` | 19 | free-tier eligibility per AI Studio data (20 free, 30+ paid, Live API edge cases, catalog consistency) |
+| `TestUsesThoughtTags` | 3 | Gemma detector: `gemma-*` → True, `gemini-*` → False |
+| `TestThoughtTagParser` | 13 | Non-streaming + streaming `<thought>` tag parser: simple, no-tags, malformed, unclosed, multi-block, partial tags split across chunks |
+| `TestBuildBody` | 7 | service_tier routing, thinking_config via extra_body, mutual exclusivity, cached_content, thought_signature |
+| `TestCalculateSafeMaxTokens` | 4 | Gemini error format parsing, floor at 1024, already-safe returns None |
+| `TestModelDefaults` | 4 | catalog lookup, Pro 2M context, context_safe_max_tokens override |
+| `TestRetryHelpers` | 3 | default 6 retries, env override, backoff schedule (5s→90s cap) |
+| `TestToolsNotSupportedError` | 3 | "does not support tools" detection |
+| `TestLiveGeminiAPI` | 3 (skipped) | Live API: `list_models`, `basic_chat`, `function_calling` (requires `GEMINI_API_KEY` + `GEMINI_RUN_LIVE_TESTS=1`) |
+
+### Live API Test Opt-In
+
+Live-API tests are skipped unless both conditions are met:
+1. `GEMINI_API_KEY` is set to a real-looking key (≥20 chars, doesn't start with `test`)
+2. `GEMINI_RUN_LIVE_TESTS=1` env var is explicitly set
+
+This prevents accidental real-API calls during normal `pytest` runs. To run them:
+
+```bash
+export GEMINI_API_KEY=<your_real_key>
+export GEMINI_RUN_LIVE_TESTS=1
+pytest tests/test_gemini_backend.py::TestLiveGeminiAPI -v
+```

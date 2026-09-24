@@ -37,6 +37,7 @@ Inspired by the architecture of OpenClaw, rebuilt from scratch for local-first o
 | [JEV_API_MODE.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/JEV_API_MODE.md) | JEV API mode — System-One decisions via any free LLM (Jev-compatible shape) |
 | [ZAI_API_TECHNICAL_REFERENCE.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/ZAI_API_TECHNICAL_REFERENCE.md) | ZAI API technical reference (auth, endpoints, parameters, error codes) |
 | [OPENROUTER_API_TECHNICAL_REFERENCE.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/OPENROUTER_API_TECHNICAL_REFERENCE.md) | OpenRouter API technical reference (sampling params, model catalog, provider routing, rate limits) |
+| [GEMINI_API_TECHNICAL_REFERENCE.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/GEMINI_API_TECHNICAL_REFERENCE.md) | Gemini API technical reference (OpenAI-compat endpoint, thinking config, free-tier limits, Gemma `<thought>` tag parser, 71-model catalog) |
 | [CREDITS.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/CREDITS.md) | Acknowledges every project, inspiration, API, model creator, and specification that makes AgentKthx possible |
 
 ## Features
@@ -44,8 +45,8 @@ Inspired by the architecture of OpenClaw, rebuilt from scratch for local-first o
 - **Zero dependencies** — Uses Python stdlib only (urllib for HTTP)
 - **Plugin system** — Manifest-based plugin discovery, lazy loading, and dependency resolution (R05.0)
 - **Plugin Spec v0.2 (R06.5)** — Lifecycle hooks (`on_init`/`on_run_start`/`on_run_end`/`on_error`/`on_shutdown`), plugin-provided tools, external plugin roots (`~/.agentkthx/plugins/`, `$AGENTKTHX_PLUGIN_PATH`), dual-form manifests (`extensions` block) with deprecation warnings for legacy fields, `plugins --load/--unload/--reload/--json/--verbose` management
-- **Native + plugin backends** — Ollama built-in; OpenRouter, BitNet, ZAI, ACP, TurboQuant as plugins
-- **Multi-cloud support** — Access to 500+ models from OpenRouter, OpenAI, Anthropic, Google, Cohere
+- **Native + plugin backends** — Ollama built-in; OpenRouter, BitNet, ZAI, ACP, TurboQuant, Gemini as plugins
+- **Multi-cloud support** — Access to 500+ models from OpenRouter, OpenAI, Anthropic, Google (Gemini + Gemma), Cohere
 - **Dual API support** — OpenResponses (`--api openre`) and OpenAI Chat-Completions (`--api openai`)
 - **JEV decision mode** — System-One decisions via any free LLM (`--api jev`) — Jev-compatible shape, no TypeSafe API key required
 - **Thinking controls** — `--thinking off|auto|low|medium|high` to control model reasoning effort, `--think` flag to display reasoning_content (chain-of-thought) in CLI output
@@ -58,7 +59,7 @@ Inspired by the architecture of OpenClaw, rebuilt from scratch for local-first o
 - **Thinking models support** — Automatic handling of qwen3, deepseek-r1 thinking mode
 - **Ctrl+C cancellation** — Graceful interrupt at backend, tool, and agent loop levels (R05.0)
 - **Persistent memory** — SQLite-backed conversation persistence with session management (`--session`)
-- **17 built-in tools** — Calculator, shell, file ops (read/write/edit/list/find), HTTP, web search, JSON parse, Python REPL, todo list, datetime, word/char count
+- **17 built-in tools** — Calculator, shell, file ops (read/write/edit/list/find), HTTP, web search, JSON parse, Python REPL, todo list, datetime, word/char count. Load mid-session via `/tool shell,read_file`
 - **Dangerous tool confirmation** — `--confirm` flag for interactive approval of destructive operations
 - **Audit logging** — Automatic JSON-lines logging of shell, write, and edit operations
 - **Argument normalization** — ~100+ tool argument aliases for small model compatibility
@@ -138,9 +139,28 @@ agentkthx chat -m anthropic/claude-3.5-sonnet --backend openrouter   # OpenRoute
 agentkthx chat -m bitnet-b1.58-2b-4t --backend bitnet              # BitNet (plugin)
 agentkthx chat -m glm-4.5-flash --backend zai                       # ZAI (free tier, plugin)
 agentkthx chat -m glm-5.1 --backend zai                             # ZAI (paid, plugin)
+agentkthx chat -m gemini-3.8-flash --backend gemini               # Google Gemini (free tier, plugin)
+agentkthx chat -m gemma-4-26b-a4b-it --backend gemini              # Gemma via Gemini API (free, generous RPD)
 
 # Plugin management
 agentkthx plugins                    # List discovered plugins
+```
+
+### Chat Mode Slash Commands
+
+In chat mode, use these slash commands to manage tools, skills, and models mid-session:
+
+```bash
+/models              # List all available models (✓ = current, free/paid, chat/non-chat)
+/models free chat    # Filter: free-tier + chat-capable models only
+/model gemini-3.8-flash   # Switch to a different model
+/tools               # List all available tools (✓ = loaded, ○ = available)
+/tool shell,read_file,write_file   # Load tools mid-session (comma-separated)
+/skills              # List all available skills (✓ = loaded)
+/skill codebase-audit  # Load a skill mid-session (appends to system prompt)
+/param temperature 0.3   # Set generation parameters
+/status              # Show model, backend, tools, skills, memory info
+/help                # Show all slash commands
 ```
 
 ### JEV API Mode — System-One Decisions
@@ -148,7 +168,7 @@ agentkthx plugins                    # List discovered plugins
 JEV mode wraps any free chat-capable LLM with a constrained decision prompt,
 returning a Jev-compatible envelope `{decision, probability, alternatives}`.
 No TypeSafe API key or waitlist required — uses your existing ZAI / OpenRouter /
-Ollama free models.
+Gemini / Ollama free models.
 
 ```bash
 # Classify an email using ZAI free model
