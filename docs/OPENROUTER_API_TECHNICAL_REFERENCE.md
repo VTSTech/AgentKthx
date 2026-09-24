@@ -391,7 +391,9 @@ data: [DONE]
 }
 ```
 
-Setting `include_usage: true` causes OpenRouter to emit a final SSE chunk with `usage` populated. Without this, streaming responses have no token usage info. AgentKthx currently does **not** set `stream_options.include_usage`, so usage tracking may be incomplete for streamed responses.
+Setting `include_usage: true` causes OpenRouter to emit a final SSE chunk with `usage` populated. Without this, streaming responses have no token usage info. AgentKthx **does** set `stream_options.include_usage` (added R06.53, PERF-02) and captures the usage chunk in `_generate_stream()` for token tracking.
+
+**Note:** Some `:free` models on OpenRouter do not return a usage chunk even when `include_usage=true` is sent. AgentKthx handles this with a fallback: if `total_tokens` is 0 after a step, it estimates tokens from message content (`chars ÷ 4`) so the footer's token counts and context % still update during the run.
 
 ### Reasoning content in streaming
 
@@ -658,8 +660,8 @@ in R06.41 — no aliases retained):
 | `does not support tools` | Free model lacks tool calling | AgentKthx auto-falls-back to ReAct; or use `--force-react` upfront |
 | Slow startup (`agentkthx models --backend openrouter`) | `/models` endpoint slow, cache cold | Subsequent calls within 1 hour use cache |
 | `model not found` | Model ID typo or removed from OpenRouter | Check `agentkthx models --backend openrouter` for current list |
-| Streaming response missing usage | `stream_options.include_usage` not set | Currently unsupported by AgentKthx (future work) |
-| Reasoning not displayed with `--think` | Streaming path doesn't capture `reasoning_content` | Use non-streaming mode (currently default for `run`, not `chat`) |
+| Streaming response missing usage | `:free` model doesn't send usage chunk | AgentKthx falls back to estimating tokens from content (`chars ÷ 4`). Footer still updates with approximate counts. |
+| Reasoning not displayed with `--think` | Streaming path doesn't capture `reasoning_content` | R06.53: streaming now captures and displays reasoning_content inline. This row is retained for historical reference. |
 | Token count way too high | Conversation history growing unbounded | Use `/clear` in chat mode; or `--session` to persist between runs |
 
 ---

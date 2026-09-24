@@ -2453,11 +2453,30 @@ Final Answer: <the answer>
             tokens = gen_response.get("usage", {}).get("total_tokens", 0)
             total_tokens += tokens
 
-            # Update running token totals for real-time footer display.
-            # Split ~60% prompt / ~40% completion (rough heuristic matching
-            # the CLI's post-run accumulation logic).
-            self._running_tokens_in += int(tokens * 0.6)
-            self._running_tokens_out += int(tokens * 0.4)
+            # Fallback: if usage is 0 (provider doesn't return usage in
+            # streaming mode — common with OpenRouter :free models),
+            # estimate from message content. ~4 chars per token.
+            if tokens == 0:
+                # Estimate input tokens from all messages in memory
+                _est_in_chars = 0
+                for msg in self.memory:
+                    c = getattr(msg, 'content', '') or ''
+                    _est_in_chars += len(c)
+                    tc = getattr(msg, 'tool_calls', None)
+                    if tc:
+                        _est_in_chars += len(json.dumps(tc, ensure_ascii=False))
+                _est_out_chars = len(content) + sum(
+                    len(json.dumps(tc, ensure_ascii=False))
+                    for tc in native_tool_calls
+                )
+                _est_in = _est_in_chars // 4
+                _est_out = _est_out_chars // 4
+                self._running_tokens_in += _est_in
+                self._running_tokens_out += _est_out
+            else:
+                # Provider returned real usage — use it
+                self._running_tokens_in += int(tokens * 0.6)
+                self._running_tokens_out += int(tokens * 0.4)
 
             # Refresh the CLI footer if a callback is registered
             if getattr(self, '_on_step_callback', None):
