@@ -1838,21 +1838,29 @@ def cmd_chat(args: argparse.Namespace) -> int:
 
             # PERF-01: when streaming, the final answer was already printed
             # by the typewriter effect in _generate_stream(). Don't print it
-            # again — that would duplicate the response. Only print the
-            # reasoning_content block (if any) since reasoning is emitted
-            # inline with content during streaming but the structured
-            # dim-grey block under the answer is still useful for review.
+            # again — that would duplicate the response.
+            #
+            # R06.56: reasoning_content is now streamed to a "reasoning:"
+            # panel ABOVE the AgentKthx: prompt during _generate_stream()
+            # (see agent.py:_emit_reasoning_panel_header). So we DON'T need
+            # to print the reasoning panel again here — that would duplicate
+            # the display. Skip the post-stream reasoning panel for the
+            # streaming path entirely.
             if _will_stream:
-                # Streaming already printed content; just show reasoning if asked.
+                # R06.56: Streaming already printed both the reasoning panel
+                # (above AgentKthx:) and the content (under AgentKthx:).
+                # Don't print either again — would duplicate.
+                # Just add a trailing blank line for spacing before the next
+                # "You: " prompt.
                 if reasoning_content:
-                    print(f"{dim('  reasoning:')}")
-                    for line in reasoning_content.splitlines():
-                        if len(line) > 200:
-                            line = line[:197] + "..."
-                        print(f"    {dim(line)}")
+                    # Reasoning was streamed above the prefix — add a blank
+                    # line after the answer for visual separation.
                     print()
                 # No "AgentKthx: <answer>" line — content already streamed.
+                # No "reasoning:" panel — already streamed above the prefix.
             elif reasoning_content:
+                # Non-streaming path — reasoning wasn't displayed inline,
+                # so show it as a panel under the answer (original behavior).
                 print(f"\n{bright_green('AgentKthx')}: {result.final_answer}")
                 print(f"{dim('  reasoning:')}")
                 for line in reasoning_content.splitlines():

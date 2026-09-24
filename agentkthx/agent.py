@@ -2124,15 +2124,61 @@ Final Answer: <the answer>
             stream_method = 'native'
 
         # PERF-01 readability: print the "AgentKthx: " prefix once, before
-        # the first content/reasoning delta arrives. Tracked so subsequent
-        # iterations of the agentic loop (after tool calls) don't re-print
-        # it — the loop is one continuous answer from the user's perspective.
+        # the first content delta arrives. Tracked so subsequent iterations
+        # of the agentic loop (after tool calls) don't re-print it — the
+        # loop is one continuous answer from the user's perspective.
         # Reset at the start of each _run_core_streaming() call (new user
         # prompt) so the prefix appears on every new reply.
         _prefix_emitted = getattr(self, "_stream_prefix_emitted", False)
+
+        # R06.56: reasoning is now displayed as a structured "reasoning:" panel
+        # ABOVE the AgentKthx: prompt, not inline in dim-grey under the prefix.
+        # This avoids duplicate reasoning display (the cmd_chat path used to
+        # also print a "reasoning:" panel after the answer — now it's shown
+        # once during streaming, before the answer).
+        _reasoning_panel_started = False
+        # Track whether we've emitted any reasoning line yet — used to add
+        # the 4-space indent on the very first line of the panel (subsequent
+        # lines get their indent from the "\n    " replacement below).
+        _reasoning_first_line_emitted = False
+
+        def _emit_reasoning_panel_header():
+            """Emit the 'reasoning:' header once, before the first reasoning
+            delta is printed. Subsequent reasoning deltas append to the panel."""
+            nonlocal _reasoning_panel_started
+            if not _reasoning_panel_started:
+                sys.stdout.write(f"\033[90m  reasoning:\033[0m\n")
+                sys.stdout.flush()
+                _reasoning_panel_started = True
+
+        def _indent_reasoning_delta(delta: str) -> str:
+            """Indent a reasoning delta to match the non-streaming panel format
+            (4 spaces under 'reasoning:').
+
+            - On the first delta ever: prepend '    ' (4 spaces) so the first
+              line is indented under the 'reasoning:' header.
+            - For every delta: replace '\\n' with '\\n    ' so subsequent
+              lines (mid-delta newlines) are also indented.
+            """
+            nonlocal _reasoning_first_line_emitted
+            if not delta:
+                return delta
+            # Replace newlines with newline+4-spaces so each new line in
+            # this delta is indented under the 'reasoning:' header.
+            indented = delta.replace("\n", "\n    ")
+            if not _reasoning_first_line_emitted:
+                # First line ever — prepend the 4-space indent.
+                indented = "    " + indented
+                _reasoning_first_line_emitted = True
+            return indented
+
         def _emit_prefix_once():
             nonlocal _prefix_emitted
             if not _prefix_emitted:
+                # If we printed a reasoning panel above, add a newline
+                # before the AgentKthx: prefix so they don't run together.
+                if _reasoning_panel_started:
+                    sys.stdout.write("\n")
                 # Bright green to match the non-streaming "AgentKthx:" label.
                 sys.stdout.write("\033[92mAgentKthx:\033[0m ")
                 sys.stdout.flush()
@@ -2215,13 +2261,19 @@ Final Answer: <the answer>
                     elif isinstance(chunk, dict) and chunk.get("reasoning_content"):
                         reasoning_delta = chunk["reasoning_content"]
                     if reasoning_delta:
-                        # Reasoning appears before content — emit the prefix
-                        # here too so the user sees "AgentKthx:" before any
-                        # output (whether reasoning or content arrives first).
-                        _emit_prefix_once()
+                        # R06.56: reasoning is now shown as a structured
+                        # "reasoning:" panel ABOVE the AgentKthx: prompt,
+                        # not as inline dim-grey text under it. This avoids
+                        # the duplicate reasoning display (cmd_chat used to
+                        # print a "reasoning:" panel after the answer — now
+                        # the panel is streamed first, before content).
+                        _emit_reasoning_panel_header()
                         reasoning_acc.append(reasoning_delta)
-                        # Print reasoning in dim grey before content continues
-                        sys.stdout.write(f"\033[90m{reasoning_delta}\033[0m")
+                        # Indent each line under the "reasoning:" header
+                        # (4 spaces, matching the non-streaming panel
+                        # format in cmd_chat:1866-1870).
+                        indented = _indent_reasoning_delta(reasoning_delta)
+                        sys.stdout.write(f"\033[90m{indented}\033[0m")
                         sys.stdout.flush()
                     # Tool-call delta accumulation
                     if tc_delta:
