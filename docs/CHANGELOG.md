@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **ROB-05** — Streaming `KeyboardInterrupt` now calls `stream_gen.close()` before returning, releasing the HTTP connection deterministically instead of waiting for GC (`agent.py:2342-2365`).
 - **ROB-06** — OpenRouter & Gemini `_iter_sse_lines` + `_stream_request` now wrap the yield loop in `try/finally response.close()`, matching ZAI's existing pattern. All 4 cloud backends now have uniform streaming cleanup.
+- **BitNet `bitnet_mode` kwarg collision** — `BitNetBackend.__init__` now pops `bitnet_mode` from kwargs before passing the hardcoded `True` to `super().__init__()`. Previously `get_backend("bitnet", api_mode=...)` crashed with `TypeError: got multiple values for keyword argument 'bitnet_mode'` because `get_backend` adds `bitnet_mode=True` AND `BitNetBackend` hardcoded it. Triggered by MAINT-05's `_probe_backend` call in `cmd_models`.
+- **BitNet "Unsupported param: tools" fallback** — `OllamaBackend.generate()`, `generate_completions()`, and `test_tool_support()` now match `"unsupported param: tools"` (llama-server 500) in addition to `"does not support tools"` (Ollama 400). BitNet's llama.cpp fork rejects the `tools` JSON param with this specific 500 error; the fallback retries without `tools` (ReAct mode) instead of dying as a fatal API error. Specificity verified — unrelated 500s don't trigger it.
 
 ### Architecture
 
@@ -24,8 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Tests
 
-- 822 passed, 9 skipped, 0 failed (was 766 at R06.56 baseline; +56 new tests)
-- New: `tests/test_is_cloud_attribute.py` (13 tests), `tests/test_context_length_recovery.py` (23 tests), `tests/test_update_check.py` +20 tests
+- 833 passed, 9 skipped, 0 failed (was 766 at R06.56 baseline; +67 new tests)
+- New: `tests/test_is_cloud_attribute.py` (24 tests — 13 is_cloud + 6 BitNet kwarg + 5 unsupported-param-tools), `tests/test_context_length_recovery.py` (23 tests), `tests/test_update_check.py` +20 tests
 
 ## [R06.56] - 2026-09-24 1:35:20 PM
 
