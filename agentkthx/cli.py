@@ -2132,7 +2132,22 @@ def cmd_agent(args: argparse.Namespace) -> int:
         return 1
 
     agent = _build_agent(args, config)
-    agent_mode = AgentMode(agent, verbose=True)
+
+    # R06.58: resolve stream flag the same way cmd_chat does — explicit
+    # --stream wins, otherwise default to streaming for cloud backends
+    # (ZAI, OpenRouter, Gemini) and non-streaming for local (Ollama).
+    # Previously cmd_agent hardcoded verbose=True but never passed stream
+    # to AgentMode, so --stream was silently ignored in agent mode.
+    _is_cloud = getattr(agent.backend, 'is_cloud', False)
+    _explicit_stream = getattr(args, 'stream', None)
+    if _explicit_stream is True:
+        _agent_stream = True
+    elif _explicit_stream is False:
+        _agent_stream = False
+    else:
+        _agent_stream = _is_cloud
+
+    agent_mode = AgentMode(agent, verbose=True, stream=_agent_stream)
 
     _print_session_header(agent, args, config, "Agent Mode")
     print("Give the agent a goal to accomplish autonomously.")

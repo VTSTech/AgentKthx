@@ -286,7 +286,9 @@ class AgentMode:
     Handles state transitions, message queuing, and task execution.
     """
     
-    def __init__(self, agent, verbose: bool = False, reset_memory_between_steps: bool = False):
+    def __init__(self, agent, verbose: bool = False,
+                 reset_memory_between_steps: bool = False,
+                 stream: bool = False):
         """
         Initialize Agent Mode session.
         
@@ -301,10 +303,19 @@ class AgentMode:
             starts with a clean context.  Default is False — the agent
             reuses its memory across steps, giving it awareness of
             previous step results.
+        stream : bool
+            If True, stream LLM output tokens to stdout as they arrive
+            (typewriter effect, matching ``chat --stream``). Also
+            enables inline tool-call printing (``[N] tool name {args}
+            → result``) and surfaces ``[Compaction]`` / ``[Context]``
+            events from the underlying agent loop. Default False —
+            caller (cmd_agent) decides based on --stream flag + backend
+            cloud-ness, mirroring cmd_chat's resolution logic.
         """
         self.agent = agent
         self.verbose = verbose
         self.reset_memory_between_steps = reset_memory_between_steps
+        self.stream = stream
         
         # State
         self.state = AgentState.IDLE
@@ -608,7 +619,16 @@ Example: [{{"description": "Step 1"}}, {{"description": "Step 2"}}]"""
         """
         step.status = "in_progress"
         step.started_at = datetime.now().isoformat()
-        
+
+        # R06.58: sync plan.current_step_index to the step we're about to
+        # execute. run_task iterates with enumerate() but never called
+        # plan.advance(), so current_step_index stayed at 0 for every step
+        # — which made the [N/M] in the ⟳ line wrong (always [1/M]).
+        # Syncing here also fixes get_status() / get_progress() which
+        # both rely on current_step_index being accurate mid-run.
+        if self.plan and step in self.plan.steps:
+            self.plan.current_step_index = self.plan.steps.index(step)
+
         # Optionally clear memory between steps for isolated execution.
         # By default (False), the agent reuses its memory so it retains
         # context from previous steps — useful for multi-step workflows
@@ -639,11 +659,23 @@ Example: [{{"description": "Step 1"}}, {{"description": "Step 2"}}]"""
             else:
                 step_prompt = step.description
             
-            # Run the agent with the step prompt
+            # Run the agent with the step prompt.
+            # R06.58: pass stream=self.stream so --stream actually takes
+            # effect in agent mode. Previously this called run() with the
+            # default stream=False, so the --stream flag was silently
+            # ignored — no typewriter effect, no inline tool-call printing,
+            # no [Compaction]/[Context] events surfaced. All three come
+            # for free once we delegate to _run_core_streaming.
             if self.verbose:
-                print(f"  ⟳ Executing: {step.description}")
-            
-            run = self.agent.run(step_prompt)
+                # Include step number/total for context, e.g. "[1/4]"
+                if self.plan and self.plan.total_steps > 1:
+                    step_idx = self.plan.current_step_index + 1
+                    step_count = self.plan.total_steps
+                    print(f"  ⟳ [{step_idx}/{step_count}] Executing: {step.description}")
+                else:
+                    print(f"  ⟳ Executing: {step.description}")
+
+            run = self.agent.run(step_prompt, stream=self.stream)
             
             # Track the result
             result_msg = run.final_answer
@@ -698,7 +730,18 @@ Example: [{{"description": "Step 1"}}, {{"description": "Step 2"}}]"""
         
         # Generate plan
         self.plan = self.plan_task(goal)
-        
+
+        # R06.58: print the full plan upfront so the user can see what
+        # the agent is about to do, step by step, before execution starts.
+        # Matches the verbosity users expect from autonomous agent CLIs
+        # (e.g., "Plan: 4 steps → 1. Analyze 2. Identify 3. Apply 4. Verify").
+        # Only prints when verbose=True (which cmd_agent always sets).
+        if self.verbose and self.plan and self.plan.total_steps > 0:
+            print(f"  📋 Plan: {self.plan.total_steps} step(s)")
+            for i, s in enumerate(self.plan.steps, 1):
+                print(f"    {i}. {s.description}")
+            print()
+
         # Log task start
         self.execution_log.append({
             "type": "task_start",
