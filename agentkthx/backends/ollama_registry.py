@@ -434,6 +434,14 @@ def recommended_turbo_config(weight_quant: str) -> dict[str, str]:
     - Q8_0/F16/BF16 weights -> symmetric turbo (best compression)
     - Q4_K_M and lower -> asymmetric (keep K at q8_0, compress V only)
 
+    R06.57: Changed the asymmetric path to use turbo4/turbo4 instead of
+    q8_0/turbo4. The server has its own auto-asymmetric upgrade logic:
+    when it detects a high GQA ratio (n_head/n_head_kv > 4), it upgrades
+    the K cache from turbo4 to q8_0 internally. Sending q8_0 directly
+    crashes on qwen35 architecture (rope.dimension_sections bug), but
+    turbo4 works because the server's auto-upgrade handles it correctly.
+    Disable the server's auto-upgrade with TURBO_AUTO_ASYMMETRIC=0.
+
     Returns:
         Dict with 'cache_type_k' and 'cache_type_v' keys
     """
@@ -453,18 +461,20 @@ def recommended_turbo_config(weight_quant: str) -> dict[str, str]:
     # TurboQuant weight types: these are already compressed, go easy on KV
     if wq.startswith("TQ"):
         return {
-            "cache_type_k": "q8_0",
+            "cache_type_k": "turbo4",
             "cache_type_v": "turbo4",
-            "mode": "asymmetric",
-            "reason": f"{weight_quant} weights: asymmetric q8_0/turbo4 (double-quant protection)",
+            "mode": "symmetric",
+            "reason": f"{weight_quant} weights: turbo4/turbo4 (server auto-upgrades K to q8_0 for high GQA ratios)",
         }
 
-    # Lower bit weights: asymmetric to protect attention quality
+    # Lower bit weights: use turbo4/turbo4 and let the server's
+    # auto-asymmetric logic handle GQA ratio protection.
+    # R06.57: was q8_0/turbo4, but q8_0 crashes on qwen35 architecture.
     return {
-        "cache_type_k": "q8_0",
+        "cache_type_k": "turbo4",
         "cache_type_v": "turbo4",
-        "mode": "asymmetric",
-        "reason": f"{weight_quant} weights: asymmetric q8_0/turbo4 (K compression stacks too much error)",
+        "mode": "symmetric",
+        "reason": f"{weight_quant} weights: turbo4/turbo4 (server auto-upgrades K to q8_0 for high GQA ratios)",
     }
 
 
