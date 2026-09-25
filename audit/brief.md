@@ -1,6 +1,7 @@
 # Codebase Intelligence Brief: AgentKthx
 
-> Generated: 2026-09-25 (updated R06.57) | Auditor: Super Z (running codebase-audit skill) | Version: R06.57 (0.6.57) | Commit: pending
+> Generated: 2026-09-26 | Auditor: Super-Z (GLM) via `codebase-audit` v0.2.0 | Commit: `acf1d72` (R07.00, PyPI 0.7.0)
+> Supersedes: R06.57 brief (2026-09-25) — regenerated because R07.00 deleted or restructured every file the old brief referenced (`agent.py` 3,119-line and `cli.py` 4,079-line monoliths no longer exist).
 
 ---
 
@@ -8,103 +9,36 @@
 
 | Field | Value |
 |-------|-------|
-| **Purpose** | Minimal, hackable agentic framework for local + cloud LLM inference — zero dependencies, Python stdlib only |
-| **Tech Stack** | Python 3.9+ (stdlib only: urllib, sqlite3, argparse, json, re, ast, subprocess, pathlib) |
-| **Entry Point** | `agentkthx/__main__.py` → `agentkthx.cli:main()` — installed as `agentkthx` console script |
-| **Build/Run** | `pip install -e .` (dev) or `pip install agentkthx` (PyPI). Run with `agentkthx chat` / `agentkthx run "<prompt>"` / `python -m agentkthx ...` |
-| **Test Command** | `ZAI_API_KEY=test_dummy_key_12345 GEMINI_API_KEY=test_dummy_key_12345 python -m pytest tests/ -q` (env vars required for cloud backend imports) |
-| **Current Version** | 0.6.57 (R06.57) |
+| **Purpose** | A minimal, hackable agentic framework + CLI for autonomous agents with local and cloud LLMs (tool use, streaming, plugins, skills) |
+| **Tech Stack** | Python >= 3.12, **zero runtime dependencies** (`dependencies = []` — stdlib HTTP/SSE/argparse only); pytest/black/ruff for dev |
+| **Entry Point** | Console script `agentkthx` → `agentkthx.cli:main` → `cli/main.py` dispatch → `cli/commands/<cmd>.py` |
+| **Build/Run** | `pip install agentkthx` (PyPI) or `pip install -e .` from source; run `agentkthx chat`, `agentkthx version`, etc. (84 CLI flags) |
+| **Test Command** | `python -m pytest tests/ -q` → **963 passed, 9 skipped, 0 failed in ~2.1s** |
 
 ---
 
 ## Architecture Map
 
 ```
-agentkthx/                    → Main package
-├── __init__.py               → Public API: Agent, Backends, Config, ACPPlugin
-├── __main__.py               → CLI entry: `python -m agentkthx`
-├── agent.py (3119 lines)     → Agent class — agentic loop, tool calling, JEV dispatch
-│                              ALSO: _generate_stream() + _run_core_streaming() (PERF-01 closed)
-│                              DUPLICATION: _run_core() vs _run_core_streaming() (MAINT-04, WORSENED)
-├── agent_mode.py             → AgentMode/AgentState/TaskPlan (R05.x agentic plan mode)
-├── orchestrator.py           → Multi-agent orchestrator (AgentCard, fallbacks)
-├── cli.py (4079 lines)       → CLI — see MAINT-01 (monolith, +278 lines in R06.56).
-│                              MAINT-05 CLOSED R06.57: now uses `is_cloud` class attribute.
-├── colors.py                 → ANSI color helpers + glyph mode (AGENTKTHX_GLYPHS env var)
-├── config.py                 → Env-var-driven config (AGENTKTHX_* + GEMINI_* env vars)
-├── shared_args.py            → Shared argparse definitions + SharedConfig dataclass
-├── update_check.py           → Update check system (stable + dev tracks)
-├── model_discovery.py        → Ollama model listing, fuzzy match, pick_best_model
-│
-├── core/                     → Core utilities (no plugin coupling)
-│   ├── models.py             → Dataclasses: AgentRun, StepResult, Tool, ToolParam, ToolCall
-│   ├── types.py              → Enums: ApiMode (OPENRE/OPENAI/JEV), BackendType (+GEMINI R06.56), StepResultType, ToolSupportLevel
-│   ├── memory.py             → In-memory conversation window (MemoryConfig, Message)
-│   ├── persistent_memory.py  → SQLite-backed memory (~/.agentkthx/memory.db)
-│   ├── helpers.py            → sanitize_command, validate_path, is_safe_url, normalize_tool_args
-│   ├── math_prompts.py       → Math system prompts + calculator_tool (uses safe_eval)
-│   ├── safe_eval.py          → AST-walking evaluator (replaces eval())
-│   ├── error_recovery.py     → Tool-call error feedback + retry logic
-│   ├── args_normal.py        → Argument normalization (fuzzy match, schema fixup)
-│   ├── model_config.py       → Per-model defaults (context size, max_tokens)
-│   ├── model_family_config.py → Family-based model defaults (qwen2, llama3, etc.)
-│   ├── prompts.py            → System prompts (general, ReAct, planning)
-│   ├── tool_cache.py         → Tool support cache (~/.cache/agentkthx/tool_support.json)
-│   ├── tool_parse.py         → Tool-call string parsing (ReAct text format)
-│   ├── openresponses.py      → OpenResponses API envelope helpers
-│   └── api_resilience.py     → API error resilience and retry logic
-│
-├── backends/                 → Backend implementations
-│   ├── base.py               → BaseBackend + BackendConfig (abstract)
-│   ├── openai_compat.py (789 lines, R06.55) → OpenAICompatibleBackend — shared OpenAI-compat logic
-│   │                          (JEV dispatch, _build_openai_body, _parse_openai_response,
-│   │                          generate_completions_stream, api_mode property, family context)
-│   │                          PERF-03: dead `think` parameter on generate_completions_stream (line 620)
-│   ├── ollama.py (1344 lines) → OllamaBackend (native /api/chat + OpenAI-compat /v1)
-│   ├── llama_server.py       → LlamaServerBackend (native llama.cpp)
-│   └── __init__.py            → _BACKENDS registry + get_backend(name) lazy plugin loader
-│
-├── tools/                    → Built-in tools
-│   ├── __init__.py            → make_builtin_registry(), BUILTIN_REGISTRY
-│   ├── registry.py            → ToolRegistry class (subset, get, fuzzy match)
-│   ├── builtins.py            → calculator (uses safe_eval), shell (uses sanitize_command),
-│   │                          read_file, write_file, http_get, python_repl, list_files,
-│   │                          todo_write, todo_read (per-session todos)
-│   └── sandboxed_repl.py     → subprocess-isolated Python REPL tool
-│
-├── plugins/                  → Plugin system (lazy-loaded)
-│   ├── __init__.py            → get_plugin_manager()
-│   ├── _loader.py             → PluginManager: scans plugins/*/plugin.json (v0.2 spec)
-│   ├── acp/                   → ACP v1.0.6 (Agent Control Panel — monitoring/STOP/resume)
-│   ├── bitnet/                → BitNet backend (1.58-bit inference, routes to llama-server)
-│   ├── zai/                   → Z.AI API backend (GLM-4.x, GLM-5.x family) — uses urllib (ROB-04 closed)
-│   ├── openrouter/            → OpenRouter backend (500+ models via OpenAI-compat API)
-│   │                          MIGRATED to stdlib urllib in R06.55 (ROB-04 closed).
-│   │                          ROB-06 (NEW): _iter_sse_lines lacks try/finally response.close() (ZAI has it)
-│   ├── gemini/ (NEW R06.56)  → Google Gemini API backend via OpenAI-compat endpoint
-│   │                          gemini.py (1864 lines): 10-model catalog, 429 retry w/ Retry-After,
-│   │                          context-length 400 recovery, Gemma <thought> tag parser, free-tier data.
-│   │                          FEAT-03 (NEW): thought-signature stateful continuation NOT yet implemented.
-│   │                          ARCH-03 (NEW): ~400 lines of 429 retry logic duplicated with OpenRouter.
-│   ├── turboquant/            → TurboQuant (quantized llama-server launcher)
-│   └── test-plugin/           → Test backend (for plugin-system tests)
-│
-├── soul/                     → Soul Spec v0.5 persona system
-│   ├── loader.py              → SoulLoader: parses soul.json + persona files
-│   └── souls/                 → Built-in soul packages (nova-skills, nova-helper, nova-trading)
-│
-└── skills/                   → Built-in skills (audit, codebase-audit, crypto-signals, etc.)
-    ├── loader.py              → Skill loader: compatibility check, prompt building
-    └── codebase-audit/        → THIS skill (audit + brief generation)
+agentkthx/agent.py        → Agent class = 5-mixin composition (51 lines; was the 3,119-line monolith)
+agentkthx/core/           → 21 modules, 9,154 LOC — the engine: mixins, agentic loop, streaming, events
+agentkthx/cli/            → 23-file CLI package (8 top-level + 15 commands); __init__.py is a facade
+agentkthx/cli/commands/   → 15 command modules (chat, version, models, agent, tools, soul, ...)
+agentkthx/plugins/        → 7 plugins: acp, bitnet, gemini, openrouter, test-plugin, turboquant, zai
+agentkthx/skills/         → 4 bundled skills (codebase-audit, crypto-signals, skill-creator, test-harness) + loader.py
+agentkthx/update_check.py → always-live PyPI + GitHub version check (no cache since R07.00)
+tests/                    → 34 files, 11,478 LOC, 963 tests (mocked unit tests)
+docs/                     → ARCH.md (authoritative architecture map, ~1,871 lines), CHANGELOG, PLUGIN_SPEC v0.1/v0.2,
+                            per-provider API references (ZAI, OpenRouter, Gemini, JEV)
+audit/                    → this brief.md + audit.md (findings tracker, ID-stable across releases)
 ```
 
 ### Skip List
 
-- `agentnova/`, `localclaw/`, `*-redirect/` — redirect stubs, kept for compat
-- `agentkthx/skills/skill-creator/scripts/` — template scripts with TODO placeholders
-- `__pycache__/`, `.pytest_cache/`, `*.egg-info/`, `*.egg-link`
-- `docs/old_CHANGELOG.md` — pre-R06.0 historical changelog
-- `agentnova/` and `localclaw/` redirect stub packages are kept for backward compat
+- `__pycache__/`, `.venv/`, `*.egg-info/`, `.pytest_cache/` — generated
+- `docs/old_CHANGELOG.md` — historical
+- `docs/*_API_TECHNICAL_REFERENCE.md` — provider API lore; read only when touching a specific backend
+- Skill asset files (templates, examples) inside `agentkthx/skills/*/` — instructions-as-docs, not executable package code (exception: `skill-creator/scripts/`)
 
 ---
 
@@ -112,57 +46,43 @@ agentkthx/                    → Main package
 
 | File | Purpose | Why It Matters |
 |------|---------|----------------|
-| `agentkthx/cli.py` (4079 lines) | CLI — all subcommands, slash commands, banner, footer | Flagged MAINT-01 (monolithic, +278 lines in R06.56). MAINT-05 CLOSED R06.57: 8 hardcoded backend allowlists replaced with `getattr(backend, 'is_cloud', False)`. Any CLI change lands here. |
-| `agentkthx/agent.py` (3119 lines) | Agent class — agentic loop, tool calling, streaming | Flagged MAINT-04. `_run_core()` (line 649, ~727 lines) and `_run_core_streaming()` (line 2399, ~602 lines) are near-duplicates. Debug-check divergence WORSENED: 36 vs 7 (was 31 vs 7), gap = 29 (was 24). UX-01 changes (reasoning panel state at lines 2139-2143, helpers at 2145/2154) exist ONLY in streaming path. |
-| `agentkthx/backends/openai_compat.py` (789 lines) | Shared OpenAI-compat base class | JEV dispatch, `_build_openai_body()`, `_parse_openai_response()`, `generate_completions_stream()`. PERF-03: `think` param accepted (line 620) but never forwarded to `_build_openai_body()` (line 669-683). |
-| `agentkthx/backends/ollama.py` (1344 lines) | OllamaBackend — native + OpenAI mode | Parent of LlamaServerBackend. Has its own `generate_completions_stream` (logprobs support). |
-| `agentkthx/plugins/gemini/gemini.py` (1864 lines, NEW R06.56) | Gemini backend | 4th cloud backend. Implements all 4 abstract hooks: `_get_chat_completions_url` (1165), `_get_auth_headers` (1175), `_iter_sse_lines` (1440), `_get_model_defaults` (1060). ROB-06: streaming lacks try/finally response.close(). FEAT-03: thought-signature continuation NOT implemented (line 50-52). 429 retry logic duplicated with OpenRouter (ARCH-03). |
-| `agentkthx/plugins/openrouter/openrouter.py` (1235 lines) | OpenRouter backend | MIGRATED to stdlib urllib (R06.55, ROB-04 closed). ROB-06 (NEW): `_iter_sse_lines` (1103-1148) and `_stream_request` (781-808) lack try/finally response.close() — ZAI has the correct pattern at lines 705-712. |
-| `agentkthx/plugins/zai/zai.py` (1119 lines) | ZAI backend | Uses `/api/paas/v4/chat/completions` endpoint. REFERENCE IMPLEMENTATION for streaming cleanup — `_iter_sse_lines` (705-712) has correct `try: yield ... finally: response.close()` pattern that OpenRouter/Gemini should adopt. |
-| `agentkthx/core/helpers.py` (~1129 lines) | Security utilities + arg normalization | `sanitize_command()`, `validate_path()`, `is_safe_url()`, `normalize_tool_args()`. The security boundary. |
-| `agentkthx/core/safe_eval.py` (~280 lines) | AST-walking math expression evaluator | Replaces `eval()` everywhere. Rejects `ast.Attribute`, `ast.Subscript`, `ast.Lambda`, comprehensions, f-strings, walrus. |
-| `agentkthx/config.py` | Env-var-driven config | All `AGENTKTHX_*` env vars + 6 new `GEMINI_*` (lines 84-95). DOC-01 (NEW): GEMINI_* env vars NOT documented in README Configuration section. |
-| `agentkthx/core/api_resilience.py` | API error resilience | Handles transient failures, rate limiting, retry logic for all backends. |
+| `agentkthx/agent.py` | `class Agent(AgentSetupMixin, CompactionMixin, ToolExecutionMixin, StreamingMixin, AgenticLoopMixin)` :51 | Mixin MRO order is load-bearing; the whole R07.00 design in one readable page |
+| `agentkthx/core/streaming.py` | `StreamingMixin` (862 lines) — `_generate_stream_chunks()` :409, `_generate_stream()` :508 | All LLM I/O flows through here; `think` resolution precedence (explicit flag > model-family directive) lives at :428-432; SSE event emission; the R07.00 `ResponseStateEvent` fix landed at :280 |
+| `agentkthx/core/agentic_loop.py` | `AgenticLoopMixin` :125 (760 lines) | The agent turn loop — orchestration of generate → parse → tool → observe |
+| `agentkthx/core/openresponses.py` | 1,053 lines — `ResponseEvent` family + OpenResponses public API | Event contract for SSE (RESPONSE_STREAMING, RESPONSE_FAILED, ...); `Agent.create_response/get_response/add_tool` are **frozen public API** (zero internal callers, kept by decision, smoke-tested in `tests/test_agent_openresponses_api.py`) |
+| `agentkthx/core/helpers.py` | 1,114 lines — largest core module, shared utilities | Appears in most dependency chains; check here before writing new helpers (R07.00 already removed ~1,292 dead lines — don't reintroduce) |
+| `agentkthx/core/error_recovery.py` | 909 lines — failure classification + recovery policy | Determines retry vs degrade vs fail behavior for every backend error |
+| `agentkthx/cli/agent_factory.py` | `_build_agent(args, config)` :104 (310 lines) | Every CLI flag that changes agent construction lands here — adding a flag? This is the wiring point |
+| `agentkthx/cli/parser.py` | 206 lines, 84 flags | `dest=` aliases are load-bearing (e.g. `--thinking` → `_think`); dead-code tools false-positive on them — all 84 flags are genuinely read |
+| `agentkthx/cli/commands/chat.py` | Interactive chat REPL + `PARAM_MATRIX` :607 | The `/param` command matrix — per-backend support sets, statically declared |
+| `agentkthx/cli/__init__.py` | **Facade** — re-exports every public name from the subpackage | Backward-compat contract: tests monkeypatch *through* this facade; a new command module must be re-exported here or import-compat breaks |
+| `agentkthx/update_check.py` | `check_for_update()` — always live | Signature is `{timeout}` only (R07.00 removed cache/force params); queries pypi.org + GitHub main every invocation; per-process result stash lives in `cli/banner.py`, not here |
+| `agentkthx/__init__.py` | `__version__ = "0.7.00"` + `_get_git_short_hash()` :39 | Version reporting; see landmine below about parent-repo hash pickup |
+
+**Rule of thumb**: If a file appears in 3+ dependency chains, it belongs here. `core/helpers.py` and `core/openresponses.py` are the two most-traversed nodes.
 
 ---
 
 ## Request / Execution Lifecycle
 
 ```
-1. User runs: `agentkthx run "<prompt>"` or `agentkthx chat`
-2. cli.py:cmd_run / cmd_chat → _build_agent() factory
-3. _build_agent():
-   a. Parse --backend, --model, --tools, --soul, --skills
-   b. backends.get_backend(name) → lazy-loads plugin if needed
-   c. tools.make_builtin_registry().subset([...])
-   d. (optional) soul.loader.load_soul(path)
-   e. (optional) skills.loader.load_skill(name)
-   f. Agent(model=..., tools=..., soul=..., ...)
-4. agent.run(prompt):
-   a. Build system prompt (base + soul + skills + ReAct instructions)
-   b. Loop (max_steps):
-      i.   backend.generate(messages, tools=...) → response dict
-         OR (if stream=True): _generate_stream() → typewriter output
-      ii.  If JEV mode: _maybe_jev_dispatch() → generate_decision() → JSON envelope
-      iii. Parse response: extract content + tool_calls
-      iv.  If tool_calls: dispatch via ToolRegistry, capture results
-      v.   Append assistant message + tool results to memory
-      vi.  If final_answer: break
-   c. Return AgentRun(final_answer, steps, total_tokens, total_ms, ...)
-5. cli.py:_print_agent_steps(run, debug) — surfaces tool calls + results
-6. (chat mode) Read next user input; loop back to step 4
-
-Streaming path (PERF-01 closed R06.53, MAINT-04 OPEN):
-  agent.run(stream=True) → _run_core(stream=True) → _run_core_streaming()
-  _run_core_streaming() calls _generate_stream() instead of _generate()
-  _generate_stream() picks: generate_completions_stream() (OpenAI SSE)
-                            or generate_stream() (native text)
-                            or generate() (non-streaming fallback)
-  Content/reasoning deltas printed to stdout as they arrive
-  Tool_calls fragments accumulated across SSE chunks
-  UX-01 (R06.56): reasoning panel emitted ABOVE AgentKthx: prefix, 4-space indented
-  ROB-05 (OPEN): KeyboardInterrupt handler (line 2342-2354) doesn't call stream_gen.close()
-  Returns same dict shape as _generate() so agentic loop is unchanged
+1. `agentkthx <cmd>` → console script → cli/main.py → parser.py (84 flags, dest= aliases)
+2. main.py dispatches → cli/commands/<cmd>.py
+3. Agent commands → cli/agent_factory._build_agent(args, config)
+      → Config.from_env() + PluginManager (loads 7 plugins) → backend selection
+      → agent.py: Agent(5 mixins) — AgentSetupMixin.__init__ wires tools, parser,
+        memory, thinking controls, compaction attrs
+4. AgenticLoopMixin drives turns:
+      StreamingMixin._generate_stream_chunks(prompt)  → backend HTTP/SSE stream
+        (zai / openrouter / gemini / bitnet plugins; OpenAICompatibleBackend
+         provides shared 429-retry, num_ctx/32 cap, safe-max-tokens — R06.57 ARCH-03)
+      → tool-call parsing → ToolExecutionMixin._execute_tool(tool_name, args)
+      → context growth → CompactionMixin compacts when threshold hit
+5. Progress/errors surface as core/openresponses.ResponseEvent family
+      → SSE-compatible (RESPONSE_STREAMING / RESPONSE_FAILED / ...) — the same
+        events the KeyboardInterrupt path must emit (see ROB-08, closed R07.00)
+6. `agentkthx version` → update_check.check_for_update() (live PyPI + GitHub),
+      banner caches per-process so one invocation = one network round max
 ```
 
 ---
@@ -170,28 +90,15 @@ Streaming path (PERF-01 closed R06.53, MAINT-04 OPEN):
 ## Dependency Graph
 
 ```
-cli.py → agent.py → backends/* + tools/* + core/*
-                       │
-                       ├─ backends/openai_compat.py ← (parent of) ollama, zai, openrouter, gemini
-                       │   ├── ollama.py ← (parent of) llama_server.py
-                       │   ├── zai.py (ZAI /api/paas/v4, Bearer auth) — REFERENCE for SSE cleanup
-                       │   ├── openrouter.py (stdlib urllib since R06.55) — ROB-06 leak
-                       │   └── gemini.py (NEW R06.56, OpenAI-compat + extra_body.google.*)
-                       │
-                       ├─ tools/builtins.py → core/helpers.py (sanitize_command, validate_path)
-                       │                   → core/safe_eval.py (calculator tool)
-                       │
-                       └─ core/helpers.py → core/safe_eval.py (normalize_tool_args)
-
-plugins/_loader.py → discovers plugins/*/plugin.json at startup
-                    → backends/__init__.py:get_backend() lazy-loads on demand
-
-soul/loader.py → agentkthx.__file__
-
-skills/loader.py → checks frameworks: ["agentnova", ...] (compatibility)
-
-update_check.py → checks PyPI + GitHub for updates
+cli/main.py → cli/parser.py → cli/commands/* → cli/agent_factory.py → agent.py (Agent)
+Agent → core mixins → core/{helpers, models, types, prompts, tool_cache, ...}
+plugins/* (self-contained) ← registered/loaded via PluginManager during agent setup
+skills/loader.py → skills/*/SKILL.md          (declarative; no code execution)
+cli/__init__.py facade ← re-exports cli.* public names; tests monkeypatch THROUGH it
+update_check.py ← cli/commands/version.py + cli/banner.py   (standalone; no core deps)
 ```
+
+Blast-radius notes: `core/helpers.py` and `core/openresponses.py` sit under nearly everything — changes there need the full suite. Plugin changes are isolated (each plugin is self-contained; `test-plugin` exists to validate the harness). The facade means a rename inside `cli/` is a two-file change (module + facade re-export) or tests silently keep patching stale paths.
 
 ---
 
@@ -199,53 +106,26 @@ update_check.py → checks PyPI + GitHub for updates
 
 | Aspect | Pattern |
 |--------|---------|
-| **Config** | Env-var-driven; module-level constants in `config.py`. `AGENTKTHX_*` prefix + per-backend prefixes (`GEMINI_*`, `OPENROUTER_*`, `ZAI_*`) |
-| **Backend abstraction** | `BaseBackend` (abstract) → `OpenAICompatibleBackend` (shared OpenAI-compat) → concrete backends. ARCH-01 (R06.55) decoupled ZAI/OpenRouter from OllamaBackend. R06.56 added GeminiBackend following same pattern. |
-| **API modes** | `ApiMode` enum: `OPENRE` (OpenResponses, native), `OPENAI` (Chat Completions), `JEV` (System-One decision wrapper). GeminiBackend silently normalizes `OPENRE → OPENAI` (R06.56 BUG-01 defense). |
-| **Tool calling** | Three-tier: native (function-calling API), ReAct (text-based `<tool>...</tool>`), none (auto-detected) |
-| **Memory** | `Memory` (in-memory sliding window) + `PersistentMemory` (SQLite-backed) |
-| **Security** | Defense-in-depth: `sanitize_command()` → `validate_path()` → `is_safe_url()` → `--security max\|off` |
-| **Math eval** | `safe_eval()` AST walker (R06.41) — no `eval()` in production |
-| **Plugin discovery** | Directory scan: `plugins/*/plugin.json` manifest (v0.2 spec) |
-| **Streaming** | `run(stream=True)` → `_run_core_streaming()` → `_generate_stream()` → `backend.generate_completions_stream()`. Each backend provides `_get_chat_completions_url()`, `_get_auth_headers()`, `_iter_sse_lines()`, `_get_model_defaults()`. ZAI's `_iter_sse_lines` is the reference for cleanup pattern. |
-| **Naming** | `snake_case` for vars/funcs, `PascalCase` for classes, `UPPER_SNAKE` for constants |
-| **Tests** | pytest. Mocked unit tests + streaming tests + 3 Gemini live-API tests (skipped by default). 766 passed, 9 skipped. NO integration tests (TEST-01 OPEN). |
+| Agent capability | Mixin method on the right mixin — never grow `agent.py` itself |
+| CLI compat | New command module ⇒ must re-export in `cli/__init__.py` facade |
+| Plugins | `docs/PLUGIN_SPEC.md` (v0.1/v0.2); backends subclass `OpenAICompatibleBackend`; `is_cloud` class attribute gates cloud-only UX (R06.57 MAINT-05 — a new cloud backend is a 1-line change) |
+| Events | `ResponseEvent` dataclass family in `core/openresponses.py`; streaming failure paths must emit events, not raise |
+| Config | `Config.from_env()` constructor; no mirror fields (removed R07.00) |
+| Testing | pytest, fully mocked (no network); monkeypatch via the facade; regression test accompanies every bug fix |
+| Versioning | R-style (R07.00) in-repo ↔ PEP 440 `0.7.00` in pyproject; PyPI displays `0.7.0` (normalization — expected) |
+| Tooling quirk | ~15 files under `agentkthx/skills/` carry UTF-8 BOMs — read with `encoding="utf-8-sig"` in any AST/regex tooling |
 
 ---
 
 ## Known Landmines
 
-- **`agentkthx/cli.py` is 4079 lines** (MAINT-01, worsened +278 in R06.56) — any CLI feature change lands in this single file. Split is a known refactor target.
-
-- **`agentkthx/agent.py` is 3119 lines** (MAINT-04, worsened +243 in R06.56) — `_run_core()` (~727 lines) and `_run_core_streaming()` (~602 lines) are near-duplicates. The streaming version is missing **29** `if self.debug` checks (was 24). UX-01 reasoning panel state (lines 2139-2143) and helpers (lines 2145, 2154) exist ONLY in streaming path. Any future fix to the agentic loop must be applied in TWO places.
-
-- **ARCH-03 CLOSED R06.57**: Triplicated 429 retry / `num_ctx/32` cap / `_calculate_safe_max_tokens` pattern lifted to `OpenAICompatibleBackend` as 3 shared methods (`_apply_max_tokens_cap`, `_calculate_safe_max_tokens`, `_handle_context_length_400`) + 6 class attributes (`_CONTEXT_LENGTH_MAX_PATTERN`, `_CONTEXT_LENGTH_INPUT_PATTERN`, `_CONTEXT_LENGTH_TOOL_PATTERN`, `_MAX_TOKENS_CAP_DIVISOR`, `_CONTEXT_SAFETY_MARGIN`, `_CONTEXT_SAFE_FLOOR`). Concrete backends (OpenRouter, Gemini, ZAI) shed 213 lines of duplication; Gemini overrides 3 regex patterns for its different error format. `_calculate_safe_max_tokens` now exists in exactly 1 place. +23 regression tests in `tests/test_context_length_recovery.py`.
-
-- ~~**8 hardcoded backend allowlists in `cli.py`** (MAINT-05, NEW)~~ — ✓ CLOSED R06.57. All 8 sites at lines 514, 587, 645, 787, 1953, 1972, 2326, 2380 now use `getattr(backend, 'is_cloud', False)`. New `is_cloud` class attribute on `BaseBackend` (default False), `OpenAICompatibleBackend` (override True), `OllamaBackend` (override back to False). A 5th cloud backend is now a 1-line change (subclass `OpenAICompatibleBackend`) instead of an 8-site edit. +13 regression tests in `tests/test_is_cloud_attribute.py`.
-
-- ~~**OpenRouter & Gemini streaming leak HTTP connections** (ROB-06, NEW)~~ — ✓ CLOSED R06.57. All 4 sites now have `try: ... finally: response.close()` matching ZAI's pattern: `openrouter.py:_iter_sse_lines` (1146-1158), `openrouter.py:_stream_request` (801-818), `gemini.py:_iter_sse_lines` (1473-1486), `gemini.py:_stream_request` (1426-1444). Combined with ROB-05's `stream_gen.close()` on Ctrl+C, the streaming cleanup contract is now uniform across all 4 cloud backends.
-
-- ~~**`_generate_stream()` KeyboardInterrupt doesn't close HTTP** (ROB-05)~~ — ✓ CLOSED R06.57. `agent.py:2342-2365` now calls `stream_gen.close()` before returning the cancelled-response dict.
-
-- ~~**Gemini env vars not in README** (DOC-01)~~ — ✓ CLOSED R06.57. README now has a `### Gemini Configuration` subsection (lines 379-416) with all 7 env vars + usage examples, plus a Gemini block in the master env-var table (lines 593-600).
-
-- **FIX-01 (R06.57, user-reported)** — Pip-installed users now see dev releases. New `_fetch_github_latest_version()` in `update_check.py` fetches `https://raw.githubusercontent.com/VTSTech/AgentKthx/main/agentkthx/__init__.py` and parses `__version__ = "X.Y.Z"`. `format_notice` surfaces the dev track for pip installs with a `pip install --force-reinstall git+...` command. `cmd_version` shows a new "GitHub main: X.Y.Z" line. Surfaces R06.55+, R06.56+, R06.57+ that aren't on PyPI. +11 new tests in `test_update_check.py` (65 total, was 54).
-
-- **FIX-02 (R06.57, user-reported)** — Update-check cache TTL reduced from 24h to 1h (success) / 6h to 15min (failure). Fixes user-reported "PyPI says 0.6.54 but 0.6.55+0.6.56 are out" stale-cache bug. The cache file already had `checked_at`; the constant was just too conservative for an actively-developed project that cuts multiple releases per day. New `agentkthx version --refresh` flag bypasses the cache for on-demand refresh without manually deleting `~/.agentkthx/update_check.json`. +9 new tests (`TestCacheTTL` asserting 1h/15min boundaries, `TestForceRefresh` asserting `force=True` refetches all sources). 786 total tests, was 766.
-
-- **ZAI now has `num_ctx/32` cap + 400 recovery** (R06.57, ROB-06 parity) — `zai.py:_get_model_defaults` caps `max_tokens` to `context_length // 32` (mirrors OpenRouter R06.55 + Gemini R06.56). `_iter_sse_lines` and `_generate_with_auth` both now have context-length 400 recovery with `_calculate_safe_max_tokens` + `_context_safe_max_tokens` persistence. All 3 cloud backends (OpenRouter, Gemini, ZAI) now share this pattern — extraction to `OpenAICompatibleBackend` is the long-term fix (ARCH-03).
-
-- **`_generate_stream()` has a dead `think` parameter** (PERF-03) — accepted at `openai_compat.py:620` but never forwarded to `_build_openai_body()` at line 669-683. Misleading API surface. Affects all OpenAI-compat backends (ZAI, OpenRouter, Gemini).
-
-- **PARAM_MATRIX excludes Gemini from 5 params** (FEAT-02 sub-issue) — `cli.py:1519-1622` `top_k`/`seed`/`n`/`presence_penalty`/`frequency_penalty` backend sets don't include `"gemini"`. Likely a bug — Gemini's OpenAI-compat endpoint accepts these. Verify on real VM.
-
-- **`GeminiBackend._api_mode` accepts strings silently** — `__init__` normalizes `OPENRE → OPENAI` (lines 818-820) per BUG-01 defense. This is intentionally more permissive than `OpenRouterBackend`'s strict check. Asymmetry is documented but creates maintenance drift.
-
-- **`agentnova/` and `localclaw/` redirect stub packages** — kept for backward compat, emit DeprecationWarning on `import`.
-
-- **Test isolation issue**: some tests mutate `ZAI_API_KEY` env var or `agentkthx.config.ZAI_API_KEY` module attribute without restoring.
-
-- **Test count discrepancy**: R06.55 audit.md says 672 passed; R06.56 changelog TEST-02 says R06.55 baseline was 710 passed. ~38 tests added between audit (2026-09-22) and R06.55 release tag (2026-09-23).
+- **Facade monkeypatch contract** — `cli/__init__.py` re-exports are what tests patch. Add a command without re-exporting it and you get confusing test failures or silently stale patches. Import-compat is tested; keep it that way.
+- **UTF-8 BOMs in `skills/`** — 15 files (mostly `skill-creator/scripts/`, `skills/__init__.py`) start with `\xef\xbb\xbf`. Naive `ast.parse` / byte-greps fail on them (this actually happened during the R07.00 dead-code analysis). Always use `utf-8-sig`.
+- **`_get_git_short_hash()` walks up 5 parent dirs** (`__init__.py:39-77`) — when the package runs from a directory nested inside an *unrelated* git repo (observed: pip `--target` install under another repo), the banner shows that repo's hash (`R07.00-db152d9` in the wild). Misleads bug reports.
+- **Version display mismatch** — code says `0.7.00`, PyPI normalizes to `0.7.0`. The update comparator handles the equivalence correctly (verified live), but humans comparing banner to `pip show` will do a double-take. Intentional; just don't "fix" the comparator.
+- **Update check is always live (R07.00)** — every process pays up to 1 timeout per source when offline (PyPI + GitHub). Opt-out env var unchanged. There is no cache to bypass; `version --refresh` was retired.
+- **argparse `dest=` aliases** — static analysis reports false-positive unused flags; all 84 are read. Verify with grep before deleting any "dead" flag.
+- **`_execute_tool(tool_name, args)`** — 2-arg signature since R07.00 (dead `user_prompt` param removed). Old 3-arg calls fail loudly; tests were updated in the same commit.
 
 ---
 
@@ -253,76 +133,32 @@ update_check.py → checks PyPI + GitHub for updates
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| **Zero dependencies** | stdlib only (urllib, sqlite3, ast, etc.) | Eliminates supply chain, version conflicts. ROB-04 (requests dep) CLOSED R06.55 — OpenRouter migrated to urllib. |
-| **Plugin discovery** | Directory scan of `plugins/*/plugin.json` | Local-first users can drop a backend folder |
-| **`shell=True` kept in subprocess** | Accepted-risk + `DANGEROUS_FLAG_COMBOS` hardening | Threat model is "model makes a casual mistake", not "determined adversary" |
-| **`AGENTNOVA_*` env vars dropped (not aliased)** | No backward-compat aliases | User explicitly opted in |
-| **`agentnova/` redirect stub kept** | Backward-compat for `import agentnova` | Downstream compatibility |
-| **JEV as `ApiMode`, not a separate `JevBackend`** | `ApiMode.JEV` sibling of `openre`/`openai` | Any chat-capable backend can produce Jev-shaped decisions |
-| **`ThinkingLevel` enum + `parse_thinking_arg()` helper** | Enum + parser + per-backend forwarding | Clean separation |
-| **Update check dual-source** | PyPI + GitHub commits | Covers both stable and dev tracks |
-| **ARCH-01: `OpenAICompatibleBackend` extraction** | ZAI/OpenRouter/Gemini inherit from new base, not OllamaBackend | R06.53/R06.54 streaming 404 bugs made structurally impossible. 534 lines of duplication removed. GeminiBackend (R06.56) follows the pattern. |
-| **Streaming path duplicated, not parameterized** | `_run_core_streaming()` is a near-copy of `_run_core()` | Non-streaming path has years of bug fixes (R06.52 loop resilience). Threading through a single parameterized implementation was deemed too risky. Trade-off: MAINT-04. |
-| **GeminiBackend silently normalizes `OPENRE → OPENAI`** | Defensive permissiveness vs OpenRouter's strict check | BUG-01 fix: avoids future CLI code paths crashing Gemini. Asymmetry documented. |
-| **Gemini thought-signature NOT yet implemented** | v0.1 ships without stateful continuation | Plumbing exists (`thought_signature` kwarg forwarded); accumulator + capture from response chunks deferred to v0.2. Trade-off: ~2-3x reasoning token cost on multi-turn loops. |
-| **Gemma `<thought>...</thought>` tag parser** (R06.56 FEAT-03) | Streaming state machine + non-streaming one-shot | Gemma emits reasoning inline as tags, not in `reasoning_content`. Strips stray closing tags, flushes unclosed. |
+| Modularization strategy | Split monoliths but keep import-compatible facade (R07.00) | Tests and user monkeypatches survived the restructure untouched |
+| Update check | Cache removed entirely — always live (R07.00) | The R06.57 hourly cache hid fresh releases from users (its original bug); simplicity won; supersedes R06.57 FIX-02 |
+| Dependencies | Zero runtime deps — stdlib HTTP/SSE | Hackability + no supply-chain surface; deliberate identity of the project |
+| Frozen public API | `Agent.create_response/add_tool/get_response` kept despite zero internal callers | Public API stability; now covered by smoke tests instead of deleted |
+| Test-only API | `PluginManager` test-facing methods kept | Harness validation uses them; flagged as future judgment calls |
+| Dead code | ~1,292 lines excised R07.00 (whole `core/math_prompts.py`, 24 ACP methods, legacy `tool_parse` helpers, ...) | Zero-caller, verified by AST cross-reference + vulture + manual dispatch analysis |
 
 ---
 
 ## What's Missing / Incomplete
 
-- **`cli.py` split** (MAINT-01) — 4079-line monolith. No modules split yet. Grew +278 lines in R06.56.
-- **`agent.py` split** (MAINT-04) — 3119-line file with duplicated agentic loop. `_run_core` + `_run_core_streaming` should converge or split into `agent_loop.py`. Debug divergence now 29 (was 24).
-- ~~**Backend allowlists hardcoded** (MAINT-05, NEW)~~ — ✓ CLOSED R06.57. 8 sites in cli.py now use `getattr(backend, 'is_cloud', False)`. New `is_cloud` class attribute on `BaseBackend` (default False) / `OpenAICompatibleBackend` (True) / `OllamaBackend` (False).
-- **Streaming `_iter_sse_lines` connection leak** (ROB-06, NEW) — OpenRouter and Gemini lack try/finally. ZAI has the pattern.
-- **Streaming KeyboardInterrupt connection leak** (ROB-05) — HTTP response not closed on Ctrl+C mid-stream.
-- **Dead `think` parameter** (PERF-03) — `_generate_stream()` accepts but never forwards.
-- **Gemini thought-signature continuation** (FEAT-03, NEW) — v0.1 limitation, ~2-3x reasoning token cost.
-- **OpenRouter `provider` routing** (FEAT-01) — no `provider.order` / `provider.ignore` / `provider.data_collection` flags.
-- **`/param` matrix extensibility** (FEAT-02) — hardcoded inline; Gemini excluded from 5 params (sub-issue).
-- **429 retry logic duplication** (ARCH-03, NEW) — ~400 lines duplicated between OpenRouter and Gemini. Should extract to base class.
-- **Coverage measurement** (ARCH-02) — no `pytest-cov` configured.
-- **Integration tests** (TEST-01) — most tests are mocked. BUG-01 and BUG-02 caught by manual VM testing.
-- **Gemini env vars in README** (DOC-01, NEW) — 6 GEMINI_* env vars declared in config.py and plugin.json but not in README Configuration section.
+- **No CI** — `.github/workflows/` does not exist; the 963-test suite runs only on maintainer machines
+- **No coverage measurement** — no pytest-cov / coverage config anywhere
+- **No integration tests** — every test is mocked; historically some bugs (streaming connection cleanup, R06.57) were caught only by manual VM testing
+- **OpenRouter routing preferences** — no provider-order/routing controls (FEAT-01, open since R06.57)
+- **Gemini thought-signature continuation** — multi-turn loops re-derive reasoning (~2-3x token cost); documented as unimplemented at `plugins/gemini/gemini.py:50` (FEAT-03)
+- **PEP 639 license migration** — `license = {text = "MIT"}` in pyproject emits a setuptools deprecation warning on every build
 
 ---
 
 ## Quick Start for Developer
 
-1. **Read the Critical Files Index above** — start with `agent.py` (agent loop) and `cli.py` (CLI surface)
-2. **Understand the Request Lifecycle** — `cmd_run` → `_build_agent` → `agent.run` → `backend.generate` → tool dispatch → final answer
-3. **Streaming path** — `agent.run(stream=True)` → `_run_core_streaming()` → `_generate_stream()` → `backend.generate_completions_stream()`. The streaming loop is a near-copy of the non-streaming loop — check BOTH when fixing agentic-loop bugs. Streaming now has UX-01 reasoning panel state (lines 2139-2143) that non-streaming lacks.
-4. **Backend hierarchy** — `BaseBackend` → `OpenAICompatibleBackend` → concrete (Ollama/ZAI/OpenRouter/Gemini). Each backend provides `_get_chat_completions_url()`, `_get_auth_headers()`, `_iter_sse_lines()`, `_get_model_defaults()`. **For SSE cleanup, copy ZAI's pattern** (`zai.py:705-712`); OpenRouter and Gemini are buggy (ROB-06).
-5. **Check Known Landmines** — especially `cli.py` size + hardcoded allowlists (MAINT-01/05), `agent.py` duplication (MAINT-04), `_iter_sse_lines` leak (ROB-06), `_api_mode` normalization asymmetry
-6. **Follow Patterns & Conventions** — `AGENTKTHX_*` env vars, `safe_eval()` for math, `sanitize_command()` for shell
+1. Read the Critical Files Index above — start with `agent.py` (one page tells you the whole design), then `core/streaming.py` for the I/O path
+2. Understand the Execution Lifecycle — that is the system
+3. Check Known Landmines — especially the facade contract and BOM quirk before writing tooling
+4. Follow Patterns & Conventions — mixin methods, facade re-exports, plugin spec
+5. Run `python -m pytest tests/ -q` before and after any change — 2.1 seconds, no excuse; expect exactly 963 passed / 9 skipped at `acf1d72`
 
-**Test first, push second**: `ZAI_API_KEY=test_dummy_key_12345 GEMINI_API_KEY=test_dummy_key_12345 python -m pytest tests/ -q` should report `766 passed, 9 skipped, 0 failed`.
-
----
-
-## Recent Test Results
-
-```
-$ ZAI_API_KEY=test_dummy_key_12345 GEMINI_API_KEY=test_dummy_key_12345 python -m pytest tests/ -q
-822 passed, 9 skipped, 0 failed in 1.86s
-```
-
-Test files (total):
-- `tests/test_security.py` (775 lines) — command sanitization, path validation, URL safety
-- `tests/test_openrouter_backend.py` — body construction, response parsing, streaming (rewritten R06.55 for urllib migration)
-- `tests/test_plugin_spec.py` (687 lines) — plugin manifest, loader, lifecycle
-- `tests/test_gemini_backend.py` (1111 lines, NEW R06.56, 97 test methods) — backend init, model family detection, free-tier classification, thought-tag parser, build body, retry helpers, 3 live-API tests (skipped by default)
-- `tests/test_jev_api_mode.py` (518 lines) — JEV dispatch, decision parsing, envelope shape
-- `tests/test_skills.py` (495 lines) — skill loader, compatibility, prompt building
-- `tests/test_loop_resilience.py` (472 lines) — error classification, termination, duplicate blocking
-- `tests/test_api_resilience.py` (443 lines, rewritten R06.55) — API error resilience, urllib mock transport
-- `tests/test_thinking_args.py` (429 lines) — thinking argument parsing, per-backend forwarding
-- `tests/test_builtins.py` (421 lines) — calculator, shell, file I/O tools
-- `tests/test_update_check.py` (~660 lines, 74 tests, +20 in R06.57) — update checking, version comparison, caching, FIX-01 pip-installed dev track via raw __init__.py, FIX-02 1h/15min TTL + `--refresh` flag
-- `tests/test_is_cloud_attribute.py` (NEW, MAINT-05) — 13 tests verifying `is_cloud` class hierarchy + 5th backend inheritance + defensive getattr fallback
-- `tests/test_context_length_recovery.py` (NEW, ARCH-03) — 23 tests verifying shared `_apply_max_tokens_cap` / `_calculate_safe_max_tokens` / `_handle_context_length_400` with default patterns (OpenRouter/ZAI) + Gemini's overridden patterns + 5th cloud backend inheritance
-- `tests/test_spec_compliance.py` (382 lines) — OpenAI spec compliance, streaming, logprobs
-- `tests/test_streaming.py` (359 lines) — _generate_stream, tool_call accumulation, AgentRun return
-- `tests/test_agent.py` (282 lines) — agent loop, tool dispatch, memory
-- `tests/test_zai_streaming.py` (270 lines) — ZAI streaming override, SSE parsing, auth headers
-- `tests/test_cmd_update_pep668.py` (88 lines) — PEP 668 detection, y/n prompt
+Do NOT start by reading every file. Use this brief as your map and read only what you need for your specific task. `docs/ARCH.md` is the deep-dive companion when you need module-level detail.
