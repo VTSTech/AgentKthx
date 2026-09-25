@@ -296,16 +296,20 @@ class TestExtractLastFinalAnswer:
 class TestCallSitesUseHelpers:
 
     def test_run_core_uses_all_three_helpers(self):
-        src = inspect.getsource(Agent._run_core)
+        # R07.00 Phase 5: loop body lives in AgenticLoopMixin._run_loop_iteration
+        src = inspect.getsource(Agent._run_loop_iteration)
         assert "_check_tool_choice_required" in src
         assert "_parse_tool_calls" in src
         assert "_finalize_run" in src
 
     def test_run_core_streaming_uses_all_three_helpers(self):
-        src = inspect.getsource(Agent._run_core_streaming)
+        # R07.00 Phase 5: single unified loop + streaming wrapper delegation
+        src = inspect.getsource(Agent._run_loop_iteration)
         assert "_check_tool_choice_required" in src
         assert "_parse_tool_calls" in src
         assert "_finalize_run" in src
+        wrapper_src = inspect.getsource(Agent._run_core_streaming)
+        assert "_run_loop_iteration" in wrapper_src
 
     def test_no_remaining_duplicated_finalize_blocks_in_run_core(self):
         """_run_core should NOT contain the old duplicated 7-line finalize

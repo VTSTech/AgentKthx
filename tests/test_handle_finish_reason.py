@@ -129,21 +129,23 @@ def test_missing_finish_reason_defaults_to_stop():
 # ---------------------------------------------------------------------------
 
 def test_run_core_uses_handle_finish_reason():
-    """_run_core's source must call self._handle_finish_reason."""
-    src = inspect.getsource(Agent._run_core)
+    """The agentic loop's source must call self._handle_finish_reason.
+    R07.00 Phase 5: the loop body lives in AgenticLoopMixin._run_loop_iteration."""
+    src = inspect.getsource(Agent._run_loop_iteration)
     assert "_handle_finish_reason" in src, (
-        "_run_core no longer calls _handle_finish_reason — the MAINT-04 "
+        "the agentic loop no longer calls _handle_finish_reason — the MAINT-04 "
         "Phase 2 refactor was reverted or bypassed"
     )
 
 
 def test_run_core_streaming_uses_handle_finish_reason():
-    """_run_core_streaming's source must call self._handle_finish_reason."""
-    src = inspect.getsource(Agent._run_core_streaming)
-    assert "_handle_finish_reason" in src, (
-        "_run_core_streaming no longer calls _handle_finish_reason — the "
-        "MAINT-04 Phase 2 refactor was reverted or bypassed"
-    )
+    """The unified agentic loop covers the streaming path too — same
+    assertion target as the non-streaming test (single loop since R07.00
+    Phase 5), plus the streaming wrapper must delegate to it."""
+    src = inspect.getsource(Agent._run_loop_iteration)
+    assert "_handle_finish_reason" in src
+    wrapper_src = inspect.getsource(Agent._run_core_streaming)
+    assert "_run_loop_iteration" in wrapper_src
 
 
 # ---------------------------------------------------------------------------

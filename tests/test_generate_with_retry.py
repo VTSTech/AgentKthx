@@ -216,24 +216,26 @@ def test_keyboard_interrupt_propagates():
 # ---------------------------------------------------------------------------
 
 def test_run_core_uses_generate_with_retry():
-    """_run_core's source must call self._generate_with_retry (so a future
-    refactor can't silently bypass the shared retry loop)."""
-    src = inspect.getsource(Agent._run_core)
+    """The agentic loop's source must call self._generate_with_retry (so a
+    future refactor can't silently bypass the shared retry loop).
+    R07.00 Phase 5: the loop body lives in AgenticLoopMixin._run_loop_iteration;
+    the per-path enable_compaction_recovery flag is set by the thin wrappers."""
+    src = inspect.getsource(Agent._run_loop_iteration)
     assert "_generate_with_retry" in src, (
-        "_run_core no longer calls _generate_with_retry — the MAINT-04 "
+        "the agentic loop no longer calls _generate_with_retry — the MAINT-04 "
         "Phase 1 refactor was reverted or bypassed"
     )
-    # Non-streaming path must pass enable_compaction_recovery=False
-    assert "enable_compaction_recovery=False" in src
+    # Non-streaming wrapper must pass enable_compaction_recovery=False
+    wrapper_src = inspect.getsource(Agent._run_core)
+    assert "enable_compaction_recovery=False" in wrapper_src
 
 
 def test_run_core_streaming_uses_generate_with_retry():
-    """_run_core_streaming's source must call self._generate_with_retry
-    with enable_compaction_recovery=True (so the context-length compaction
+    """The streaming wrapper must delegate with
+    enable_compaction_recovery=True (so the context-length compaction
     handler still fires on long streaming runs)."""
     src = inspect.getsource(Agent._run_core_streaming)
-    assert "_generate_with_retry" in src, (
-        "_run_core_streaming no longer calls _generate_with_retry — the "
-        "MAINT-04 Phase 1 refactor was reverted or bypassed"
+    assert "_generate_stream" in src, (
+        "_run_core_streaming no longer uses the streaming generator"
     )
     assert "enable_compaction_recovery=True" in src

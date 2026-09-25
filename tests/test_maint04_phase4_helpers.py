@@ -297,28 +297,37 @@ class TestRejectForToolChoice:
 class TestNoRemainingDuplication:
 
     def test_run_core_uses_enforce_final_answer(self):
-        src = inspect.getsource(Agent._run_core)
+        # R07.00 Phase 5: loop body lives in AgenticLoopMixin._run_loop_iteration
+        src = inspect.getsource(Agent._run_loop_iteration)
         assert "_enforce_final_answer" in src
 
     def test_run_core_streaming_uses_enforce_final_answer(self):
-        src = inspect.getsource(Agent._run_core_streaming)
+        # R07.00 Phase 5: single unified loop + streaming wrapper delegation
+        src = inspect.getsource(Agent._run_loop_iteration)
         assert "_enforce_final_answer" in src
+        wrapper_src = inspect.getsource(Agent._run_core_streaming)
+        assert "_run_loop_iteration" in wrapper_src
 
     def test_run_core_uses_handle_blocked_tool_call(self):
-        src = inspect.getsource(Agent._run_core)
+        # R07.00 Phase 5: per-call dispatch lives in _execute_single_tool_call
+        src = inspect.getsource(Agent._execute_single_tool_call)
         assert "_handle_blocked_tool_call" in src
 
     def test_run_core_streaming_uses_handle_blocked_tool_call(self):
-        src = inspect.getsource(Agent._run_core_streaming)
+        # R07.00 Phase 5: single unified dispatch covers both paths
+        src = inspect.getsource(Agent._execute_single_tool_call)
         assert "_handle_blocked_tool_call" in src
 
     def test_run_core_uses_reject_for_tool_choice(self):
-        src = inspect.getsource(Agent._run_core)
+        # R07.00 Phase 5: loop body lives in AgenticLoopMixin._run_loop_iteration
+        src = inspect.getsource(Agent._run_loop_iteration)
         assert "_reject_for_tool_choice" in src
 
     def test_run_core_streaming_uses_reject_for_tool_choice(self):
-        src = inspect.getsource(Agent._run_core_streaming)
+        # R07.00 Phase 5: single unified loop; per-path format hint via callbacks
+        src = inspect.getsource(Agent._run_loop_iteration)
         assert "_reject_for_tool_choice" in src
+        assert "include_format_hint=callbacks.include_format_hint" in src
 
     def test_no_remaining_duplicated_enforce_blocks_in_run_core(self):
         """_run_core should NOT contain the old duplicated 'FINAL ANSWWER
