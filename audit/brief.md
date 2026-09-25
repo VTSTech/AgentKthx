@@ -1,6 +1,6 @@
 # Codebase Intelligence Brief: AgentKthx
 
-> Generated: 2026-09-26 | Auditor: Super-Z (GLM) via `codebase-audit` v0.2.0 | Commit: `acf1d72` (R07.00, PyPI 0.7.0) + R07.01 in-tree fixes (ROB-07, MAINT-06, TEST-02)
+> Generated: 2026-09-26 | Auditor: Super-Z (GLM) via `codebase-audit` v0.2.0 | Commit: `acf1d72` (R07.00, PyPI 0.7.0) + R07.01 in-tree fixes (ROB-07, MAINT-06, TEST-02, ARCH-02)
 > Supersedes: R06.57 brief (2026-09-25) — regenerated because R07.00 deleted or restructured every file the old brief referenced (`agent.py` 3,119-line and `cli.py` 4,079-line monoliths no longer exist).
 
 ---
@@ -27,7 +27,7 @@ agentkthx/cli/commands/   → 15 command modules (chat, version, models, agent, 
 agentkthx/plugins/        → 7 plugins: acp, bitnet, gemini, openrouter, test-plugin, turboquant, zai
 agentkthx/skills/         → 4 bundled skills (codebase-audit, crypto-signals, skill-creator, test-harness) + loader.py
 agentkthx/update_check.py → always-live PyPI + GitHub version check (no cache since R07.00)
-.github/workflows/ci.yml → GitHub Actions CI (R07.01) — runs full pytest suite on push/PR, Python 3.12/3.13 matrix
+.github/workflows/ci.yml → GitHub Actions CI (R07.01) — runs full pytest suite on push/PR, Python 3.12/3.13 matrix; parallel `coverage` job uploads coverage.xml as 30-day artifact (ARCH-02, R07.01)
 agentkthx/skills/skill-creator/scripts/package_skill.py → skill packager with BOM guard (R07.01 MAINT-06)
 tests/                    → 35 files, ~11,600 LOC, 988 tests (mocked unit tests + 4 BOM regression tests)
 docs/                     → ARCH.md (authoritative architecture map, ~1,871 lines), CHANGELOG, PLUGIN_SPEC v0.1/v0.2,
@@ -147,8 +147,8 @@ Blast-radius notes: `core/helpers.py` and `core/openresponses.py` sit under near
 ## What's Missing / Incomplete
 
 - ~~**No CI** — `.github/workflows/` does not exist; the 988-test suite runs only on maintainer machines~~ **FIXED R07.01**: `.github/workflows/ci.yml` runs `python -m pytest tests/ -q` on push and PR against a Python 3.12/3.13 matrix.
-- **No coverage measurement** — no pytest-cov / coverage config anywhere (ARCH-02). With CI now in place, this is a one-line `--cov` flag away from being part of the standard workflow.
-- **No integration tests** — every test is mocked; historically some bugs (streaming connection cleanup, R06.57) were caught only by manual VM testing (TEST-01)
+- ~~**No coverage measurement** — no pytest-cov / coverage config anywhere (ARCH-02)~~ **FIXED R07.01**: `pytest-cov>=4.0` in dev extras; new `[tool.coverage]` block in `pyproject.toml`; parallel `coverage` job in `.github/workflows/ci.yml` uploads `coverage.xml` as 30-day artifact. Baseline: **42.7% line coverage** over 13,580 statements; no threshold enforced yet (visibility first).
+- **No integration tests** — every test is mocked; historically some bugs (streaming connection cleanup, R06.57) were caught only by manual VM testing (TEST-01). The ARCH-02 coverage baseline now points directly at the highest-payoff modules: `plugins/turboquant/turbo.py` (0%), `cli/commands/chat.py` (2%), `plugins/acp/acp_plugin.py` (16%), `plugins/zai/zai.py` (17%).
 - **OpenRouter routing preferences** — no provider-order/routing controls (FEAT-01, open since R06.57)
 - **Gemini thought-signature continuation** — multi-turn loops re-derive reasoning (~2-3x token cost); documented as unimplemented at `plugins/gemini/gemini.py:50` (FEAT-03)
 - **PEP 639 license migration** — `license = {text = "MIT"}` in pyproject emits a setuptools deprecation warning on every build (MAINT-07)
@@ -161,6 +161,6 @@ Blast-radius notes: `core/helpers.py` and `core/openresponses.py` sit under near
 2. Understand the Execution Lifecycle — that is the system
 3. Check Known Landmines — especially the facade contract and BOM quirk before writing tooling
 4. Follow Patterns & Conventions — mixin methods, facade re-exports, plugin spec
-5. Run `python -m pytest tests/ -q` before and after any change — 2.5 seconds, no excuse; expect exactly 984 passed / 9 skipped at the R07.01 MAINT-06 + TEST-02 fix commit. CI runs the same command on push/PR.
+5. Run `python -m pytest tests/ -q` before and after any change — 2.5 seconds, no excuse; expect exactly 984 passed / 9 skipped at the R07.01 ARCH-02 fix commit. CI runs the same command on push/PR. To see coverage locally: `pip install -e .[dev]` then `python -m pytest tests/ -q --cov=agentkthx --cov-report=term-missing` (adds ~3s; baseline is 42.7%).
 
 Do NOT start by reading every file. Use this brief as your map and read only what you need for your specific task. `docs/ARCH.md` is the deep-dive companion when you need module-level detail.
