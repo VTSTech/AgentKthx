@@ -5,6 +5,38 @@ All notable changes to AgentKthx will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [R07.00] - 2026-09-25 12:05:00 PM
+
+Pure-reorganization release executing `docs/R07.00-MODULARIZATION-PLAN.md`: `agent.py` (3466 lines) and `cli.py` (4270 lines) decomposed into focused modules with **zero behavioral changes** — every commit shipped with the full suite green (933 tests at baseline, 971 at completion). Closes audit findings MAINT-01 (cli.py monolith) and MAINT-04 (dual agentic loop).
+
+### Architecture
+
+- **Phase 5 — unified agentic loop, `core/agentic_loop.py` (the MAINT-04 flagship)** — the near-identical `_run_core` (~571 lines) and `_run_core_streaming` (~464 lines) loop bodies are replaced by ONE loop: `_run_loop_iteration()` with `_execute_single_tool_call()` and `_process_tool_result()`. Per-path differences are now explicit and data-driven via the new `LoopCallbacks` dataclass — four streaming-only hooks (`on_step_start`: preventive compaction; `on_generated`: token snapshot + footer refresh; `on_tool_executed`: the R06.55 inline `[N] tool` print; `on_tool_result_committed`: the R06.58 between-calls compaction) plus two behavioral toggles preserved exactly as before (`include_format_hint` T/F, `mark_response_completed` T/F — streaming never marked the Response COMPLETED; preserved, documented, and test-asserted). `_run_core`/`_run_core_streaming` are now thin wrappers. Debug output is unified to the non-streaming superset, closing the 29-check debug divergence MAINT-04 had tracked since R04.
+- **Phase 6 — streaming machinery, `core/streaming.py` (858 lines)** — `run_stream()` (OpenResponses SSE event generator), `_generate_stream_chunks()` and `_generate_stream()` (SSE chunk parsing + tool-call accumulation) moved verbatim into `StreamingMixin`.
+- **Phase 7 — compaction subsystem, `core/compaction.py` (199 lines)** — `_check_compaction()` and `_snapshot_running_tokens()` moved verbatim; the token-tracking block became `_update_running_tokens()`.
+- **Phase 9 — agent setup, `core/agent_setup.py` (520 lines)** — the ~400-line Agent constructor and `_build_default_prompt()` moved verbatim into `AgentSetupMixin`; 13 dead imports dropped from `agent.py`.
+- **Phase 10 — tool execution, `core/tool_execution.py` (103 lines)** — `_execute_tool()` (registry lookup, dangerous-tool confirmation gate, argument normalization, execution, error formatting) moved verbatim into `ToolExecutionMixin`.
+- **Phase 8 — `cli.py` (4270 lines) → `agentkthx/cli/` package (23 files)** — shared machinery in 8 top-level modules (`parser.py`: `create_parser`; `agent_factory.py`: `_build_agent`/`_init_acp`/skill loading; `banner.py`; `headers.py`: header/summary printers — the plan's `footer.py`, renamed since it also prints one-shot run headers; `utils.py`; `main.py`: dispatch + plugin wiring; `__main__.py`), plus one module per subcommand under `commands/` (14 modules). `cli/__init__.py` is a **compatibility facade**: it re-exports every module-level name that existed on the old module, so `from agentkthx.cli import X` and `monkeypatch.setattr(cli, 'X', ...)` keep working unchanged; the four cross-command collaborators (`_build_agent`, `_init_acp`, `_print_session_header`, `_print_update_notice`) are resolved through the facade at call time, so patching affects all consumers exactly as pre-split. 12 dead top-level imports dropped. Documented deviation: `commands/chat.py` is 1201 lines (above the plan's 800-line ceiling) — extracting the footer machinery (closures with nonlocal state) would have been a rewrite, violating the "extract, don't rewrite" principle; deferred.
+- **`agent.py`: 3466 → 1096 lines (−68%)** — the Agent class is now a facade composing the five mixins (`Agent(AgentSetupMixin, CompactionMixin, ToolExecutionMixin, StreamingMixin, AgenticLoopMixin)`); public API frozen. Documented deviation from the plan's ~300-line stretch target: the MAINT-04 Phase 1-4 helpers were outside the phase spec and remain in `agent.py` (candidate for R07.01).
+- **Preserved verbatim (pre-existing quirks, flagged for R07.0x)**: `run_stream()`'s KeyboardInterrupt path references an undefined `ResponseStateEvent` (would NameError); the streaming path never marks the Response COMPLETED; the streaming wrapper resets running-token counters at run start while non-streaming does not.
+
+### Packaging
+
+- **`requires-python`: `>=3.9` → `>=3.12`** — aligns the declared floor with reality: the CLI package (and the old `cli.py` before it) uses Python 3.12-only f-string syntax. The mismatch surfaced during the R07.00 split; the declaration is now honest.
+
+### Documentation
+
+- **`docs/ARCH.md` updated for R07.00** — new module map (5 core mixins, `backends/openai_compat.py` + deprecated `backends/bitnet.py` entries, full `cli/` package tree), an Agent mixin-architecture section with the `LoopCallbacks` hook/toggle table, and a CLI package layout section documenting the facade patch-compatibility contract.
+- **`docs/R07.00-MODULARIZATION-PLAN.md`** — status flipped Draft → Executed.
+- **`PROGRESS-R07.00.md`** — finalized to reflect all 6 phases complete (was a mid-flight snapshot that predated Phase 8).
+
+### Tests
+
+- 971 passed, 9 skipped, 0 failed (was 933; +38 new)
+- New: `tests/test_compaction_subsystem.py` (5), `tests/test_agent_setup_subsystem.py` (5), `tests/test_tool_execution_subsystem.py` (5), `tests/test_streaming_subsystem.py` (5), `tests/test_agentic_loop_subsystem.py` (12), `tests/test_cli_package_split.py` (6: facade completeness/identity, module importability, source contract, end-to-end monkeypatch-through-facade on `cmd_run`, `python -m agentkthx.cli` subprocess)
+- Retargeted with intent preserved (guard against helper bypass): 12 source-inspection tests moved to the new module locations across `test_generate_with_retry.py`, `test_handle_finish_reason.py`, `test_maint04_phase3_helpers.py`, `test_maint04_phase4_helpers.py`
+- Smoke-tested from a clean VM install: `pip install -e`, `chat -h`, model listing, and streaming chat with the zai backend all confirmed working.
+
 ## [R06.58] - 2026-09-25 11:07:05 AM
 
 ### Bug Fixes

@@ -2,9 +2,9 @@
 
 AgentKthx is a modular agent framework designed for local LLMs with tool-calling capabilities. It implements the OpenResponses specification for multi-provider, interoperable LLM interfaces.
 
-**Specification Compliance**: 100% (R03.5+) -- R04.x, R05.x, R06.0–R06.57
+**Specification Compliance**: 100% (R03.5+) -- R04.x, R05.x, R06.0–R07.00
 
-**Version**: R06.57
+**Version**: R07.00
 - OpenResponses API: 100%
 - Chat Completions API: 100%
 - Soul Spec v0.5: 100%
@@ -32,7 +32,24 @@ agentkthx/
 │   │                         # missing argument synthesizer
 │   ├── error_recovery.py     # ErrorRecoveryTracker, build_enhanced_observation(),
 │   │                         # build_retry_context(), is_error_result()
-│   └── openresponses.py      # OpenResponses specification types
+│   ├── openresponses.py      # OpenResponses specification types
+│   │
+│   │                         # ── Agent runtime mixins (R07.00) ──
+│   │                         # The Agent class composes these five; see the
+│   │                         # Agent section below for the mixin table.
+│   ├── agent_setup.py        # AgentSetupMixin — constructor, 30+ attribute
+│   │                         # inits, default system-prompt builder (Phase 9)
+│   ├── agentic_loop.py       # AgenticLoopMixin — the unified agentic loop:
+│   │                         # _run_loop_iteration + _execute_single_tool_call
+│   │                         # + _process_tool_result, parameterized by the
+│   │                         # LoopCallbacks dataclass (Phase 5, MAINT-04)
+│   ├── streaming.py          # StreamingMixin — SSE machinery: run_stream(),
+│   │                         # _generate_stream_chunks(), _generate_stream() (Phase 6)
+│   ├── compaction.py         # CompactionMixin — context compaction + running-
+│   │                         # token snapshots (Phase 7)
+│   └── tool_execution.py     # ToolExecutionMixin — _execute_tool(): registry
+│                             # lookup, confirmation gate, argument
+│                             # normalization, execution, error formatting (Phase 10)
 │
 ├── tools/
 │   ├── registry.py           # Tool registry with decorator-based registration
@@ -50,8 +67,13 @@ agentkthx/
 │   │                         # - /props fallback for model name discovery
 │   │                         # - Family-aware prompt formatting
 │   │                         # - Turn-bleed guards
-│   └── ollama_registry.py    # Ollama model registry: manifest discovery, GGUF header
-│                             # parsing via mmap, TurboQuant compatibility (R04.5)
+│   ├── ollama_registry.py    # Ollama model registry: manifest discovery, GGUF header
+│   │                         # parsing via mmap, TurboQuant compatibility (R04.5)
+│   ├── openai_compat.py      # OpenAICompatibleBackend — shared base for cloud
+│   │                         # backends speaking the OpenAI protocol (R06.55;
+│   │                         # subclassed by ZAI, OpenRouter, Gemini plugins)
+│   └── bitnet.py             # Deprecated alias: BitNetBackend is now
+│                             # LlamaServerBackend(bitnet_mode=True)
 │
 ├── plugins/                  # Plugin system (R05.0)
 │   ├── __init__.py           # get_plugin_manager() singleton export
@@ -109,7 +131,10 @@ agentkthx/
 │
 ├── examples/                 # Test examples and benchmarks
 │
-├── agent.py                  # Main Agent class (OpenResponses agentic loop)
+├── agent.py                  # Agent class — facade composing the five core
+│                             # mixins (R07.00); retains run(), the MAINT-04
+│                             # Phase 1-4 shared helpers, _generate(), and the
+│                             # thin _run_core/_run_core_streaming wrappers
 ├── agent_mode.py             # Autonomous agent mode (state machine)
 ├── orchestrator.py           # Multi-agent orchestration (R03.6)
 │                             # - Router, Pipeline, Parallel modes
@@ -124,7 +149,22 @@ agentkthx/
 ├── config.py                 # Core framework config (OLLAMA_BASE_URL, LLAMA_SERVER_BASE_URL)
 │                             # Plugin-owned config (BitNet, ZAI, ACP, TurboQuant) reads from
 │                             # env vars with defaults defined in each plugin's plugin.json
-├── cli.py                    # Command-line interface (with plugin CLI subcommand support)
+├── cli/                      # CLI package (R07.00 Phase 8 — was the 4270-line
+│   ├── __init__.py           # cli.py). Compatibility facade re-exporting every
+│   │                         # name that existed on the old module, so
+│   │                         # `from agentkthx.cli import X` and
+│   │                         # monkeypatching `agentkthx.cli.X` keep working
+│   ├── __main__.py           # `python -m agentkthx.cli` shim
+│   ├── parser.py             # create_parser() — argparse construction
+│   ├── agent_factory.py      # _build_agent, _init_acp, skill-prompt loading
+│   ├── banner.py             # ASCII banner + update-check notice
+│   ├── headers.py            # Session/run header + summary printers
+│   ├── utils.py              # Model resolution, step printing, tool cache
+│   ├── main.py               # main() — dispatch + plugin wiring
+│   └── commands/             # One module per subcommand (14 modules):
+│                             # run, chat, agent, models, test, config, turbo,
+│                             # soul, skills, sessions, plugins, modelfile,
+│                             # tools, version (+update)
 ├── model_discovery.py        # Ollama model listing and selection
 ├── shared_args.py            # Shared CLI argument definitions + SharedConfig dataclass (R04.2)
 │
@@ -136,7 +176,9 @@ agentkthx/
 │   ├── TESTS.md              # Benchmark results and testing guide
 │   ├── JEV_API_MODE.md       # JEV (System-One) API mode reference
 │   ├── ZAI_API_TECHNICAL_REFERENCE.md  # ZAI API reference
-│   └── OPENROUTER_API_TECHNICAL_REFERENCE.md  # OpenRouter API reference
+│   ├── OPENROUTER_API_TECHNICAL_REFERENCE.md  # OpenRouter API reference
+│   ├── GEMINI_API_TECHNICAL_REFERENCE.md  # Gemini API reference (R06.56)
+│   └── R07.00-MODULARIZATION-PLAN.md     # Modularization plan (executed in R07.00)
 │
 ├── audit/                    # Audit materials (R06.41)
 │   ├── audit.md              # Codebase audit findings report
@@ -150,7 +192,44 @@ agentkthx/
 
 ## Key Components
 
-### Agent (`agent.py`)
+### Agent (`agent.py` + `core/` mixins)
+
+Since R07.00 the Agent is a thin facade composing five focused mixins — one per subsystem:
+
+| Mixin | Module | Owns |
+|-------|--------|------|
+| `AgentSetupMixin` | `core/agent_setup.py` | Constructor, 30+ attribute inits, default system-prompt builder |
+| `CompactionMixin` | `core/compaction.py` | `_check_compaction()`, running-token snapshots |
+| `ToolExecutionMixin` | `core/tool_execution.py` | `_execute_tool()`: lookup, confirmation gate, normalization, execution |
+| `StreamingMixin` | `core/streaming.py` | `run_stream()`, SSE chunk parsing, stream accumulation |
+| `AgenticLoopMixin` | `core/agentic_loop.py` | `_run_loop_iteration()` — the unified agentic loop |
+
+```python
+class Agent(
+    AgentSetupMixin,
+    CompactionMixin,
+    ToolExecutionMixin,
+    StreamingMixin,
+    AgenticLoopMixin,
+): ...
+```
+
+`agent.py` itself (1096 lines, down from 3466 at R06.58) retains `run()`, the MAINT-04 Phase 1-4 shared helpers (`_generate_with_retry`, `_handle_finish_reason`, `_check_tool_choice_required`, `_parse_tool_calls`, `_finalize_run`, `_enforce_final_answer`, `_handle_blocked_tool_call`, `_reject_for_tool_choice`), `_generate()`, and the thin `_run_core` / `_run_core_streaming` wrappers. The public API is unchanged: `from agentkthx import Agent`.
+
+#### Unified agentic loop (R07.00 Phase 5, closes MAINT-04)
+
+`_run_core` and `_run_core_streaming` were near-identical ~500-line loop bodies. Both are now thin wrappers around a single loop body, `_run_loop_iteration()`. Per-path differences are expressed explicitly through the `LoopCallbacks` dataclass — hooks the streaming wrapper fills in, plus two behavioral toggles that preserve the pre-R07.00 per-path behavior exactly:
+
+| Hook / toggle | Non-streaming | Streaming |
+|---|---|---|
+| `on_step_start(step)` | no-op | Preventive compaction at top of step |
+| `on_generated(step, response)` | no-op | Token snapshot + CLI footer refresh |
+| `on_tool_executed(count, name, args, result)` | no-op | Inline `[N] tool …` print (R06.55) |
+| `on_tool_result_committed(n_calls)` | no-op | Between-calls compaction when a step carried multiple tool calls (R06.58) |
+| `include_format_hint` | `True` | `False` (ReAct hint in tool_choice rejection) |
+| `mark_response_completed` | `True` | `False` (pre-existing streaming behavior, preserved + test-asserted) |
+
+Debug output was unified to the non-streaming superset, closing the MAINT-04 29-check debug divergence between the two paths.
 
 The main Agent class implements the **OpenResponses Agentic Loop**:
 
@@ -1417,7 +1496,8 @@ Each decision point in the agentic loop has explicit guidance:
 The agent adds contextual hints to tool results:
 
 ```python
-# In agent.py - Memory.add() for tool results
+# In the agentic loop (core/agentic_loop.py, non-streaming path) — tool-result
+# processing; the streaming path (core/streaming.py) builds the same observation
 if result_str.startswith("Error"):
     observation_msg = f"Observation: {result_str}\n\nNote: Try a different approach..."
 else:
@@ -1516,6 +1596,12 @@ This ensures BitNet models (which report `"bitnet"` as their architecture in GGU
 ---
 
 ## CLI Commands
+
+### CLI Package Layout (R07.00)
+
+The CLI lives in the `agentkthx/cli/` package (Phase 8 split of the former 4270-line `cli.py`): shared machinery in 8 top-level modules (`parser`, `agent_factory`, `banner`, `headers`, `utils`, `main`, `__init__`, `__main__`), one module per subcommand under `commands/` (14 modules).
+
+`cli/__init__.py` is a **compatibility facade**: it re-exports every module-level name that existed on the old `cli` module — all `cmd_*` handlers, helpers, constants, `main`, `create_parser` — so `from agentkthx.cli import X` keeps working unchanged. The four collaborators shared across command modules (`_build_agent`, `_init_acp`, `_print_session_header`, `_print_update_notice`) are resolved by command modules **through the facade at call time**, so `monkeypatch.setattr("agentkthx.cli._build_agent", …)` affects all consumers exactly as it did pre-split — the patch-compatibility contract is test-enforced (`tests/test_cli_package_split.py`).
 
 | Command | Description |
 |---------|-------------|
