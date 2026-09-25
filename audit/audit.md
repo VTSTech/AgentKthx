@@ -4,8 +4,10 @@
 
 **Repository:** https://github.com/VTSTech/AgentKthx
 **Author:** VTSTech | **License:** MIT | **Date:** 2026-09-26
-**Status:** 10 Open Findings (1 fixed in tree, unreleased) | 7 Categories | SEC, ROB, MAINT, PERF, FEAT, ARCH, TEST
+**Status:** 8 Open Findings | 7 Categories | SEC, ROB, MAINT, PERF, FEAT, ARCH, TEST
 
+> **R07.01 delta (2026-09-26, unreleased):** Two findings closed. **MAINT-06** (Low): the 15 UTF-8 BOM-bearing files under `agentkthx/skills/` were stripped in place, `EXCLUDED_DIRS` was hoisted to module scope in `package_skill.py`, and a new `_find_bom_python_files()` guard now refuses to package any skill containing a BOM-bearing `.py` file (with a clear `sed -i '1s/^\xef\xbb\xbf//'` fix message). Four new regression tests in `tests/test_no_bom_in_skills.py` assert (a) no shipped `.py` under `skills/` begins with the BOM, (b) the packager rejects a BOM-bearing skill, and (c) the packager still accepts clean skills. **TEST-02** (Medium): `.github/workflows/ci.yml` now runs the full pytest suite on push and PR against a Python 3.12/3.13 matrix — the 988-test suite that previously executed only on maintainer machines now runs on every change, with `cancel-in-progress` concurrency to keep PR feedback fast. Suite: 980 → **984 passed / 9 skipped** in ~2.5s.
+>
 > **R07.00 delta (2026-09-26):** The two highest-severity structural findings are now **closed**. **MAINT-01** (High): the 4,079-line `cli.py` monolith is now a 23-file `agentkthx/cli/` package (largest file 310 lines) behind an import-compatible facade in `cli/__init__.py`. **MAINT-04** (Medium): the 3,119-line `agent.py` god-class is now a 51-line five-mixin composition (`AgentSetupMixin, CompactionMixin, ToolExecutionMixin, StreamingMixin, AgenticLoopMixin`) in `agentkthx/agent.py`. **PERF-03** (Low): the dead `think` parameter is gone — `_generate_stream()` takes no arguments and think-resolution precedence (explicit flag > model-family no-think directive) is explicit at `core/streaming.py:428-432`. New finding **ROB-08** was found and fixed within the cycle: `core/streaming.py:280` referenced `ResponseStateEvent` without importing it, so a KeyboardInterrupt during tool execution in streaming raised `NameError` instead of emitting the clean `RESPONSE_FAILED` SSE event — fixed with a regression test that reproduces the original failure. The R07.00 dead-code sweep removed ~1,292 verified zero-caller lines (whole `core/math_prompts.py`, 24 ACP plugin methods, legacy `tool_parse.py` helpers, dead params/fields) while deliberately preserving frozen public API (now smoke-tested). The update-check cache was **removed by design** (always-live results; `version --refresh` retired) — this supersedes R06.57's FIX-02. Test suite grew 822 → **963 passed / 9 skipped**. Version published to PyPI as `0.7.0` (PEP 440 normalization of 0.7.00). New findings this cycle: ROB-07, MAINT-06, MAINT-07, MAINT-08, MAINT-09, TEST-02. ROB-07 was subsequently fixed in the working tree (R07.01, unreleased) — see its entry below.
 
 ---
@@ -29,7 +31,7 @@
 
 ## Executive Summary
 
-This audit covers AgentKthx at commit `acf1d72` (v0.7.00, published to PyPI as 0.7.0): 114 Python files / 44,386 lines in the package plus 34 test files / 11,478 lines, reviewed following the R07.00 modularization, dead-code cleanup, and update-check cache removal. The suite passes 963 / 9 skipped in ~2.1 seconds. The headline is positive: both structural findings that dominated prior audits — the CLI monolith (MAINT-01, High) and the agent god-class (MAINT-04) — are closed by R07.00, and the codebase now has no open High-severity findings. Eleven findings remain open: five Medium (git-hash misattribution in version reporting, absent CI, absent integration tests, and the two carried-forward provider feature gaps) and six Low (BOM files, PEP 639 license, version display, test-only API surface, hardcoded /param matrix, no coverage measurement). The highest-leverage next move is mechanical, not architectural: stand up GitHub Actions CI — the 963-test suite already exists, runs in two seconds, and currently executes only on maintainer machines, which is the single largest reliability gap given the project's release cadence (16 PyPI releases in the 0.6.x–0.7.0 line). A recurring pattern worth noting: this codebase's remaining risk is concentrated in *process* (testing, reporting, packaging hygiene) rather than *structure* — the R-series discipline of audit-tracked findings with closure deltas is itself working and should continue.
+This audit covers AgentKthx at commit `acf1d72` (v0.7.00, published to PyPI as 0.7.0), with R07.01 in-tree fixes (unreleased) tracked in this document. At the R07.01 in-tree state: 114 Python files / 44,386 lines in the package plus 35 test files / ~11,600 lines, reviewed following the R07.00 modularization, dead-code cleanup, and update-check cache removal, plus the R07.01 ROB-07 attribution-guard fix and the MAINT-06 BOM strip + TEST-02 CI workflow. The suite passes **984 / 9 skipped in ~2.5 seconds** at the MAINT-06 + TEST-02 fix commit (980 from R07.01 ROB-07 + 4 new BOM regression tests). The headline is positive: both structural findings that dominated prior audits — the CLI monolith (MAINT-01, High) and the agent god-class (MAINT-04) — were closed by R07.00, and R07.01 closes the two highest-leverage near-term findings identified by the R07.00 audit (MAINT-06 and TEST-02). Eight findings remain open: three Medium (absent integration tests, OpenRouter routing preferences, Gemini thought-signature continuation) and five Low (PEP 639 license, version display inconsistency, test-only `PluginManager` API surface, hardcoded `/param` matrix, no coverage measurement). The next highest-leverage move is now TEST-01 (a thin record/replay integration tier) — with CI landed, an integration-test group is one CI matrix slot away from being part of the standard verification surface, and ARCH-02 (coverage measurement) is now nearly free to add to the same workflow. A recurring pattern worth noting: this codebase's remaining risk is concentrated in *process* (testing, reporting, packaging hygiene) rather than *structure* — the R-series discipline of audit-tracked findings with closure deltas is itself working and should continue.
 
 ---
 
@@ -38,11 +40,11 @@ This audit covers AgentKthx at commit `acf1d72` (v0.7.00, published to PyPI as 0
 | ID | Severity | Category | Status | Title |
 |----|----------|----------|--------|-------|
 | ~~ROB-07~~ | ~~Medium~~ | Robustness | ✓ FIXED R07.01 (in tree) | `_get_git_short_hash()` attaches unrelated parent-repo hash to version string |
-| TEST-02 | **Medium** | Testing | OPEN | No CI — 963-test suite runs only on maintainer machines |
+| ~~TEST-02~~ | ~~Medium~~ | Testing | ✓ CLOSED R07.01 (in tree) | No CI — 988-test suite runs only on maintainer machines |
+| ~~MAINT-06~~ | ~~Low~~ | Maintainability | ✓ CLOSED R07.01 (in tree) | 15 files under `agentkthx/skills/` carry UTF-8 BOMs |
 | TEST-01 | Medium | Testing | OPEN | No integration tests — all tests are mocked unit tests |
 | FEAT-01 | Medium | New Features | OPEN | No provider routing preferences for OpenRouter |
 | FEAT-03 | Medium | New Features | OPEN | Gemini thought-signature stateful continuation not implemented |
-| MAINT-06 | Low | Maintainability | OPEN | 15 files under `agentkthx/skills/` carry UTF-8 BOMs |
 | MAINT-07 | Low | Maintainability | OPEN | `license = {text = "MIT"}` emits PEP 639 deprecation warning on every build |
 | MAINT-08 | Low | Maintainability | OPEN | Version display inconsistency: 0.7.00 in-repo vs 0.7.0 on PyPI |
 | MAINT-09 | Low | Maintainability | OPEN | Test-only `PluginManager` API surface kept in production code |
@@ -103,17 +105,19 @@ The monolith was decomposed into a 23-file `agentkthx/cli/` package: 8 top-level
 
 **Impact:** Agent capabilities are added as mixin methods in scoped modules instead of appending to a god-class.
 
-#### MAINT-06: 15 files under `agentkthx/skills/` carry UTF-8 BOMs
+#### ~~MAINT-06: 15 files under `agentkthx/skills/` carry UTF-8 BOMs~~ ✓ CLOSED R07.01 (in tree)
 
 | Property | Value |
 |----------|-------|
 | **Severity** | Low |
 | **Category** | Maintainability |
-| **File(s)** | `agentkthx/skills/__init__.py`, `agentkthx/skills/skill-creator/scripts/*.py` (8 files), and 6 more under `skills/` |
+| **File(s)** | `agentkthx/skills/__init__.py`, `agentkthx/skills/skill-creator/scripts/*.py` (14 files) |
 
-Fifteen package files begin with a UTF-8 byte-order mark. Python itself executes them fine, but tooling does not: during the R07.00 dead-code analysis, `ast.parse` failed on these files until every read was switched to `encoding="utf-8-sig"`, and naive byte-level greps silently miss or mis-anchor matches. Since these files ship in the wheel, any downstream contributor running linters, cross-referencers, or codemods against an installed AgentKthx will hit the same friction. The fix is a one-time strip (`sed -i '1s/^\xEF\xBB\xBF//'` or equivalent) plus a check in the skill-creator packaging script so newly generated skill scripts are written BOM-free.
+Fifteen package files began with a UTF-8 byte-order mark. Python itself executed them fine, but tooling did not: during the R07.00 dead-code analysis, `ast.parse` failed on these files until every read was switched to `encoding="utf-8-sig"`, and naive byte-level greps silently missed or mis-anchor matches. Since these files ship in the wheel, any downstream contributor running linters, cross-referencers, or codemods against an installed AgentKthx hit the same friction.
 
-**Impact:** Third-party tooling works against the shipped package without silent failures.
+**Fixed in the working tree (R07.01, unreleased):** (1) The 15 BOMs were stripped in place via a one-time `strip_bom_in_skills.py` script (persisted in `/home/z/my-project/scripts/` for traceability — the same script is idempotent and can be re-run as a verification step). (2) `EXCLUDED_DIRS` was hoisted from a local variable inside `package_skill.package_skill()` to a module-level constant so it could be shared between the BOM scan and the zip write loop — they must agree on what "in the skill" means. (3) A new `_find_bom_python_files()` helper in `package_skill.py` scans every `.py` file about to be packaged; if any begins with `bytes([0xEF, 0xBB, 0xBF])`, the packager refuses to produce a `.skill` archive and prints a clear `sed -i '1s/^\xef\xbb\xbf//' <file>` fix message — forcing the source to be fixed rather than silently stripping. The decision to refuse-and-instruct rather than auto-strip is deliberate: silent stripping would let the issue recur on the next save. (4) Four regression tests in `tests/test_no_bom_in_skills.py` assert both the no-BOM invariant on shipped package files and the packager's reject/accept behavior.
+
+**Impact:** Third-party tooling works against the shipped package without silent failures, and the packager prevents future BOM-bearing skills from being distributed.
 
 #### MAINT-07: `license = {text = "MIT"}` emits PEP 639 deprecation warning on every build
 
@@ -223,17 +227,19 @@ Carried forward from R06.57, unchanged in kind. The entire suite mocks backend H
 
 **Impact:** The bug classes that historically escaped to production become suite-detectable.
 
-#### TEST-02: No CI — 963-test suite runs only on maintainer machines
+#### ~~TEST-02: No CI — 963-test suite runs only on maintainer machines~~ ✓ CLOSED R07.01 (in tree)
 
 | Property | Value |
 |----------|-------|
 | **Severity** | Medium |
 | **Category** | Testing |
-| **File(s)** | `.github/` (absent) |
+| **File(s)** | `.github/workflows/ci.yml` (new) |
 
-New finding this cycle: the repository has no CI configuration at all — `.github/workflows/` does not exist. The project has shipped 16 PyPI releases across 0.6.x–0.7.0 with substantial per-release churn (R07.00 alone: 8 files changed in the final cache-removal commit, on top of a 36-file cleanup), and the only thing standing between a bad push and a published release is a developer remembering to run pytest locally. The assets for CI already exist: a fast suite (963 tests, ~2.1s), zero runtime dependencies (trivial install), and a pinned Python floor (>= 3.12, so a two-line actions matrix covers 3.12/3.13). A minimal workflow — checkout, `pip install -e .[dev]`, `pytest` on push and PR — is a ten-line YAML file. Given the release cadence, this is the highest leverage single change available in this audit.
+The repository had no CI configuration at all — `.github/workflows/` did not exist. The project shipped 16 PyPI releases across 0.6.x–0.7.0 with substantial per-release churn (R07.00 alone: 8 files changed in the final cache-removal commit, on top of a 36-file cleanup), and the only thing standing between a bad push and a published release was a developer remembering to run pytest locally.
 
-**Impact:** Every push and PR is verified before it can reach a release, independent of any one machine.
+**Fixed in the working tree (R07.01, unreleased):** `.github/workflows/ci.yml` runs the full pytest suite on every push to `main`/`master` and every pull request, against a Python 3.12 / 3.13 matrix (matching `requires-python = ">=3.12"` and `[tool.black] target-version`). The workflow installs the package with `pip install -e .[dev]` (zero runtime deps — install is fast and deterministic), uses `actions/setup-python@v5` with `cache: pip` keyed on `pyproject.toml` for fast subsequent runs, and runs `python -m pytest tests/ -q` (the documented dev invocation). `concurrency: cancel-in-progress: true` cancels superseded runs on the same ref to keep PR feedback fast and avoid burning Actions minutes. The workflow is intentionally minimal — a 10-line job — so that the suite (now **988 tests: 984 passed / 9 skipped in ~2.5s** including the four new BOM regression tests) is verified on every change without depending on any one maintainer's machine.
+
+**Impact:** Every push and PR is verified before it can reach a release, independent of any one machine. The highest-leverage single change identified by the R07.00 audit is now in place.
 
 ---
 
@@ -241,8 +247,8 @@ New finding this cycle: the repository has no CI configuration at all — `.gith
 
 | Timeline | Findings |
 |----------|----------|
-| **Near term (R07.0x)** | TEST-02 (stand up GitHub Actions — 10-line YAML, suite already exists), ~~ROB-07~~ (fixed in tree, R07.01), MAINT-06 (strip 15 BOMs + guard in skill-creator), MAINT-07 (one-line PEP 639 license migration) |
-| **Short term (R07.1x – R08.0)** | TEST-01 (record/replay integration tier for backend streaming), FEAT-03 (Gemini thought-signature continuation — largest token-cost gap), FEAT-01 (OpenRouter routing preferences), ARCH-02 (coverage baseline, rides on CI) |
+| **Near term (R07.0x)** | ~~TEST-02~~ (closed R07.01 — `.github/workflows/ci.yml`), ~~ROB-07~~ (closed R07.01 — attribution-guarded git hash), ~~MAINT-06~~ (closed R07.01 — 15 BOMs stripped + packager guard), MAINT-07 (one-line PEP 639 license migration) |
+| **Short term (R07.1x – R08.0)** | TEST-01 (record/replay integration tier — now has a CI matrix slot waiting for it), FEAT-03 (Gemini thought-signature continuation — largest token-cost gap), FEAT-01 (OpenRouter routing preferences), ARCH-02 (coverage baseline — now rides free on the CI workflow) |
 | **Medium term (R08.x+)** | FEAT-02 (self-reporting parameter support), MAINT-08 (README FAQ note on 0.7.00/0.7.0), MAINT-09 (annotate or absorb test-only PluginManager API) |
 
 ---
@@ -253,7 +259,8 @@ New finding this cycle: the repository has no CI configuration at all — `.gith
 - **Mixin composition over god-class** — `agentkthx/agent.py` is 51 readable lines; capabilities live in five scoped mixins under `core/` (setup, compaction, tool execution, streaming, agentic loop). The MRO is the architecture, and it is legible at a glance.
 - **The facade contract worked** — `cli/__init__.py` re-exports carried every legacy import path and every test monkeypatch through the R07.00 decomposition of a 4,079-line monolith without a single test rewrite. This is the pattern to keep for any future large restructure.
 - **Plugin registry with a written spec** — 7 plugins including `test-plugin`, whose entire purpose is validating the plugin harness; `docs/PLUGIN_SPEC.md` (two versions) documents the contract. The `is_cloud` attribute (R06.57) means a new cloud backend is a one-line change.
-- **A suite that gets run** — 963 tests in ~2.1 seconds with zero runtime deps. The speed is a feature: it removes every excuse for skipping the suite before a commit, and the count is tracked per-release in the CHANGELOG.
+- **A suite that gets run** — 984 tests in ~2.5 seconds with zero runtime deps, and as of R07.01 the suite is run on every push and PR via `.github/workflows/ci.yml` (closing the gap where the suite previously ran only on maintainer machines). The speed is a feature: it removes every excuse for skipping the suite before a commit, and the count is tracked per-release in the CHANGELOG.
+- **BOM hygiene enforced** — the R07.01 BOM strip in `agentkthx/skills/` is enforced by a packager guard in `package_skill.py` that refuses to ship BOM-bearing `.py` files and four regression tests in `tests/test_no_bom_in_skills.py` that assert both the no-BOM invariant and the reject/accept behavior of the packager. The class of bug — "Python tolerates it, but tooling does not" — is now structurally guarded.
 - **Audit discipline as process** — findings carry stable IDs across releases with closure deltas recorded at the top of this document; MAINT-01 was tracked from identification through "worsened" to closure across four releases. The tracker is doing its job.
 - **Skills as instructions-as-docs** — bundled skills (including this `codebase-audit` skill) are declarative SKILL.md guidance with no code execution in the load path (`skills/loader.py`), keeping the attack surface of the skill system minimal.
 - **Event-driven streaming contract** — the `ResponseEvent` family in `core/openresponses.py` gives every streaming path (including failure and interrupt paths, post ROB-08) a uniform SSE-compatible vocabulary, and the frozen OpenResponses public API (`create_response/get_response/add_tool`) is now pinned by smoke tests.

@@ -1,0 +1,62 @@
+# AgentKthx CI — runs the full pytest suite on every push and PR.
+#
+# Audit TEST-02 (R07.01): the project has 16 PyPI releases across 0.6.x–0.7.x
+# with substantial per-release churn, and prior to this workflow the 980-test
+# suite ran only on maintainer machines. This workflow stands up the same
+# command developers run locally (`pip install -e .[dev] && pytest`) on a
+# 2-version Python matrix covering the project's declared floor (>=3.12).
+#
+# Design notes:
+#  - Zero runtime deps means `pip install -e .[dev]` only fetches the dev
+#    extras (pytest, black, ruff) — install is fast (~5s) and reproducible.
+#  - The suite runs in ~2.3s locally, so we don't bother with -x; the full
+#    output is more useful than fast-fail during the rollout phase.
+#  - We don't gate on black/ruff here yet — that's an ARCH-02-tier decision
+#    (separate "lint" job is a clean extension point if/when wanted).
+
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+# Cancel in-flight runs for the same ref when a new commit lands — keeps PR
+# feedback fast and avoids burning Actions minutes on superseded pushes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: pytest (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install package + dev extras
+        # Zero runtime deps — install is fast and deterministic.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[dev]
+
+      - name: Run pytest
+        # Match the documented dev invocation. Suite runs in ~2-3s; no need
+        # for coverage gating yet (ARCH-02 is the follow-on if/when wanted).
+        run: python -m pytest tests/ -q

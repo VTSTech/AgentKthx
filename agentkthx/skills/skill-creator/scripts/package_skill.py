@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 Skill Packager - Creates a distributable .skill file of a skill folder
 
@@ -16,6 +16,16 @@ from pathlib import Path
 
 from quick_validate import validate_skill
 
+# UTF-8 BOM (EF BB BF) — Python tolerates it, but linters, ast.parse, and
+# naive byte-greps silently fail. The packager refuses to ship BOM-bearing
+# .py files so downstream contributors never hit that friction. Audit MAINT-06.
+_UTF8_BOM = bytes([0xEF, 0xBB, 0xBF])
+
+# Directories never packaged (applies to both BOM scan and zip walk).
+# Hoisted to module scope so the BOM scan helper reuses the same exclusion
+# list as the zip write loop — they must agree on what "in the skill" means.
+EXCLUDED_DIRS = {".git", ".svn", ".hg", "__pycache__", "node_modules"}
+
 
 def _is_within(path: Path, root: Path) -> bool:
     try:
@@ -23,6 +33,26 @@ def _is_within(path: Path, root: Path) -> bool:
         return True
     except ValueError:
         return False
+
+
+def _find_bom_python_files(skill_path: Path) -> list[Path]:
+    """Return .py files under skill_path that begin with a UTF-8 BOM.
+
+    Refuses to package them rather than silently stripping — the source file
+    should be fixed so the issue does not recur on the next save.
+    """
+    offenders: list[Path] = []
+    for candidate in skill_path.rglob("*.py"):
+        if any(part in EXCLUDED_DIRS for part in candidate.relative_to(skill_path).parts):
+            continue
+        try:
+            with candidate.open("rb") as fh:
+                if fh.read(3) == _UTF8_BOM:
+                    offenders.append(candidate)
+        except OSError:
+            # Unreadable file — let the packaging loop fail loudly later.
+            continue
+    return offenders
 
 
 def package_skill(skill_path, output_dir=None):
@@ -62,6 +92,20 @@ def package_skill(skill_path, output_dir=None):
         return None
     print(f"[OK] {message}\n")
 
+    # BOM guard (audit MAINT-06): refuse to ship BOM-bearing .py files.
+    bom_files = _find_bom_python_files(skill_path)
+    if bom_files:
+        print(f"[ERROR] {len(bom_files)} .py file(s) start with a UTF-8 BOM (EF BB BF).")
+        print("   BOMs break naive ast.parse / byte-greps and are stripped from the")
+        print("   AgentKthx package itself. Fix the source, then re-package.")
+        print("   Strip in place with:")
+        print("     sed -i '1s/^\\xef\\xbb\\xbf//' <file>")
+        print("   Offending files:")
+        for f in bom_files:
+            print(f"     - {f}")
+        return None
+    print("[OK] No UTF-8 BOMs in .py files\n")
+
     # Determine output location
     skill_name = skill_path.name
     if output_dir:
@@ -71,8 +115,6 @@ def package_skill(skill_path, output_dir=None):
         output_path = Path.cwd()
 
     skill_filename = output_path / f"{skill_name}.skill"
-
-    EXCLUDED_DIRS = {".git", ".svn", ".hg", "__pycache__", "node_modules"}
 
     # Create the .skill file (zip format)
     try:

@@ -1,4 +1,4 @@
-﻿"""
+"""
 ⚛️ AgentKthx R02 - Skills Module
 
 Agent Skills support for AgentKthx.
