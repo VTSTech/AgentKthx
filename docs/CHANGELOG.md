@@ -5,6 +5,39 @@ All notable changes to AgentKthx will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [R06.58] - 2026-09-25 11:07:05 AM
+
+### Bug Fixes
+
+- **Compaction: oversized messages in the recent window bypassed compaction** — a single oversized message (e.g. a 200KB `read_file` result) inside `keep_count` survived compaction untouched because it was "recent", quietly consuming half the context. `Memory.compact_messages()` now applies a per-message size cap (`max_kept_msg_chars` = 8KB, ~2K tokens) to ALL non-system messages regardless of position, keeping head + tail (the tail is where tool success/error markers usually live). Compaction is now idempotent — existing `[compacted]`/`[truncated]` markers prevent re-truncating already-compacted content.
+- **ctx% footer pinned at 100% after compaction** — the fallback token-estimation path did `_running_tokens_in += _est_in` every step, where `_est_in` was the size of the ENTIRE history — after N steps the running total was N× the actual memory size. Compounding that, the reset only fired when `compacted > 0`, so a fully-compacted memory followed by a nothing-to-compact call kept the stale inflated totals forever (users reported "compaction not firing at 100% ctx" — the display was lying, not the compaction). New `_snapshot_running_tokens()` recomputes the running in/out totals from current memory after every step's generate and after every compaction attempt — the single source of truth for the footer's ctx%.
+- **Context-length 400 death-loop on long agentic runs** — compaction previously only fired on the FIRST context-length failure (`_api_failure == 0`). When the first compaction wasn't aggressive enough, every subsequent retry hit the same wall with no further compaction. Now compaction is attempted on EVERY context-length failure as long as the previous attempt actually freed something (retry counter resets on success); if compaction freed nothing, the input is already minimal and the error falls through to the transient-error path instead of infinite-looping.
+- **Compaction between tool calls within one assistant message** — when the model emits multiple tool calls in one response ("read A, read B, read C"), each result is appended to memory inside the dispatch loop, but compaction only fired at the TOP of the next step — so 5 large tool results could blow past the context window before compaction ever noticed. `_check_compaction()` now runs after each tool result commits when a message carries multiple tool calls, keeping memory bounded mid-step too.
+- **Agent mode `--stream` was silently ignored** — `cmd_agent` never passed the stream flag to `AgentMode`, so `--stream` had no effect (no typewriter output, no inline tool-call printing, no `[Compaction]`/`[Context]` events). `AgentMode` now accepts `stream=`, and `cmd_agent` resolves it exactly like `cmd_chat`: explicit `--stream`/`--no-stream` wins, otherwise cloud backends default to streaming and local backends to non-streaming.
+- **Agent mode step counter stuck at [1/M]** — `run_task()` iterates steps with `enumerate()` but never called `plan.advance()`, so `current_step_index` stayed at 0 for every step: the ⟳ progress line always read `[1/M]` and `get_status()`/`get_progress()` reported the wrong step mid-run. `_execute_step()` now syncs `current_step_index` before executing each step.
+
+### Features
+
+- **Agent mode persistent footer** — the 2-line scroll-region footer from chat mode (line 1: version, model, prompt size, ctx, max_tokens, temperature; line 2: backend, token usage ↑in/↓out, ctx% with warning coloring) is now ported to `cmd_agent`, updating in place during streaming via the same `_on_step_callback` mechanism as `cmd_chat`.
+- **Agent mode upfront plan display** — the full plan now prints before execution starts (`📋 Plan: N step(s)` followed by numbered steps), matching the verbosity users expect from autonomous agent CLIs, and the ⟳ line carries `[N/M]` step progress.
+- **`scripts/bump-version.sh`** — new release tooling. Bumps the version across all 4 declaration sites (pyproject.toml, `__init__.py` header comment, `__version__`, README title) in one command; accepts a release tag (`R06.58`) or semver (`0.6.58`) and auto-derives the other; `--dry-run` previews changes, `--current` prints the current version. Intentionally does NOT touch historical `R06.xx:` code comments (those reference the version that introduced a change) or `docs/CHANGELOG.md` (prose, not regex-able). Exit codes: 0 success / 1 bad invocation / 2 already at target version.
+
+### Architecture
+
+- **MAINT-04 Phase 1 — `_generate_with_retry()`** — the near-identical ~67-line API-resilience retry loops in `_run_core()` and `_run_core_streaming()` (~80 lines of overlap) extracted into a single shared helper. The only behavioral difference between the two paths — the context-length-400 compaction recovery — is preserved via the `enable_compaction_recovery` flag (streaming only). Future retry/backoff/terminal-error fixes now land in ONE place and apply to both paths automatically.
+- **MAINT-04 Phase 2 — `_handle_finish_reason()`** — the duplicated ~25-line `length`/`content_filter` terminal-reason blocks extracted; both paths now produce identical StepResult entries and response status transitions for the same `finish_reason`.
+- **MAINT-04 Phase 3 — `_check_tool_choice_required()` + `_parse_tool_calls()` + `_finalize_run()`** — the tool_choice enforcement check (duplicated 4×, ~24 lines), the tool-call parser handling native OpenAI-format and ReAct/JSON/XML parsed calls (duplicated 2×, ~40 lines), and the response-finalization block (duplicated across 10 exit points, ~70 lines) extracted. Every exit path now stores the response, sets `total_tokens`, and computes `total_ms` identically.
+- **MAINT-04 Phase 4 — `_enforce_final_answer()` + `_handle_blocked_tool_call()` + `_reject_for_tool_choice()`** — the Final-Answer enforcement block (duplicated 4×, ~56 lines), the repeat-blocked-call guard (duplicated 2×, ~46 lines), and the tool_choice rejection block (duplicated 4×, ~40 lines) extracted. The rejection helper parameterizes the previously-accidental user-facing message variation between the streaming and non-streaming paths, preserving each path's behavior exactly. Phases 1-4 total: 9 extracted methods, ~380 lines of duplicated agentic-loop logic eliminated.
+
+### Documentation
+
+- **R07.00 Modularization Plan** — new `docs/R07.00-MODULARIZATION-PLAN.md` (269 lines): the draft plan for Phases 5-10 — agentic-loop unification (`core/agentic_loop.py`), streaming machinery (`core/streaming.py`), compaction subsystem (`core/compaction.py`), agent setup, tool execution, and the full `cli.py` → `cli/` package split. Recommended execution order 7 → 9 → 10 → 6 → 5 → 8 (lowest risk first). Targets: `agent.py` 3466 → ~300 lines, no file > 800 lines, zero behavioral changes, 933-test suite green after every phase.
+
+### Tests
+
+- 933 passed, 9 skipped, 0 failed (was 833 at R06.57 baseline; +100 new tests)
+- New: `tests/test_compaction_tokens.py` (7), `tests/test_agent_mode_verbosity.py` (8), `tests/test_bump_version_script.py` (9), `tests/test_agent_mode_footer.py` (3), `tests/test_generate_with_retry.py` (9), `tests/test_handle_finish_reason.py` (9), `tests/test_maint04_phase3_helpers.py` (24), `tests/test_maint04_phase4_helpers.py` (31)
+
 ## [R06.57] - 2026-09-24 9:59:54 PM
 
 ### Bug Fixes
