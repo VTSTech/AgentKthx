@@ -840,12 +840,15 @@ def cmd_run(args: argparse.Namespace) -> int:
                 print(f"    {dim(line)}")
             print()
     elif reasoning_content:
-        print(result.final_answer)
+        # R06.57: Non-streaming path — show reasoning ABOVE the answer
+        # (matching the streaming UX-01 layout and chat mode).
         print(f"{dim('  reasoning:')}")
         for line in reasoning_content.splitlines():
             if len(line) > 200:
                 line = line[:197] + "..."
             print(f"    {dim(line)}")
+        print()
+        print(result.final_answer)
         print()
     else:
         print(result.final_answer)
@@ -2088,14 +2091,16 @@ def cmd_chat(args: argparse.Namespace) -> int:
                 # No "AgentKthx: <answer>" line — content already streamed.
                 # No "reasoning:" panel — already streamed above the prefix.
             elif reasoning_content:
-                # Non-streaming path — reasoning wasn't displayed inline,
-                # so show it as a panel under the answer (original behavior).
-                print(f"\n{bright_green('AgentKthx')}: {result.final_answer}")
+                # Non-streaming path — show reasoning panel ABOVE the
+                # AgentKthx: response, matching the streaming UX-01 layout.
+                # R06.57: was AgentKthx first then reasoning below; now
+                # reasoning first, then AgentKthx response.
                 print(f"{dim('  reasoning:')}")
                 for line in reasoning_content.splitlines():
                     if len(line) > 200:
                         line = line[:197] + "..."
                     print(f"    {dim(line)}")
+                print(f"\n{bright_green('AgentKthx')}: {result.final_answer}")
                 print()
             else:
                 print(f"\n{bright_green('AgentKthx')}: {result.final_answer}\n")
