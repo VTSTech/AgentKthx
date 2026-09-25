@@ -2153,7 +2153,151 @@ def cmd_agent(args: argparse.Namespace) -> int:
     print("Give the agent a goal to accomplish autonomously.")
     print(f"Commands: {cyan('/status')}, {cyan('/pause')}, {cyan('/resume')}, {cyan('/stop')}, {cyan('/quit')}\n")
 
-    while True:
+    # ── Persistent footer (R06.58): ported from cmd_chat ────────────────
+    # Same 2-line scroll-region footer as chat mode: shows version, model,
+    # ctx, prompt size, max_tokens, temperature on line 1; backend, token
+    # usage, ctx% on line 2. Updates in place during streaming via the
+    # _on_step_callback hook (same mechanism as cmd_chat).
+    _session_tokens_in = 0
+    _session_tokens_out = 0
+
+    def _footer_line1() -> str:
+        ctx = agent.num_ctx
+        ctx_str = f"{ctx // 1024}K" if ctx and ctx >= 1024 else str(ctx) if ctx else '?'
+        max_t = agent._num_predict if agent._num_predict is not None else agent.model_config.default_max_tokens
+        max_t_str = f"{max_t // 1024}K" if max_t >= 1024 else str(max_t)
+        temp = agent._temperature if agent._temperature is not None else agent.model_config.default_temperature
+        def _fmt_tok(n):
+            n = int(str(n).strip())
+            if n >= 1000:
+                return f"{n/1000:.1f}k"
+            return str(n)
+        _sys_prompt = getattr(agent, '_custom_system_prompt', '') or ''
+        _prompt_chr = len(_sys_prompt)
+        _prompt_tok = _prompt_chr // 4
+        prompt_str = f"{_fmt_tok(_prompt_chr)} chr {_fmt_tok(_prompt_tok)} tok"
+        _e_brand = '\u269b\ufe0f'
+        _e_model = '\U0001f9e0'
+        _e_ctx   = '\U0001f4e6'
+        _e_resp  = '\U0001f4ac'
+        _e_temp  = '\U0001f321\ufe0f'
+        _e_prmpt = '\U0001f4dd'
+        parts = [
+            f"{dim(_e_brand)} {cyan(__version__)}",
+            f"{dim(_e_model)} {cyan(agent.model)}",
+            f"{dim(_e_prmpt)} {yellow(prompt_str)}",
+            f"{dim(_e_ctx)} {yellow(ctx_str)}",
+            f"{dim(_e_resp)} {yellow(max_t_str)}",
+            f"{dim(_e_temp)} {yellow(str(temp))}",
+        ]
+        return ' '.join(parts)
+
+    def _footer_line2() -> str:
+        backend = getattr(agent.backend, 'backend_type', None)
+        bname = backend.value if backend and hasattr(backend, 'value') else str(backend) if backend else '?'
+        def _fmt_tok(n):
+            n = int(str(n).strip())
+            if n >= 1000:
+                return f"{n/1000:.1f}k"
+            return str(n)
+        _tok_in = getattr(agent, '_running_tokens_in', 0) or _session_tokens_in
+        _tok_out = getattr(agent, '_running_tokens_out', 0) or _session_tokens_out
+        tok_str = f"\u2191{_fmt_tok(_tok_in)} \u2193{_fmt_tok(_tok_out)}"
+        _total_session = _tok_in + _tok_out
+        _ctx = agent.num_ctx or 8192
+        _ctx_pct = min(100, int((_total_session / _ctx) * 100)) if _ctx > 0 else 0
+        if _ctx_pct >= 85:
+            _ctx_pct_str = red(f"{_ctx_pct}%")
+        elif _ctx_pct >= 60:
+            _ctx_pct_str = yellow(f"{_ctx_pct}%")
+        else:
+            _ctx_pct_str = green(f"{_ctx_pct}%")
+        _e_be    = '\U0001f50c'
+        _e_tok   = '\U0001f4c8'
+        _e_dbg   = '\U0001f41b'
+        parts = [
+            f"{dim(_e_be)} {green(bname)}",
+            f"{dim(_e_tok)} {yellow(tok_str)}",
+            f"{dim('ctx')} {_ctx_pct_str}",
+        ]
+        if agent.debug:
+            parts.append(f"{red(_e_dbg + ' debug')}")
+        return ' '.join(parts)
+
+    _FOOTER_LINES = 2
+    _is_tty = sys.stdout.isatty()
+    _term_size = shutil.get_terminal_size() if _is_tty else None
+    _use_persistent_footer = bool(
+        _is_tty and _term_size and _term_size.lines >= 6
+    )
+
+    def _setup_footer_region():
+        if not _use_persistent_footer:
+            return
+        bottom = _term_size.lines - _FOOTER_LINES
+        sys.stdout.write(f"\033[1;{bottom}r")
+        sys.stdout.write(f"\033[{bottom};1H")
+        sys.stdout.flush()
+
+    def _teardown_footer_region():
+        if not _use_persistent_footer:
+            return
+        sys.stdout.write("\033[r")
+        if _term_size:
+            for i in range(_FOOTER_LINES):
+                row = _term_size.lines - i
+                sys.stdout.write(f"\033[{row};1H\033[2K")
+            sys.stdout.write(f"\033[{_term_size.lines - _FOOTER_LINES};1H")
+        sys.stdout.flush()
+
+    def _update_footer():
+        nonlocal _term_size
+        if not _use_persistent_footer:
+            return
+        new_size = shutil.get_terminal_size()
+        if (new_size.lines != _term_size.lines or
+            new_size.columns != _term_size.columns):
+            _term_size = new_size
+            bottom = _term_size.lines - _FOOTER_LINES
+            sys.stdout.write(f"\033[1;{bottom}r")
+            sys.stdout.flush()
+
+        line1 = _footer_line1()
+        line2 = _footer_line2()
+        sys.stdout.write("\033[s")
+        sys.stdout.write("\033[?7l")
+        try:
+            row1 = _term_size.lines - 1
+            sys.stdout.write(f"\033[{row1};1H")
+            sys.stdout.write("\033[2K")
+            sys.stdout.write(line1)
+            row2 = _term_size.lines
+            sys.stdout.write(f"\033[{row2};1H")
+            sys.stdout.write("\033[2K")
+            sys.stdout.write(line2)
+        finally:
+            sys.stdout.write("\033[?7h")
+        sys.stdout.write("\033[u")
+        sys.stdout.flush()
+
+    def _position_for_input():
+        if not _use_persistent_footer:
+            return
+        bottom = _term_size.lines - _FOOTER_LINES
+        sys.stdout.write(f"\033[{bottom};1H")
+        sys.stdout.write("\033[2K")
+        sys.stdout.write("\033[?7h")
+        sys.stdout.flush()
+
+    # Setup scroll region + register step callback so the footer updates
+    # token counts and ctx% during streaming (not just after each step).
+    _setup_footer_region()
+    agent._on_step_callback = lambda step, tin, tout: _update_footer()
+
+    try:
+      while True:
+        _update_footer()
+        _position_for_input()
         try:
             user_input = input("Goal: ").strip()
         except (EOFError, KeyboardInterrupt):
@@ -2216,6 +2360,11 @@ def cmd_agent(args: argparse.Namespace) -> int:
         # Log result to ACP
         if acp:
             acp.log_chat("assistant", f"Result: {result}")
+    finally:
+        # R06.58: tear down the scroll region on every exit path (quit,
+        # EOF, Ctrl+C, unexpected exception) so the terminal is never
+        # left in a broken state. Mirrors cmd_chat's try/finally pattern.
+        _teardown_footer_region()
 
     return 0
 

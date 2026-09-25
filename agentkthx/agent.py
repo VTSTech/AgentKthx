@@ -23,7 +23,7 @@ from __future__ import annotations
 import json
 import sys
 import time
-from typing import Any, Generator, Optional
+from typing import Any, Callable, Generator, Optional
 
 from .core.models import AgentRun, StepResult, Tool, ToolParam, ToolCall
 from .core.types import StepResultType, ApiMode, BackendType
@@ -646,6 +646,107 @@ Final Answer: <the answer>
 
         return result
 
+    # ── MAINT-04 Phase 1: shared API-resilience retry loop ──────────────
+    # Both _run_core and _run_core_streaming had nearly identical retry
+    # loops (~67 lines each, ~38 lines of overlap) with the ONLY structural
+    # difference being the streaming path's context-length-compaction
+    # handler (ROB-06 / R06.58). Extracting this loop into a single helper
+    # eliminates ~80 lines of duplication and — critically — makes the
+    # retry/backoff/terminal-error logic live in ONE place so future bug
+    # fixes (a new error pattern, a new retry policy) apply to both paths
+    # automatically.
+    #
+    # Phase 2 of MAINT-04 will merge the full agentic loop. Phase 1 is
+    # intentionally surgical: same control flow, same side effects, same
+    # return shape — just moved.
+
+    def _generate_with_retry(
+        self,
+        generate_fn: "Callable[[], dict]",
+        *,
+        step_num: int,
+        steps: list,
+        response: "Response",
+        enable_compaction_recovery: bool = False,
+    ) -> tuple["Optional[dict]", bool]:
+        """Call ``generate_fn()`` with API-resilience retry.
+
+        Shared between ``_run_core`` (non-streaming) and
+        ``_run_core_streaming`` (streaming). The only behavioral difference
+        between the two paths is the context-length-400 compaction handler,
+        gated by ``enable_compaction_recovery`` — streaming enables it
+        because that's the path that runs long enough to hit input-too-large
+        conditions during multi-tool agentic runs.
+
+        Returns ``(gen_response, terminated)``. The caller must break its
+        outer step loop when ``terminated`` is True.
+        """
+        gen_response = None
+        _api_failure = 0
+        _api_wait_total = 0.0
+        _terminated = False
+        while True:
+            try:
+                gen_response = generate_fn()
+                break
+            except KeyboardInterrupt:
+                raise
+            except Exception as e:
+                # ROB-06 / R06.58: Context-length 400 where input alone
+                # exceeds the context window. The _iter_sse_lines retry
+                # already reduced max_tokens, but if the INPUT is larger
+                # than the context, no max_tokens reduction can help.
+                # Compact memory (truncate old tool results) and retry.
+                # Only enabled on the streaming path — the non-streaming
+                # path doesn't run long enough agentic loops to need it,
+                # and enabling it there would be a behavioral change.
+                if enable_compaction_recovery:
+                    err_str = str(e)
+                    if "context length" in err_str.lower():
+                        compacted = self.memory.compact_messages(keep_count=10)
+                        # Always re-snapshot after a compaction attempt so
+                        # the footer reflects the post-compaction state.
+                        self._snapshot_running_tokens()
+                        if compacted > 0:
+                            post_tokens = (self._running_tokens_in
+                                           + self._running_tokens_out)
+                            print(f"  [Context] Input exceeded context "
+                                  f"window — compacted {compacted} messages "
+                                  f"(~{post_tokens // 1000}K tokens remaining)")
+                            _api_failure = 0  # reset retry counter — new state
+                            continue  # retry with compacted memory
+                        # If compaction freed nothing, the input is already
+                        # minimal — fall through to the transient-error
+                        # path so we don't infinite-loop on the same 400.
+
+                _api_failure += 1
+                _transient = is_transient_api_error(e)
+                _exhausted = _transient and _api_failure > self.max_api_retries
+                if not _transient or _exhausted:
+                    # R06.54: always tell the user WHY the run stopped —
+                    # the old code stayed silent here (non-debug), so chat
+                    # mode showed a bare "(empty response)".
+                    if _exhausted:
+                        print(describe_terminal(
+                            e, self.max_api_retries, _api_wait_total))
+                    elif not _transient:
+                        print(f"  [Resilience] Fatal API error — "
+                              f"not retrying: {e}")
+                    if self.debug:
+                        print(f"  ERROR: {e}")
+                    steps.append(StepResult(
+                        type=StepResultType.ERROR,
+                        error=str(e),
+                    ))
+                    response.mark_failed({"message": str(e), "type": "model_error"})
+                    _terminated = True
+                    break
+                _waited = backoff_delay(_api_failure)
+                _api_wait_total += _waited
+                print(describe_wait(_api_failure, self.max_api_retries, _waited, e))
+                time.sleep(_waited)
+        return gen_response, _terminated
+
     def _run_core(self, prompt: str, stream: bool = False) -> AgentRun:
         """
         Run the agent on a prompt.
@@ -747,42 +848,20 @@ Final Answer: <the answer>
             # persistent failure (max_api_retries consecutive) or a permanent
             # error (auth, bad request) terminates the run, and it does so
             # with a clean history (nothing was announced for this step).
-            gen_response = None
-            _api_failure = 0
-            _api_wait_total = 0.0
-            while True:
-                try:
-                    gen_response = self._generate()
-                    break
-                except KeyboardInterrupt:
-                    raise
-                except Exception as e:
-                    _api_failure += 1
-                    _transient = is_transient_api_error(e)
-                    _exhausted = _transient and _api_failure > self.max_api_retries
-                    if not _transient or _exhausted:
-                        # R06.54: always tell the user WHY the run stopped —
-                        # the old code stayed silent here (non-debug), so chat
-                        # mode showed a bare "(empty response)".
-                        if _exhausted:
-                            print(describe_terminal(
-                                e, self.max_api_retries, _api_wait_total))
-                        elif not _transient:
-                            print(f"  [Resilience] Fatal API error — "
-                                  f"not retrying: {e}")
-                        if self.debug:
-                            print(f"  ERROR: {e}")
-                        steps.append(StepResult(
-                            type=StepResultType.ERROR,
-                            error=str(e),
-                        ))
-                        response.mark_failed({"message": str(e), "type": "model_error"})
-                        _terminated = True
-                        break
-                    _waited = backoff_delay(_api_failure)
-                    _api_wait_total += _waited
-                    print(describe_wait(_api_failure, self.max_api_retries, _waited, e))
-                    time.sleep(_waited)
+            #
+            # MAINT-04 Phase 1 (R06.59): the retry loop now lives in
+            # ``_generate_with_retry`` so both _run_core and
+            # _run_core_streaming share it. Non-streaming path passes
+            # enable_compaction_recovery=False — the context-length-400
+            # compaction handler is streaming-only because non-streaming
+            # runs don't accumulate enough history to trigger it.
+            gen_response, _terminated = self._generate_with_retry(
+                self._generate,
+                step_num=step_num,
+                steps=steps,
+                response=response,
+                enable_compaction_recovery=False,
+            )
             if _terminated or gen_response is None:
                 break
 
@@ -2528,74 +2607,22 @@ Final Answer: <the answer>
             # the compaction threshold (default 85% of num_ctx).
             self._check_compaction()
 
-            # Streaming generate with API resilience retry
-            gen_response = None
-            _api_failure = 0
-            _api_wait_total = 0.0
-            while True:
-                try:
-                    gen_response = self._generate_stream()
-                    break
-                except KeyboardInterrupt:
-                    raise
-                except Exception as e:
-                    # ROB-06: Context-length 400 where input alone exceeds
-                    # the context window. The _iter_sse_lines retry already
-                    # reduced max_tokens, but if the INPUT is larger than
-                    # the context, no max_tokens reduction can help.
-                    # Compact memory (truncate old tool results) and retry.
-                    # This is the "memory pressure" path that triggers on
-                    # long agentic runs (30+ file reads) when the preventive
-                    # compaction wasn't aggressive enough.
-                    #
-                    # R06.58 BUGFIX: previously this only fired on the FIRST
-                    # context-length failure (``_api_failure == 0``). On long
-                    # agentic runs the agent could enter a death-loop of
-                    # context-length 400s where the first compaction wasn't
-                    # aggressive enough, then every subsequent retry hit the
-                    # same wall with no further compaction. Now we attempt
-                    # compaction on EVERY context-length failure as long as
-                    # the previous attempt actually freed something.
-                    err_str = str(e)
-                    if "context length" in err_str.lower():
-                        compacted = self.memory.compact_messages(keep_count=10)
-                        # Always re-snapshot after a compaction attempt so
-                        # the footer reflects the post-compaction state.
-                        self._snapshot_running_tokens()
-                        if compacted > 0:
-                            post_tokens = (self._running_tokens_in
-                                           + self._running_tokens_out)
-                            print(f"  [Context] Input exceeded context "
-                                  f"window — compacted {compacted} messages "
-                                  f"(~{post_tokens // 1000}K tokens remaining)")
-                            _api_failure = 0  # reset retry counter — new state
-                            continue  # retry with compacted memory
-                        # If compaction freed nothing, the input is already
-                        # minimal — fall through to the transient-error path
-                        # so we don't infinite-loop on the same 400.
-                    _api_failure += 1
-                    _transient = is_transient_api_error(e)
-                    _exhausted = _transient and _api_failure > self.max_api_retries
-                    if not _transient or _exhausted:
-                        if _exhausted:
-                            print(describe_terminal(
-                                e, self.max_api_retries, _api_wait_total))
-                        elif not _transient:
-                            print(f"  [Resilience] Fatal API error — "
-                                  f"not retrying: {e}")
-                        if self.debug:
-                            print(f"  ERROR: {e}")
-                        steps.append(StepResult(
-                            type=StepResultType.ERROR,
-                            error=str(e),
-                        ))
-                        response.mark_failed({"message": str(e), "type": "model_error"})
-                        _terminated = True
-                        break
-                    _waited = backoff_delay(_api_failure)
-                    _api_wait_total += _waited
-                    print(describe_wait(_api_failure, self.max_api_retries, _waited, e))
-                    time.sleep(_waited)
+            # Streaming generate with API resilience retry.
+            #
+            # MAINT-04 Phase 1 (R06.59): the retry loop now lives in
+            # ``_generate_with_retry`` so both _run_core and
+            # _run_core_streaming share it. Streaming path passes
+            # enable_compaction_recovery=True — the context-length-400
+            # compaction handler (ROB-06 / R06.58) runs only here, because
+            # streaming is the path that runs long enough to hit
+            # input-too-large conditions during multi-tool agentic runs.
+            gen_response, _terminated = self._generate_with_retry(
+                self._generate_stream,
+                step_num=step_num,
+                steps=steps,
+                response=response,
+                enable_compaction_recovery=True,
+            )
             if _terminated or gen_response is None:
                 break
 
