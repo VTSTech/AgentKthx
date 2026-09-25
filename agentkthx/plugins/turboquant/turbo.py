@@ -365,25 +365,14 @@ def start_server(
             model_path = str(ollama_model.blob_path)
             weight_quant = ollama_model.weight_quant
 
-    # Check TurboQuant compatibility (head_dim >= 128)
-    if ollama_model is not None and ollama_model.head_dim > 0:
-        if not ollama_model.turbo_compatible:
-            uses_turbo = (cache_type_k and "turbo" in cache_type_k.lower()) or \
-                         (cache_type_v and "turbo" in cache_type_v.lower())
-            if not uses_turbo and cache_type_k is None and cache_type_v is None:
-                print(bright_yellow(f"  Warning: {model_name} has {ollama_model.turbo_note}"))
-                print(bright_yellow(f"           TurboQuant requires head_dim >= 128. Starting without turbo KV compression."))
-                print()
-                cache_type_k = cache_type_k or "f16"
-                cache_type_v = cache_type_v or "f16"
-            elif uses_turbo:
-                raise RuntimeError(
-                    f"Model '{model_name}' is incompatible with TurboQuant KV cache.\n"
-                    f"  {ollama_model.turbo_note}\n"
-                    f"  TurboQuant requires head_dim >= 128 for KV block alignment.\n"
-                    f"  Run without -ctk/-ctv flags to use default F16 KV cache.\n"
-                    f"  Compatible models: gemma3:270m and others with head_dim >= 128."
-                )
+    # R06.57: Removed the head_dim >= 128 compatibility check.
+    # Empirical testing on Colab (2026-09-25) showed the check was wrong:
+    # 8/10 models with head_dim=64 loaded fine with turbo4/turbo4, and
+    # functiongemma:270m (head_dim=128) actually FAILED. The real determinant
+    # is whether the TurboQuant fork's ggml supports the model's architecture
+    # (e.g. qwen35.rope.dimension_sections is unsupported), not head_dim.
+    # The server will report a clear error if a model can't load — no need
+    # to pre-block based on a wrong heuristic.
 
     # Auto-detect TurboQuant config if not specified
     if cache_type_k is None or cache_type_v is None:
@@ -663,16 +652,19 @@ def print_model_list(models: list[OllamaModel], source: str = "local", backend_u
         quant_str = model.weight_quant
         is_not_pulled = quant_str == "not pulled"
 
-        # Get recommended config
-        if model.turbo_compatible:
+        # R06.57: Show recommended turbo config for all models — the
+        # head_dim >= 128 check was wrong (empirical testing showed
+        # head_dim=64 models work fine). Just show the recommended config
+        # and let the user try it.
+        if not is_not_pulled:
             config = recommended_turbo_config(model.weight_quant)
             turbo_str = f"{config['cache_type_k']}/{config['cache_type_v']}"
             mode_str = dim(f"({config['mode']})")
             compat_color = bright_green
         else:
             turbo_str = dim("N/A")
-            mode_str = dim(f"({model.turbo_note})")
-            compat_color = bright_red
+            mode_str = dim("(not pulled)")
+            compat_color = dim
 
         line = (
             pad_colored(name_str, name_w) +
@@ -684,20 +676,14 @@ def print_model_list(models: list[OllamaModel], source: str = "local", backend_u
         )
         print(line)
 
-    # Count compatible models
-    n_compatible = sum(1 for m in models if m.turbo_compatible)
-    n_incompatible = sum(1 for m in models if m.head_dim > 0 and not m.turbo_compatible)
+    # Count models (R06.57: no more head_dim compatibility gate)
+    n_pulled = sum(1 for m in models if m.weight_quant != "not pulled")
     n_not_pulled = sum(1 for m in models if m.weight_quant == "not pulled")
-    n_unknown = sum(1 for m in models if m.head_dim == 0 and m.weight_quant != "not pulled")
 
     print()
     print(dim(f"  {len(models)} model(s) found"))
-    if n_compatible:
-        print(bright_green(f"  {n_compatible} turbo-compatible (head_dim >= 128)"))
-    if n_incompatible:
-        print(bright_red(f"  {n_incompatible} incompatible (head_dim < 128, turbo KV will crash)"))
-    if n_unknown:
-        print(yellow(f"  {n_unknown} unknown (could not read head_dim from GGUF)"))
+    if n_pulled:
+        print(bright_green(f"  {n_pulled} available for TurboQuant"))
     if n_not_pulled:
         print(dim(f"  {n_not_pulled} not pulled locally (pull with: ollama pull <name>)"))
     if source == "api":
