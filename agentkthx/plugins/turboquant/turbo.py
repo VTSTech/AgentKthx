@@ -145,14 +145,64 @@ class TurboState:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _is_process_alive(pid: int) -> bool:
-    """Check if a process is running."""
+    """Check if a process is running AND not a zombie.
+
+    R06.57: A zombie process (state 'Z') still responds to ``os.kill(pid, 0)``
+    but is effectively dead — it won't do anything and may still hold a port
+    socket in TIME_WAIT. Read ``/proc/<pid>/stat`` to check the process state
+    and treat zombies as dead.
+    """
     if pid <= 0:
         return False
     try:
         os.kill(pid, 0)  # Signal 0 = check existence
-        return True
     except (ProcessLookupError, PermissionError, OSError):
         return False
+    # Check if it's a zombie (state 'Z') via /proc on Linux
+    try:
+        with open(f"/proc/{pid}/stat", "r") as f:
+            stat = f.read().split()
+            # stat[2] is the process state: 'R' running, 'S' sleeping, 'Z' zombie, etc.
+            state = stat[2] if len(stat) > 2 else "?"
+            if state == "Z":
+                return False  # Zombie — treat as dead
+    except (FileNotFoundError, IndexError, PermissionError, OSError):
+        pass  # Not Linux or can't read /proc — assume alive (os.kill said so)
+    return True
+
+
+def _free_port(port: int, host: str = "localhost") -> bool:
+    """Kill any process listening on the given port.
+
+    R06.57: Prevents "couldn't bind HTTP server socket" errors when a
+    zombie or leftover llama-server process is still holding the port.
+    Uses ``fuser`` on Linux (Colab) to find and kill the process.
+
+    Returns:
+        True if a process was killed, False if the port was already free.
+    """
+    import subprocess as _sp
+    try:
+        result = _sp.run(
+            ["fuser", f"{port}/tcp"],
+            capture_output=True, text=True, timeout=3.0
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            # Port is in use — kill the processes
+            pids = result.stdout.strip().split()
+            for pid_str in pids:
+                try:
+                    pid = int(pid_str.strip())
+                    os.kill(pid, signal.SIGKILL)
+                    if os.environ.get("AGENTKTHX_DEBUG"):
+                        print(f"  [TurboQuant] Killed stale process {pid} on port {port}")
+                except (ValueError, ProcessLookupError, PermissionError, OSError):
+                    pass
+            time.sleep(0.5)  # Give the OS time to release the socket
+            return True
+    except (FileNotFoundError, _sp.TimeoutExpired, OSError):
+        pass  # fuser not available — skip cleanup
+    return False
 
 
 def _get_running_state() -> Optional[TurboState]:
@@ -360,6 +410,13 @@ def start_server(
     ctx = ctx or TURBOQUANT_DEFAULT_CTX
     host = "localhost"
 
+    # R06.57: Free the port before starting — kill any stale/zombie
+    # llama-server process that's still holding the port socket.
+    # This is what the Colab notebook cell does with `!pkill llama-server`.
+    if _free_port(port, host):
+        if os.environ.get("AGENTKTHX_DEBUG"):
+            print(f"  [TurboQuant] Freed port {port} from stale process")
+
     # Build command
     cmd = _build_command(
         server_path=server_path,
@@ -431,16 +488,26 @@ def start_server(
         ready = False
         while time.time() - start_wait < ready_timeout:
             if not _is_process_alive(pid):
-                # Process died
+                # Process died — read the last few log lines to show why
                 state_out = ""
                 if TURBOQUANT_STATE_FILE.exists():
                     TURBOQUANT_STATE_FILE.unlink()
                 if TURBOQUANT_PID_FILE.exists():
                     TURBOQUANT_PID_FILE.unlink()
                 print(bright_red("FAILED"))
+                # Read last 5 lines of the log for the error message
+                log_tail = ""
+                try:
+                    log_file.close()
+                    with open(TURBOQUANT_LOG_FILE, "r") as lf:
+                        lines = lf.readlines()
+                        log_tail = "".join(lines[-5:]) if lines else "(empty log)"
+                except Exception:
+                    log_tail = "(could not read log)"
                 raise RuntimeError(
                     f"llama-server process (PID {pid}) died during startup.\n"
-                    f"Check that the model file is valid and the server binary is compiled correctly."
+                    f"Check that the model file is valid and the server binary is compiled correctly.\n"
+                    f"Last log lines:\n{log_tail}"
                 )
             if _check_server_health(host, port, timeout=2.0):
                 ready = True
