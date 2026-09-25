@@ -1937,6 +1937,20 @@ Final Answer: <the answer>
         gen_max_tokens = self._num_predict if self._num_predict is not None else self.model_config.default_max_tokens
         gen_top_p = self._top_p if self._top_p is not None else self.model_config.default_top_p
 
+        # R06.57: Cap max_tokens to num_ctx/32 so input + output fits the
+        # context window. The model_config default_max_tokens is 8192, which
+        # equals the entire runtime context if num_ctx=8192 — leaving zero
+        # room for input. Cap to num_ctx//32 (256 for 8K context, 1024 for
+        # 32K, etc.). The backend's _get_model_defaults cap only fires when
+        # max_tokens is None, but the agent always passes a value — so we
+        # need to cap here too.
+        # Skip the cap if the user explicitly set --num-predict (gen_max_tokens
+        # came from self._num_predict, not the default).
+        if self._num_predict is None and self.num_ctx and self.num_ctx > 0:
+            capped = self.num_ctx // 32
+            if gen_max_tokens > capped:
+                gen_max_tokens = capped
+
         if self.debug:
             params_str = f"temp={gen_temperature}, top_p={gen_top_p}, max_tokens={gen_max_tokens}, num_ctx={self.num_ctx}"
             if think is not None:
@@ -2113,6 +2127,12 @@ Final Answer: <the answer>
         gen_temperature = self._temperature if self._temperature is not None else self.model_config.default_temperature
         gen_max_tokens = self._num_predict if self._num_predict is not None else self.model_config.default_max_tokens
         gen_top_p = self._top_p if self._top_p is not None else self.model_config.default_top_p
+
+        # R06.57: Cap max_tokens to num_ctx/32 (same as non-streaming path)
+        if self._num_predict is None and self.num_ctx and self.num_ctx > 0:
+            capped = self.num_ctx // 32
+            if gen_max_tokens > capped:
+                gen_max_tokens = capped
 
         # Pick the streaming method. Order: OpenAI-compat (chat/completions
         # SSE) preferred because it carries tool_calls deltas. The native
