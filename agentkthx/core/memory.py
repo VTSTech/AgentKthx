@@ -268,10 +268,20 @@ class Memory:
 
         What compaction does:
         - System messages: always kept intact
-        - Recent N messages (keep_count): kept intact
+        - Recent N messages (keep_count): kept intact (subject to the
+          per-message size cap — see ``max_kept_msg_chars`` below)
         - Older messages: content truncated to first 200 chars, tool results
           truncated to first 200 chars + "[compacted]" marker. Tool call names
           and args are preserved (they're small and essential for context).
+
+        R06.58 BUGFIX: a single oversized message in the "recent" window
+        (e.g., a 200KB ``read_file`` result) used to survive compaction
+        untouched because it was within ``keep_count``. Now any single
+        message larger than ``max_kept_msg_chars`` (default 8KB) is also
+        truncated, regardless of position. This catches the common failure
+        mode where the agent reads a large file and then keeps referencing
+        it — the read result stays in the recent window, consuming half
+        the context by itself.
 
         Args:
             keep_count: Number of recent non-system messages to keep intact.
@@ -279,22 +289,56 @@ class Memory:
         Returns:
             Number of messages that were compacted.
         """
+        # R06.58: per-message size cap — 8KB. Tuned to ~2K tokens, so a
+        # 128K context can hold ~60 such messages before compaction. The
+        # cap only kicks in for genuinely oversized results (full file
+        # dumps, large command outputs) — normal tool results stay intact.
+        max_kept_msg_chars = 8192
+
         systems = [m for m in self._messages if m.role == "system"]
         non_system = [m for m in self._messages if m.role != "system"]
 
+        compacted_count = 0
+
+        # R06.58: per-message size cap. Apply to ALL non-system messages,
+        # including the "kept" recent ones. An oversized read_file result
+        # in the last 10 messages used to bypass compaction entirely.
+        if max_kept_msg_chars > 0:
+            for msg in non_system:
+                if (msg.content
+                        and len(msg.content) > max_kept_msg_chars
+                        and "[truncated]" not in msg.content):
+                    # Keep head + tail so the agent retains both the
+                    # start (often the most important context) and the
+                    # end (recent output). For tool results the tail is
+                    # usually where the success/error marker lives.
+                    head = max_kept_msg_chars // 2
+                    tail = max_kept_msg_chars // 4
+                    msg.content = (
+                        msg.content[:head]
+                        + f"\n...[truncated {len(msg.content) - head - tail} chars]...\n"
+                        + msg.content[-tail:]
+                    )
+                    compacted_count += 1
+
         if len(non_system) <= keep_count:
-            return 0  # nothing to compact
+            # Even if nothing was compacted by position, the per-message
+            # cap above may have truncated oversized messages. Re-assemble
+            # and report.
+            self._messages = systems + non_system
+            return compacted_count
 
         # Split into "to compact" (older) and "to keep" (recent)
         to_compact = non_system[:-keep_count] if keep_count > 0 else non_system
         to_keep = non_system[-keep_count:] if keep_count > 0 else []
 
-        compacted_count = 0
         for msg in to_compact:
             # Compact content — truncate to 200 chars
             if msg.content and len(msg.content) > 200:
-                msg.content = msg.content[:200] + "\n[compacted]"
-                compacted_count += 1
+                # Don't re-compact something already compacted
+                if "[compacted]" not in msg.content:
+                    msg.content = msg.content[:200] + "\n[compacted]"
+                    compacted_count += 1
 
             # Compact tool_calls — keep name + args (small), but they're
             # already compact (args are usually short). Don't truncate.

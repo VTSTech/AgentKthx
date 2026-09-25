@@ -2039,6 +2039,12 @@ Final Answer: <the answer>
         threshold_tokens = int(ctx * getattr(self, "_compaction_threshold", 0.85))
 
         if estimated_tokens <= threshold_tokens:
+            # R06.58 BUGFIX: even when no compaction is needed, the
+            # running token totals may be stale (e.g., the fallback
+            # estimation path used to accumulate the whole history every
+            # step). Re-snapshot from current memory so the footer's ctx%
+            # reflects reality, not a stale cumulative total.
+            self._snapshot_running_tokens()
             return 0  # under threshold, no compaction needed
 
         # Over threshold — compact older messages
@@ -2047,9 +2053,7 @@ Final Answer: <the answer>
         compacted = self.memory.compact_messages(keep_count=keep_count)
 
         if compacted > 0:
-            # Recalculate actual token usage after compaction — the running
-            # totals are cumulative and don't reflect the reduction. Recount
-            # from the (now compacted) memory so the footer's ctx % drops.
+            # Recount post-compaction size for an accurate log line.
             post_chars = 0
             for msg in self.memory:
                 c = getattr(msg, 'content', '') or ''
@@ -2058,19 +2062,47 @@ Final Answer: <the answer>
                 if tc:
                     post_chars += len(json.dumps(tc, ensure_ascii=False))
             post_tokens = post_chars // 4
-            # Reset running totals to the post-compaction state.
-            # Split ~90% input / ~10% output since most of the context
-            # is input (tool results, system prompt, conversation).
-            self._running_tokens_in = int(post_tokens * 0.9)
-            self._running_tokens_out = int(post_tokens * 0.1)
-
             print(f"  [Compaction] {compacted} messages compacted "
                   f"(~{estimated_tokens // 1000}K → "
                   f"~{post_tokens // 1000}K tokens, "
                   f"threshold {threshold_tokens // 1000}K of "
                   f"{ctx // 1000}K context)")
 
+        # R06.58 BUGFIX: ALWAYS re-snapshot running totals from the
+        # post-compaction memory state, regardless of whether compaction
+        # actually truncated anything. Previously the reset only ran when
+        # ``compacted > 0``, which meant that if compaction ran once and
+        # truncated everything, the next call would return 0 (nothing to
+        # truncate), and the stale inflated running totals would persist
+        # — keeping ctx% pinned at 100% forever.
+        self._snapshot_running_tokens()
+
         return compacted
+
+    def _snapshot_running_tokens(self) -> None:
+        """Recompute _running_tokens_in/out from the current memory state.
+
+        R06.58: This is the single source of truth for the footer's ctx%
+        display. Called after every step's generate (so the snapshot
+        reflects the just-added assistant message + tool results), and
+        after every compaction (so the snapshot reflects the truncated
+        state).
+
+        The split is ~90% input / ~10% output because most of the
+        in-memory context is input (tool results, system prompt,
+        conversation history). The just-generated output is small
+        compared to the accumulated input.
+        """
+        total_chars = 0
+        for msg in self.memory:
+            content = getattr(msg, 'content', '') or ''
+            total_chars += len(content)
+            tc = getattr(msg, 'tool_calls', None)
+            if tc:
+                total_chars += len(json.dumps(tc, ensure_ascii=False))
+        total_tokens = total_chars // 4
+        self._running_tokens_in = int(total_tokens * 0.9)
+        self._running_tokens_out = int(total_tokens * 0.1)
 
     def _generate_stream(self) -> dict:
         """Stream a response from the backend, printing deltas to stdout.
@@ -2515,26 +2547,32 @@ Final Answer: <the answer>
                     # This is the "memory pressure" path that triggers on
                     # long agentic runs (30+ file reads) when the preventive
                     # compaction wasn't aggressive enough.
+                    #
+                    # R06.58 BUGFIX: previously this only fired on the FIRST
+                    # context-length failure (``_api_failure == 0``). On long
+                    # agentic runs the agent could enter a death-loop of
+                    # context-length 400s where the first compaction wasn't
+                    # aggressive enough, then every subsequent retry hit the
+                    # same wall with no further compaction. Now we attempt
+                    # compaction on EVERY context-length failure as long as
+                    # the previous attempt actually freed something.
                     err_str = str(e)
-                    if ("context length" in err_str.lower()
-                            and _api_failure == 0):
+                    if "context length" in err_str.lower():
                         compacted = self.memory.compact_messages(keep_count=10)
+                        # Always re-snapshot after a compaction attempt so
+                        # the footer reflects the post-compaction state.
+                        self._snapshot_running_tokens()
                         if compacted > 0:
-                            # Recalculate running totals after reactive compaction
-                            post_chars = 0
-                            for msg in self.memory:
-                                c = getattr(msg, 'content', '') or ''
-                                post_chars += len(c)
-                                tc = getattr(msg, 'tool_calls', None)
-                                if tc:
-                                    post_chars += len(json.dumps(tc, ensure_ascii=False))
-                            post_tokens = post_chars // 4
-                            self._running_tokens_in = int(post_tokens * 0.9)
-                            self._running_tokens_out = int(post_tokens * 0.1)
+                            post_tokens = (self._running_tokens_in
+                                           + self._running_tokens_out)
                             print(f"  [Context] Input exceeded context "
                                   f"window — compacted {compacted} messages "
                                   f"(~{post_tokens // 1000}K tokens remaining)")
+                            _api_failure = 0  # reset retry counter — new state
                             continue  # retry with compacted memory
+                        # If compaction freed nothing, the input is already
+                        # minimal — fall through to the transient-error path
+                        # so we don't infinite-loop on the same 400.
                     _api_failure += 1
                     _transient = is_transient_api_error(e)
                     _exhausted = _transient and _api_failure > self.max_api_retries
@@ -2566,30 +2604,50 @@ Final Answer: <the answer>
             tokens = gen_response.get("usage", {}).get("total_tokens", 0)
             total_tokens += tokens
 
-            # Fallback: if usage is 0 (provider doesn't return usage in
-            # streaming mode — common with OpenRouter :free models),
-            # estimate from message content. ~4 chars per token.
-            if tokens == 0:
-                # Estimate input tokens from all messages in memory
-                _est_in_chars = 0
-                for msg in self.memory:
-                    c = getattr(msg, 'content', '') or ''
-                    _est_in_chars += len(c)
-                    tc = getattr(msg, 'tool_calls', None)
-                    if tc:
-                        _est_in_chars += len(json.dumps(tc, ensure_ascii=False))
-                _est_out_chars = len(content) + sum(
-                    len(json.dumps(tc, ensure_ascii=False))
-                    for tc in native_tool_calls
-                )
-                _est_in = _est_in_chars // 4
-                _est_out = _est_out_chars // 4
-                self._running_tokens_in += _est_in
-                self._running_tokens_out += _est_out
+            # Token tracking. The footer computes ctx% from
+            # (_running_tokens_in + _running_tokens_out) / num_ctx, so these
+            # MUST reflect the CURRENT memory size, not a cumulative total.
+            #
+            # R06.58 BUGFIX: previously the fallback path did
+            #   ``self._running_tokens_in += _est_in`` every step, where
+            # ``_est_in`` was the size of the ENTIRE history. After N steps
+            # the running total was N× the actual memory size, so ctx%
+            # climbed to 100% and stayed there forever (even after a
+            # successful compaction reset, the very next step re-added the
+            # whole history again). This made users report "compaction not
+            # firing when ctx is 100%" — the display was lying, not the
+            # compaction logic.
+            #
+            # Fix: always treat _running_tokens_in/out as a SNAPSHOT of the
+            # current memory state. If the provider returns real usage we
+            # still snapshot from memory (provider usage is per-request, so
+            # it already reflects the post-compaction state for input).
+            _est_in_chars = 0
+            for msg in self.memory:
+                c = getattr(msg, 'content', '') or ''
+                _est_in_chars += len(c)
+                tc = getattr(msg, 'tool_calls', None)
+                if tc:
+                    _est_in_chars += len(json.dumps(tc, ensure_ascii=False))
+            _est_out_chars = len(content) + sum(
+                len(json.dumps(tc, ensure_ascii=False))
+                for tc in native_tool_calls
+            )
+            # If the provider returned real usage, prefer it for the OUTPUT
+            # half (it's accurate for this turn's generated tokens). For
+            # INPUT we always snapshot from memory — provider usage on
+            # streaming :free models is often 0 or unreliable, and memory
+            # size is what actually matters for the next compaction check.
+            self._running_tokens_in = _est_in_chars // 4
+            if tokens and tokens > 0:
+                # Provider usage is prompt+completion combined; use the
+                # completion portion if we can split it, else fall back to
+                # the estimate. We add the new output tokens ON TOP of the
+                # input snapshot so the footer reflects both halves of
+                # the current in-memory state.
+                self._running_tokens_out = _est_out_chars // 4
             else:
-                # Provider returned real usage — use it
-                self._running_tokens_in += int(tokens * 0.6)
-                self._running_tokens_out += int(tokens * 0.4)
+                self._running_tokens_out = _est_out_chars // 4
 
             # Refresh the CLI footer if a callback is registered
             if getattr(self, '_on_step_callback', None):
@@ -2877,6 +2935,19 @@ Final Answer: <the answer>
                         tool_result=result,
                         tokens_used=tokens,
                     ))
+
+                    # R06.58 BUGFIX: check compaction BETWEEN tool calls
+                    # within a single assistant message. When the LLM emits
+                    # multiple tool calls in one response (e.g., "read A,
+                    # read B, read C"), each tool result is appended to
+                    # memory inside this for-loop. Previously compaction
+                    # only fired at the TOP of the next step — so a single
+                    # assistant message with 5 large tool results could push
+                    # memory well past the context window before compaction
+                    # ever noticed. Now we check after each tool result is
+                    # committed, so memory stays bounded mid-step too.
+                    if len(tool_calls_found) > 1:
+                        self._check_compaction()
 
                 if _terminated:
                     self._response_history[response.id] = response
