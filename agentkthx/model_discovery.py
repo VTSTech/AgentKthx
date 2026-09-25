@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from .config import AGENTKTHX_BACKEND, DEFAULT_MODEL
+from .config import AGENTKTHX_BACKEND
 from .backends import get_backend, get_default_backend, BaseBackend
 
 

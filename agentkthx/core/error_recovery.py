@@ -424,9 +424,6 @@ class ErrorRecoveryTracker:
     # Track total failures in current run
     total_failures: int = 0
     
-    # Track total successes (for resetting consecutive failures)
-    last_success_tool: str | None = None
-    
     # R06.52: consecutive steps in which EVERY tool call failed (any tool).
     # Used for termination so a single bad step never kills a healthy run.
     consecutive_all: int = 0
@@ -532,7 +529,6 @@ class ErrorRecoveryTracker:
         # Reset consecutive failures for this tool
         if tool_name in self.consecutive_failures:
             del self.consecutive_failures[tool_name]
-        self.last_success_tool = tool_name
         # R06.52: any success proves the run is not stuck — reset the
         # consecutive all-failure counter.
         self.consecutive_all = 0
@@ -540,10 +536,6 @@ class ErrorRecoveryTracker:
     def get_consecutive_failures(self, tool_name: str) -> int:
         """Get the number of consecutive failures for a tool."""
         return self.consecutive_failures.get(tool_name, 0)
-    
-    def should_suggest_alternative(self, tool_name: str) -> bool:
-        """Check if we should suggest an alternative tool."""
-        return self.get_consecutive_failures(tool_name) >= self.max_consecutive_failures
     
     def should_terminate(self) -> bool:
         """
@@ -656,7 +648,6 @@ class ErrorRecoveryTracker:
         self.consecutive_failures.clear()
         self.failure_history.clear()
         self.total_failures = 0
-        self.last_success_tool = None
         self.consecutive_all = 0
         self.recent_failures.clear()
 

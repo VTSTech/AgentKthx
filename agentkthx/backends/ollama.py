@@ -932,10 +932,12 @@ class OllamaBackend(OpenAICompatibleBackend):
 
     # Known defaults by model family
     # Note: These are fallbacks. Actual context is read from model_info.<family>.context_length
-    # ARCH-01: FAMILY_CONTEXT_DEFAULTS, get_context_by_family, get_model_context_size
-    # are now inherited from OpenAICompatibleBackend. Only get_model_runtime_context
+    # ARCH-01: FAMILY_CONTEXT_DEFAULTS and get_context_by_family are now
+    # inherited from OpenAICompatibleBackend. Only get_model_runtime_context
     # and get_model_max_context stay here as Ollama-specific implementations
     # (they query the Ollama /api/show endpoint for num_ctx and model_info).
+    # R07.01: the zero-caller get_model_context_size override was removed
+    # (dead repo-wide, along with the OpenAICompatibleBackend base method).
 
     def get_model_runtime_context(self, model: str) -> int:
         """
@@ -1023,30 +1025,6 @@ class OllamaBackend(OpenAICompatibleBackend):
                 return ctx
         
         return 4096  # Ultimate fallback
-
-    def get_model_context_size(self, model: str, family: str | None = None) -> int:
-        """
-        Get the context window size for a model.
-        
-        DEPRECATED: Use get_model_runtime_context() or get_model_max_context() instead.
-        
-        This method returns the runtime context (num_ctx) if explicitly set,
-        otherwise returns the model's max context (for backwards compatibility).
-        
-        Args:
-            model: Model name
-            family: Optional family name
-        
-        Returns:
-            Context window size in tokens
-        """
-        # First check for explicit num_ctx
-        runtime_ctx = self.get_model_runtime_context(model)
-        if runtime_ctx != 2048:  # Explicitly set
-            return runtime_ctx
-        
-        # Otherwise return max context (for backwards compat)
-        return self.get_model_max_context(model, family)
 
     def list_models(self) -> list[dict]:
         """List available models from Ollama."""
@@ -1271,32 +1249,6 @@ class OllamaBackend(OpenAICompatibleBackend):
                 return json.loads(response.read().decode("utf-8"))
         except (urllib.error.HTTPError, urllib.error.URLError):
             return {"status": "not_running"}
-
-    def pull_model(self, model: str, stream: bool = False) -> dict | Generator:
-        """Pull a model from Ollama registry."""
-        import urllib.request
-        import urllib.error
-
-        url = f"{self.base_url}/api/pull"
-
-        body = {
-            "name": model,
-            "stream": stream,
-        }
-
-        req = urllib.request.Request(
-            url,
-            data=json.dumps(body).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-
-        with urllib.request.urlopen(req, timeout=300) as response:
-            if stream:
-                for line in response:
-                    yield json.loads(line.decode("utf-8"))
-            else:
-                return json.loads(response.read().decode("utf-8"))
 
     # ─────────────────────────────────────────────────────────────────────
     # OpenAICompatibleBackend abstract hooks (ARCH-01)

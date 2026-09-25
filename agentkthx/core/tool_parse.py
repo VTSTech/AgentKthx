@@ -1,4 +1,4 @@
-﻿"""
+"""
 ⚛️ AgentKthx — Tool Parser
 Regex patterns and functions for parsing tool calls from model output.
 
@@ -67,86 +67,6 @@ def _sanitize_model_json(text: str) -> str:
     text = re.sub(r'\\\\\\(?=[^\\"])', r'\\\\', text)
 
     return text
-
-
-def _looks_like_tool_schema(text: str) -> bool:
-    """
-    Returns True if the text looks like the model outputting a JSON
-    function-call schema rather than a real answer.
-
-    Handles both single-object schemas and array schemas like
-    [{"type":"function",...}, ...].
-    """
-    stripped = re.sub(r"```(?:json)?", "", text).strip().rstrip("`").strip()
-    if not stripped:
-        return False
-
-    # Try JSON array first — models sometimes dump entire tool schema arrays
-    arr_start = stripped.find("[")
-    if arr_start != -1:
-        arr_end = stripped.rfind("]")
-        if arr_end != -1 and arr_end > arr_start:
-            try:
-                arr = json.loads(stripped[arr_start:arr_end + 1])
-                if isinstance(arr, list) and len(arr) > 0:
-                    # Array of tool function schemas
-                    if any(
-                        isinstance(item, dict) and item.get("type") == "function"
-                        for item in arr
-                    ):
-                        return True
-                    # Array containing objects that look like tool schemas
-                    if any(
-                        isinstance(item, dict)
-                        and "name" in item
-                        and any(k in item for k in ("parameters", "arguments", "args"))
-                        for item in arr
-                    ):
-                        return True
-            except json.JSONDecodeError:
-                pass
-
-    # Try single JSON object
-    start = stripped.find("{")
-    end = stripped.rfind("}")
-    if start == -1 or end == -1:
-        return False
-    try:
-        obj = json.loads(stripped[start:end + 1])
-        return (
-            isinstance(obj, dict)
-            and "name" in obj
-            and any(k in obj for k in ("parameters", "arguments", "args"))
-        )
-    except json.JSONDecodeError:
-        return False
-
-
-def _looks_like_tool_schema_dump(text: str) -> bool:
-    """
-    Detect when a model dumps the entire tool schema as text instead of
-    using it properly. This happens with some models like granite3.1-moe.
-    """
-    if not text:
-        return False
-    
-    dump_indicators = [
-        '{"function <nil>',
-        '"type":"function"',
-        '"parameters":{"type":"object"',
-        '[{"type":',
-        '"required":',
-        '"properties":',
-        'Search the web using DuckDuckGo',
-        'Evaluate a mathematical expression',
-        'Execute Python code',
-        '{object <nil>',
-    ]
-    
-    text_lower = text.lower()
-    matches = sum(1 for indicator in dump_indicators if indicator.lower() in text_lower)
-    
-    return matches >= 2
 
 
 def _extract_tool_from_json(obj: dict, debug: bool = False) -> tuple[str | None, dict | None]:
@@ -219,118 +139,6 @@ def _extract_tool_from_json(obj: dict, debug: bool = False) -> tuple[str | None,
         return name, args
 
     return name, args
-
-
-def _extract_python_code(text: str) -> str | None:
-    """
-    Extract Python code from markdown code blocks.
-    """
-    match = _PYTHON_CODE_RE.search(text)
-    if match:
-        return match.group(1).strip()
-    return None
-
-
-def _fuzzy_match_tool_name(hallucinated_name: str, available_tool_names: list[str]) -> str | None:
-    """
-    Small models often hallucinate tool names. This function attempts to
-    match a hallucinated name to a real tool name using various heuristics.
-    
-    Returns the matched tool name or None if no match found.
-    """
-    if hallucinated_name in available_tool_names:
-        return hallucinated_name
-    
-    lower_hallucinated = hallucinated_name.lower().replace("_", "")
-    
-    # Strategy 1: Substring match
-    for real_name in available_tool_names:
-        lower_real = real_name.lower().replace("_", "")
-        if lower_real in lower_hallucinated or lower_hallucinated in lower_real:
-            return real_name
-    
-    # Strategy 2: Word mappings
-    word_mappings = {
-        "calculate": ["calculator", "python_repl"],
-        "calc": ["calculator", "python_repl"],
-        "math": ["calculator", "python_repl"],
-        "compute": ["calculator", "python_repl"],
-        "eval": ["calculator", "python_repl"],
-        "expression": ["calculator", "python_repl"],
-        "power": ["calculator", "python_repl"],
-        "pow": ["calculator", "python_repl"],
-        "square": ["calculator", "python_repl"],
-        "sqrt": ["calculator", "python_repl"],
-        "root": ["calculator", "python_repl"],
-        "add": ["calculator", "python_repl"],
-        "subtract": ["calculator", "python_repl"],
-        "multiply": ["calculator", "python_repl"],
-        "times": ["calculator", "python_repl"],
-        "multiplied": ["calculator", "python_repl"],
-        "divide": ["calculator", "python_repl"],
-        "divided": ["calculator", "python_repl"],
-        "calculator": ["calculator", "python_repl"],
-        "store": ["calculator", "python_repl"],
-        "open": ["calculator", "python_repl"],
-        "hours": ["calculator", "python_repl"],
-        "hour": ["calculator", "python_repl"],
-        "python": ["python_repl", "shell"],
-        "repl": ["python_repl", "shell"],
-        "code": ["python_repl", "shell"],
-        "print": ["python_repl", "shell"],
-        "execute": ["python_repl", "shell"],
-        "run": ["python_repl", "shell"],
-        "exec": ["python_repl", "shell"],
-        "today": ["python_repl", "shell"],
-        "date": ["python_repl", "shell"],
-        "time": ["python_repl", "shell"],
-        "datetime": ["python_repl", "shell"],
-        "now": ["python_repl", "shell"],
-        "current": ["python_repl", "shell"],
-        "get_date": ["python_repl", "shell"],
-        "get_time": ["python_repl", "shell"],
-        "shell": ["shell"],
-        "bash": ["shell"],
-        "cmd": ["shell"],
-        "command": ["shell"],
-        "ls": ["shell"],
-        "dir": ["shell"],
-        "cat": ["shell"],
-        "echo": ["shell"],
-        "grep": ["shell"],
-        "find": ["shell"],
-        "pwd": ["shell"],
-        "mkdir": ["shell"],
-        "rm": ["shell"],
-        "cp": ["shell"],
-        "mv": ["shell"],
-        "read": ["read_file"],
-        "write": ["write_file"],
-        "file": ["read_file"],
-        "load": ["read_file"],
-        "save": ["write_file"],
-        "weather": ["get_weather"],
-        "currency": ["convert_currency"],
-        "convert": ["convert_currency"],
-        "money": ["convert_currency"],
-    }
-    
-    # Check for keywords in the hallucinated name (including slashes)
-    for keyword, tool_hints in word_mappings.items():
-        if keyword in lower_hallucinated:
-            for tool_hint in tool_hints:
-                for real_name in available_tool_names:
-                    if tool_hint in real_name or real_name == tool_hint:
-                        return real_name
-    
-    # Strategy 3: First 4+ chars match
-    for real_name in available_tool_names:
-        lower_real = real_name.lower()
-        if len(lower_real) >= 4 and len(lower_hallucinated) >= 4:
-            if lower_real[:4] == lower_hallucinated[:4]:
-                return real_name
-    
-    return None
 
 
 # ------------------------------------------------------------------ #
@@ -641,10 +449,6 @@ class ToolParser:
             ))
 
         return calls
-
-    def has_tool_call(self, text: str) -> bool:
-        """Check if text contains a tool call."""
-        return bool(self.parse(text))
 
     def is_final_answer(self, text: str) -> bool:
         """Check if text indicates a final answer.

@@ -189,36 +189,3 @@ def cache_tool_support(model: str, support: ToolSupportLevel, family: str = "", 
     save_tool_cache(cache)
 
 
-def clear_tool_cache() -> None:
-    """Clear the tool support cache."""
-    cache_file = get_cache_file()
-    if cache_file.exists():
-        try:
-            cache_file.unlink()
-        except Exception:
-            pass
-
-
-def list_cached_models() -> list[str]:
-    """List all models with cached tool support."""
-    cache = load_tool_cache()
-    return list(cache.keys())
-
-
-def get_cache_age(model: str, api_mode: str = "openre") -> Optional[float]:
-    """
-    Get age of cached result in seconds.
-    
-    Args:
-        model: Model name
-        api_mode: API mode used during testing (default: "openre")
-    
-    Returns:
-        Age in seconds, or None if not cached
-    """
-    cache = load_tool_cache()
-    key = _cache_key(model, api_mode)
-    cached = cache.get(key)
-    if cached and "tested_at" in cached:
-        return time.time() - cached["tested_at"]
-    return None

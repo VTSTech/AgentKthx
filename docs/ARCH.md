@@ -26,8 +26,6 @@ agentkthx/
 │   ├── model_family_config.py # Family-specific behavior (stop tokens, formats)
 │   ├── prompts.py            # Tool argument aliases (TOOL_ARG_ALIASES), platform constants,
 │   │                         # few-shot prompting suffixes, system prompt builders
-│   ├── math_prompts.py       # Math-specific system prompts for GSM8K, number extraction,
-│   │                         # calculator tool function
 │   ├── args_normal.py        # Full argument normalizer, calculator argument fixer,
 │   │                         # missing argument synthesizer
 │   ├── error_recovery.py     # ErrorRecoveryTracker, build_enhanced_observation(),
@@ -309,7 +307,6 @@ orchestrator.register(code_card)
 result = orchestrator.run("Calculate 15 * 8")
 print(result.final_answer)
 print(f"Agent used: {result.chosen_agent}")
-result.print_summary()
 ```
 
 **OrchestratorResult Fields**:
@@ -449,7 +446,6 @@ deepseek-r1:1.5b         → ReAct only ○ (reasoning model, no native tools)
 from agentkthx.core.tool_cache import (
     get_cached_tool_support,    # Get cached level or None
     cache_tool_support,          # Save detection result
-    clear_tool_cache,            # Clear cache file
     load_tool_cache,             # Load full cache dict
     save_tool_cache,             # Save full cache dict
 )
@@ -466,8 +462,6 @@ cache_tool_support(
     family="qwen2"
 )
 
-# Clear cache
-clear_tool_cache()
 ```
 
 **CLI Usage**:
@@ -517,12 +511,10 @@ The static tool reference in SOUL.md is replaced with actual available tools at 
 
 **Cache Management**:
 ```python
-from agentkthx.soul import clear_soul_cache, load_soul
+from agentkthx.soul import load_soul
 
-# Clear cache after modifying soul files
-clear_soul_cache()
-
-# Force reload from disk
+# Force reload from disk after modifying soul files
+# (R07.00: the zero-caller clear_soul_cache() was removed)
 soul = load_soul("nova-helper", reload=True)
 ```
 

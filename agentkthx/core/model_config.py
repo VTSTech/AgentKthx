@@ -22,11 +22,6 @@ from .model_family_config import ModelFamilyConfig, get_model_config
 from .model_family_config import FAMILY_CONFIGS as MODEL_CONFIGS
 
 
-def list_supported_families() -> list[str]:
-    """List all supported model families."""
-    return [k for k in MODEL_CONFIGS.keys()]
-
-
 # Emit deprecation warning on import
 warnings.warn(
     "model_config.py is deprecated. Use model_family_config.py instead. "

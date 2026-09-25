@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import Optional
 from urllib.parse import urlparse
 
 
@@ -152,13 +151,9 @@ MAX_TOOL_RETRIES = int(os.environ.get("AGENTKTHX_MAX_TOOL_RETRIES") or "2")
 @dataclass
 class Config:
     """AgentKthx configuration."""
-    # Backend URLs
+    # Backend URLs (plugin-owned URLs are read directly from their env
+    # constants — R07.01 dropped the never-read mirror fields)
     ollama_base_url: str = field(default_factory=lambda: OLLAMA_BASE_URL)
-    llama_server_base_url: str = field(default_factory=lambda: LLAMA_SERVER_BASE_URL)
-
-    # Plugin-owned URLs (read from env vars, defaults from plugin.json)
-    bitnet_base_url: str = field(default_factory=lambda: BITNET_BASE_URL)
-    zai_base_url: str = field(default_factory=lambda: ZAI_BASE_URL)
     acp_base_url: str = field(default_factory=lambda: ACP_BASE_URL)
 
     # ACP Credentials
@@ -194,37 +189,10 @@ class Config:
     debug: bool = field(default_factory=lambda: DEBUG)
     verbose: bool = field(default_factory=lambda: VERBOSE)
 
-    @property
-    def ollama_host(self) -> str:
-        """Extract host from Ollama URL."""
-        parsed = urlparse(self.ollama_base_url)
-        return parsed.hostname or "localhost"
-
-    @property
-    def ollama_port(self) -> int:
-        """Extract port from Ollama URL."""
-        parsed = urlparse(self.ollama_base_url)
-        return parsed.port or 11434
-
     @classmethod
     def from_env(cls) -> "Config":
         """Load configuration from environment variables."""
         return cls()
-
-    @classmethod
-    def from_file(cls, path: str) -> "Config":
-        """Load configuration from a JSON file."""
-        import json
-
-        try:
-            with open(path, "r") as f:
-                data = json.load(f)
-            return cls(**data)
-        except FileNotFoundError:
-            return cls()
-        except Exception as e:
-            print(f"Warning: Error loading config file: {e}")
-            return cls()
 
 
 def _get_num_ctx() -> int | None:
@@ -250,7 +218,3 @@ def get_config(reload: bool = False) -> Config:
     return _config
 
 
-def set_config(config: Config) -> None:
-    """Set the global configuration."""
-    global _config
-    _config = config

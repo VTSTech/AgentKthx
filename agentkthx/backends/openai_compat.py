@@ -206,14 +206,6 @@ class OpenAICompatibleBackend(BaseBackend):
         """
         return self.get_model_max_context(model)
 
-    def get_model_context_size(self, model: str, family: str | None = None) -> int:
-        """Get the context window size for a model.
-
-        DEPRECATED: Use ``get_model_runtime_context()`` or
-        ``get_model_max_context()`` instead. Kept for backward compat.
-        """
-        return self.get_model_max_context(model, family=family)
-
     # ─────────────────────────────────────────────────────────────────────
     # JEV System-One Decision Mode
     # ─────────────────────────────────────────────────────────────────────

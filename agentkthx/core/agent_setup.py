@@ -367,7 +367,6 @@ class AgentSetupMixin:
 
         # Load Soul Spec package (default: nova-helper)
         self.soul = None
-        self._soul_level = soul_level
 
         # Determine if tools are available
         has_tools = self.tools and len(self.tools) > 0 and self.tool_choice.type != ToolChoiceType.NONE
@@ -440,7 +439,6 @@ class AgentSetupMixin:
         self.memory.add("system", self._custom_system_prompt)
 
         # Store kwargs
-        self._kwargs = kwargs
 
         # Response history for previous_response_id support
         self._response_history: dict[str, Response] = {}

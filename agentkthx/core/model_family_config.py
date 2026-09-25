@@ -32,10 +32,7 @@ class ModelFamilyConfig:
     start_tokens: dict = field(default_factory=dict)
     stop_tokens: list[str] = field(default_factory=list)
     tool_format: Literal["native", "xml", "json", "none"] = "native"
-    tool_call_start: str = ""
-    tool_call_end: str = ""
     supports_native_tools: bool = True
-    system_prompt_style: Literal["separate", "first_user", "template", "default", "react", "minimal"] = "separate"
     # Generation defaults
     preferred_temperature: float = 0.7
     default_temperature: float = 0.7  # Used by agent.py for generation
@@ -45,26 +42,13 @@ class ModelFamilyConfig:
     needs_think_directive: bool = False
     prefers_few_shot: bool = True
     few_shot_style: Literal["react", "native", "compact"] = "react"
-    reasoning_hints: list[str] = field(default_factory=list)
     # Streaming / capabilities
-    supports_streaming: bool = True
-    supports_vision: bool = False
-    # Think tag handling (e.g., <think/> for DeepSeek)
-    think_tag: str | None = None
-    strip_think_tags: bool = False
     # Special behaviors
     has_schema_dump_issue: bool = False  # Some models dump tool schema as text
     truncate_json_args: bool = False  # Some models truncate JSON in ReAct
-    needs_empty_system: bool = False  # Some models break with empty system
     prefers_user_system: bool = False  # Put system prompt in first user message
     # Override system prompt for models without tool support (pure reasoning)
     no_tools_system_prompt: str | None = None
-
-    def get_stop_sequences(self) -> list[str]:
-        """Get stop sequences for this model family."""
-        stops = list(self.stop_tokens)
-        return stops
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # FAMILY CONFIGURATIONS
@@ -79,12 +63,9 @@ FAMILY_CONFIGS: dict[str, ModelFamilyConfig] = {
         stop_tokens=["<end_of_turn>"],
         tool_format="none",
         supports_native_tools=False,
-        system_prompt_style="first_user",
         preferred_temperature=0.7,
-        needs_empty_system=True,
         prefers_few_shot=False,
         few_shot_style="compact",
-        reasoning_hints=["Think step by step", "Show your work"],
         # General-purpose prompt for models without tool support
         no_tools_system_prompt="""Answer questions directly. For math, show work then give answer.
 
@@ -120,10 +101,7 @@ Keep answers brief. Show calculation first, then the final number.""",
         },
         stop_tokens=["<|end_of_text|>"],
         tool_format="xml",
-        tool_call_start="<tool_calljson\n",
-        tool_call_end="\n</tool_call",
         supports_native_tools=True,
-        system_prompt_style="separate",
         preferred_temperature=0.7,
         prefers_few_shot=False,  # Native tools don't need few-shot
         few_shot_style="native",
@@ -139,10 +117,7 @@ Keep answers brief. Show calculation first, then the final number.""",
         },
         stop_tokens=["<|end_of_text|>"],
         tool_format="xml",
-        tool_call_start="<|tool_call|>\n",
-        tool_call_end="",
         supports_native_tools=True,
-        system_prompt_style="separate",
         preferred_temperature=0.6,
         prefers_few_shot=True,  # MoE benefits from examples
         few_shot_style="react",
@@ -160,10 +135,7 @@ Keep answers brief. Show calculation first, then the final number.""",
         },
         stop_tokens=["<|im_end|>"],
         tool_format="xml",
-        tool_call_start="<tool_calljson\n",
-        tool_call_end="\n</tool_call",
         supports_native_tools=True,
-        system_prompt_style="separate",
         preferred_temperature=0.7,
         prefers_few_shot=False,  # Native tools don't need few-shot
         few_shot_style="native",
@@ -179,10 +151,7 @@ Keep answers brief. Show calculation first, then the final number.""",
         },
         stop_tokens=["<|im_end|>"],
         tool_format="xml",
-        tool_call_start="<tool_calljson\n",
-        tool_call_end="\n</tool_call",
         supports_native_tools=True,
-        system_prompt_style="separate",
         preferred_temperature=0.6,
         needs_think_directive=True,
         prefers_few_shot=True,
@@ -200,10 +169,7 @@ Keep answers brief. Show calculation first, then the final number.""",
         },
         stop_tokens=["<|im_end|>"],
         tool_format="xml",
-        tool_call_start="<tool_calljson\n",
-        tool_call_end="\n</tool_call",
         supports_native_tools=True,
-        system_prompt_style="separate",
         preferred_temperature=0.6,
         needs_think_directive=False,  # Qwen3.5 does NOT have thinking mode
         prefers_few_shot=False,  # Native models should NOT have few-shot
@@ -220,10 +186,7 @@ Keep answers brief. Show calculation first, then the final number.""",
         },
         stop_tokens=["<|eot_id|>", "<|end_of_text|>"],
         tool_format="native",
-        tool_call_start="",
-        tool_call_end="",
         supports_native_tools=True,
-        system_prompt_style="separate",
         preferred_temperature=0.7,
         prefers_few_shot=True,
         few_shot_style="react",
@@ -240,11 +203,9 @@ Keep answers brief. Show calculation first, then the final number.""",
         stop_tokens=["<|im_end|>", "<|im_start|>"],
         tool_format="none",
         supports_native_tools=False,
-        system_prompt_style="separate",
         preferred_temperature=0.7,
         prefers_few_shot=False,
         few_shot_style="compact",
-        reasoning_hints=["Be direct and helpful", "Follow instructions precisely"],
         no_tools_system_prompt="""You are AI AgentKthx.
 
 Be concise and direct. For math, show the calculation then the answer.
@@ -280,17 +241,11 @@ Keep answers brief. One word when possible.""",
         },
         stop_tokens=["<｜end▁of▁sentence｜>"],
         tool_format="native",
-        tool_call_start="",
-        tool_call_end="",
         supports_native_tools=True,
-        system_prompt_style="separate",
         preferred_temperature=0.6,
         needs_think_directive=True,  # DeepSeek-R1 has thinking mode
         prefers_few_shot=True,
-        think_tag="think",
-        strip_think_tags=True,
         few_shot_style="react",
-        reasoning_hints=["Think step by step", "Show your reasoning"],
     ),
     
     # DEEPSEEK - DeepSeek's standard models (coder, v3, etc.)
@@ -303,16 +258,11 @@ Keep answers brief. One word when possible.""",
         },
         stop_tokens=["<｜end▁of▁sentence｜>"],
         tool_format="native",
-        tool_call_start="",
-        tool_call_end="",
         supports_native_tools=True,
-        system_prompt_style="separate",
         preferred_temperature=0.7,
         needs_think_directive=False,  # Standard DeepSeek models don't have thinking mode
         prefers_few_shot=True,
         few_shot_style="react",
-        think_tag="think",
-        strip_think_tags=True,
     ),
 }
 
@@ -378,7 +328,7 @@ def get_preferred_temperature(family: str) -> float:
     return get_family_config(family).preferred_temperature
 
 
-def should_use_few_shot(family: str, model_size_hint: str = "") -> bool:
+def should_use_few_shot(family: str) -> bool:
     """Determine if few-shot prompting should be used."""
     config = get_family_config(family)
     

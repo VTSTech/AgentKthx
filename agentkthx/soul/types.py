@@ -266,12 +266,6 @@ class SoulManifest:
         
         return issues
     
-    def is_compatible_with(self, framework: str) -> bool:
-        """Check if soul is compatible with a given framework."""
-        if not self.compatibility.frameworks:
-            return True  # No restriction = compatible with all
-        return framework in self.compatibility.frameworks
-    
     def get_summary(self) -> str:
         """Get Level 1 summary for quick-scan discovery."""
         if self.disclosure and self.disclosure.summary:

@@ -70,3 +70,42 @@ def test_generate_stream_returns_generate_shaped_dict():
     assert isinstance(result, dict)
     assert result.get("content") == "the answer"
     assert result.get("tool_calls") == []
+
+
+def test_run_stream_keyboardinterrupt_during_tool_yields_response_failed():
+    """R07.01 regression: Ctrl+C while a tool executes inside run_stream()
+    must yield a clean ``response.failed`` SSE event.
+
+    Pre-R07.01 this path referenced the undefined ``ResponseStateEvent``
+    (survived verbatim from the original agent.py:1499) and raised
+    NameError instead of emitting the cancellation event.
+    """
+    from agentkthx.agent import Agent
+
+    class FakeBackend:
+        backend_type = None
+        api_mode = None
+        def generate(self, messages, tools=None, **kw):
+            return {
+                "content": 'Action: calculator\nAction Input: {"expression": "1+1"}',
+                "tool_calls": [], "usage": {}, "finish_reason": "stop",
+            }
+
+    agent = Agent(model="fake", backend=FakeBackend(),
+                  system_prompt="sys", tools=["calculator"], soul=None)
+
+    def _interrupt(name, args, prompt=""):
+        raise KeyboardInterrupt()
+
+    agent._execute_tool = _interrupt
+
+    events = list(agent.run_stream("hi"))
+    types = []
+    for e in events:
+        first = e.split("\n")[0]
+        if first.startswith("event: "):
+            types.append(first[len("event: "):].strip())
+
+    assert "response.failed" in types, (
+        f"expected response.failed after Ctrl+C during tool execution, "
+        f"got event sequence: {types}")

@@ -19,8 +19,6 @@ Written by VTSTech — https://www.vts-tech.org — https://github.com/VTSTech/A
 
 from __future__ import annotations
 
-import json
-import shutil
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -28,7 +26,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from .colors import dim, green, yellow, cyan
+from .colors import dim
 
 
 class AgentState(Enum):
@@ -134,23 +132,6 @@ class TaskPlan:
         step = Step(description=description)
         self.steps.append(step)
         return step
-    
-    def advance(self) -> bool:
-        """Move to next step. Returns True if advanced, False if done."""
-        if self.current_step:
-            self.current_step.status = "done"
-            self.current_step.completed_at = datetime.now().isoformat()
-        
-        self.current_step_index += 1
-        if self.current_step_index < len(self.steps):
-            self.steps[self.current_step_index].status = "in_progress"
-            self.steps[self.current_step_index].started_at = datetime.now().isoformat()
-            return True
-        return False  # No more steps
-    
-    def get_rollback_point(self) -> Optional[Step]:
-        """Get the current step for rollback."""
-        return self.current_step
 
 
 # ------------------------------------------------------------------ #
@@ -342,23 +323,6 @@ class AgentMode:
         if self.on_state_change:
             self.on_state_change(old_state, new_state)
     
-    def queue_message(self, message: str) -> int:
-        """
-        Queue a message while agent is working.
-        Returns the queue length.
-        """
-        self.message_queue.append(message)
-        return len(self.message_queue)
-    
-    def process_queue(self) -> list[str]:
-        """
-        Process all queued messages.
-        Returns list of messages that were processed.
-        """
-        messages = self.message_queue.copy()
-        self.message_queue.clear()
-        return messages
-    
     # ------------------------------------------------------------------ #
     #  Slash Command Handlers                                            #
     # ------------------------------------------------------------------ #
@@ -382,52 +346,6 @@ class AgentMode:
             })
         
         return status
-    
-    def get_progress(self) -> dict:
-        """Get detailed progress breakdown."""
-        if not self.plan:
-            return {"error": "No active task"}
-        
-        steps_info = []
-        for i, step in enumerate(self.plan.steps):
-            steps_info.append({
-                "index": i + 1,
-                "description": step.description,
-                "status": step.status,
-                "actions_count": len(step.actions),
-                "started_at": step.started_at,
-                "completed_at": step.completed_at,
-            })
-        
-        return {
-            "goal": self.plan.goal,
-            "current_step": self.plan.current_step_index + 1,
-            "total_steps": self.plan.total_steps,
-            "progress_percent": round(self.plan.progress_percent, 1),
-            "steps": steps_info,
-        }
-    
-    def get_plan(self) -> Optional[dict]:
-        """Get the current task plan."""
-        if not self.plan:
-            return None
-        
-        return {
-            "goal": self.plan.goal,
-            "created_at": self.plan.created_at,
-            "total_steps": self.plan.total_steps,
-            "steps": [
-                {
-                    "description": s.description,
-                    "status": s.status,
-                }
-                for s in self.plan.steps
-            ],
-        }
-    
-    def get_logs(self, limit: int = 20) -> list[dict]:
-        """Get recent execution logs."""
-        return self.execution_log[-limit:]
     
     def pause(self) -> tuple[bool, str]:
         """
@@ -621,11 +539,11 @@ Example: [{{"description": "Step 1"}}, {{"description": "Step 2"}}]"""
         step.started_at = datetime.now().isoformat()
 
         # R06.58: sync plan.current_step_index to the step we're about to
-        # execute. run_task iterates with enumerate() but never called
-        # plan.advance(), so current_step_index stayed at 0 for every step
-        # — which made the [N/M] in the ⟳ line wrong (always [1/M]).
-        # Syncing here also fixes get_status() / get_progress() which
-        # both rely on current_step_index being accurate mid-run.
+        # execute. run_task iterates with enumerate() and (R07.01) the
+        # Plan.advance() method no longer exists — this direct sync is the
+        # single mechanism, so the [N/M] in the ⟳ line stays accurate.
+        # Syncing here also fixes get_status() which relies on
+        # current_step_index being accurate mid-run.
         if self.plan and step in self.plan.steps:
             self.plan.current_step_index = self.plan.steps.index(step)
 

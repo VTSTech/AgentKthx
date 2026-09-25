@@ -22,7 +22,6 @@ class BackendConfig:
     port: int = 11434
     timeout: int = 120
     max_retries: int = 3
-    retry_delay: float = 1.0
     truncation: str = "auto"
 
 
@@ -268,22 +267,6 @@ class BaseBackend(ABC):
             if m.get("name") == model:
                 return m
         return None
-
-    def count_tokens(self, text: str) -> int:
-        """
-        Estimate token count for text.
-
-        This is a simple estimation. Backends may override
-        for more accurate counting.
-
-        Args:
-            text: Text to count
-
-        Returns:
-            Estimated token count
-        """
-        # Simple estimation: ~4 characters per token
-        return len(text) // 4
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(url={self.base_url})"

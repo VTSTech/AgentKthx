@@ -22,7 +22,7 @@ import concurrent.futures
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Literal, Optional
+from typing import Callable, Literal
 
 from .agent import Agent
 from .tools import ToolRegistry
@@ -99,23 +99,6 @@ class OrchestratorResult:
     total_ms: float = 0.0
     success: bool = True
     error: str = ""
-
-    def print_summary(self):
-        """Print a summary of the orchestration."""
-        print(f"\n{'='*60}")
-        print(f"ORCHESTRATOR RESULT ({self.mode} mode)")
-        print(f"{'='*60}")
-        print(f"Agents used: {', '.join(self.agents_used)}")
-        if self.chosen_agent:
-            print(f"Primary agent: {self.chosen_agent}")
-        for agent_name, result in self.agent_results.items():
-            elapsed = self.agent_times.get(agent_name, 0)
-            preview = result[:100] + "..." if len(result) > 100 else result
-            print(f"\n[{agent_name}] ({elapsed:.1f}s):")
-            print(f"  {preview}")
-        print(f"\nTotal time: {self.total_ms/1000:.1f}s")
-        print(f"{'='*60}")
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ORCHESTRATOR
@@ -467,19 +450,6 @@ Reply with ONLY the agent name (nothing else). Pick the most suitable agent."""
     # ------------------------------------------------------------------ #
     #  UTILITIES                                                          #
     # ------------------------------------------------------------------ #
-
-    def list_agents(self) -> list[dict]:
-        """List registered agents."""
-        return [
-            {
-                "name": card.name,
-                "description": card.description,
-                "capabilities": card.capabilities,
-                "priority": card.priority,
-                "fallback": card.fallback,
-            }
-            for card in self._agent_list
-        ]
 
     def __repr__(self) -> str:
         return f"Orchestrator(mode={self.mode}, agents={len(self._agent_list)})"

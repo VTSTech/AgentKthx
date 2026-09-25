@@ -1,4 +1,4 @@
-﻿"""
+"""
 ⚛️ AgentKthx — Helper Functions
 Utility functions for fuzzy matching, argument normalization, and security.
 
@@ -709,21 +709,6 @@ def sanitize_command(command: str) -> tuple[bool, str, str]:
 # ============================================================================
 # String Utilities
 # ============================================================================
-
-def truncate(text: str, max_length: int = 500, suffix: str = "...") -> str:
-    """Truncate text to max length with suffix."""
-    if len(text) <= max_length:
-        return text
-    return text[:max_length - len(suffix)] + suffix
-
-
-def strip_code_blocks(text: str) -> str:
-    """Remove markdown code block markers from text."""
-    # Remove code block markers
-    text = re.sub(r"```\w*\n?", "", text)
-    text = re.sub(r"```\s*$", "", text)
-    return text.strip()
-
 
 # ============================================================================
 # Argument Synthesis for Small Models

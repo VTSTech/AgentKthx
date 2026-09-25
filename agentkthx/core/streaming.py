@@ -272,12 +272,16 @@ class StreamingMixin:
 
                     # Execute the tool
                     try:
-                        result = self._execute_tool(tool_name, tool_args, prompt)
+                        result = self._execute_tool(tool_name, tool_args)
                     except KeyboardInterrupt:
                         fc_item.status = ItemStatus.FAILED
                         response.mark_cancelled(debug=self.debug)
                         # Yield cancellation event and stop
-                        cancel_event = ResponseStateEvent(
+                        # R07.01: was `ResponseStateEvent` (undefined — NameError
+                        # on the Ctrl+C-during-tool-exec path since original
+                        # agent.py:1499); fixed to ResponseEvent, matching the
+                        # fail_event pattern above.
+                        cancel_event = ResponseEvent(
                             type=EventType.RESPONSE_FAILED,
                             response=response,
                         )

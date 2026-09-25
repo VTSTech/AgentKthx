@@ -394,83 +394,6 @@ class ACPPlugin:
             self._csrf_token = token if token else ""
             self._csrf_expiry = now
 
-    def _request_with_retry(
-        self,
-        endpoint: str,
-        method: str = "GET",
-        data: dict | None = None,
-        timeout: float = 5.0,
-        max_retries: int = None,
-        base_delay: float = None,
-        max_delay: float = None,
-        jitter: bool = None,
-        retryable_errors: tuple = None,
-    ) -> dict:
-        """
-        Make HTTP request with exponential backoff retry logic.
-        
-        This wraps _request() with automatic retry on transient failures,
-        implementing exponential backoff to avoid overwhelming the server.
-        
-        Args:
-            endpoint: API endpoint path
-            method: HTTP method
-            data: Request body data
-            timeout: Request timeout
-            max_retries: Maximum number of retry attempts (default: from ACP_RETRY_CONFIG)
-            base_delay: Initial delay in seconds (default: from ACP_RETRY_CONFIG)
-            max_delay: Maximum delay cap in seconds (default: from ACP_RETRY_CONFIG)
-            jitter: Add randomness to avoid thundering herd (default: from ACP_RETRY_CONFIG)
-            retryable_errors: Tuple of error types that should trigger retry
-                            Default: (502, 503, 504, connection errors)
-        
-        Returns:
-            API response dict
-        """
-        # Use config defaults if not specified
-        if max_retries is None:
-            max_retries = ACP_RETRY_CONFIG["max_retries"]
-        if base_delay is None:
-            base_delay = ACP_RETRY_CONFIG["base_delay"]
-        if max_delay is None:
-            max_delay = ACP_RETRY_CONFIG["max_delay"]
-        if jitter is None:
-            jitter = ACP_RETRY_CONFIG["jitter"]
-        
-        if retryable_errors is None:
-            # Default retryable: server errors and connection issues
-            retryable_errors = (502, 503, 504, "connection", "timeout")
-        
-        last_error = None
-        
-        for attempt in range(max_retries + 1):
-            result = self._request(endpoint, method, data, timeout)
-            
-            # Check for success
-            if result.get("success") != False or "error" not in result:
-                return result
-            
-            # Check if error is retryable
-            error_str = str(result.get("error", "")).lower()
-            is_retryable = any(
-                str(code) in error_str or str(code) in error_str.lower()
-                for code in retryable_errors
-            )
-            
-            if not is_retryable or attempt == max_retries:
-                return result
-            
-            # Calculate exponential backoff delay with optional jitter
-            delay = min(base_delay * (2 ** attempt), max_delay)
-            if jitter:
-                # Add up to 25% random jitter
-                delay = delay * (0.75 + random.random() * 0.5)
-            self._log(f"Retry {attempt + 1}/{max_retries} after {delay:.2f}s: {error_str}")
-            time.sleep(delay)
-            last_error = error_str
-        
-        return result
-
     # ------------------------------------------------------------------ #
     #  JSON-RPC 2.0 Support (1.0.4 - A2A Compliance)                          #
     # ------------------------------------------------------------------ #
@@ -548,32 +471,6 @@ class ACPPlugin:
             return {"error": {"code": -32700, "message": f"Parse error: {e}"}}
         except Exception as e:
             return {"error": {"code": -32603, "message": str(e)}}
-
-    def get_agent_card(self) -> dict:
-        """
-        Get ACP server's Agent Card from well-known URI.
-
-        Returns
-        -------
-        dict
-            Agent Card with name, description, skills, capabilities
-        """
-        if not self.enabled:
-            return {"error": "Plugin disabled"}
-
-        headers = {
-            "Authorization": f"Basic {self.auth}",
-        }
-
-        url = f"{self.base_url}/.well-known/agent-card.json"
-
-        req = urllib.request.Request(url, headers=headers, method="GET")
-
-        try:
-            with urllib.request.urlopen(req, timeout=5.0) as resp:
-                return json.loads(resp.read().decode())
-        except Exception as e:
-            return {"error": str(e)}
 
     def _generate_skills_from_tools(self) -> list[dict]:
         """
@@ -735,26 +632,6 @@ class ACPPlugin:
             List of AgentSkill objects
         """
         return self._skills if self._skills else self._auto_skills
-
-    def get_context_id(self, create: bool = True) -> str | None:
-        """
-        Get current contextId for A2A session continuity.
-
-        Parameters
-        ----------
-        create : bool
-            If True and no context exists, create one
-
-        Returns
-        -------
-        str | None
-            Current contextId or None
-        """
-        if self._context_id is None and create:
-            import uuid
-            self._context_id = f"ctx-{uuid.uuid4().hex[:12]}"
-            self._log(f"Created contextId: {self._context_id}")
-        return self._context_id
 
     def _check_stop_flag(self) -> bool:
         """Check if STOP flag is set on ACP server."""
@@ -1223,10 +1100,6 @@ class ACPPlugin:
 
         return resp
 
-    def log_user_message(self, content: str) -> dict:
-        """Convenience method to log a user message."""
-        return self.log_chat("user", content)
-
     def log_assistant_message(self, content: str) -> dict:
         """Convenience method to log an assistant message."""
         return self.log_chat("assistant", content)
@@ -1243,11 +1116,6 @@ class ACPPlugin:
         """Get current session token count from ACP."""
         status = self.get_status()
         return status.get("session_tokens", 0)
-
-    def get_agent_tokens(self) -> dict:
-        """Get per-agent token breakdown from ACP (v1.0.3)."""
-        status = self.get_status()
-        return status.get("agent_tokens", {})
 
     # ------------------------------------------------------------------ #
     #  Budget & Cost Tracking (v1.0.5 - merged from acp_streaming.py)     #
@@ -1273,18 +1141,6 @@ class ACPPlugin:
             return -1
         current = self.get_session_tokens()
         return max(0, self.token_budget - current)
-
-    def check_budget(self) -> bool:
-        """Check if we're within token budget. Raises StopIteration if exceeded."""
-        if self.token_budget <= 0:
-            return True
-        
-        current = self.get_session_tokens()
-        if current >= self.token_budget:
-            if self.on_budget_exceeded:
-                self.on_budget_exceeded(current, self.token_budget)
-            raise StopIteration(f"Token budget exceeded: {current}/{self.token_budget}")
-        return True
 
     @contextmanager
     def track_operation(self, action: str, target: str) -> Generator[str | None, None, None]:
@@ -1373,14 +1229,6 @@ class ACPPlugin:
             "remaining_budget": self.get_remaining_budget(),
         }
 
-    def add_note(self, category: str, content: str, importance: str = "normal") -> dict:
-        """Add a note to ACP."""
-        return self._request("/api/notes/add", "POST", {
-            "category": category,
-            "content": content,
-            "importance": importance,
-        })
-
     def sync_todos(self, todos: list[dict]) -> dict:
         """Sync TODO list to ACP.
         
@@ -1393,10 +1241,6 @@ class ACPPlugin:
             if "agent_name" not in todo["metadata"]:
                 todo["metadata"]["agent_name"] = self.agent_name
         return self._request("/api/todos/update", "POST", {"todos": todos})
-
-    def get_duration_stats(self) -> dict:
-        """Get activity duration statistics (v1.0.3)."""
-        return self._request("/api/stats/duration")
 
     # ------------------------------------------------------------------ #
     #  Batch Operations (v1.0.3)                                          #
@@ -1641,37 +1485,6 @@ class ACPPlugin:
 
         return resp
 
-    def is_shutdown_nudge(self, nudge: dict) -> bool:
-        """
-        Check if a nudge is a shutdown notification.
-
-        Parameters
-        ----------
-        nudge : dict
-            Nudge dict from ACP response
-
-        Returns
-        -------
-        bool
-            True if this is a shutdown nudge
-        """
-        return nudge and nudge.get("type") == "shutdown"
-
-    def get_todos(self) -> list[dict]:
-        """
-        Get current TODO list from ACP.
-
-        Use this to recover TODOs from a previous session or to check
-        current task state.
-
-        Returns
-        -------
-        list[dict]
-            List of TODO objects, each with id, content, status, priority
-        """
-        resp = self._request("/api/todos")
-        return resp.get("todos", [])
-
     def add_todo(self, content: str, priority: str = "medium", status: str = "pending") -> dict:
         """
         Add a single TODO item (1.0.6).
@@ -1702,36 +1515,6 @@ class ACPPlugin:
             "todo": {"content": content, "priority": priority, "status": status},
             "agent_name": self.agent_name,
         })
-
-    def toggle_todo(self, todo_id: str) -> dict:
-        """
-        Toggle a TODO item's status between pending and completed (1.0.6).
-
-        Uses POST /api/todos/toggle which flips a TODO between
-        pending ↔ completed in a single call.
-
-        Parameters
-        ----------
-        todo_id : str
-            The TODO item ID to toggle
-
-        Returns
-        -------
-        dict
-            Response with 'todo' and 'toggled' fields
-        """
-        return self._request("/api/todos/toggle", "POST", {
-            "id": todo_id,
-        })
-
-    def clear_completed_todos(self) -> dict:
-        """
-        Clear completed TODOs (1.0.6).
-
-        Removes all TODOs with status="completed" from the list.
-        """
-        return self._request("/api/todos/clear", "POST", {})
-
 
     def bootstrap(self, claim_primary: bool = True) -> dict:
         """
@@ -1905,78 +1688,6 @@ class ACPPlugin:
 
         return resp
 
-    def a2a_heartbeat(self) -> dict:
-        """
-        Update agent's last_seen timestamp to maintain online status.
-
-        Per spec §3.7, there is no dedicated heartbeat endpoint. Online status
-        is computed from last_seen: agents seen within 60 seconds are "online".
-        To stay online, re-register via POST /api/agents/register — this updates
-        last_seen without changing other fields.
-
-        Call this every 30-60 seconds during long-running sessions.
-
-        Returns
-        -------
-        dict
-            Re-registration response with success status
-        """
-        if not self.enabled:
-            return {"success": False, "error": "Plugin disabled"}
-
-        # Re-register to update last_seen — spec §3.7: online = last_seen < 60s ago
-        return self._request("/api/agents/register", "POST", {
-            "agent_name": self.agent_name,
-            "capabilities": self.capabilities,
-            "model_name": self.model_name,
-            "endpoint": self.endpoint,
-        })
-
-    def a2a_get_agents(self, use_jsonrpc: bool = False) -> list[dict]:
-        """
-        Get list of all registered agents with their Agent Cards.
-
-        Parameters
-        ----------
-        use_jsonrpc : bool
-            Use JSON-RPC 2.0 for A2A compliance
-
-        Returns
-        -------
-        list[dict]
-            List of agent cards with name, skills, capabilities, status
-        """
-        if not self.enabled:
-            return []
-
-        if use_jsonrpc:
-            resp = self._jsonrpc_request("GetAgents", {})
-            if "error" not in resp:
-                return resp.get("agents", [])
-
-        resp = self._request("/api/agents")
-        return resp.get("agents", [])
-
-    def a2a_get_agent(self, agent_name: str) -> dict | None:
-        """
-        Get details for a specific agent.
-
-        Parameters
-        ----------
-        agent_name : str
-            Name of the agent to look up
-
-        Returns
-        -------
-        dict | None
-            Agent details or None if not found
-        """
-        if not self.enabled:
-            return None
-
-        resp = self._request(f"/api/agents/{agent_name}")
-        return resp.get("agent") if resp.get("success") else None
-
     def a2a_send(
         self,
         to_agent: str,
@@ -2080,172 +1791,6 @@ class ACPPlugin:
             self._log(f"A2A: Sent message to {to_agent} ({action})")
 
         return resp
-
-    def a2a_get_inbox(self, since: float | None = None) -> list[dict]:
-        """
-        Get messages for this agent.
-
-        Per spec §4.13, uses GET /api/a2a/history?to=<agent_name> to retrieve
-        messages addressed to this agent.
-
-        Parameters
-        ----------
-        since : float | None
-            Unused — spec does not support since-based filtering.
-            Messages expire automatically via TTL.
-
-        Returns
-        -------
-        list[dict]
-            List of messages for this agent
-        """
-        if not self.enabled:
-            return []
-
-        resp = self._request(f"/api/a2a/history?to={self.agent_name}")
-
-        messages = resp.get("messages", [])
-        if messages:
-            self._log(f"A2A: Received {len(messages)} message(s)")
-
-        return messages
-
-    def a2a_clear(self, older_than_hours: int = 24) -> dict:
-        """
-        No-op — there is no message clear endpoint in the ACP spec.
-
-        Per spec §4.13, the only A2A endpoints are:
-          - POST /api/a2a/send
-          - GET  /api/a2a/history
-
-        Messages are capped at MAX_A2A_MESSAGES=100 server-side (spec §8.2)
-        and expire automatically via their TTL/expires_at field.
-
-        Parameters
-        ----------
-        older_than_hours : int
-            Ignored — kept for API compatibility.
-
-        Returns
-        -------
-        dict
-            Always returns success (no-op)
-        """
-        return {"success": True, "note": "No-op — ACP has no clear endpoint; messages expire via TTL per spec §8.2"}
-
-    def a2a_acknowledge(self, msg_ids: str | list[str]) -> dict:
-        """
-        No-op — acknowledgement is not part of the ACP spec.
-
-        Per spec §4.13 and §3.12, messages expire automatically via their
-        TTL/expires_at field. There is no acknowledgement or delete endpoint.
-        To avoid processing the same message twice, track processed IDs locally
-        or filter by created_at timestamp.
-
-        Parameters
-        ----------
-        msg_ids : str | list[str]
-            Ignored — kept for API compatibility.
-
-        Returns
-        -------
-        dict
-            Always returns success (no-op)
-        """
-        return {"success": True, "note": "No-op — ACP messages expire via TTL per spec §3.12"}
-
-    def a2a_get_history(
-        self,
-        from_agent: str | None = None,
-        to_agent: str | None = None,
-        msg_type: str | None = None,
-    ) -> list[dict]:
-        """
-        Get A2A message history with optional filters.
-
-        Parameters
-        ----------
-        from_agent : str | None
-            Filter by sender
-        to_agent : str | None
-            Filter by recipient
-        msg_type : str | None
-            Filter by message type
-
-        Returns
-        -------
-        list[dict]
-            List of messages matching filters
-        """
-        if not self.enabled:
-            return []
-
-        params = []
-        if from_agent:
-            params.append(f"from={from_agent}")
-        if to_agent:
-            params.append(f"to={to_agent}")
-        if msg_type:
-            params.append(f"type={msg_type}")
-
-        query = "?" + "&".join(params) if params else ""
-        resp = self._request(f"/api/a2a/history{query}")
-
-        return resp.get("messages", [])
-
-    def a2a_broadcast(
-        self,
-        action: str,
-        payload: dict | None = None,
-        capabilities_filter: list[str] | None = None,
-        exclude_self: bool = True,
-    ) -> list[dict]:
-        """
-        Broadcast a message to all agents (optionally filtered by capability).
-
-        Parameters
-        ----------
-        action : str
-            Action type for the broadcast
-        payload : dict | None
-            Message payload
-        capabilities_filter : list[str] | None
-            Only send to agents with these capabilities
-        exclude_self : bool
-            Exclude this agent from broadcast (default: True)
-
-        Returns
-        -------
-        list[dict]
-            List of send responses for each recipient
-        """
-        agents = self.a2a_get_agents()
-        results = []
-
-        for agent in agents:
-            agent_name = agent.get("name")
-
-            # Skip self
-            if exclude_self and agent_name == self.agent_name:
-                continue
-
-            # Check capability filter
-            if capabilities_filter:
-                agent_caps = set(agent.get("capabilities", []))
-                if not any(cap in agent_caps for cap in capabilities_filter):
-                    continue
-
-            # Send message
-            result = self.a2a_send(
-                to_agent=agent_name,
-                action=action,
-                payload=payload,
-                message_type="notification",
-            )
-            results.append({"agent": agent_name, "result": result})
-
-        self._log(f"A2A: Broadcast {action} to {len(results)} agent(s)")
-        return results
 
     # ------------------------------------------------------------------ #
     #  Batch Context Manager (v1.0.6)                                     #

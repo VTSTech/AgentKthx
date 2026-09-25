@@ -1,4 +1,4 @@
-﻿"""
+"""
 ⚛️ AgentKthx R02 - Skills Loader
 
 Implements the Agent Skills specification for loading SKILL.md files.
@@ -7,7 +7,6 @@ See: https://agentskills.io/
 Written by VTSTech — https://www.vts-tech.org — https://github.com/VTSTech/AgentKthx
 """
 
-import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -228,47 +227,6 @@ class Skill:
         """Get parsed compatibility requirements."""
         return self._compatibility_parsed
     
-    def check_compatibility(
-        self,
-        runtime: str | None = None,
-        python_version: str | None = None,
-    ) -> tuple[bool, List[str]]:
-        """
-        Check if the skill is compatible with the given environment.
-        
-        Args:
-            runtime: Runtime name (e.g., "ollama", "openai")
-            python_version: Python version string (e.g., "3.10")
-            
-        Returns:
-            Tuple of (is_compatible, warnings_list)
-        """
-        warnings = []
-        
-        # Check Python version (zero-dep: tuple comparison on split version strings)
-        py_req = self._compatibility_parsed.get("python")
-        if py_req and python_version:
-            min_ver = py_req.get("min_version", "0")
-            op = py_req.get("operator", ">=")
-            try:
-                py_ver = tuple(int(x) for x in python_version.split(".") if x.isdigit())
-                req_ver = tuple(int(x) for x in min_ver.split(".") if x.isdigit())
-                if op == ">=" and py_ver < req_ver:
-                    warnings.append(f"Python {python_version} < required {min_ver}")
-                elif op == ">" and py_ver <= req_ver:
-                    warnings.append(f"Python {python_version} <= required >{min_ver}")
-            except (ValueError, AttributeError):
-                pass
-        
-        # Check runtime
-        runtimes = self._compatibility_parsed.get("runtimes", [])
-        if runtimes and runtime:
-            runtime_names = [r.get("name", "").lower() for r in runtimes]
-            if runtime.lower() not in runtime_names:
-                warnings.append(f"Runtime '{runtime}' not in required: {runtime_names}")
-        
-        return len(warnings) == 0, warnings
-    
     @property
     def scripts_dir(self) -> Optional[Path]:
         """Path to scripts directory if it exists."""
@@ -286,31 +244,6 @@ class Skill:
         """Path to assets directory if it exists."""
         assets = self.path / "assets"
         return assets if assets.is_dir() else None
-    
-    def get_script(self, script_name: str) -> Optional[Path]:
-        """Get path to a specific script file."""
-        if self.scripts_dir:
-            script = self.scripts_dir / script_name
-            return script if script.exists() else None
-        return None
-    
-    def get_reference(self, ref_name: str) -> Optional[Path]:
-        """Get path to a specific reference file."""
-        if self.references_dir:
-            ref = self.references_dir / ref_name
-            return ref if ref.exists() else None
-        return None
-    
-    def get_asset(self, asset_name: str) -> Optional[Path]:
-        """Get path to a specific asset file."""
-        if self.assets_dir:
-            asset = self.assets_dir / asset_name
-            return asset if asset.exists() else None
-        return None
-    
-    def to_system_prompt(self) -> str:
-        """Convert skill instructions to a system prompt addition."""
-        return f"\n\n---\n## Skill: {self.name}\n\n{self.instructions}"
     
     def __repr__(self) -> str:
         return f"Skill(name={self.name!r}, description={self.description[:50]}...)"
@@ -681,52 +614,6 @@ class SkillRegistry:
                 f"3. Use your available tools (shell, write_file, etc.) to execute the skill's instructions.\n"
             )
         return ""
-    
-    def get_resource_path(self, skill_name: str, resource_type: str, resource_name: str) -> Optional[Path]:
-        """
-        Get path to a specific resource within a skill.
-        
-        Args:
-            skill_name: Name of the skill
-            resource_type: Type of resource ('scripts', 'references', 'assets')
-            resource_name: Name of the resource file
-            
-        Returns:
-            Path to the resource or None if not found
-        """
-        skill = self._skills.get(skill_name)
-        if not skill:
-            return None
-        
-        resource_map = {
-            'scripts': skill.scripts_dir,
-            'references': skill.references_dir,
-            'assets': skill.assets_dir,
-        }
-        
-        resource_dir = resource_map.get(resource_type)
-        if resource_dir:
-            resource_path = resource_dir / resource_name
-            return resource_path if resource_path.exists() else None
-        return None
-    
-    def get_skill_info(self) -> str:
-        """Get a formatted string with all skill information for the agent."""
-        if not self._skills:
-            return "No active skills."
-        
-        lines = ["Active Skills:"]
-        for name, skill in self._skills.items():
-            lines.append(f"  - {name}: {skill.description}")
-            if skill.scripts_dir:
-                scripts = list(skill.scripts_dir.glob("*.py"))
-                if scripts:
-                    lines.append(f"    Scripts: {', '.join(s.name for s in scripts)}")
-            if skill.references_dir:
-                refs = list(skill.references_dir.glob("*.md"))
-                if refs:
-                    lines.append(f"    References: {', '.join(r.name for r in refs)}")
-        return "\n".join(lines)
     
     def __len__(self) -> int:
         return len(self._skills)

@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Pure-reorganization release executing `docs/R07.00-MODULARIZATION-PLAN.md`: `agent.py` (3466 lines) and `cli.py` (4270 lines) decomposed into focused modules with **zero behavioral changes** — every commit shipped with the full suite green (933 tests at baseline, 971 at completion). Closes audit findings MAINT-01 (cli.py monolith) and MAINT-04 (dual agentic loop).
 
+Dead-code cleanup + the first R07.00-flagged bug fix. Every removal below was verified as having **zero callers repo-wide** (source, tests, docs, scripts — including string-literal references for dynamic-dispatch patterns) before deletion; the full 972-test suite ran green after every batch. Net: **−1,609 lines deleted, +163 added** (new tests + inline docs), across 34 files.
+
+### Bug Fixes
+
+- **`run_stream()` Ctrl+C-during-tool-exec NameError (PROGRESS-R07.00 flagged quirk #1)** — the KeyboardInterrupt path in `core/streaming.py` referenced the undefined `ResponseStateEvent` (survived verbatim from the original `agent.py:1499` through the R07.00 Phase 6 move). Ctrl+C while a tool executed in streaming mode raised `NameError` instead of emitting the cancellation event. Now constructs `ResponseEvent(type=EventType.RESPONSE_FAILED, ...)`, matching the fail_event pattern used by every other failure path. Regression test added (`test_streaming_subsystem.py::test_run_stream_keyboardinterrupt_during_tool_yields_response_failed` — verified to fail on the old code).
+
 ### Architecture
 
 - **Phase 5 — unified agentic loop, `core/agentic_loop.py` (the MAINT-04 flagship)** — the near-identical `_run_core` (~571 lines) and `_run_core_streaming` (~464 lines) loop bodies are replaced by ONE loop: `_run_loop_iteration()` with `_execute_single_tool_call()` and `_process_tool_result()`. Per-path differences are now explicit and data-driven via the new `LoopCallbacks` dataclass — four streaming-only hooks (`on_step_start`: preventive compaction; `on_generated`: token snapshot + footer refresh; `on_tool_executed`: the R06.55 inline `[N] tool` print; `on_tool_result_committed`: the R06.58 between-calls compaction) plus two behavioral toggles preserved exactly as before (`include_format_hint` T/F, `mark_response_completed` T/F — streaming never marked the Response COMPLETED; preserved, documented, and test-asserted). `_run_core`/`_run_core_streaming` are now thin wrappers. Debug output is unified to the non-streaming superset, closing the 29-check debug divergence MAINT-04 had tracked since R04.
@@ -30,12 +36,36 @@ Pure-reorganization release executing `docs/R07.00-MODULARIZATION-PLAN.md`: `age
 - **`docs/R07.00-MODULARIZATION-PLAN.md`** — status flipped Draft → Executed.
 - **`PROGRESS-R07.00.md`** — finalized to reflect all 6 phases complete (was a mid-flight snapshot that predated Phase 8).
 
+### Removed — dead modules
+
+- **`core/math_prompts.py` deleted (383 lines)** — the entire module had zero imports repo-wide. The live calculator tool is `tools/builtins.py`'s registered `calculator`; the GSM8K/benchmark examples each carry their own local `extract_number` copies. `docs/ARCH.md` tree updated.
+
+### Removed — dead functions & methods (zero callers, zero tests, zero live-doc references)
+
+- **ACP plugin: 20 methods (−455 lines)** — `_request_with_retry`, `a2a_broadcast`, `a2a_get_history`, `a2a_get_inbox`, `a2a_heartbeat`, `a2a_get_agent`, `a2a_get_agents`, `a2a_acknowledge`, `a2a_clear`, `toggle_todo`, `get_todos`, `clear_completed_todos`, `is_shutdown_nudge`, `get_duration_stats`, `add_note`, `check_budget`, `get_agent_tokens`, `log_user_message`, `get_context_id`, `get_agent_card`. Runtime only ever uses `bootstrap`, `log_chat`, `log_assistant_message`, `a2a_register`/`a2a_unregister`, `_log`, `shutdown`. The `_BatchContext` activity API (`add_read`/`add_write`/`add_edit`/`add_bash`/`add_search`/`add_api`) is **kept** — it's documented public API (ARCH Batch Context Manager).
+- **`core/tool_parse.py`: 5 legacy helpers (−198 lines)** — `_fuzzy_match_tool_name` (100 lines; superseded by the live `tools/registry.py get_fuzzy()` + `core/helpers.py fuzzy_match()` pair), `_looks_like_tool_schema`, `_looks_like_tool_schema_dump`, `_extract_python_code`, `has_tool_call`.
+- **`agent_mode.py`: 7 methods (−94 lines)** — `Plan.advance()` (orphaned by the R06.58 fix, which syncs `current_step_index` directly in `_execute_step`; the explanatory comment was updated), `get_rollback_point`, `queue_message`, `process_queue`, `get_progress`, `get_plan`, `get_logs`.
+- **`skills/loader.py`: 7 methods (−105 lines)** — `Skill.check_compatibility`, `get_script`, `get_reference`, `get_asset`, `to_system_prompt` (the live path is `SkillRegistry.to_system_prompt_addition()`), `SkillRegistry.get_resource_path`, `get_skill_info`.
+- **Backends (−70 lines)** — `BaseBackend.count_tokens`, `BackendConfig.retry_delay` (never-read field), `OllamaBackend.get_model_context_size` + `pull_model`, `OpenAICompatibleBackend.get_model_context_size`, `OllamaModel.turbo_compatible`/`turbo_note` properties.
+- **`config.py` (−29 lines)** — `set_config`, `Config.ollama_host`/`ollama_port` properties, `Config.from_file`, and the three never-read mirror fields `llama_server_base_url`/`bitnet_base_url`/`zai_base_url` (plugins read the env constants directly).
+- **Smaller removals** — `orchestrator.print_summary`/`list_agents` (ARCH example updated), `shared_args.SharedConfig.model_options`, `core/openresponses.Response.get_final_answer`, `core/tool_cache.clear_tool_cache`/`list_cached_models`/`get_cache_age` (ARCH Cache API section updated), `core/helpers.truncate`/`strip_code_blocks`, `core/memory.get_recent`, `core/model_config.list_supported_families`, `core/model_family_config.get_stop_sequences`, `core/error_recovery.should_suggest_alternative` + the write-only `last_success_tool` attribute (`total_failures` stays — test-asserted), `soul/loader.clear_soul_cache`/`get_allowed_tools`/`get_required_skills`/`get_optional_skills` (ARCH cache section now documents `load_soul(reload=True)`), `soul/types.is_compatible_with`, `plugins/_loader.get_all_cli_flag_choices`, `agent._log_openresponses`.
+- **Kept intentionally (documented/spec API, not dead weight):** `PluginManager.unregister_hook`/`list_plugins` and the PLUGIN_SPEC-documented tool/hook API; `Agent.create_response`/`add_tool`/`get_response` (frozen public API — now test-covered, see below); the `cli/utils.py` facade-contract trio `_load_tool_cache`/`_save_tool_cache`/`_get_cloud_model_size` (existence asserted by `test_cli_package_split.py`).
+
+### Removed — dead parameters, attributes, fields
+
+- `_execute_tool(user_prompt=...)` — parameter was passed by both callers but never read by the body; removed from signature + both call sites (`agentic_loop.py`, `streaming.py`).
+- `should_use_few_shot(model_size_hint=...)` — accepted, never used.
+- `FamilyConfig`: 10 never-read dataclass fields (`tool_call_start`, `tool_call_end`, `system_prompt_style`, `reasoning_hints`, `supports_streaming`, `supports_vision`, `think_tag`, `strip_think_tags`, `needs_empty_system`, `model_size_hint`) + their construction-site kwargs in every family definition.
+- `AgentSetupMixin`: write-only `self._kwargs` and `self._soul_level` initializations.
+
+### Removed — unused imports (16)
+
+`agent.py` (5 × openresponses), `agent_mode.py` (`json`, `shutil`, `green`, `yellow`, `cyan`), `orchestrator.py` (`Any`, `Optional`), `model_discovery.py` (`DEFAULT_MODEL`), `config.py` (`Optional`), `skills/loader.py` (`os`). `pyflakes` is now clean on the package (excluding bundled skill assets).
+
 ### Tests
 
-- 971 passed, 9 skipped, 0 failed (was 933; +38 new)
-- New: `tests/test_compaction_subsystem.py` (5), `tests/test_agent_setup_subsystem.py` (5), `tests/test_tool_execution_subsystem.py` (5), `tests/test_streaming_subsystem.py` (5), `tests/test_agentic_loop_subsystem.py` (12), `tests/test_cli_package_split.py` (6: facade completeness/identity, module importability, source contract, end-to-end monkeypatch-through-facade on `cmd_run`, `python -m agentkthx.cli` subprocess)
-- Retargeted with intent preserved (guard against helper bypass): 12 source-inspection tests moved to the new module locations across `test_generate_with_retry.py`, `test_handle_finish_reason.py`, `test_maint04_phase3_helpers.py`, `test_maint04_phase4_helpers.py`
-- Smoke-tested from a clean VM install: `pip install -e`, `chat -h`, model listing, and streaming chat with the zai backend all confirmed working.
+- 976 passed, 9 skipped, 0 failed (was 971; +5: 1 streaming Ctrl+C regression test, 4 `Agent.create_response`/`get_response`/`add_tool` smoke tests in new `tests/test_agent_openresponses_api.py` — the frozen public OpenResponses API previously had zero coverage)
+- The cleanup was executed in 6 batches, full suite green after each: (1) core function deletions, (2) backends/config/orchestrator, (3) ACP, (4) stragglers found by re-running the dead-code cross-referencer post-deletion (`pull_model`, `a2a_get_agents`, skills/loader getters), (5) imports/fields/params, (6) docs + version bump.
 
 ## [R06.58] - 2026-09-25 11:07:05 AM
 

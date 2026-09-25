@@ -495,20 +495,6 @@ class Response:
         if _should_show_openresponses_debug(debug):
             print(f"[OpenResponses.Response] Output item added: id={item.id}, type={item.type}")
     
-    def get_final_answer(self) -> str | None:
-        """
-        Extract the final answer from output items.
-        
-        Returns the text content of the last message item with role 'assistant'.
-        """
-        for item in reversed(self.output):
-            if isinstance(item, MessageItem) and item.role == "assistant":
-                for content in item.content:
-                    if isinstance(content, OutputText) and content.text:
-                        return content.text
-        return None
-
-
 # ============================================================================
 # Streaming Events
 # ============================================================================

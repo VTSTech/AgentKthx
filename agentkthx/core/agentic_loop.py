@@ -564,7 +564,7 @@ class AgenticLoopMixin:
             print(f"  [OpenResponses] FunctionCallItem status: {fc_item.status.value}")
 
         try:
-            result = self._execute_tool(tool_name, tool_args, prompt)
+            result = self._execute_tool(tool_name, tool_args)
         except KeyboardInterrupt:
             fc_item.status = ItemStatus.FAILED
             response.mark_cancelled(debug=self.debug)

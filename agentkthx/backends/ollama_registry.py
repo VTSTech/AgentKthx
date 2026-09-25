@@ -56,24 +56,6 @@ class OllamaModel:
     context_length: int = 0 # max context window from model metadata
 
     @property
-    def turbo_compatible(self) -> bool:
-        """Check if this model's head_dim is compatible with TurboQuant.
-
-        TurboQuant requires head_dim >= TURBO_D (128) for KV cache block
-        alignment. Models with head_dim < 128 will crash the server.
-        """
-        return self.head_dim >= _TURBO_D
-
-    @property
-    def turbo_note(self) -> str:
-        """Human-readable note about turbo compatibility."""
-        if self.head_dim == 0:
-            return "head_dim unknown"
-        if self.head_dim < _TURBO_D:
-            return f"head_dim={self.head_dim} < {_TURBO_D} (incompatible)"
-        return f"head_dim={self.head_dim}"
-
-    @property
     def size_human(self) -> str:
         """Return human-readable size string."""
         if self.size_bytes < 1024:

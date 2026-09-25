@@ -37,11 +37,9 @@ from .core.api_resilience import (
 from .core.openresponses import (
     Response, ResponseStatus, ItemStatus,
     ToolChoiceType,
-    MessageItem, FunctionCallItem, FunctionCallOutputItem, ReasoningItem,
+    ReasoningItem,
     OutputText,
-    Error,
     create_message_item,
-    create_function_call_output_item,
 )
 from .core.compaction import CompactionMixin
 from .core.agent_setup import AgentSetupMixin
@@ -98,11 +96,6 @@ class Agent(AgentSetupMixin, CompactionMixin, ToolExecutionMixin, StreamingMixin
         # Force specific tool
         agent = Agent(model="llama3", tools=["calculator"], tool_choice=ToolChoice.specific("calculator"))
     """
-
-    def _log_openresponses(self, msg: str) -> None:
-        """Log OpenResponses debug message only when not in comp mode."""
-        if self.debug and not self._is_comp_mode:
-            print(msg)
 
     def run(self, prompt: str, stream: bool = False) -> AgentRun:
         """

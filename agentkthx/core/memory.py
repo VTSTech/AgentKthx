@@ -208,11 +208,6 @@ class Memory:
 
         self._messages = final
 
-    def get_recent(self, n: int = 5) -> list[dict]:
-        """Get the n most recent messages."""
-        messages = self.get_messages()
-        return messages[-n:] if len(messages) > n else messages
-
     def clear(self) -> None:
         """Clear all messages (except system prompt if configured)."""
         if self.config.keep_system and self._system_prompt:

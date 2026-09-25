@@ -30,7 +30,7 @@ class ToolExecutionMixin:
     Agent class simply inherits the method now.
     """
 
-    def _execute_tool(self, name: str, args: dict, user_prompt: str = "") -> Any:
+    def _execute_tool(self, name: str, args: dict) -> Any:
         """
         Execute a tool by name with arguments.
 

@@ -59,20 +59,6 @@ class SharedConfig:
             if self.num_predict is None:
                 self.num_predict = 256
 
-    @property
-    def model_options(self) -> dict:
-        """Get model options dict for Agent constructor."""
-        opts = {}
-        if self.num_ctx is not None:
-            opts["num_ctx"] = self.num_ctx
-        if self.num_predict is not None:
-            opts["num_predict"] = self.num_predict
-        if self.temperature is not None:
-            opts["temperature"] = self.temperature
-        if self.top_p is not None:
-            opts["top_p"] = self.top_p
-        return opts
-
 
 def add_shared_args(parser: argparse.ArgumentParser) -> None:
     """Add shared arguments to an argument parser.

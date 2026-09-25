@@ -1135,10 +1135,6 @@ class PluginManager:
         plugin_values = self._cli_flag_values.get("--backend", [])
         return core + [v for v in plugin_values if v not in core]
 
-    def get_all_cli_flag_choices(self, flag: str) -> list[str]:
-        """Merged choices for any CLI flag."""
-        return self._cli_flag_values.get(flag, [])
-
     # ------------------------------------------------------------------ #
     #  Tools (spec §Tools)                                                #
     # ------------------------------------------------------------------ #

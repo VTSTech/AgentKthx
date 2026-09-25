@@ -492,19 +492,6 @@ class SoulLoader:
         
         return "\n".join(parts)
     
-    def get_allowed_tools(self, manifest: SoulManifest) -> list[str]:
-        """Get the list of allowed tools for this soul."""
-        return manifest.allowed_tools
-    
-    def get_required_skills(self, manifest: SoulManifest) -> list[str]:
-        """Get the list of required skill names."""
-        return [s.name for s in manifest.recommended_skills if s.required]
-    
-    def get_optional_skills(self, manifest: SoulManifest) -> list[str]:
-        """Get the list of optional skill names."""
-        return [s.name for s in manifest.recommended_skills if not s.required]
-
-
 # Singleton instance for convenience
 _default_loader: Optional[SoulLoader] = None
 
@@ -522,13 +509,6 @@ def get_soul_loader(strict: bool = False, clear_cache: bool = False) -> SoulLoad
     if clear_cache:
         _default_loader._cache.clear()
     return _default_loader
-
-
-def clear_soul_cache() -> None:
-    """Clear the soul loader cache. Call this after modifying soul files."""
-    global _default_loader
-    if _default_loader is not None:
-        _default_loader._cache.clear()
 
 
 def load_soul(path: Union[str, Path], level: int = 2, reload: bool = False) -> SoulManifest:
