@@ -197,12 +197,27 @@ class LlamaServerBackend(OllamaBackend):
 
             models = []
             for m in result.get("data", []):
+                # R06.57: llama-server's /v1/models returns a "meta" field with
+                # n_ctx (runtime context), n_ctx_train (model max), n_params,
+                # size, n_vocab, n_embd, ftype. Extract these so the
+                # num_ctx/32 cap uses the actual server-configured context.
+                meta = m.get("meta", {})
+                n_ctx = meta.get("n_ctx", 0)
+                n_ctx_train = meta.get("n_ctx_train", 0)
+                n_params = meta.get("n_params", 0)
+                size = meta.get("size", 0)
                 models.append({
                     "name": m.get("id", "unknown"),
-                    "size": 0,
+                    "size": size,
                     "details": {
                         "family": "llama-server",
                         "backend": "llama-cpp",
+                        # Store the meta fields for get_model_runtime_context
+                        # and get_model_max_context to pick up.
+                        "n_ctx": n_ctx,
+                        "n_ctx_train": n_ctx_train,
+                        "n_params": n_params,
+                        "size": size,
                     },
                 })
 
@@ -888,17 +903,28 @@ class LlamaServerBackend(OllamaBackend):
             return ToolSupportLevel.REACT
 
     # ─────────────────────────────────────────────────────────────────────
-    # Context size — llama-server doesn't expose this via API
+    # Context size — query the running llama-server via /v1/models meta
     # ─────────────────────────────────────────────────────────────────────
 
     def get_model_runtime_context(self, model: str) -> int:
-        """
-        Get the runtime context window size.
+        """Get the runtime context window size (what the server was started with).
 
-        llama-server doesn't expose num_ctx via API. Returns the configured
-        context or falls back to 4096 (typical llama.cpp default).
+        R06.57: Queries ``GET /v1/models`` and reads ``meta.n_ctx`` — this is
+        the ``-c`` / ``--ctx-size`` value the server was started with. Falls
+        back to the ``NUM_CTX`` env var, then 4096 (llama.cpp default).
+
+        For TurboQuant, this picks up the ``--ctx`` flag from
+        ``agentkthx turbo start --ctx 8192`` automatically — no env var needed.
         """
-        # Check if user set num_ctx via env var
+        # Try the server's /v1/models meta.n_ctx first
+        info = self.get_model_info(model)
+        if info:
+            details = info.get("details", {})
+            n_ctx = details.get("n_ctx", 0)
+            if n_ctx and n_ctx > 0:
+                return n_ctx
+
+        # Fallback: NUM_CTX env var (set by --num-ctx CLI flag or user)
         from ..config import NUM_CTX
         if NUM_CTX and NUM_CTX > 0:
             return NUM_CTX
@@ -906,12 +932,21 @@ class LlamaServerBackend(OllamaBackend):
         return 4096
 
     def get_model_max_context(self, model: str, family: str | None = None) -> int:
-        """
-        Get the model's maximum trained context window size.
+        """Get the model's maximum trained context window size.
 
-        llama-server doesn't expose model metadata. Uses family heuristics
-        from OllamaBackend if a family hint is available, otherwise 4096.
+        R06.57: Queries ``GET /v1/models`` and reads ``meta.n_ctx_train`` —
+        this is the context length the model was trained on (e.g. 262144 for
+        qwen3.5). Falls back to family heuristics, then 4096.
         """
+        # Try the server's /v1/models meta.n_ctx_train first
+        info = self.get_model_info(model)
+        if info:
+            details = info.get("details", {})
+            n_ctx_train = details.get("n_ctx_train", 0)
+            if n_ctx_train and n_ctx_train > 0:
+                return n_ctx_train
+
+        # Fallback: family-based lookup
         if family:
             ctx = self.get_context_by_family(family)
             if ctx:

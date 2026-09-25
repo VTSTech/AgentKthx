@@ -1379,10 +1379,36 @@ class OllamaBackend(OpenAICompatibleBackend):
         from ..core.model_family_config import get_family_defaults
         defaults = get_family_defaults(family)
         max_tokens = defaults.get("max_tokens", 2048)
-        # Resolve context_length: try get_model_max_context (queries Ollama API
-        # for the actual context_length), fall back to family default or 4096.
+        # R06.57: Use the RUNTIME context (what the server actually enforces),
+        # NOT the model's theoretical max. For Ollama, this is the num_ctx from
+        # the Modelfile (defaults to 2048). For llama-server/TurboQuant, this
+        # is what was passed as --ctx-size when starting the server (defaults
+        # to 4096, or TURBOQUANT_CTX for TurboQuant).
+        #
+        # Using the model's max (e.g. 262144 for qwen3.5) would cap max_tokens
+        # to 262144//32 = 8192, which equals the entire runtime context if the
+        # server was started with -c 8192 — leaving zero room for input.
+        # Using the runtime context (e.g. 8192) correctly caps to 8192//32 = 256.
         try:
-            context_length = self.get_model_max_context(model, family=family)
+            # Try runtime context first (queries Ollama /api/show for num_ctx,
+            # or checks NUM_CTX env var for llama-server)
+            if hasattr(self, 'get_model_runtime_context'):
+                context_length = self.get_model_runtime_context(model)
+                # If runtime context is the Ollama default (2048), try the
+                # max context as a fallback — the model might support more
+                # and the user may have set num_ctx via --num-ctx CLI flag
+                # (which doesn't show up in the Modelfile).
+                if context_length <= 2048:
+                    max_ctx = self.get_model_max_context(model, family=family)
+                    if max_ctx and max_ctx > 2048:
+                        # Use the smaller of: the CLI --num-ctx, or the model max
+                        from ..config import NUM_CTX
+                        if NUM_CTX and NUM_CTX > 0:
+                            context_length = min(NUM_CTX, max_ctx)
+                        else:
+                            context_length = max_ctx
+            else:
+                context_length = self.get_model_max_context(model, family=family)
             if not context_length or context_length < 1024:
                 context_length = 4096
         except Exception:
