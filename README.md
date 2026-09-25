@@ -1,4 +1,4 @@
-# ⚛️ AgentKthx R07.00
+# ⚛️ AgentKthx R07.01
 
 **Status: Alpha**
 

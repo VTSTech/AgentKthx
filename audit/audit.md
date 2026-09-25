@@ -4,9 +4,9 @@
 
 **Repository:** https://github.com/VTSTech/AgentKthx
 **Author:** VTSTech | **License:** MIT | **Date:** 2026-09-26
-**Status:** 11 Open Findings | 7 Categories | SEC, ROB, MAINT, PERF, FEAT, ARCH, TEST
+**Status:** 10 Open Findings (1 fixed in tree, unreleased) | 7 Categories | SEC, ROB, MAINT, PERF, FEAT, ARCH, TEST
 
-> **R07.00 delta (2026-09-26):** The two highest-severity structural findings are now **closed**. **MAINT-01** (High): the 4,079-line `cli.py` monolith is now a 23-file `agentkthx/cli/` package (largest file 310 lines) behind an import-compatible facade in `cli/__init__.py`. **MAINT-04** (Medium): the 3,119-line `agent.py` god-class is now a 51-line five-mixin composition (`AgentSetupMixin, CompactionMixin, ToolExecutionMixin, StreamingMixin, AgenticLoopMixin`) in `agentkthx/agent.py`. **PERF-03** (Low): the dead `think` parameter is gone — `_generate_stream()` takes no arguments and think-resolution precedence (explicit flag > model-family no-think directive) is explicit at `core/streaming.py:428-432`. New finding **ROB-08** was found and fixed within the cycle: `core/streaming.py:280` referenced `ResponseStateEvent` without importing it, so a KeyboardInterrupt during tool execution in streaming raised `NameError` instead of emitting the clean `RESPONSE_FAILED` SSE event — fixed with a regression test that reproduces the original failure. The R07.00 dead-code sweep removed ~1,292 verified zero-caller lines (whole `core/math_prompts.py`, 24 ACP plugin methods, legacy `tool_parse.py` helpers, dead params/fields) while deliberately preserving frozen public API (now smoke-tested). The update-check cache was **removed by design** (always-live results; `version --refresh` retired) — this supersedes R06.57's FIX-02. Test suite grew 822 → **963 passed / 9 skipped**. Version published to PyPI as `0.7.0` (PEP 440 normalization of 0.7.00). New findings this cycle: ROB-07, MAINT-06, MAINT-07, MAINT-08, MAINT-09, TEST-02.
+> **R07.00 delta (2026-09-26):** The two highest-severity structural findings are now **closed**. **MAINT-01** (High): the 4,079-line `cli.py` monolith is now a 23-file `agentkthx/cli/` package (largest file 310 lines) behind an import-compatible facade in `cli/__init__.py`. **MAINT-04** (Medium): the 3,119-line `agent.py` god-class is now a 51-line five-mixin composition (`AgentSetupMixin, CompactionMixin, ToolExecutionMixin, StreamingMixin, AgenticLoopMixin`) in `agentkthx/agent.py`. **PERF-03** (Low): the dead `think` parameter is gone — `_generate_stream()` takes no arguments and think-resolution precedence (explicit flag > model-family no-think directive) is explicit at `core/streaming.py:428-432`. New finding **ROB-08** was found and fixed within the cycle: `core/streaming.py:280` referenced `ResponseStateEvent` without importing it, so a KeyboardInterrupt during tool execution in streaming raised `NameError` instead of emitting the clean `RESPONSE_FAILED` SSE event — fixed with a regression test that reproduces the original failure. The R07.00 dead-code sweep removed ~1,292 verified zero-caller lines (whole `core/math_prompts.py`, 24 ACP plugin methods, legacy `tool_parse.py` helpers, dead params/fields) while deliberately preserving frozen public API (now smoke-tested). The update-check cache was **removed by design** (always-live results; `version --refresh` retired) — this supersedes R06.57's FIX-02. Test suite grew 822 → **963 passed / 9 skipped**. Version published to PyPI as `0.7.0` (PEP 440 normalization of 0.7.00). New findings this cycle: ROB-07, MAINT-06, MAINT-07, MAINT-08, MAINT-09, TEST-02. ROB-07 was subsequently fixed in the working tree (R07.01, unreleased) — see its entry below.
 
 ---
 
@@ -37,7 +37,7 @@ This audit covers AgentKthx at commit `acf1d72` (v0.7.00, published to PyPI as 0
 
 | ID | Severity | Category | Status | Title |
 |----|----------|----------|--------|-------|
-| ROB-07 | **Medium** | Robustness | OPEN | `_get_git_short_hash()` attaches unrelated parent-repo hash to version string |
+| ~~ROB-07~~ | ~~Medium~~ | Robustness | ✓ FIXED R07.01 (in tree) | `_get_git_short_hash()` attaches unrelated parent-repo hash to version string |
 | TEST-02 | **Medium** | Testing | OPEN | No CI — 963-test suite runs only on maintainer machines |
 | TEST-01 | Medium | Testing | OPEN | No integration tests — all tests are mocked unit tests |
 | FEAT-01 | Medium | New Features | OPEN | No provider routing preferences for OpenRouter |
@@ -65,15 +65,15 @@ No findings in this category this cycle. This pass focused on architecture, main
 
 ### Robustness
 
-#### ROB-07: `_get_git_short_hash()` attaches unrelated parent-repo hash to version string
+#### ~~ROB-07: `_get_git_short_hash()` attaches unrelated parent-repo hash to version string~~ ✓ FIXED R07.01 (in tree)
 
 | Property | Value |
 |----------|-------|
-| **Severity** | Medium |
+| **Severity** | Medium (at time of fix) |
 | **Category** | Robustness |
-| **File(s)** | `agentkthx/__init__.py:39-77` |
+| **File(s)** | `agentkthx/__init__.py`, `setup.py` (new) |
 
-The version helper walks up to five parent directories looking for a `.git` folder, then runs `git rev-parse --short HEAD` and appends the result to `__version__`. When the package is executed from a location nested inside an *unrelated* git repository, it picks up that repository's hash. This was observed in practice during this audit cycle: a pip `--target` install executed under a different repository's tree reported itself as `R07.00-db152d9`, where `db152d9` belongs to the parent directory's repo, not AgentKthx. The consequence is corrupted version information in bug reports — the exact string maintainers ask users to paste — and it cannot be reproduced or resolved by the maintainer. The walk-up exists to serve source checkouts (running from a cloned repo should show the commit), so the fix is to constrain the attribution: only trust a discovered `.git` if the same directory contains the project's own `pyproject.toml` (or verify the repo's remote URL matches the project origin), otherwise return the plain version. The five-level blind walk should be removed.
+The version helper walks up to five parent directories looking for a `.git` folder, then runs `git rev-parse --short HEAD` and appends the result to `__version__`. When the package is executed from a location nested inside an *unrelated* git repository, it picks up that repository's hash. This was observed in practice during this audit cycle: a pip `--target` install executed under a different repository's tree reported itself as `R07.00-db152d9`, where `db152d9` belongs to the parent directory's repo, not AgentKthx. The consequence is corrupted version information in bug reports — the exact string maintainers ask users to paste — and it cannot be reproduced or resolved by the maintainer. The walk-up exists to serve source checkouts (running from a cloned repo should show the commit), so the fix constrains attribution. **Fixed in the working tree (R07.01, unreleased):** the resolver now (1) verifies `remote.origin.url` points at `VTSTech/AgentKthx` (https or ssh) before trusting any discovered `.git`, (2) caps the walk-up at 2 parents, (3) marks dirty trees via `git describe --always --dirty` (`acf1d72-dirty` = "not exactly what is on GitHub"), and (4) falls back to `SOURCE_COMMIT` baked into every wheel/sdist by new `setup.py` build hooks — so PyPI installs and `pip install git+https://…` installs report the exact commit they were built from (pip's temporary clone is discarded after the wheel is built; baking is the only way the hash survives). Verified empirically: a wheel installed inside a foreign git repo (`78b0377`) reports its baked commit `acf1d72`; a wheel built from an sdist (no `.git` present) preserves the baked value instead of clobbering it with None. 17 regression tests in `tests/test_git_meta.py`.
 
 **Impact:** Bug reports stop containing plausible-but-wrong commit hashes, making user-reported issues actually actionable.
 
@@ -241,7 +241,7 @@ New finding this cycle: the repository has no CI configuration at all — `.gith
 
 | Timeline | Findings |
 |----------|----------|
-| **Near term (R07.0x)** | TEST-02 (stand up GitHub Actions — 10-line YAML, suite already exists), ROB-07 (constrain git-hash attribution to repos containing the project's own pyproject.toml), MAINT-06 (strip 15 BOMs + guard in skill-creator), MAINT-07 (one-line PEP 639 license migration) |
+| **Near term (R07.0x)** | TEST-02 (stand up GitHub Actions — 10-line YAML, suite already exists), ~~ROB-07~~ (fixed in tree, R07.01), MAINT-06 (strip 15 BOMs + guard in skill-creator), MAINT-07 (one-line PEP 639 license migration) |
 | **Short term (R07.1x – R08.0)** | TEST-01 (record/replay integration tier for backend streaming), FEAT-03 (Gemini thought-signature continuation — largest token-cost gap), FEAT-01 (OpenRouter routing preferences), ARCH-02 (coverage baseline, rides on CI) |
 | **Medium term (R08.x+)** | FEAT-02 (self-reporting parameter support), MAINT-08 (README FAQ note on 0.7.00/0.7.0), MAINT-09 (annotate or absorb test-only PluginManager API) |
 

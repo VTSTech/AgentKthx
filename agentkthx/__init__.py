@@ -1,5 +1,5 @@
 """
-⚛️ AgentKthx R07.00
+⚛️ AgentKthx R07.01
 A minimal, hackable agentic framework engineered for local inference.
 
 Features:
@@ -31,36 +31,51 @@ Example Usage:
     agent = Agent(model="qwen2.5:0.5b", soul="/path/to/soul/package")
 """
 
-__version__ = "0.7.00"  # R07.00
+__version__ = "0.7.01"  # R07.01
 __author__ = "VTSTech"
 __status__ = "Alpha"
 
 
 def _get_git_short_hash() -> str:
     """
-    Get the short git commit hash of the repository.
-    
-    Works when running from source (has .git directory).
-    Returns empty string when installed via pip or git is unavailable.
+    Resolve the source commit for the version suffix, most-accurate first.
+
+    1. Live verified git checkout (``pip install -e .`` / running from a
+       clone). A discovered ``.git`` is only trusted when its
+       ``remote.origin.url`` points at VTSTech/AgentKthx — otherwise a
+       pip-installed package that merely sits inside the *user's* repo would
+       report that repo's hash. Dirty trees are marked: ``acf1d72-dirty``.
+    2. ``agentkthx._git_meta.SOURCE_COMMIT`` — the commit baked in at build
+       time by setup.py (covers PyPI wheels and ``pip install git+https://…``
+       where pip's temporary clone is discarded after the wheel is built).
+    3. ``""`` — plain version, no suffix.
     """
+    import os
     import subprocess
+
+    def _run(cmd: list) -> subprocess.CompletedProcess:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+
+    # --- 1. live verified checkout -------------------------------------
     try:
-        # Try to find the repo root from this file's location
-        # Walk up from agentkthx/ looking for .git
-        import os
         check_dir = os.path.dirname(os.path.abspath(__file__))
-        for _ in range(5):  # don't walk up more than 5 levels
-            if os.path.isdir(os.path.join(check_dir, ".git")):
-                # We're inside a git repo — get the short hash
-                result = subprocess.run(
-                    ["git", "rev-parse", "--short", "HEAD"],
-                    cwd=check_dir,
-                    capture_output=True,
-                    text=True,
-                    timeout=5,
+        for _ in range(3):  # package dir + 2 parents — never farther
+            git_path = os.path.join(check_dir, ".git")
+            if os.path.exists(git_path):  # dir, or a file (worktree/submodule)
+                # Attribution guard: only trust OUR repository.
+                origin = _run(
+                    ["git", "-C", check_dir, "remote", "get-url", "origin"]
                 )
-                if result.returncode == 0:
-                    return result.stdout.strip()
+                url = origin.stdout.strip().lower() if origin.returncode == 0 else ""
+                if "vtstech/agentkthx" in url:
+                    desc = _run(
+                        ["git", "-C", check_dir, "describe", "--always",
+                         "--dirty", "--abbrev=7"]
+                    )
+                    if desc.returncode == 0 and desc.stdout.strip():
+                        return desc.stdout.strip()
+                # .git exists but it is not our repo (or describe failed):
+                # stop — do not keep walking into random parent repos.
                 break
             parent = os.path.dirname(check_dir)
             if parent == check_dir:
@@ -68,6 +83,15 @@ def _get_git_short_hash() -> str:
             check_dir = parent
     except Exception:
         pass
+
+    # --- 2. commit baked at build time (PyPI / git+https wheels) --------
+    try:
+        from . import _git_meta
+        if _git_meta.SOURCE_COMMIT:
+            return _git_meta.SOURCE_COMMIT
+    except ImportError:
+        pass
+
     return ""
 
 

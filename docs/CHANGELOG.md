@@ -5,6 +5,12 @@ All notable changes to AgentKthx will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [R07.01] - unreleased
+
+### Bug Fixes
+
+- **Version git-suffix no longer misattributes foreign repositories (audit ROB-07)** — `_get_git_short_hash()` walked up to 5 parent directories looking for *any* `.git`, so a pip-installed AgentKthx that merely sat inside the *user's* project repo reported that repo's hash in its version string (observed in the wild: `0.7.00-db152d9`). Resolution order is now: (1) **live verified checkout** — a discovered `.git` is trusted only when `remote.origin.url` points at `VTSTech/AgentKthx` (https or ssh), the walk-up is capped at 2 parents, and dirty trees are explicitly marked via `git describe --always --dirty` (`0.7.00-acf1d72-dirty` means "not exactly what's on GitHub"); (2) **commit baked at build time** — new `setup.py` build hooks write `agentkthx/_git_meta.py` (`SOURCE_COMMIT = "<sha>"`) into every wheel and sdist, so PyPI installs and `pip install git+https://…` installs report the exact commit they were built from (pip's temporary clone is discarded after the wheel is built — baking is the only way the hash survives); (3) plain version. The generated file is auto-removed from the working tree after sdist builds and is .gitignored. Side benefit: typical pip installs now resolve the suffix with zero subprocess calls. 17 new tests in `tests/test_git_meta.py`; suite 963 → **980 passed / 9 skipped**.
+
 ## [R07.00] - 2026-09-25 12:05:00 PM
 
 Pure-reorganization release executing `docs/R07.00-MODULARIZATION-PLAN.md`: `agent.py` (3466 lines) and `cli.py` (4270 lines) decomposed into focused modules with **zero behavioral changes** — every commit shipped with the full suite green (933 tests at baseline, 971 at completion). Closes audit findings MAINT-01 (cli.py monolith) and MAINT-04 (dual agentic loop).
