@@ -980,6 +980,208 @@ Final Answer: <the answer>
                 return step.content or ""
         return ""
 
+    # ── MAINT-04 Phase 4a: shared Final Answer enforcement ─────────────
+    # The "if _expecting_final_answer and _last_successful_result is not
+    # None" block was duplicated 4× (2× per method). Each instance did
+    # the same thing: force final_answer = _last_successful_result,
+    # create a message item, append a FINAL_ANSWER StepResult, then
+    # finalize the run. Extracting eliminates ~56 lines and ensures
+    # all 4 exit paths produce identical output items + step records.
+
+    def _enforce_final_answer(
+        self,
+        _last_successful_result: str,
+        tokens: int,
+        reasoning_content: str,
+        steps: list,
+        total_tokens: int,
+        start_time: float,
+        tool_calls: int,
+        response: "Response",
+        debug_context: str = "",
+    ) -> AgentRun:
+        """Force a Final Answer from the last successful tool result.
+
+        Shared between ``_run_core`` and ``_run_core_streaming``. Called
+        when the agent was expecting a Final Answer (after a successful
+        terminal-tool call) but the model either tried to call tools
+        again or responded without the "Final Answer:" format. Instead
+        of accepting the model's potentially-wrong answer, we use the
+        last successful tool result as the final answer.
+
+        Parameters
+        ----------
+        debug_context : str
+            Optional context string for the debug log — e.g. "Model
+            tried to call tools" vs "Model responded without Final
+            Answer format". When empty, no debug line is printed
+            (matches the streaming path which has no debug print here).
+
+        Returns
+        -------
+        AgentRun — the caller must ``return`` this immediately.
+        """
+        if self.debug and not self._is_comp_mode and debug_context:
+            print(f"  [OpenResponses] FINAL ANSWER ENFORCEMENT: {debug_context}")
+            print(f"  [OpenResponses] Forcing Final Answer from last result: {_last_successful_result}")
+
+        final_answer = _last_successful_result
+        msg_item = create_message_item("assistant", final_answer)
+        msg_item.status = ItemStatus.COMPLETED
+        response.add_output_item(msg_item, debug=not self._is_comp_mode and self.debug)
+
+        steps.append(StepResult(
+            type=StepResultType.FINAL_ANSWER,
+            content=final_answer,
+            tokens_used=tokens,
+            reasoning_content=reasoning_content,
+        ))
+
+        return self._finalize_run(
+            final_answer=final_answer,
+            steps=steps,
+            total_tokens=total_tokens,
+            start_time=start_time,
+            tool_calls=tool_calls,
+            response=response,
+            success=True,
+        )
+
+    # ── MAINT-04 Phase 4b: shared blocked-tool-call handler ────────────
+    # The "should_block_repeat" guard + blocked-call handler was
+    # duplicated 2× (1× per method). Each instance built the blocked
+    # message, recorded it to memory (native vs ReAct format), recorded
+    # the failure, appended a StepResult, and checked should_terminate.
+    # Extracting eliminates ~46 lines and ensures both paths handle
+    # repeat-blocked calls identically.
+
+    def _handle_blocked_tool_call(
+        self,
+        tool_name: str,
+        tool_args: dict,
+        tool_call_id: str,
+        native_tool_calls: list,
+        step_num: int,
+        tool_calls: int,
+        tokens: int,
+        steps: list,
+        response: "Response",
+    ) -> tuple[bool, bool]:
+        """Handle a repeat-blocked tool call (R06.52 identical-repeat guard).
+
+        Shared between ``_run_core`` and ``_run_core_streaming``. Called
+        BEFORE tool execution when ``_error_tracker.should_block_repeat``
+        returns True — i.e., the same call already failed
+        ``max_identical_failures`` times.
+
+        Side effects:
+        - Builds a "blocked" message via ``_error_tracker.format_repeat_block``
+        - Records it to memory (native format via ``add_tool_result``,
+          ReAct format via ``add("user", "Observation: ...")``)
+        - Records the failure on ``_error_tracker`` (so consecutive counter
+          increments — a stubborn model re-issuing the same call can't
+          loop forever at max_steps)
+        - Appends an ERROR ``StepResult`` to ``steps``
+        - If ``_error_tracker.should_terminate()`` is True, marks the
+          response failed
+
+        Returns ``(was_blocked, should_terminate)``:
+        - ``was_blocked`` is always True (the caller should ``continue``
+          the for-loop, skipping tool execution for this call).
+        - ``should_terminate`` is True if the error tracker declared the
+          run stuck — the caller must ``break`` the for-loop AND set
+          ``_terminated = True`` so the outer step loop stops too.
+        """
+        blocked_msg = self._error_tracker.format_repeat_block(tool_name, tool_args)
+        if self.debug:
+            print(f"  [ErrorRecovery] Blocking repeated identical call: "
+                  f"{tool_name}({tool_args})")
+
+        if native_tool_calls:
+            self.memory.add_tool_result(
+                tool_call_id=tool_call_id or f"blocked_{step_num}_{tool_calls}",
+                name=tool_name,
+                content=blocked_msg,
+            )
+        else:
+            self.memory.add("user", f"Observation: {blocked_msg}")
+
+        # A blocked call still counts as a failure for the consecutive
+        # counter — otherwise a stubborn model re-issuing the same call
+        # would only stop at max_steps.
+        self._error_tracker.record_failure(
+            tool_name=tool_name,
+            error_message=blocked_msg,
+            step=step_num,
+            arguments=tool_args,
+        )
+        steps.append(StepResult(
+            type=StepResultType.ERROR,
+            error=blocked_msg,
+            tool_call=ToolCall(name=tool_name, arguments=tool_args),
+            tokens_used=tokens,
+        ))
+
+        if self._error_tracker.should_terminate():
+            response.mark_failed({"message": "Too many tool failures", "type": "error_recovery"})
+            return True, True
+        return True, False
+
+    # ── MAINT-04 Phase 4c: shared tool_choice rejection ─────────────────
+    # The "needs_tool → memory.add(assistant, content) + memory.add(user,
+    # 'You must use ...')" block was duplicated 4× (2× per method). Each
+    # instance had slightly different user-facing message text — the
+    # variation was accidental, not intentional (non-streaming said
+    # "Use the Action/Action Input format", streaming didn't). The helper
+    # parameterizes both dimensions so the behavior is preserved exactly
+    # while the duplication is eliminated.
+
+    def _reject_for_tool_choice(
+        self,
+        content: str,
+        is_final_answer_context: bool = False,
+        include_format_hint: bool = True,
+    ) -> None:
+        """Reject the model's response and tell it to use a tool.
+
+        Shared between ``_run_core`` and ``_run_core_streaming``. Called
+        when ``_check_tool_choice_required`` returned ``needs_tool=True``
+        — i.e., ``tool_choice`` is REQUIRED or SPECIFIC but the model
+        responded without calling any tools.
+
+        Side effects:
+        - Adds the model's content to memory as an assistant message
+        - Adds a user message telling the model to use a tool
+
+        The caller must ``continue`` the agentic loop after this returns.
+
+        Parameters
+        ----------
+        is_final_answer_context : bool
+            True when the rejection is in response to a Final Answer
+            (the message says "before providing a final answer").
+            False when the model just responded with plain text.
+        include_format_hint : bool
+            True to append "Use the Action/Action Input format" (the
+            non-streaming path's behavior). False to omit it (the
+            streaming path's behavior). Both are preserved for
+            backward compatibility — the difference was unintentional
+            but this helper keeps it rather than silently changing
+            user-facing messages.
+        """
+        self.memory.add("assistant", content)
+        # Build the qualifier
+        qualifier = " before providing a final answer" if is_final_answer_context else ""
+        format_hint = " Use the Action/Action Input format to call a tool." if include_format_hint else ""
+
+        if self.tool_choice.type == ToolChoiceType.SPECIFIC:
+            self.memory.add("user",
+                f"You must use the '{self.tool_choice.name}' tool"
+                f"{qualifier}.{format_hint}")
+        else:
+            self.memory.add("user",
+                f"You must use at least one tool{qualifier}.{format_hint}")
+
     def _run_core(self, prompt: str, stream: bool = False) -> AgentRun:
         """
         Run the agent on a prompt.
@@ -1141,36 +1343,20 @@ Final Answer: <the answer>
             if tool_calls_found:
                 # OpenResponses Enhancement: Final Answer Enforcement
                 # If we asked for Final Answer but model tried to call tools again,
-                # intercept and force Final Answer extraction
+                # intercept and force Final Answer extraction.
+                # MAINT-04 Phase 4a (R06.59): now via shared _enforce_final_answer.
                 if _expecting_final_answer and _last_successful_result is not None:
-                    if self.debug and not self._is_comp_mode:
-                        print(f"  [OpenResponses] FINAL ANSWWER ENFORCEMENT: Model tried to call tools instead of Final Answer")
-                        print(f"  [OpenResponses] Forcing Final Answer from last result: {_last_successful_result}")
-                    
-                    # Force Final Answer
-                    final_answer = _last_successful_result
-                    msg_item = create_message_item("assistant", final_answer)
-                    msg_item.status = ItemStatus.COMPLETED
-                    response.add_output_item(msg_item, debug=not self._is_comp_mode and self.debug)
-                    
-                    steps.append(StepResult(
-                        type=StepResultType.FINAL_ANSWER,
-                        content=final_answer,
-                        tokens_used=tokens,
+                    return self._enforce_final_answer(
+                        _last_successful_result=_last_successful_result,
+                        tokens=tokens,
                         reasoning_content=reasoning_content,
-                    ))
-
-                    # MAINT-04 Phase 3c (R06.59): finalize via shared helper.
-                    return self._finalize_run(
-                        final_answer=final_answer,
                         steps=steps,
                         total_tokens=total_tokens,
                         start_time=start_time,
                         tool_calls=tool_calls,
                         response=response,
-                        success=True,
+                        debug_context="Model tried to call tools instead of Final Answer",
                     )
-
 
                 # Track if any tool call has a final_answer
                 pending_final_answer = None
@@ -1211,35 +1397,20 @@ Final Answer: <the answer>
                     # times, block it BEFORE execution and teach the model to
                     # change approach. The result is recorded in memory so the
                     # sequence stays paired.
+                    # MAINT-04 Phase 4b (R06.59): now via shared _handle_blocked_tool_call.
                     if self._error_tracker.should_block_repeat(tool_name, tool_args):
-                        blocked_msg = self._error_tracker.format_repeat_block(tool_name, tool_args)
-                        if self.debug:
-                            print(f"  [ErrorRecovery] Blocking repeated identical call: {tool_name}({tool_args})")
-                        if native_tool_calls:
-                            self.memory.add_tool_result(
-                                tool_call_id=tool_call_id or f"blocked_{step_num}_{tool_calls}",
-                                name=tool_name,
-                                content=blocked_msg,
-                            )
-                        else:
-                            self.memory.add("user", f"Observation: {blocked_msg}")
-                        # A blocked call still counts as a failure for the
-                        # consecutive counter — otherwise a stubborn model
-                        # re-issuing the same call would only stop at max_steps.
-                        self._error_tracker.record_failure(
+                        _blocked, _term = self._handle_blocked_tool_call(
                             tool_name=tool_name,
-                            error_message=blocked_msg,
-                            step=step_num,
-                            arguments=tool_args,
+                            tool_args=tool_args,
+                            tool_call_id=tool_call_id,
+                            native_tool_calls=native_tool_calls,
+                            step_num=step_num,
+                            tool_calls=tool_calls,
+                            tokens=tokens,
+                            steps=steps,
+                            response=response,
                         )
-                        steps.append(StepResult(
-                            type=StepResultType.ERROR,
-                            error=blocked_msg,
-                            tool_call=ToolCall(name=tool_name, arguments=tool_args),
-                            tokens_used=tokens,
-                        ))
-                        if self._error_tracker.should_terminate():
-                            response.mark_failed({"message": "Too many tool failures", "type": "error_recovery"})
+                        if _term:
                             _terminated = True
                             break
                         continue
@@ -1452,12 +1623,13 @@ Final Answer: <the answer>
                     if self.debug and not self._is_comp_mode:
                         print(f"  [OpenResponses] REJECTED: {rejection_reason}")
                         print(f"  [OpenResponses] Enforcing tool requirement...")
-                    # Tell model to use tools
-                    self.memory.add("assistant", content)
-                    if self.tool_choice.type == ToolChoiceType.SPECIFIC:
-                        self.memory.add("user", f"You must use the '{self.tool_choice.name}' tool before providing a final answer. Use the Action/Action Input format.")
-                    else:
-                        self.memory.add("user", "You must use at least one tool before providing a final answer. Use the Action/Action Input format to call a tool.")
+                    # Tell model to use tools.
+                    # MAINT-04 Phase 4c (R06.59): now via shared _reject_for_tool_choice.
+                    self._reject_for_tool_choice(
+                        content,
+                        is_final_answer_context=True,
+                        include_format_hint=True,
+                    )
                     continue
 
                 answer = self._parser.extract_final_answer(content)
@@ -1496,43 +1668,30 @@ Final Answer: <the answer>
                 if self.debug and not self._is_comp_mode:
                     print(f"  [OpenResponses] REJECTED: {rejection_reason}")
                     print(f"  [OpenResponses] Enforcing tool requirement...")
-                # Tell model to use tools
-                self.memory.add("assistant", content)
-                if self.tool_choice.type == ToolChoiceType.SPECIFIC:
-                    self.memory.add("user", f"You must use the '{self.tool_choice.name}' tool. Use the Action/Action Input format.")
-                else:
-                    self.memory.add("user", "You must use at least one tool. Use the Action/Action Input format to call a tool.")
+                # Tell model to use tools.
+                # MAINT-04 Phase 4c (R06.59): now via shared _reject_for_tool_choice.
+                self._reject_for_tool_choice(
+                    content,
+                    is_final_answer_context=False,
+                    include_format_hint=True,
+                )
                 continue
 
             # OpenResponses Enhancement: Final Answer Enforcement
             # If we were expecting Final Answer but model responded without "Final Answer:" format,
-            # use the last successful result instead of accepting the model's potentially wrong answer
+            # use the last successful result instead of accepting the model's potentially wrong answer.
+            # MAINT-04 Phase 4a (R06.59): now via shared _enforce_final_answer.
             if _expecting_final_answer and _last_successful_result is not None:
-                if self.debug and not self._is_comp_mode:
-                    print(f"  [OpenResponses] FINAL ANSWWER ENFORCEMENT: Model responded without Final Answer format")
-                    print(f"  [OpenResponses] Using last successful result: {_last_successful_result}")
-                
-                final_answer = _last_successful_result
-                msg_item = create_message_item("assistant", final_answer)
-                msg_item.status = ItemStatus.COMPLETED
-                response.add_output_item(msg_item, debug=not self._is_comp_mode and self.debug)
-                
-                steps.append(StepResult(
-                    type=StepResultType.FINAL_ANSWER,
-                    content=final_answer,
-                    tokens_used=tokens,
+                return self._enforce_final_answer(
+                    _last_successful_result=_last_successful_result,
+                    tokens=tokens,
                     reasoning_content=reasoning_content,
-                ))
-
-                # MAINT-04 Phase 3c (R06.59): finalize via shared helper.
-                return self._finalize_run(
-                    final_answer=final_answer,
                     steps=steps,
                     total_tokens=total_tokens,
                     start_time=start_time,
                     tool_calls=tool_calls,
                     response=response,
-                    success=True,
+                    debug_context="Model responded without Final Answer format",
                 )
 
             # Accept model's response as the final answer
@@ -2862,27 +3021,18 @@ Final Answer: <the answer>
             )
 
             if tool_calls_found:
-                # Final Answer enforcement (same as non-streaming path)
+                # Final Answer enforcement (same as non-streaming path).
+                # MAINT-04 Phase 4a (R06.59): now via shared _enforce_final_answer.
                 if _expecting_final_answer and _last_successful_result is not None:
-                    final_answer = _last_successful_result
-                    msg_item = create_message_item("assistant", final_answer)
-                    msg_item.status = ItemStatus.COMPLETED
-                    response.add_output_item(msg_item, debug=not self._is_comp_mode and self.debug)
-                    steps.append(StepResult(
-                        type=StepResultType.FINAL_ANSWER,
-                        content=final_answer,
-                        tokens_used=tokens,
+                    return self._enforce_final_answer(
+                        _last_successful_result=_last_successful_result,
+                        tokens=tokens,
                         reasoning_content=reasoning_content,
-                    ))
-                    # MAINT-04 Phase 3c (R06.59): finalize via shared helper.
-                    return self._finalize_run(
-                        final_answer=final_answer,
                         steps=steps,
                         total_tokens=total_tokens,
                         start_time=start_time,
                         tool_calls=tool_calls,
                         response=response,
-                        success=True,
                     )
 
                 pending_final_answer = None
@@ -2911,32 +3061,20 @@ Final Answer: <the answer>
                             self.memory.add("user", f"Observation: Error: {error_msg}")
                         continue
 
+                    # MAINT-04 Phase 4b (R06.59): now via shared _handle_blocked_tool_call.
                     if self._error_tracker.should_block_repeat(tool_name, tool_args):
-                        blocked_msg = self._error_tracker.format_repeat_block(tool_name, tool_args)
-                        if self.debug:
-                            print(f"  [ErrorRecovery] Blocking repeated identical call: {tool_name}({tool_args})")
-                        if native_tool_calls:
-                            self.memory.add_tool_result(
-                                tool_call_id=tool_call_id or f"blocked_{step_num}_{tool_calls}",
-                                name=tool_name,
-                                content=blocked_msg,
-                            )
-                        else:
-                            self.memory.add("user", f"Observation: {blocked_msg}")
-                        self._error_tracker.record_failure(
+                        _blocked, _term = self._handle_blocked_tool_call(
                             tool_name=tool_name,
-                            error_message=blocked_msg,
-                            step=step_num,
-                            arguments=tool_args,
+                            tool_args=tool_args,
+                            tool_call_id=tool_call_id,
+                            native_tool_calls=native_tool_calls,
+                            step_num=step_num,
+                            tool_calls=tool_calls,
+                            tokens=tokens,
+                            steps=steps,
+                            response=response,
                         )
-                        steps.append(StepResult(
-                            type=StepResultType.ERROR,
-                            error=blocked_msg,
-                            tool_call=ToolCall(name=tool_name, arguments=tool_args),
-                            tokens_used=tokens,
-                        ))
-                        if self._error_tracker.should_terminate():
-                            response.mark_failed({"message": "Too many tool failures", "type": "error_recovery"})
+                        if _term:
                             _terminated = True
                             break
                         continue
@@ -3128,11 +3266,12 @@ Final Answer: <the answer>
                 # MAINT-04 Phase 3a (R06.59): shared _check_tool_choice_required.
                 needs_tool, rejection_reason = self._check_tool_choice_required(tool_calls)
                 if needs_tool:
-                    self.memory.add("assistant", content)
-                    if self.tool_choice.type == ToolChoiceType.SPECIFIC:
-                        self.memory.add("user", f"You must use the '{self.tool_choice.name}' tool before providing a final answer.")
-                    else:
-                        self.memory.add("user", "You must use at least one tool before providing a final answer.")
+                    # MAINT-04 Phase 4c (R06.59): now via shared _reject_for_tool_choice.
+                    self._reject_for_tool_choice(
+                        content,
+                        is_final_answer_context=True,
+                        include_format_hint=False,
+                    )
                     continue
 
                 answer = self._parser.extract_final_answer(content)
@@ -3152,33 +3291,25 @@ Final Answer: <the answer>
             # MAINT-04 Phase 3a (R06.59): shared _check_tool_choice_required.
             needs_tool, rejection_reason = self._check_tool_choice_required(tool_calls)
             if needs_tool:
-                self.memory.add("assistant", content)
-                if self.tool_choice.type == ToolChoiceType.SPECIFIC:
-                    self.memory.add("user", f"You must use the '{self.tool_choice.name}' tool.")
-                else:
-                    self.memory.add("user", "You must use at least one tool.")
+                # MAINT-04 Phase 4c (R06.59): now via shared _reject_for_tool_choice.
+                self._reject_for_tool_choice(
+                    content,
+                    is_final_answer_context=False,
+                    include_format_hint=False,
+                )
                 continue
 
+            # MAINT-04 Phase 4a (R06.59): now via shared _enforce_final_answer.
             if _expecting_final_answer and _last_successful_result is not None:
-                final_answer = _last_successful_result
-                msg_item = create_message_item("assistant", final_answer)
-                msg_item.status = ItemStatus.COMPLETED
-                response.add_output_item(msg_item, debug=not self._is_comp_mode and self.debug)
-                steps.append(StepResult(
-                    type=StepResultType.FINAL_ANSWER,
-                    content=final_answer,
-                    tokens_used=tokens,
+                return self._enforce_final_answer(
+                    _last_successful_result=_last_successful_result,
+                    tokens=tokens,
                     reasoning_content=reasoning_content,
-                ))
-                # MAINT-04 Phase 3c (R06.59): finalize via shared helper.
-                return self._finalize_run(
-                    final_answer=final_answer,
                     steps=steps,
                     total_tokens=total_tokens,
                     start_time=start_time,
                     tool_calls=tool_calls,
                     response=response,
-                    success=True,
                 )
 
             # Accept as final answer
