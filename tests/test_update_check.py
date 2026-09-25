@@ -9,24 +9,21 @@ version" feature. Dual release tracks:
              main (raw.githubusercontent.com/.../__init__.py) so pip-installed
              users can see dev releases that haven't been pushed to PyPI yet.
 
-Covers: version parsing/comparison, git_hash extraction, per-source cache
-(fresh hit / stale refetch / expiry / negative cache), opt-out env, silent
-failures per source, notice formatting for both tracks.
+Covers: version parsing/comparison, git_hash extraction, always-live checks
+(R07.00: every invocation hits the network — no disk cache, no negative
+cache), opt-out env, silent failures per source, notice formatting for both
+tracks.
 """
 
 import json
-import time
 
 import pytest
 
 from agentkthx import update_check
 from agentkthx.update_check import (
-    FAILURE_TTL,
     GITHUB_COMMITS_URL,
     GITHUB_RAW_INIT_URL,
     PYPI_JSON_URL,
-    SUCCESS_TTL,
-    _cache_fresh,
     base_version,
     check_for_update,
     format_notice,
@@ -177,115 +174,50 @@ class TestIsNewer:
         assert is_newer(latest, current) is expected
 
 
-class TestCacheTTL:
-    """R06.57: cache TTLs reduced from 24h/6h to 1h/15min.
+class TestCacheRemoved:
+    """R07.00: the on-disk update-check cache was removed — checks are live.
 
-    Verifies the constants and that ``_cache_fresh`` honors them —
-    success entries expire after 1h, failure entries after 15min.
+    The R06.57 cache (~/.agentkthx/update_check.json, 1h success TTL /
+    15min negative TTL, ``force`` bypass) is gone: every invocation hits
+    the network and returns the latest live results.
     """
 
-    def test_success_ttl_is_one_hour(self):
-        # R06.57: was 24h, reduced to 1h after user-reported stale-cache
-        # confusion (a 24h-cached "0.6.54 on PyPI" hid 0.6.55+0.6.56).
-        assert SUCCESS_TTL == 3600
+    def test_cache_plumbing_is_gone(self):
+        # Regression guard against silently re-adding a disk cache.
+        for name in (
+            "DEFAULT_CACHE_FILE", "SUCCESS_TTL", "FAILURE_TTL",
+            "_read_cache", "_write_cache", "_cache_fresh",
+        ):
+            assert not hasattr(update_check, name), name
 
-    def test_failure_ttl_is_fifteen_minutes(self):
-        # R06.57: was 6h, reduced proportionally to 15min.
-        assert FAILURE_TTL == 900
-
-    def test_failure_ttl_shorter_than_success(self):
-        # Transient failures (rate limit, blip) should be retried sooner
-        # than successful entries need refreshing.
-        assert FAILURE_TTL < SUCCESS_TTL
-
-    def test_success_entry_fresh_within_one_hour(self):
-        # 30min after a successful check at T0 → still fresh
-        now = time.time()
-        assert _cache_fresh({"error": False}, now - 1800, now) is True
-
-    def test_success_entry_stale_after_one_hour(self):
-        # 1h + 1s after a successful check at T0 → stale (refetch)
-        now = time.time()
-        assert _cache_fresh({"error": False}, now - 3601, now) is False
-
-    def test_failure_entry_fresh_within_fifteen_minutes(self):
-        # 10min after a failed check at T0 → still fresh (negative cache)
-        now = time.time()
-        assert _cache_fresh({"error": True}, now - 600, now) is True
-
-    def test_failure_entry_stale_after_fifteen_minutes(self):
-        # 15min + 1s after a failed check at T0 → stale (retry)
-        now = time.time()
-        assert _cache_fresh({"error": True}, now - 901, now) is False
-
-
-class TestForceRefresh:
-    """R06.57: ``check_for_update(force=True)`` bypasses cache for all sources."""
-
-    def test_force_refetches_pypi_even_with_fresh_cache(self, counter_urlopen, tmp_path, pip_install):
-        calls, set_fake = counter_urlopen
-        def _route(url, timeout=None):
-            if "raw.githubusercontent.com" in url:
-                return _FakeResponse(_github_init_payload("0.6.51"))
-            return _FakeResponse(_pypi_payload("0.6.99"))
-        set_fake(_route)
-        cache = tmp_path / "c.json"
-        cache.write_text(json.dumps({
-            "checked_at": time.time(),  # fresh cache
-            "pypi": {"latest_version": "0.6.50"},
-            "github_version": {"version": "0.6.50"},
-        }))
-        result = check_for_update(force=True, cache_file=cache)
-        assert result["pypi_latest"] == "0.6.99"  # bypassed cache
-        assert result["github_latest_version"] == "0.6.51"  # bypassed cache
-        # Should have hit both URLs despite fresh cache
-        assert len(calls) == 2
-
-    def test_force_refetches_github_sha_for_git_checkout(self, counter_urlopen, tmp_path, git_checkout):
-        calls, set_fake = counter_urlopen
-        full_sha = "f754294" + "0" * 33
-        def _route(url, timeout=None):
-            if "raw.githubusercontent.com" in url:
-                return _FakeResponse(_github_init_payload("0.6.51"))
-            if "github" in url:  # commits API
-                return _FakeResponse(_github_payload(full_sha))
-            return _FakeResponse(_pypi_payload("0.6.51"))
-        set_fake(_route)
-        cache = tmp_path / "c.json"
-        cache.write_text(json.dumps({
-            "checked_at": time.time(),
-            "pypi": {"latest_version": "0.6.50"},
-            "github": {"sha": "0" * 40},
-            "github_version": {"version": "0.6.50"},
-        }))
-        result = check_for_update(force=True, cache_file=cache)
-        assert result["github_sha"] == full_sha  # bypassed cache
-        # All 3 sources refetched
-        assert len(calls) == 3
+    def test_signature_has_no_cache_or_force_params(self):
+        import inspect
+        params = inspect.signature(check_for_update).parameters
+        assert set(params) == {"timeout"}
 
 
 # ----------------------------------------------------------------------------
-# check_for_update — cache + network behavior (per source)
+# check_for_update — always-live network behavior (per source)
 # ----------------------------------------------------------------------------
 
 class TestCheckForUpdate:
-    def test_opt_out_env_disables_check(self, counter_urlopen, tmp_path, pip_install):
+    def test_opt_out_env_disables_check(self, counter_urlopen, pip_install):
         import os
         calls, _ = counter_urlopen
         os.environ["AGENTKTHX_NO_UPDATE_CHECK"] = "1"
         try:
-            assert check_for_update(cache_file=tmp_path / "c.json") is None
+            assert check_for_update() is None
             assert calls == []  # never touched the network
         finally:
             del os.environ["AGENTKTHX_NO_UPDATE_CHECK"]
 
     @pytest.mark.parametrize("val", ["true", "yes", "ON", "True"])
-    def test_opt_out_accepts_common_truthy(self, monkeypatch, tmp_path, pip_install, val):
+    def test_opt_out_accepts_common_truthy(self, monkeypatch, pip_install, val):
         monkeypatch.setenv("AGENTKTHX_NO_UPDATE_CHECK", val)
-        assert check_for_update(cache_file=tmp_path / "c.json") is None
+        assert check_for_update() is None
 
     def test_pip_install_skips_github_sha_but_fetches_init_version(
-        self, counter_urlopen, tmp_path, pip_install
+        self, counter_urlopen, pip_install
     ):
         """R06.57: pip installs skip the commits/SHA API but DO fetch raw __init__.py.
 
@@ -299,7 +231,7 @@ class TestCheckForUpdate:
                 return _FakeResponse(_github_init_payload("0.6.99"))
             return _FakeResponse(_pypi_payload("0.6.51"))
         set_fake(_route)
-        result = check_for_update(cache_file=tmp_path / "c.json")
+        result = check_for_update()
         assert result["from_git"] is False
         assert result["github_sha"] is None              # SHA API never hit
         assert result["github_latest_version"] == "0.6.99"  # raw __init__.py was hit
@@ -307,51 +239,36 @@ class TestCheckForUpdate:
         assert all("commits/HEAD" not in c["url"] for c in calls)
         assert any("raw.githubusercontent.com" in c["url"] for c in calls)
 
-    def test_fresh_cache_hit_skips_network(self, counter_urlopen, tmp_path, pip_install):
-        calls, _ = counter_urlopen
-        cache = tmp_path / "c.json"
-        cache.write_text(json.dumps({
-            "checked_at": time.time(),
-            "pypi": {"latest_version": "9.9.9"},
-        }))
-        result = check_for_update(cache_file=cache)
-        assert result["pypi_latest"] == "9.9.9"
-        assert result["source"] == "cache"
-        assert calls == []  # cache answer — zero network
-
-    def test_legacy_single_source_cache_is_migrated(self, counter_urlopen, tmp_path, pip_install):
-        """Pre-0.6.51 cache files used a flat latest_version key."""
-        calls, _ = counter_urlopen
-        cache = tmp_path / "c.json"
-        cache.write_text(json.dumps({
-            "checked_at": time.time(),
-            "latest_version": "8.8.8",
-        }))
-        result = check_for_update(cache_file=cache)
-        assert result["pypi_latest"] == "8.8.8"
-        assert result["source"] == "cache"
-        assert calls == []
-
-    def test_stale_cache_triggers_refetch(self, counter_urlopen, tmp_path, pip_install):
+    def test_every_invocation_hits_the_network(self, counter_urlopen, pip_install):
+        """R07.00: no disk cache — back-to-back calls both fetch live."""
         calls, set_fake = counter_urlopen
         def _route(url, timeout=None):
             if "raw.githubusercontent.com" in url:
                 return _FakeResponse(_github_init_payload("0.6.51"))
             return _FakeResponse(_pypi_payload("0.6.51"))
         set_fake(_route)
-        cache = tmp_path / "c.json"
-        cache.write_text(json.dumps({
-            "checked_at": time.time() - SUCCESS_TTL - 10,
-            "pypi": {"latest_version": "0.6.50"},
-        }))
-        result = check_for_update(cache_file=cache)
-        assert result["pypi_latest"] == "0.6.51" and result["source"] == "network"
-        # R06.57: pip installs hit pypi + raw __init__.py = 2 calls
-        assert len(calls) == 2
-        # cache rewritten with the fresh per-source entry
-        assert json.loads(cache.read_text())["pypi"]["latest_version"] == "0.6.51"
+        first = check_for_update()
+        second = check_for_update()
+        assert first["pypi_latest"] == "0.6.51"
+        assert second["pypi_latest"] == "0.6.51"
+        # pip installs hit pypi + raw __init__.py per cycle → 2 cycles = 4 calls
+        assert len(calls) == 4
 
-    def test_github_fetched_for_git_checkout(self, counter_urlopen, tmp_path, git_checkout):
+    def test_live_result_changes_between_calls(self, counter_urlopen, pip_install):
+        """R07.00: a release cut between two invocations is visible
+        immediately — the second call returns the new live answer."""
+        _, set_fake = counter_urlopen
+        state = {"version": "0.6.51"}
+        def _route(url, timeout=None):
+            if "raw.githubusercontent.com" in url:
+                return _FakeResponse(_github_init_payload(state["version"]))
+            return _FakeResponse(_pypi_payload(state["version"]))
+        set_fake(_route)
+        assert check_for_update()["pypi_latest"] == "0.6.51"
+        state["version"] = "0.7.00"  # a release just went out
+        assert check_for_update()["pypi_latest"] == "0.7.00"
+
+    def test_github_fetched_for_git_checkout(self, counter_urlopen, git_checkout):
         calls, set_fake = counter_urlopen
         full_sha = "f754294" + "0" * 33  # installed short hash + padding = same commit
         def _route(url, timeout=None):
@@ -361,118 +278,61 @@ class TestCheckForUpdate:
                 return _FakeResponse(_github_payload(full_sha))
             return _FakeResponse(_pypi_payload("0.6.51"))
         set_fake(_route)
-        result = check_for_update(cache_file=tmp_path / "c.json")
+        result = check_for_update()
         assert result["github_sha"] == full_sha
         # R06.57: git checkouts hit pypi (1) + commits API (1) + raw __init__.py (1) = 3
         assert sum("github" in c["url"] for c in calls) == 2  # commits + raw both contain "github"
         assert sum("pypi" in c["url"] for c in calls) == 1
 
-    def test_github_error_is_negative_cached_independently(
-        self, counter_urlopen, tmp_path, git_checkout
+    def test_github_failure_is_silent_and_retried_live(
+        self, counter_urlopen, git_checkout
     ):
+        """R07.00: GitHub failures are silent, independent, and NOT
+        negatively cached — the failing sources are retried live on the
+        very next invocation."""
         calls, set_fake = counter_urlopen
         def _route(url, timeout=None):
             if "github" in url:  # commits API and raw both fail
                 raise ConnectionError("rate limited")
             return _FakeResponse(_pypi_payload("0.6.51"))
         set_fake(_route)
-        cache = tmp_path / "c.json"
-        first = check_for_update(cache_file=cache)
+        first = check_for_update()
         assert first["pypi_latest"] == "0.6.51"      # pypi fine
         assert first["github_sha"] is None            # commits API failed silently
         assert first["github_latest_version"] is None # raw __init__.py also failed
-        data = json.loads(cache.read_text())
-        assert data["pypi"].get("latest_version") == "0.6.51"
-        assert data["github"].get("error") is True
-        assert data["github_version"].get("error") is True
 
-        # second call: pypi from cache, github sources from negative cache — no network
-        second = check_for_update(cache_file=cache)
+        # second call: pypi live again, github sources retried live (still down)
+        second = check_for_update()
         assert second["pypi_latest"] == "0.6.51" and second["github_sha"] is None
-        # R06.57: 1 pypi + 1 commits + 1 raw __init__.py = 3 calls, all on first cycle
-        assert len(calls) == 3
-
-    def test_negative_cache_expires(self, counter_urlopen, tmp_path, pip_install):
-        calls, set_fake = counter_urlopen
-        def _route(url, timeout=None):
-            if "raw.githubusercontent.com" in url:
-                return _FakeResponse(_github_init_payload("0.7.0"))
-            return _FakeResponse(_pypi_payload("0.7.0"))
-        set_fake(_route)
-        cache = tmp_path / "c.json"
-        cache.write_text(json.dumps({
-            "checked_at": time.time() - FAILURE_TTL - 10,
-            "pypi": {"error": True},
-        }))
-        result = check_for_update(cache_file=cache)
-        assert result["pypi_latest"] == "0.7.0"
-        # R06.57: pip installs hit pypi + raw __init__.py = 2 calls
-        assert len(calls) == 2
+        # git checkouts hit 1 pypi + 1 commits + 1 raw __init__.py per cycle
+        # → 2 cycles = 6 calls (a negative cache would have stopped at 3)
+        assert len(calls) == 6
 
     def test_network_failure_returns_none_value_silently(
-        self, counter_urlopen, tmp_path, pip_install
+        self, counter_urlopen, pip_install
     ):
         calls, set_fake = counter_urlopen
         def _boom(url, timeout=None):
             raise ConnectionError("no internet")
         set_fake(_boom)
-        cache = tmp_path / "c.json"
-        result = check_for_update(cache_file=cache)
+        result = check_for_update()
         assert result is not None  # structured result, sources just empty
         assert result["pypi_latest"] is None
-        assert json.loads(cache.read_text())["pypi"].get("error") is True
+        assert result["github_latest_version"] is None
 
-    def test_force_bypasses_fresh_cache(self, counter_urlopen, tmp_path, pip_install):
-        calls, set_fake = counter_urlopen
-        def _route(url, timeout=None):
-            if "raw.githubusercontent.com" in url:
-                return _FakeResponse(_github_init_payload("0.8.0"))
-            return _FakeResponse(_pypi_payload("0.8.0"))
-        set_fake(_route)
-        cache = tmp_path / "c.json"
-        cache.write_text(json.dumps({
-            "checked_at": time.time(),
-            "pypi": {"latest_version": "9.9.9"},
-        }))
-        result = check_for_update(force=True, cache_file=cache)
-        assert result["pypi_latest"] == "0.8.0"
-        # R06.57: force=True bypasses cache for ALL sources — pypi + raw __init__.py = 2 calls
-        assert len(calls) == 2
-
-    def test_corrupt_cache_is_ignored(self, counter_urlopen, tmp_path, pip_install):
-        calls, set_fake = counter_urlopen
-        def _route(url, timeout=None):
-            if "raw.githubusercontent.com" in url:
-                return _FakeResponse(_github_init_payload("0.6.51"))
-            return _FakeResponse(_pypi_payload("0.6.51"))
-        set_fake(_route)
-        cache = tmp_path / "c.json"
-        cache.write_text("{not valid json!!")
-        result = check_for_update(cache_file=cache)
-        assert result["pypi_latest"] == "0.6.51"
-        # R06.57: corrupt cache forces both pypi and raw __init__.py to refetch = 2 calls
-        assert len(calls) == 2
-
-    def test_malformed_pypi_payload_fails_silently(self, counter_urlopen, tmp_path, pip_install):
+    def test_malformed_pypi_payload_fails_silently(self, counter_urlopen, pip_install):
         calls, set_fake = counter_urlopen
         set_fake(lambda url, timeout=None: _FakeResponse(b'{"info": {}}'))
-        result = check_for_update(cache_file=tmp_path / "c.json")
+        result = check_for_update()
         assert result["pypi_latest"] is None
 
-    def test_timeout_is_forwarded(self, counter_urlopen, tmp_path, pip_install):
+    def test_timeout_is_forwarded(self, counter_urlopen, pip_install):
         calls, set_fake = counter_urlopen
         set_fake(lambda url, timeout=None: _FakeResponse(_pypi_payload("0.6.51")))
-        check_for_update(timeout=0.25, cache_file=tmp_path / "c.json")
+        check_for_update(timeout=0.25)
         assert calls and calls[0]["timeout"] == 0.25
 
-    def test_creates_cache_parent_dir(self, counter_urlopen, tmp_path, pip_install):
-        _, set_fake = counter_urlopen
-        set_fake(lambda url, timeout=None: _FakeResponse(_pypi_payload("0.6.51")))
-        nested = tmp_path / "deep" / "dir" / "c.json"
-        assert check_for_update(cache_file=nested) is not None
-        assert nested.exists()
-
-    def test_urls_are_the_documented_endpoints(self, counter_urlopen, tmp_path, git_checkout):
+    def test_urls_are_the_documented_endpoints(self, counter_urlopen, git_checkout):
         calls, set_fake = counter_urlopen
         def _route(url, timeout=None):
             if "github" in url and "raw" not in url:
@@ -481,7 +341,7 @@ class TestCheckForUpdate:
                 return _FakeResponse(_github_init_payload("0.6.51"))
             return _FakeResponse(_pypi_payload("0.6.51"))
         set_fake(_route)
-        check_for_update(cache_file=tmp_path / "c.json")
+        check_for_update()
         hit = {c["url"] for c in calls}
         assert any(u.startswith(PYPI_JSON_URL) for u in hit)
         assert any(u.startswith(GITHUB_COMMITS_URL) for u in hit)
@@ -549,32 +409,26 @@ class TestFetchGithubLatestVersion:
         _fetch_github_latest_version(timeout=1.0)
         assert resp_holder["r"].closed is True
 
-    def test_cached_github_version_is_reused(self, counter_urlopen, tmp_path, pip_install):
-        """Fresh github_version cache entry skips the network on next call."""
-        calls, _ = counter_urlopen
-        cache = tmp_path / "c.json"
-        cache.write_text(json.dumps({
-            "checked_at": time.time(),
-            "pypi": {"latest_version": "0.6.51"},
-            "github_version": {"version": "0.6.99"},
-        }))
-        result = check_for_update(cache_file=cache)
-        assert result["github_latest_version"] == "0.6.99"
-        assert result["source"] == "cache"
-        assert calls == []  # zero network
-
-    def test_github_version_error_is_negative_cached(self, counter_urlopen, tmp_path, pip_install):
-        """Failed github_version fetch is cached as error for FAILURE_TTL."""
+    def test_github_version_failure_is_retried_live(self, counter_urlopen, pip_install):
+        """R07.00: a failed raw __init__.py fetch leaves None (no negative
+        cache) — the source recovers on the very next invocation."""
         calls, set_fake = counter_urlopen
-        def _boom(url, timeout=None):
-            if "raw.githubusercontent.com" in url:
+        state = {"down": True}
+        def _route(url, timeout=None):
+            if "raw.githubusercontent.com" in url and state["down"]:
                 raise ConnectionError("GitHub raw down")
+            if "raw.githubusercontent.com" in url:
+                return _FakeResponse(_github_init_payload("0.6.99"))
             return _FakeResponse(_pypi_payload("0.6.51"))
-        set_fake(_boom)
-        cache = tmp_path / "c.json"
-        first = check_for_update(cache_file=cache)
+        set_fake(_route)
+        first = check_for_update()
         assert first["github_latest_version"] is None
-        assert json.loads(cache.read_text())["github_version"].get("error") is True
+        state["down"] = False  # GitHub raw recovers
+        second = check_for_update()
+        assert second["github_latest_version"] == "0.6.99"
+        # 2 cycles × (1 pypi + 1 raw __init__.py) = 4 calls — the failed
+        # source was retried live, not negatively cached.
+        assert len(calls) == 4
 
 
 # ----------------------------------------------------------------------------

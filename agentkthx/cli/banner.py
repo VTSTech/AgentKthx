@@ -81,16 +81,18 @@ def print_banner() -> None:
 # Update Check (pip-style "new release available" notice)
 # ============================================================================
 
-# Result of the hourly-cached PyPI update check for this process, stashed by
-# main() so the notice can be printed under the chat banner (cmd_chat) and
-# after non-interactive commands (post-run) without hitting the network twice.
+# Result of the update check for this process, stashed by main() so the
+# notice can be printed under the chat banner (cmd_chat) and after
+# non-interactive commands (post-run) without hitting the network twice.
+# (R07.00: the check itself is always live — the on-disk cache is gone;
+# this per-process stash only dedupes fetches within a single run.)
 _LAST_UPDATE_CHECK = None
 
 
 
 
 def _run_update_check(timeout: float = 1.0) -> None:
-    """Run the hourly-cached update check once; stash the result. Never raises."""
+    """Run the live update check once per process; stash the result. Never raises."""
     global _LAST_UPDATE_CHECK
     try:
         from ..update_check import check_for_update

@@ -165,15 +165,7 @@ def create_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("update", help="Update AgentKthx to the latest version from GitHub")
 
     # Version command
-    _version_parser = subparsers.add_parser("version", help="Show version information")
-    # R06.57: --refresh bypasses the update_check cache so users can force a
-    # fresh fetch from PyPI + GitHub without manually deleting
-    # ~/.agentkthx/update_check.json. Useful when a new release was just
-    # published and the 1h cache hasn't expired yet.
-    _version_parser.add_argument(
-        "--refresh", action="store_true",
-        help="Bypass the update-check cache and fetch fresh from PyPI/GitHub",
-    )
+    subparsers.add_parser("version", help="Show version information")
 
     return parser
 

@@ -68,7 +68,7 @@ Inspired by the architecture of OpenClaw, rebuilt from scratch for local-first o
 - **Argument normalization** — ~100+ tool argument aliases for small model compatibility
 - **JSON structured output** — `--response-format json` for structured JSON responses
 - **Self-update** — `agentkthx update` to update to latest version from GitHub
-- **Update check** — Startup + post-run notice for both release tracks: **stable** (new package on PyPI) and **development** (new commits on GitHub main); `agentkthx version` shows both too (use `agentkthx version --refresh` to bypass the cache); hourly cache, fails silently offline, opt out with `AGENTKTHX_NO_UPDATE_CHECK=1`
+- **Update check** — Startup + post-run notice for both release tracks: **stable** (new package on PyPI) and **development** (new commits on GitHub main); `agentkthx version` shows both too; always live (no cache — every run queries PyPI + GitHub main directly), fails silently offline, opt out with `AGENTKTHX_NO_UPDATE_CHECK=1`
 - **Persistent status footer** — 2-line terminal footer with live model/backend/token info (R05.4, scroll-region based)
 - **OpenRouter 429 retry** — Automatic retry with `Retry-After` header support for rate-limited providers (R05.4)
 - **Tool-call visibility** — Tool calls and results displayed in chat mode (R05.4)

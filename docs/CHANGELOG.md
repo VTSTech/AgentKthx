@@ -11,6 +11,13 @@ Pure-reorganization release executing `docs/R07.00-MODULARIZATION-PLAN.md`: `age
 
 Dead-code cleanup + the first R07.00-flagged bug fix. Every removal below was verified as having **zero callers repo-wide** (source, tests, docs, scripts — including string-literal references for dynamic-dispatch patterns) before deletion; the full 972-test suite ran green after every batch. Net: **−1,609 lines deleted, +163 added** (new tests + inline docs), across 34 files.
 
+Follow-up change in the same release: the update-check cache was removed — update checks now always use the latest live PyPI/GitHub results (see Changed).
+
+### Changed
+
+- **Update check is now always live — the on-disk cache is gone** — `check_for_update()` previously throttled itself via `~/.agentkthx/update_check.json` (1h success / 15min negative TTLs, R06.57). The cache kept hiding freshly-cut releases from the developer — the one user who needs the live answer most — so it was removed entirely: every invocation now queries PyPI + GitHub main directly and returns whatever is live right now. Failed sources still fail independently and silently, and are simply retried live on the next invocation (no negative cache). The per-process stash in `cli/banner.py` is unchanged — still one network round per `agentkthx` process, reused for the chat-banner + post-run notices. Offline cost: at most one timeout (1s) per source, once per process; opt out with `AGENTKTHX_NO_UPDATE_CHECK=1`. A stale `update_check.json` left by an older install is ignored (safe to delete). API notes: `check_for_update()` loses its `force`/`cache_file` parameters, the result loses the now-meaningless `"source"` field (it could only ever be `"network"`), and the update check no longer writes anything under `~/.agentkthx/`.
+- **`agentkthx version --refresh` retired** — the flag existed only to bypass the update-check cache (R06.57). With the cache gone there is nothing left to bypass; `agentkthx version` is always fresh now.
+
 ### Bug Fixes
 
 - **`run_stream()` Ctrl+C-during-tool-exec NameError (PROGRESS-R07.00 flagged quirk #1)** — the KeyboardInterrupt path in `core/streaming.py` referenced the undefined `ResponseStateEvent` (survived verbatim from the original `agent.py:1499` through the R07.00 Phase 6 move). Ctrl+C while a tool executed in streaming mode raised `NameError` instead of emitting the cancellation event. Now constructs `ResponseEvent(type=EventType.RESPONSE_FAILED, ...)`, matching the fail_event pattern used by every other failure path. Regression test added (`test_streaming_subsystem.py::test_run_stream_keyboardinterrupt_during_tool_yields_response_failed` — verified to fail on the old code).
@@ -64,7 +71,8 @@ Dead-code cleanup + the first R07.00-flagged bug fix. Every removal below was ve
 
 ### Tests
 
-- 976 passed, 9 skipped, 0 failed (was 971; +5: 1 streaming Ctrl+C regression test, 4 `Agent.create_response`/`get_response`/`add_tool` smoke tests in new `tests/test_agent_openresponses_api.py` — the frozen public OpenResponses API previously had zero coverage)
+- 976 → **963 passed, 9 skipped, 0 failed** after the update-check change (the cleanup had brought it to 976 from 971 with +5: 1 streaming Ctrl+C regression test, 4 `Agent.create_response`/`get_response`/`add_tool` smoke tests in new `tests/test_agent_openresponses_api.py` — the frozen public OpenResponses API previously had zero coverage)
+- Update-check tests: `tests/test_update_check.py` 74 → 61 items — 17 cache-behavior tests removed (TTL boundaries, fresh/stale/negative-cache hits, `force` bypass, legacy-cache migration, cache-dir creation), replaced by 4 always-live tests (every invocation hits the network; a release cut between two calls is visible immediately; failed sources are retried live, not negatively cached) + `TestCacheRemoved` removal guards (cache plumbing absent; signature has no `force`/`cache_file` params)
 - The cleanup was executed in 6 batches, full suite green after each: (1) core function deletions, (2) backends/config/orchestrator, (3) ACP, (4) stragglers found by re-running the dead-code cross-referencer post-deletion (`pull_model`, `a2a_get_agents`, skills/loader getters), (5) imports/fields/params, (6) docs + version bump.
 
 ## [R06.58] - 2026-09-25 11:07:05 AM

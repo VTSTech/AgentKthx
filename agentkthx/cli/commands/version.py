@@ -22,18 +22,18 @@ def cmd_version(args: argparse.Namespace) -> int:
     print(f"   {dim('Author:')}  {cyan(__author__)}")
     print(f"   {dim('Repo:')}    {dim('https://github.com/VTSTech/AgentKthx')}")
 
-    # Latest releases (hourly-cached checks — silent on failure / opt-out):
+    # Latest releases (live checks — silent on failure / opt-out):
     # stable track via PyPI, development track via GitHub main commits
     # (the commit line only appears for git checkouts, which have a baseline).
     #
     # R06.57: pip-installed users now also see a "GitHub main:" version line
     # (parsed from raw.githubusercontent.com/.../__init__.py) — surfaces
     # dev releases that haven't been pushed to PyPI yet.
-    # R06.57: --refresh flag bypasses the 1h cache for fresh fetches.
-    _force_refresh = getattr(args, "refresh", False)
+    # R07.00: update checks are always live — the on-disk cache was removed,
+    # so `version --refresh` was retired (nothing left to bypass).
     try:
         from ...update_check import base_version, check_for_update, git_hash, is_newer
-        _latest_info = check_for_update(timeout=1.0, force=_force_refresh)
+        _latest_info = check_for_update(timeout=1.0)
     except Exception:
         _latest_info = None
     if _latest_info:

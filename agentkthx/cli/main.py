@@ -92,9 +92,10 @@ def main(argv: Optional[list[str]] = None) -> int:
         parser.print_help()
         return 0
 
-    # Update check — hourly-cached PyPI query, silent on failure / opt-out
-    # (AGENTKTHX_NO_UPDATE_CHECK=1). `version` does its own inline check
-    # (and honors --refresh); `update` obviously doesn't need one.
+    # Update check — live PyPI+GitHub query, silent on failure / opt-out
+    # (AGENTKTHX_NO_UPDATE_CHECK=1). Runs once per process (R07.00: always
+    # live, no cache); `version` does its own inline check;
+    # `update` obviously doesn't need one.
     if args.command not in ("version", "update"):
         _run_update_check()
 

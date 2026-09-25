@@ -14,23 +14,27 @@ GitHub *commits* API is the source of truth for the dev track):
     a pip install carries no commit hash, so there is no baseline to compare
     against. Action: `agentkthx update`.
 
-Behavior (same policy as pip / npm / AWS CLI):
+Behavior (R07.00: cache removed — always live):
 
-  - At most one network round per source per hour (R06.57: was 24h — too
-    long, hid recent releases from users); results cached in
-    ~/.agentkthx/update_check.json (per-source entries, shared timestamp).
-  - Failed sources are negatively cached for 15 min (R06.57: was 6h) so
-    offline users never stall, and each source fails independently and
-    silently.
-  - Force a refresh with ``agentkthx version --refresh`` (bypasses cache
-    for all sources, R06.57) or by deleting the cache file.
-  - Opt out entirely with AGENTKTHX_NO_UPDATE_CHECK=1 (also true/yes/on).
+  - Every check queries both endpoints live; nothing is written to or read
+    from disk. The R06.57 hourly cache (~/.agentkthx/update_check.json,
+    1h success / 15min negative TTLs) was removed after it kept hiding
+    freshly-cut releases from the developer — the one user who needs the
+    live answer most. A stale cache file from an older install is simply
+    ignored (safe to delete).
+  - Each source fails independently and silently; a failed source leaves
+    its field None for this invocation and is retried live on the next one
+    (no negative cache).
+  - Offline cost: at most one timeout (default 1s) per source, once per
+    process — opt out entirely with AGENTKTHX_NO_UPDATE_CHECK=1
+    (also true/yes/on).
 
 Zero dependencies — stdlib urllib only.
 
-Used by cli.py:
-  - main()            runs check_for_update() once, stashes the result,
-                      prints a pip-style notice after non-chat commands
+Used by the CLI:
+  - main()            runs check_for_update() once per process, stashes
+                      the result, prints a pip-style notice after
+                      non-chat commands
   - cmd_chat()        prints the notice under the chat banner
   - cmd_version()     shows "Latest on PyPI:" / "GitHub main:" lines
 
@@ -41,7 +45,6 @@ import json
 import os
 import time
 import urllib.request
-from pathlib import Path
 from typing import Optional
 
 from . import __version__
@@ -54,23 +57,6 @@ GITHUB_COMMITS_URL = "https://api.github.com/repos/VTSTech/AgentKthx/commits/HEA
 # version number declared in __init__.py on main. This surfaces dev releases
 # (R06.55, R06.56, R06.57, ...) that haven't been pushed to PyPI yet.
 GITHUB_RAW_INIT_URL = "https://raw.githubusercontent.com/VTSTech/AgentKthx/main/agentkthx/__init__.py"
-
-#: Cache location — follows the established ~/.agentkthx/ user-data convention.
-DEFAULT_CACHE_FILE = Path.home() / ".agentkthx" / "update_check.json"
-
-#: Fresh-check TTL: at most one request per source per hour. Kept short so
-#: users notice new releases (stable on PyPI, dev on GitHub main) the next
-#: time they run `agentkthx` rather than waiting a full day. The cache file
-#: (~/.agentkthx/update_check.json) records ``checked_at`` per cycle; if
-#: ``now - checked_at >= SUCCESS_TTL`` the entry is refetched. R06.57:
-#: reduced from 24h to 1h after user-reported confusion where a 24h-cached
-#: "0.6.54 on PyPI" hid the fact that 0.6.55+0.6.56 had been released.
-SUCCESS_TTL = 3600
-#: Negative-cache TTL for failed checks: retry after 15 min, not on every
-#: startup. Shorter than SUCCESS_TTL so transient failures (rate-limited
-#: GitHub API, PyPI blip) get retried sooner than successful entries
-#: need refreshing. R06.57: reduced from 6h to 15min proportionally.
-FAILURE_TTL = 900
 
 #: indirection so tests can monkeypatch the network call
 _urlopen = urllib.request.urlopen
@@ -147,7 +133,7 @@ def is_newer(latest: str, current: str) -> bool:
 
 
 # ----------------------------------------------------------------------------
-# Cache plumbing
+# Opt-out + network fetches
 # ----------------------------------------------------------------------------
 
 def _opted_out() -> bool:
@@ -155,23 +141,6 @@ def _opted_out() -> bool:
     return os.environ.get("AGENTKTHX_NO_UPDATE_CHECK", "").strip().lower() in (
         "1", "true", "yes", "on",
     )
-
-
-def _read_cache(cache_file: Path) -> dict:
-    try:
-        data = json.loads(cache_file.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
-
-
-def _write_cache(cache_file: Path, data: dict) -> None:
-    """Best-effort cache write — never raises."""
-    try:
-        cache_file.parent.mkdir(parents=True, exist_ok=True)
-        cache_file.write_text(json.dumps(data), encoding="utf-8")
-    except Exception:
-        pass
 
 
 def _fetch_json(url: str, timeout: float) -> dict:
@@ -251,25 +220,14 @@ def _fetch_github_latest_version(timeout: float) -> str:
     return base_version(version)
 
 
-def _cache_fresh(entry, cached_ts: float, now: float) -> bool:
-    """True if a per-source cache entry is still inside its TTL."""
-    if not isinstance(entry, dict):
-        return False
-    ttl = FAILURE_TTL if entry.get("error") else SUCCESS_TTL
-    return (now - cached_ts) < ttl
-
-
 # ----------------------------------------------------------------------------
-# The check
+# The check — always live (R07.00: on-disk cache removed)
 # ----------------------------------------------------------------------------
 
-def check_for_update(
-    force: bool = False,
-    timeout: float = 1.0,
-    cache_file: Optional[Path] = None,
-) -> Optional[dict]:
+def check_for_update(timeout: float = 1.0) -> Optional[dict]:
     """
-    Check both release tracks. Never raises; returns None only when opted out.
+    Check both release tracks — always live, never cached. Never raises;
+    returns None only when opted out.
 
     Returns:
         {
@@ -277,36 +235,28 @@ def check_for_update(
           "github_sha":  "<full sha>" | None,    # latest commit on GitHub main (git checkouts only)
           "github_latest_version": "0.6.57" | None,  # R06.57: __init__.py version on main
           "from_git":    bool,                   # installed copy is a git checkout
-          "source":      "cache" | "network",    # where the answer(s) came from
-          "checked_at":  epoch,
+          "checked_at":  epoch,                  # when this live check ran
         }
         None when AGENTKTHX_NO_UPDATE_CHECK is set.
 
-    Each source resolves independently: one may answer from cache while the
-    other is refetched; one may fail (cached as an error for 6h) without
-    affecting the other. The GitHub SHA check only runs for git checkouts
-    (pip installs have no commit hash to compare against); the GitHub
-    version-number check (R06.57) runs for everyone so pip-installed users
-    can see dev releases that haven't been pushed to PyPI yet.
+    Each source resolves independently and silently: one may fail without
+    affecting the others, and a failed source is retried on the next
+    invocation (no negative cache). The GitHub SHA check only runs for git
+    checkouts (pip installs have no commit hash to compare against); the
+    GitHub version-number check (R06.57) runs for everyone so pip-installed
+    users can see dev releases that haven't been pushed to PyPI yet.
+
+    R07.00: the on-disk cache (~/.agentkthx/update_check.json, 1h/15min
+    TTLs) was removed — every invocation fetches the latest live results.
+    The per-process stash in cli/banner.py still avoids duplicate fetches
+    within a single run.
 
     Args:
-        force:      bypass caches and hit both endpoints (still silent on failure)
         timeout:    socket timeout in seconds — kept small so startup stalls
-                    are bounded (once per TTL per source at worst)
-        cache_file: override the cache location (tests)
+                    are bounded (once per process at worst)
     """
     if _opted_out():
         return None
-
-    cache_file = Path(cache_file) if cache_file else DEFAULT_CACHE_FILE
-    now = time.time()
-    cached = _read_cache(cache_file)
-    cached_ts = float(cached.get("checked_at", 0) or 0)
-
-    # Migrate pre-0.6.51 single-source cache files ({"checked_at",
-    # "latest_version"} / {"error": true}) into the per-source layout.
-    if "pypi" not in cached and "latest_version" in cached and not cached.get("error"):
-        cached["pypi"] = {"latest_version": cached.get("latest_version")}
 
     from_git = bool(git_hash())
     result = {
@@ -314,36 +264,22 @@ def check_for_update(
         "github_sha": None,
         "github_latest_version": None,  # R06.57
         "from_git": from_git,
-        "source": "network",
-        "checked_at": now,
+        "checked_at": time.time(),
     }
-    fresh = {}  # per-source entries to persist for this cycle
 
     # --- Track 1: stable (PyPI) -------------------------------------------
-    entry = cached.get("pypi")
-    if not force and _cache_fresh(entry, cached_ts, now):
-        result["pypi_latest"] = entry.get("latest_version")
-        result["source"] = "cache"
-    else:
-        try:
-            result["pypi_latest"] = _fetch_pypi_latest(timeout)
-            fresh["pypi"] = {"latest_version": result["pypi_latest"]}
-        except Exception:
-            fresh["pypi"] = {"error": True}
+    try:
+        result["pypi_latest"] = _fetch_pypi_latest(timeout)
+    except Exception:
+        pass
 
     # --- Track 2a: development (GitHub main commit SHA) — git checkouts only
     # Only meaningful with a commit baseline: pip installs skip it entirely.
     if from_git:
-        entry = cached.get("github")
-        if not force and _cache_fresh(entry, cached_ts, now):
-            result["github_sha"] = entry.get("sha")
-            result["source"] = "cache"
-        else:
-            try:
-                result["github_sha"] = _fetch_github_sha(timeout)
-                fresh["github"] = {"sha": result["github_sha"]}
-            except Exception:
-                fresh["github"] = {"error": True}
+        try:
+            result["github_sha"] = _fetch_github_sha(timeout)
+        except Exception:
+            pass
 
     # --- Track 2b: development (GitHub main __init__.py version) — everyone
     # R06.57: Pip-installed users have no commit hash baseline, so the SHA
@@ -352,19 +288,11 @@ def check_for_update(
     # against — surfaces dev releases (R06.55+, R06.56+, ...) that haven't
     # been pushed to PyPI. Git checkouts also benefit: if the SHA fetch
     # failed but the version fetch succeeded, we still have a signal.
-    entry = cached.get("github_version")
-    if not force and _cache_fresh(entry, cached_ts, now):
-        result["github_latest_version"] = entry.get("version")
-        result["source"] = "cache"
-    else:
-        try:
-            result["github_latest_version"] = _fetch_github_latest_version(timeout)
-            fresh["github_version"] = {"version": result["github_latest_version"]}
-        except Exception:
-            fresh["github_version"] = {"error": True}
+    try:
+        result["github_latest_version"] = _fetch_github_latest_version(timeout)
+    except Exception:
+        pass
 
-    # Persist this cycle: fresh entries win, still-valid cached entries stay.
-    _write_cache(cache_file, {**cached, **fresh, "checked_at": now})
     return result
 
 
