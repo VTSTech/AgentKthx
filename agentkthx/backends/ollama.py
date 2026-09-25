@@ -69,6 +69,11 @@ class OllamaBackend(OpenAICompatibleBackend):
         # Set environment variable so other components know the API mode
         os.environ["AGENTKTHX_API_MODE"] = api_mode.value
 
+        # R06.57: Persisted safe max_tokens after a context-length 400 (if a
+        # local llama.cpp fork ever returns one). Honored by _apply_max_tokens_cap
+        # in _get_model_defaults. Mirrors the cloud backends' init.
+        self._context_safe_max_tokens: int | None = None
+
     @property
     def backend_type(self) -> BackendType:
         return BackendType.OLLAMA
@@ -1306,38 +1311,58 @@ class OllamaBackend(OpenAICompatibleBackend):
         return {"Content-Type": "application/json"}
 
     def _iter_sse_lines(self, url: str, body: dict, headers: dict) -> Generator[bytes, None, None]:
-        """Make a streaming POST to Ollama's /v1/chat/completions and yield raw SSE lines."""
+        """Make a streaming POST to Ollama's /v1/chat/completions and yield raw SSE lines.
+
+        R06.57: Now uses the shared ``_handle_context_length_400`` helper for
+        context-length 400 recovery (same as OpenRouter/Gemini/ZAI). Local
+        backends rarely 400 on context length (they truncate internally),
+        but llama.cpp forks (TurboQuant, BitNet) might.
+        """
         import urllib.request
         import urllib.error
-        req = urllib.request.Request(
-            url,
-            data=json.dumps(body).encode("utf-8"),
-            headers=headers,
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=self.config.timeout) as response:
-                for line in response:
-                    yield line
-        except urllib.error.HTTPError as e:
-            error_body = e.read().decode("utf-8") if e.fp else ""
-            raise RuntimeError(f"Ollama HTTP error {e.code}: {error_body}")
-        except urllib.error.URLError as e:
-            raise RuntimeError(f"Ollama connection error: {e.reason}")
+        for attempt in range(2):  # max 2 attempts (original + 1 retry)
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(body).encode("utf-8"),
+                headers=headers,
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=self.config.timeout) as response:
+                    for line in response:
+                        yield line
+            except urllib.error.HTTPError as e:
+                error_body = e.read().decode("utf-8") if e.fp else ""
+                # R06.57: shared context-length 400 handler
+                if e.code == 400 and attempt == 0:
+                    if self._handle_context_length_400(error_body, body):
+                        continue  # retry with reduced max_tokens
+                raise RuntimeError(f"Ollama HTTP error {e.code}: {error_body}")
+            except urllib.error.URLError as e:
+                raise RuntimeError(f"Ollama connection error: {e.reason}")
+            return  # success — don't retry
 
     def _get_model_defaults(self, model: str) -> dict:
-        """Ollama per-model defaults (temperature, max_tokens)."""
-        return self._get_model_defaults_ollama(model)
+        """Ollama per-model defaults (temperature, max_tokens, context_length).
 
-    def _get_model_defaults_ollama(self, model: str) -> dict:
-        """Original Ollama model-defaults implementation (renamed to avoid clash)."""
-        # Delegate to the existing family-based lookup
+        R06.57: Now uses the shared ``_apply_max_tokens_cap`` helper inherited
+        from ``OpenAICompatibleBackend`` — same ``num_ctx/32`` cap + persisted
+        ``_context_safe_max_tokens`` pattern as the cloud backends. This
+        prevents local backends from requesting a huge ``max_tokens`` that
+        leaves no room for input growth on long agentic runs.
+
+        Local backends (Ollama, llama-server, BitNet) don't return HTTP 400
+        context-length errors (they truncate internally), so the persisted
+        safe value rarely fires — but if a llama.cpp fork DOES 400 (e.g.
+        llama-cpp-turboquant with a tight context), the recovery path now
+        works the same as cloud backends.
+        """
+        # Resolve context_length from the family-based lookup
         family = None
         if ":" in model:
             base = model.split(":")[0].lower()
         else:
             base = model.lower()
-        # Quick family detection
         if "qwen" in base:
             family = "qwen2"
         elif "llama" in base:
@@ -1353,10 +1378,21 @@ class OllamaBackend(OpenAICompatibleBackend):
 
         from ..core.model_family_config import get_family_defaults
         defaults = get_family_defaults(family)
-        return {
-            "temperature": defaults.get("temperature", 0.7),
-            "max_tokens": defaults.get("max_tokens", 2048),
-        }
+        max_tokens = defaults.get("max_tokens", 2048)
+        # Resolve context_length: try get_model_max_context (queries Ollama API
+        # for the actual context_length), fall back to family default or 4096.
+        try:
+            context_length = self.get_model_max_context(model, family=family)
+            if not context_length or context_length < 1024:
+                context_length = 4096
+        except Exception:
+            context_length = 4096
+        temperature = defaults.get("temperature", 0.7)
+
+        # Use the shared cap helper (honors _context_safe_max_tokens if set)
+        return self._apply_max_tokens_cap(
+            max_tokens, context_length, temperature=temperature
+        )
 
     def __repr__(self) -> str:
         return f"OllamaBackend(url={self.base_url})"

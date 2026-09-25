@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **MAINT-05** — Replaced 8 hardcoded backend allowlists in `cli.py` with a single `is_cloud: bool` class attribute on the backend hierarchy. Adding a 5th cloud backend is now a 1-line change instead of an 8-site edit.
 - **ARCH-03** — Lifted the triplicated 429 retry / `num_ctx/32` cap / `_calculate_safe_max_tokens` pattern into `OpenAICompatibleBackend` as 3 shared methods + 6 overridable class attributes. Concrete backends shed 213 lines of duplication.
+- **Local backend parity** — `OllamaBackend._get_model_defaults` now uses the shared `_apply_max_tokens_cap` helper, so Ollama/llama-server/BitNet get the same `num_ctx/32` cap + `_context_safe_max_tokens` persistence as the cloud backends. `OllamaBackend._iter_sse_lines` now uses the shared `_handle_context_length_400` handler for context-length 400 recovery. Local backends rarely 400 (they truncate internally), but llama.cpp forks (TurboQuant, BitNet) might.
 
 ### Features
 
