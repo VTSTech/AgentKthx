@@ -68,7 +68,7 @@ Inspired by the architecture of OpenClaw, rebuilt from scratch for local-first o
 - **Argument normalization** — ~100+ tool argument aliases for small model compatibility
 - **JSON structured output** — `--response-format json` for structured JSON responses
 - **Self-update** — `agentkthx update` to update to latest version from GitHub
-- **Update check** — Startup + post-run notice for both release tracks: **stable** (new package on PyPI) and **development** (new commits on GitHub main); `agentkthx version` shows both too; daily cache, fails silently offline, opt out with `AGENTKTHX_NO_UPDATE_CHECK=1`
+- **Update check** — Startup + post-run notice for both release tracks: **stable** (new package on PyPI) and **development** (new commits on GitHub main); `agentkthx version` shows both too (use `agentkthx version --refresh` to bypass the cache); hourly cache, fails silently offline, opt out with `AGENTKTHX_NO_UPDATE_CHECK=1`
 - **Persistent status footer** — 2-line terminal footer with live model/backend/token info (R05.4, scroll-region based)
 - **OpenRouter 429 retry** — Automatic retry with `Retry-After` header support for rate-limited providers (R05.4)
 - **Tool-call visibility** — Tool calls and results displayed in chat mode (R05.4)
@@ -185,6 +185,10 @@ agentkthx run "Task: calculate 15 * 8 and save to file — route to math/file/ge
 # Local Ollama model making a decision
 agentkthx run "Is this a bug or feature request? 'App crashes on startup'" \
     --api jev --backend ollama --model qwen2.5:0.5b
+
+# Google Gemini free tier making a decision
+agentkthx run "Should I use Python or Rust for a CLI tool? — classify as python/rust/either" \
+    --api jev --backend gemini --model gemini-3.8-flash
 ```
 
 Output is a JSON decision envelope:

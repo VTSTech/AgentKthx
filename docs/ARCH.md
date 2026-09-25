@@ -2,15 +2,15 @@
 
 AgentKthx is a modular agent framework designed for local LLMs with tool-calling capabilities. It implements the OpenResponses specification for multi-provider, interoperable LLM interfaces.
 
-**Specification Compliance**: 100% (R03.5+) -- R04.1, R04.2, R04.3, R04.4, R04.5, R04.6, R04.7, R05.0
+**Specification Compliance**: 100% (R03.5+) -- R04.x, R05.x, R06.0–R06.57
 
-**Version**: R05.6
+**Version**: R06.57
 - OpenResponses API: 100%
 - Chat Completions API: 100%
 - Soul Spec v0.5: 100%
 - ACP v1.0.6: 100%
 - AgentSkills: 100%
-- Plugin Spec v0.1: 100%
+- Plugin Spec v0.2: 100%
 
 ```
 agentkthx/
@@ -62,7 +62,7 @@ agentkthx/
 │   │   └── acp_plugin.py     # ACP v1.0.6 integration (audit logging, session monitoring)
 │   ├── bitnet/               # BitNet backend plugin
 │   │   ├── plugin.json       # Manifest (type: backend, provides: bitnet)
-│   │   └── bitnet.py          # BitNetPlugin: LlamaServerBackend with bitnet_mode=True
+│   │   └── bitnet.py          # BitNetBackend: LlamaServerBackend with bitnet_mode=True
 │   ├── zai/                  # ZAI cloud API plugin
 │   │   ├── plugin.json       # Manifest (type: backend, provides: zai)
 │   │   └── zai.py             # ZaiBackend: GLM models via ZAI API, 13-model catalog
@@ -473,7 +473,7 @@ The `--backend` flag selects which backend to use:
 |-------------|--------|-------|-------------|
 | `ollama` | native | `OllamaBackend` | Ollama server (default) |
 | `llama-server` / `llama_server` | native | `LlamaServerBackend` | llama.cpp HTTP server / TurboQuant |
-| `bitnet` | plugin | `BitNetPlugin` | BitNet 1.58b models via llama.cpp |
+| `bitnet` | plugin | `BitNetBackend` | BitNet 1.58b models via llama.cpp |
 | `zai` | plugin | `ZaiBackend` | ZAI cloud API (GLM models) |
 | `openrouter` | plugin | `OpenRouterBackend` | OpenRouter cloud API (500+ models) |
 | `gemini` | plugin | `GeminiBackend` | Google Gemini API (71 models, free tier, Gemma) |
@@ -501,10 +501,10 @@ Extends `OllamaBackend` with llama.cpp server support. Used for both standard ll
 
 ### BitNet Backend (`plugins/bitnet/`) (R04.2, plugin in R05.0)
 
-The BitNet backend is a plugin that provides `BitNetPlugin`, a thin wrapper inheriting from `LlamaServerBackend` with `bitnet_mode=True`. All logic lives in `backends/llama_server.py`. Lazy-loaded via the plugin system when `--backend bitnet` is used.
+The BitNet backend is a plugin that provides `BitNetBackend`, a thin wrapper inheriting from `LlamaServerBackend` with `bitnet_mode=True`. All logic lives in `backends/llama_server.py`. Lazy-loaded via the plugin system when `--backend bitnet` is used.
 
 ```python
-class BitNetPlugin(LlamaServerBackend):
+class BitNetBackend(LlamaServerBackend):
     def __init__(self, **kwargs):
         kwargs.setdefault("bitnet_mode", True)
         super().__init__(**kwargs)
@@ -814,7 +814,7 @@ State is persisted to `~/.agentkthx/turbo_state.json`.
 Uses `ollama_registry.discover_models()` to find Ollama-compatible models, then:
 - Parses GGUF binary headers via mmap to extract weight quantization info
 - Auto-detects KV cache configuration from weight quantization (tensor count, head dimensions)
-- Runs compatibility check: requires `head_dim >= 128`
+- R06.57: The head_dim compatibility check was removed — empirical testing showed it was wrong (head_dim=64 models work fine). The server itself reports a clear error if a model cannot load.
 
 ### Environment Variables
 
@@ -1541,7 +1541,7 @@ This ensures BitNet models (which report `"bitnet"` as their architecture in GGU
 | `-m, --model` | run, chat, agent, test | Model to use |
 | `--tools` | run, chat, agent | Comma-separated tool list |
 | `--skills` | run, chat, agent | Comma-separated skill names to load |
-| `--backend` | all | Backend (ollama, bitnet, llama-server, zai) |
+| `--backend` | all | Backend (ollama, bitnet, llama-server, zai, openrouter, gemini) |
 | `--api` | run, chat, agent, test | API mode: `openre` (OpenResponses) or `openai` (OpenAI Chat-Completions) |
 | `--response-format` | run, chat, agent | Response format: `text` or `json` (Chat-Completions mode) |
 | `--truncation` | run, chat, agent | Truncation behavior: `auto` or `disabled` |

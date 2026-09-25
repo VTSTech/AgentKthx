@@ -121,6 +121,7 @@ if confidence < 0.5:
 | `ollama` | ✅ | Uses `/v1/chat/completions` with `response_format=json_object` |
 | `zai` | ✅ | Routes through `_generate_with_auth` (Bearer auth + ZAI_FREE_ONLY) |
 | `openrouter` | ✅ | Routes through `generate()` (429 retry + OPENROUTER_FREE_ONLY) |
+| `gemini` | ✅ | Routes through `generate()` — `_jev_call_completions` flips api_mode to OPENAI and forces `reasoning_effort="minimal"` for decisions (saves tokens on Gemini 3.x) |
 | `llama-server` | ✅ | Inherits from OllamaBackend |
 | `bitnet` | ✅ | Inherits from LlamaServerBackend |
 

@@ -405,7 +405,7 @@ data: {"choices":[{"delta":{"reasoning":"First I should..."}}]}
 data: {"choices":[{"delta":{"content":"The answer is..."}}]}
 ```
 
-The `reasoning` field appears in delta chunks BEFORE the `content` field. AgentKthx currently captures `reasoning_content` only from non-streaming responses; streaming reasoning capture is a future enhancement (R06.x).
+The `reasoning` field appears in delta chunks BEFORE the `content` field. AgentKthx captures `reasoning_content` in both streaming and non-streaming responses (since R06.53). In streaming mode, reasoning deltas are displayed in a `reasoning:` panel above the `AgentKthx:` prompt (UX-01, R06.56).
 
 ---
 
