@@ -747,6 +747,66 @@ Final Answer: <the answer>
                 time.sleep(_waited)
         return gen_response, _terminated
 
+    # ── MAINT-04 Phase 2: shared finish_reason handler ──────────────────
+    # Both _run_core and _run_core_streaming had near-identical finish_reason
+    # blocks (~25 lines each) handling the "length" and "content_filter"
+    # cases. Extracting into a single helper eliminates ~25 lines of
+    # duplication and ensures both paths produce the same StepResult
+    # entries + response status transitions for the same finish_reason.
+    #
+    # Returns True if the run should break (terminal finish_reason),
+    # False if the run should continue (normal "stop" or unknown reason).
+
+    def _handle_finish_reason(
+        self,
+        gen_response: dict,
+        steps: list,
+        response: "Response",
+    ) -> bool:
+        """Handle ``finish_reason`` from the backend response.
+
+        Shared between ``_run_core`` and ``_run_core_streaming``.
+
+        Handles two terminal finish reasons:
+        - ``"length"``: token budget exhausted → mark response incomplete,
+          append a MAX_STEPS step, return True (break the loop).
+        - ``"content_filter"``: provider blocked the response → mark
+          response failed, append an ERROR step, return True.
+
+        For any other finish reason (including ``"stop"``), returns False
+        so the caller continues processing tool calls / final answer.
+
+        Returns
+        -------
+        True if the caller should break its step loop (terminal reason);
+        False if the caller should continue.
+        """
+        tokens = gen_response.get("usage", {}).get("total_tokens", 0)
+        finish_reason = gen_response.get("_finish_reason", "stop")
+        if finish_reason == "length":
+            # Token budget exhausted — response is incomplete
+            if self.debug:
+                print(f"  [OpenResponses] finish_reason='length' — marking incomplete")
+            steps.append(StepResult(
+                type=StepResultType.MAX_STEPS,
+                content="Response truncated: token limit reached",
+                tokens_used=tokens,
+            ))
+            response.mark_incomplete()
+            return True
+        elif finish_reason == "content_filter":
+            # Content was filtered — response failed
+            if self.debug:
+                print(f"  [OpenResponses] finish_reason='content_filter' — marking failed")
+            steps.append(StepResult(
+                type=StepResultType.ERROR,
+                error="Response blocked by content filter",
+                tokens_used=tokens,
+            ))
+            response.mark_failed({"message": "Content filtered by provider", "type": "content_filter"})
+            return True
+        return False
+
     def _run_core(self, prompt: str, stream: bool = False) -> AgentRun:
         """
         Run the agent on a prompt.
@@ -885,29 +945,11 @@ Final Answer: <the answer>
                 response.mark_cancelled(debug=self.debug)
                 break
 
-            # OpenResponses: Handle finish_reason from backend
-            finish_reason = gen_response.get("_finish_reason", "stop")
-            if finish_reason == "length":
-                # Token budget exhausted — response is incomplete
-                if self.debug:
-                    print(f"  [OpenResponses] finish_reason='length' — marking incomplete")
-                steps.append(StepResult(
-                    type=StepResultType.MAX_STEPS,
-                    content="Response truncated: token limit reached",
-                    tokens_used=tokens,
-                ))
-                response.mark_incomplete()
-                break
-            elif finish_reason == "content_filter":
-                # Content was filtered — response failed
-                if self.debug:
-                    print(f"  [OpenResponses] finish_reason='content_filter' — marking failed")
-                steps.append(StepResult(
-                    type=StepResultType.ERROR,
-                    error="Response blocked by content filter",
-                    tokens_used=tokens,
-                ))
-                response.mark_failed({"message": "Content filtered by provider", "type": "content_filter"})
+            # OpenResponses: Handle finish_reason from backend.
+            # MAINT-04 Phase 2 (R06.59): the length/content_filter handling
+            # now lives in ``_handle_finish_reason`` so both _run_core and
+            # _run_core_streaming share it. Returns True if terminal.
+            if self._handle_finish_reason(gen_response, steps, response):
                 break
 
             if self.debug:
@@ -2700,22 +2742,10 @@ Final Answer: <the answer>
                 response.mark_cancelled(debug=self.debug)
                 break
 
-            finish_reason = gen_response.get("_finish_reason", "stop")
-            if finish_reason == "length":
-                steps.append(StepResult(
-                    type=StepResultType.MAX_STEPS,
-                    content="Response truncated: token limit reached",
-                    tokens_used=tokens,
-                ))
-                response.mark_incomplete()
-                break
-            elif finish_reason == "content_filter":
-                steps.append(StepResult(
-                    type=StepResultType.ERROR,
-                    error="Response blocked by content filter",
-                    tokens_used=tokens,
-                ))
-                response.mark_failed({"message": "Content filtered by provider", "type": "content_filter"})
+            # MAINT-04 Phase 2 (R06.59): finish_reason handling now shared
+            # with _run_core via ``_handle_finish_reason``. Returns True
+            # if terminal (length / content_filter).
+            if self._handle_finish_reason(gen_response, steps, response):
                 break
 
             if self.debug:
