@@ -807,6 +807,179 @@ Final Answer: <the answer>
             return True
         return False
 
+    # ── MAINT-04 Phase 3a: shared tool_choice enforcement check ─────────
+    # Both _run_core and _run_core_streaming had this 6-line block
+    # duplicated 4 times total (twice each — once for the Final Answer
+    # case, once for the no-tool-no-final-answer case). Extracting it
+    # eliminates ~24 lines of duplication and ensures both paths enforce
+    # tool_choice identically.
+
+    def _check_tool_choice_required(self, tool_calls: int) -> tuple[bool, str]:
+        """Check whether ``tool_choice`` requires a tool call that didn't happen.
+
+        Shared between ``_run_core`` and ``_run_core_streaming``. Called in
+        two places per method: (1) when the model emits a Final Answer
+        without having called any tools, (2) when the model responds with
+        neither a tool call nor a Final Answer.
+
+        Returns ``(needs_tool, rejection_reason)``. When ``needs_tool`` is
+        True, the caller must NOT accept the response — it should inject a
+        user message telling the model to use a tool, then ``continue`` the
+        agentic loop.
+        """
+        if self.tool_choice.type == ToolChoiceType.REQUIRED and tool_calls == 0:
+            return True, "tool_choice='required' but no tool was called"
+        if self.tool_choice.type == ToolChoiceType.SPECIFIC and tool_calls == 0:
+            return (True,
+                    f"tool_choice requires '{self.tool_choice.name}' "
+                    f"but no tool was called")
+        return False, ""
+
+    # ── MAINT-04 Phase 3b: shared tool-call parser ──────────────────────
+    # Both _run_core and _run_core_streaming had a ~20-line block that
+    # parsed tool calls from the model response into the unified
+    # ``tool_calls_found`` list — handling both native (OpenAI-format)
+    # tool calls and ReAct/JSON/XML parsed calls. Extracting this block
+    # eliminates ~40 lines of duplication (20 per method) and ensures
+    # both paths produce identical tool_calls_found shape.
+
+    def _parse_tool_calls(
+        self,
+        content: str,
+        native_tool_calls: list,
+        response: "Response",
+    ) -> list[dict]:
+        """Parse tool calls from the model response into a unified list.
+
+        Shared between ``_run_core`` and ``_run_core_streaming``.
+
+        Handles two sources of tool calls:
+        1. **Native** (OpenAI-format): ``native_tool_calls`` is a list of
+           ``{"name", "arguments", "id"}`` dicts from the backend. These
+           are normalized to the unified shape directly.
+        2. **ReAct/JSON/XML** (parsed from ``content``): when the backend
+           doesn't return native tool calls, the content is parsed by
+           ``self._parser``. Parsed calls may include a ``thought`` field
+           which is captured as a ``ReasoningItem`` on the response.
+
+        Returns a list of dicts in the unified shape:
+        ``{"name", "arguments", "id", "final_answer"}``. The
+        ``final_answer`` key is only present for ReAct calls that include
+        one (may be None).
+        """
+        tool_calls_found: list[dict] = []
+
+        # Check for native tool calls from backend
+        if native_tool_calls:
+            for tc in native_tool_calls:
+                tool_calls_found.append({
+                    "name": tc.get("name", ""),
+                    "arguments": tc.get("arguments", {}),
+                    "id": tc.get("id", ""),
+                })
+            return tool_calls_found
+
+        # Check for tool calls in model output (ReAct, JSON, or XML format)
+        if not content:
+            return tool_calls_found
+
+        parsed_calls = self._parser.parse(content)
+        if self.debug and parsed_calls and not self._is_comp_mode:
+            print(f"  [OpenResponses] Tool calls detected: {len(parsed_calls)}")
+
+        for call in parsed_calls:
+            if self.debug and not self._is_comp_mode:
+                print(f"  [OpenResponses] Parsed: name={call.name}, "
+                      f"args={call.arguments}, "
+                      f"final_answer={call.final_answer}")
+
+            # OpenResponses: Capture ReasoningItem if thought is present
+            if hasattr(call, 'thought') and call.thought:
+                if self.debug and not self._is_comp_mode:
+                    print(f"  [OpenResponses] Captured thought for "
+                          f"ReasoningItem: {call.thought[:50]}...")
+                reasoning_item = ReasoningItem(
+                    content=[OutputText(text=call.thought)]
+                )
+                reasoning_item.status = ItemStatus.COMPLETED
+                response.add_output_item(
+                    reasoning_item,
+                    debug=not self._is_comp_mode and self.debug,
+                )
+
+            tool_calls_found.append({
+                "name": call.name,
+                "arguments": call.arguments,
+                "id": "",
+                "final_answer": call.final_answer,  # May be None
+            })
+
+        return tool_calls_found
+
+    # ── MAINT-04 Phase 3c: shared run finalization ──────────────────────
+    # Both _run_core and _run_core_streaming had this ~7-line block
+    # duplicated at every successful exit point:
+    #     self._response_history[response.id] = response
+    #     response.usage["total_tokens"] = total_tokens
+    #     total_ms = (time.time() - start_time) * 1000
+    #     return AgentRun(final_answer=..., steps=steps, ...)
+    # Extracting it eliminates ~70 lines of duplication (7 lines × 10
+    # exit points) and ensures every exit path stores the response + sets
+    # total_tokens + computes total_ms identically.
+
+    def _finalize_run(
+        self,
+        final_answer: str,
+        steps: list,
+        total_tokens: int,
+        start_time: float,
+        tool_calls: int,
+        response: "Response",
+        success: bool = True,
+        mark_completed: bool = True,
+    ) -> AgentRun:
+        """Build the final ``AgentRun`` and store the response for
+        ``previous_response_id`` support.
+
+        Shared between ``_run_core`` and ``_run_core_streaming``. Called
+        at every exit point where the run produced a final answer (or
+        terminated with an empty answer).
+
+        Side effects:
+        - Stores ``response`` in ``self._response_history`` so callers can
+          chain via ``previous_response_id``.
+        - Sets ``response.usage["total_tokens"]``.
+        - Optionally marks the response as COMPLETED (when
+          ``mark_completed=True`` and status is IN_PROGRESS).
+
+        Returns a fully-populated ``AgentRun``.
+        """
+        if mark_completed and response.status == ResponseStatus.IN_PROGRESS:
+            response.mark_completed()
+        self._response_history[response.id] = response
+        response.usage["total_tokens"] = total_tokens
+        total_ms = (time.time() - start_time) * 1000
+        return AgentRun(
+            final_answer=final_answer,
+            steps=steps,
+            total_tokens=total_tokens,
+            total_ms=total_ms,
+            tool_calls=tool_calls,
+            success=success,
+        )
+
+    @staticmethod
+    def _extract_last_final_answer(steps: list) -> str:
+        """Walk ``steps`` in reverse and return the content of the last
+        ``FINAL_ANSWER`` step (or ``""`` if none). Used by both
+        ``_run_core`` and ``_run_core_streaming`` at their end-of-loop
+        fallthrough path.
+        """
+        for step in reversed(steps):
+            if step.type == StepResultType.FINAL_ANSWER:
+                return step.content or ""
+        return ""
+
     def _run_core(self, prompt: str, stream: bool = False) -> AgentRun:
         """
         Run the agent on a prompt.
@@ -957,42 +1130,12 @@ Final Answer: <the answer>
                 print(f"  Native tool calls: {native_tool_calls}")
 
             # ---- Process tool calls (native or ReAct) ----
-            tool_calls_found = []
-
-            # Check for native tool calls from backend
-            if native_tool_calls:
-                for tc in native_tool_calls:
-                    tool_calls_found.append({
-                        "name": tc.get("name", ""),
-                        "arguments": tc.get("arguments", {}),
-                        "id": tc.get("id", ""),
-                    })
-
-            # Check for tool calls in model output (ReAct, JSON, or XML format)
-            elif content:
-                parsed_calls = self._parser.parse(content)
-                if self.debug and parsed_calls and not self._is_comp_mode:
-                    print(f"  [OpenResponses] Tool calls detected: {len(parsed_calls)}")
-                for call in parsed_calls:
-                    if self.debug and not self._is_comp_mode:
-                        print(f"  [OpenResponses] Parsed: name={call.name}, args={call.arguments}, final_answer={call.final_answer}")
-                    
-                    # OpenResponses: Capture ReasoningItem if thought is present
-                    if hasattr(call, 'thought') and call.thought:
-                        if self.debug and not self._is_comp_mode:
-                            print(f"  [OpenResponses] Captured thought for ReasoningItem: {call.thought[:50]}...")
-                        reasoning_item = ReasoningItem(
-                            content=[OutputText(text=call.thought)]
-                        )
-                        reasoning_item.status = ItemStatus.COMPLETED
-                        response.add_output_item(reasoning_item, debug=not self._is_comp_mode and self.debug)
-                    
-                    tool_calls_found.append({
-                        "name": call.name,
-                        "arguments": call.arguments,
-                        "id": "",
-                        "final_answer": call.final_answer,  # May be None
-                    })
+            # MAINT-04 Phase 3b (R06.59): parsing now lives in
+            # ``_parse_tool_calls`` so both paths produce the same
+            # tool_calls_found shape.
+            tool_calls_found = self._parse_tool_calls(
+                content, native_tool_calls, response,
+            )
 
             # Execute tool calls if found
             if tool_calls_found:
@@ -1016,26 +1159,19 @@ Final Answer: <the answer>
                         tokens_used=tokens,
                         reasoning_content=reasoning_content,
                     ))
-                    
-                    # Mark response as completed
-                    if response.status == ResponseStatus.IN_PROGRESS:
-                        response.mark_completed()
-                    
-                    # Store response for previous_response_id support
-                    self._response_history[response.id] = response
-                    response.usage["total_tokens"] = total_tokens
-                    
-                    total_ms = (time.time() - start_time) * 1000
-                    
-                    return AgentRun(
+
+                    # MAINT-04 Phase 3c (R06.59): finalize via shared helper.
+                    return self._finalize_run(
                         final_answer=final_answer,
                         steps=steps,
                         total_tokens=total_tokens,
-                        total_ms=total_ms,
+                        start_time=start_time,
                         tool_calls=tool_calls,
+                        response=response,
                         success=True,
                     )
-                
+
+
                 # Track if any tool call has a final_answer
                 pending_final_answer = None
                 
@@ -1257,17 +1393,19 @@ Final Answer: <the answer>
                 # stop the WHOLE run. The old code only broke the inner loop
                 # and then called the model again with dangling tool_calls —
                 # an illegal API sequence (OpenRouter 400 / ZAI 1214).
+                #
+                # MAINT-04 Phase 3c (R06.59): finalize via shared helper
+                # (mark_completed=False because we're in a failed state).
                 if _terminated:
-                    self._response_history[response.id] = response
-                    response.usage["total_tokens"] = total_tokens
-                    total_ms = (time.time() - start_time) * 1000
-                    return AgentRun(
+                    return self._finalize_run(
                         final_answer="",
                         steps=steps,
                         total_tokens=total_tokens,
-                        total_ms=total_ms,
+                        start_time=start_time,
                         tool_calls=tool_calls,
+                        response=response,
                         success=False,
+                        mark_completed=False,
                     )
 
                 # Check if model provided final_answer along with tool call
@@ -1275,38 +1413,27 @@ Final Answer: <the answer>
                     if self.debug and not self._is_comp_mode:
                         print(f"  [OpenResponses] Model provided final_answer with tool call")
                         print(f"  [OpenResponses] Using final_answer: {pending_final_answer[:100]}...")
-                    
+
                     # Create output message item
                     msg_item = create_message_item("assistant", pending_final_answer)
                     msg_item.status = ItemStatus.COMPLETED
                     response.add_output_item(msg_item, debug=not self._is_comp_mode and self.debug)
-                    
+
                     steps.append(StepResult(
                         type=StepResultType.FINAL_ANSWER,
                         content=pending_final_answer,
                         tokens_used=tokens,
                         reasoning_content=reasoning_content,
                     ))
-                    
-                    # Mark response as completed
-                    if response.status == ResponseStatus.IN_PROGRESS:
-                        response.mark_completed()
-                    
-                    # Get final answer
-                    final_answer = pending_final_answer
-                    
-                    # Store response for previous_response_id support
-                    self._response_history[response.id] = response
-                    response.usage["total_tokens"] = total_tokens
-                    
-                    total_ms = (time.time() - start_time) * 1000
-                    
-                    return AgentRun(
-                        final_answer=final_answer,
+
+                    # MAINT-04 Phase 3c (R06.59): finalize via shared helper.
+                    return self._finalize_run(
+                        final_answer=pending_final_answer,
                         steps=steps,
                         total_tokens=total_tokens,
-                        total_ms=total_ms,
+                        start_time=start_time,
                         tool_calls=tool_calls,
+                        response=response,
                         success=True,
                     )
 
@@ -1316,17 +1443,11 @@ Final Answer: <the answer>
             # ---- Check for Final Answer ----
             # The model explicitly signals completion with "Final Answer:"
             if self._parser.is_final_answer(content):
-                # OpenResponses: Check tool_choice enforcement
-                needs_tool = False
-                rejection_reason = ""
-                
-                if self.tool_choice.type == ToolChoiceType.REQUIRED and tool_calls == 0:
-                    needs_tool = True
-                    rejection_reason = "tool_choice='required' but no tool was called"
-                elif self.tool_choice.type == ToolChoiceType.SPECIFIC and tool_calls == 0:
-                    needs_tool = True
-                    rejection_reason = f"tool_choice requires '{self.tool_choice.name}' but no tool was called"
-                
+                # OpenResponses: Check tool_choice enforcement.
+                # MAINT-04 Phase 3a (R06.59): the 6-line needs_tool block
+                # now lives in ``_check_tool_choice_required``.
+                needs_tool, rejection_reason = self._check_tool_choice_required(tool_calls)
+
                 if needs_tool:
                     if self.debug and not self._is_comp_mode:
                         print(f"  [OpenResponses] REJECTED: {rejection_reason}")
@@ -1338,9 +1459,9 @@ Final Answer: <the answer>
                     else:
                         self.memory.add("user", "You must use at least one tool before providing a final answer. Use the Action/Action Input format to call a tool.")
                     continue
-                
+
                 answer = self._parser.extract_final_answer(content)
-                
+
                 # Reset the expecting_final_answer flag
                 _expecting_final_answer = False
 
@@ -1367,17 +1488,10 @@ Final Answer: <the answer>
 
             # ---- No tool call, no final answer ----
             # Model responded directly without explicit final answer format
-            # Check tool_choice enforcement before accepting
-            needs_tool = False
-            rejection_reason = ""
-            
-            if self.tool_choice.type == ToolChoiceType.REQUIRED and tool_calls == 0:
-                needs_tool = True
-                rejection_reason = "tool_choice='required' but no tool was called"
-            elif self.tool_choice.type == ToolChoiceType.SPECIFIC and tool_calls == 0:
-                needs_tool = True
-                rejection_reason = f"tool_choice requires '{self.tool_choice.name}' but no tool was called"
-            
+            # Check tool_choice enforcement before accepting.
+            # MAINT-04 Phase 3a (R06.59): uses shared _check_tool_choice_required.
+            needs_tool, rejection_reason = self._check_tool_choice_required(tool_calls)
+
             if needs_tool:
                 if self.debug and not self._is_comp_mode:
                     print(f"  [OpenResponses] REJECTED: {rejection_reason}")
@@ -1389,7 +1503,7 @@ Final Answer: <the answer>
                 else:
                     self.memory.add("user", "You must use at least one tool. Use the Action/Action Input format to call a tool.")
                 continue
-            
+
             # OpenResponses Enhancement: Final Answer Enforcement
             # If we were expecting Final Answer but model responded without "Final Answer:" format,
             # use the last successful result instead of accepting the model's potentially wrong answer
@@ -1409,29 +1523,21 @@ Final Answer: <the answer>
                     tokens_used=tokens,
                     reasoning_content=reasoning_content,
                 ))
-                
-                # Mark response as completed
-                if response.status == ResponseStatus.IN_PROGRESS:
-                    response.mark_completed()
-                
-                # Store response for previous_response_id support
-                self._response_history[response.id] = response
-                response.usage["total_tokens"] = total_tokens
-                
-                total_ms = (time.time() - start_time) * 1000
-                
-                return AgentRun(
+
+                # MAINT-04 Phase 3c (R06.59): finalize via shared helper.
+                return self._finalize_run(
                     final_answer=final_answer,
                     steps=steps,
                     total_tokens=total_tokens,
-                    total_ms=total_ms,
+                    start_time=start_time,
                     tool_calls=tool_calls,
+                    response=response,
                     success=True,
                 )
-            
+
             # Accept model's response as the final answer
             # This is the model's decision (OpenResponses: model decides in 'auto' mode)
-            
+
             # Create output message item
             if content:
                 msg_item = create_message_item("assistant", content)
@@ -1465,33 +1571,28 @@ Final Answer: <the answer>
         # Mark response as completed
         if response.status == ResponseStatus.IN_PROGRESS:
             response.mark_completed()
-        
+
         if self.debug and not self._is_comp_mode:
             print(f"\n[OpenResponses] Response completed: id={response.id}")
             print(f"[OpenResponses] Final status: {response.status.value}")
             print(f"[OpenResponses] Output items: {len(response.output)}")
             print(f"[OpenResponses] Tool calls made: {tool_calls}")
 
-        # Store response for previous_response_id support
-        self._response_history[response.id] = response
+        # Get final answer via shared helper (MAINT-04 Phase 3c).
+        final_answer = self._extract_last_final_answer(steps)
 
-        # Get final answer
-        final_answer = ""
-        for step in reversed(steps):
-            if step.type == StepResultType.FINAL_ANSWER:
-                final_answer = step.content or ""
-                break
-
-        # Update usage in response
-        response.usage["total_tokens"] = total_tokens
-
-        return AgentRun(
+        # MAINT-04 Phase 3c (R06.59): finalize via shared helper.
+        # mark_completed=False because we already marked it above (to
+        # keep the debug print ordering intact).
+        return self._finalize_run(
             final_answer=final_answer,
             steps=steps,
             total_tokens=total_tokens,
-            total_ms=total_ms,
+            start_time=start_time,
             tool_calls=tool_calls,
+            response=response,
             success=bool(final_answer),
+            mark_completed=False,
         )
 
     def run_stream(self, prompt: str) -> Generator[str, None, None]:
@@ -2753,29 +2854,12 @@ Final Answer: <the answer>
                 print(f"  Native tool calls: {native_tool_calls}")
 
             # ---- Process tool calls (native or ReAct) ----
-            tool_calls_found = []
-            if native_tool_calls:
-                for tc in native_tool_calls:
-                    tool_calls_found.append({
-                        "name": tc.get("name", ""),
-                        "arguments": tc.get("arguments", {}),
-                        "id": tc.get("id", ""),
-                    })
-            elif content:
-                parsed_calls = self._parser.parse(content)
-                for call in parsed_calls:
-                    if hasattr(call, 'thought') and call.thought:
-                        reasoning_item = ReasoningItem(
-                            content=[OutputText(text=call.thought)]
-                        )
-                        reasoning_item.status = ItemStatus.COMPLETED
-                        response.add_output_item(reasoning_item, debug=not self._is_comp_mode and self.debug)
-                    tool_calls_found.append({
-                        "name": call.name,
-                        "arguments": call.arguments,
-                        "id": "",
-                        "final_answer": call.final_answer,
-                    })
+            # MAINT-04 Phase 3b (R06.59): parsing now lives in
+            # ``_parse_tool_calls`` so both paths produce the same
+            # tool_calls_found shape.
+            tool_calls_found = self._parse_tool_calls(
+                content, native_tool_calls, response,
+            )
 
             if tool_calls_found:
                 # Final Answer enforcement (same as non-streaming path)
@@ -2790,17 +2874,14 @@ Final Answer: <the answer>
                         tokens_used=tokens,
                         reasoning_content=reasoning_content,
                     ))
-                    if response.status == ResponseStatus.IN_PROGRESS:
-                        response.mark_completed()
-                    self._response_history[response.id] = response
-                    response.usage["total_tokens"] = total_tokens
-                    total_ms = (time.time() - start_time) * 1000
-                    return AgentRun(
+                    # MAINT-04 Phase 3c (R06.59): finalize via shared helper.
+                    return self._finalize_run(
                         final_answer=final_answer,
                         steps=steps,
                         total_tokens=total_tokens,
-                        total_ms=total_ms,
+                        start_time=start_time,
                         tool_calls=tool_calls,
+                        response=response,
                         success=True,
                     )
 
@@ -3007,16 +3088,16 @@ Final Answer: <the answer>
                         self._check_compaction()
 
                 if _terminated:
-                    self._response_history[response.id] = response
-                    response.usage["total_tokens"] = total_tokens
-                    total_ms = (time.time() - start_time) * 1000
-                    return AgentRun(
+                    # MAINT-04 Phase 3c (R06.59): finalize via shared helper.
+                    return self._finalize_run(
                         final_answer="",
                         steps=steps,
                         total_tokens=total_tokens,
-                        total_ms=total_ms,
+                        start_time=start_time,
                         tool_calls=tool_calls,
+                        response=response,
                         success=False,
+                        mark_completed=False,
                     )
 
                 if pending_final_answer:
@@ -3029,17 +3110,14 @@ Final Answer: <the answer>
                         tokens_used=tokens,
                         reasoning_content=reasoning_content,
                     ))
-                    if response.status == ResponseStatus.IN_PROGRESS:
-                        response.mark_completed()
-                    self._response_history[response.id] = response
-                    response.usage["total_tokens"] = total_tokens
-                    total_ms = (time.time() - start_time) * 1000
-                    return AgentRun(
+                    # MAINT-04 Phase 3c (R06.59): finalize via shared helper.
+                    return self._finalize_run(
                         final_answer=pending_final_answer,
                         steps=steps,
                         total_tokens=total_tokens,
-                        total_ms=total_ms,
+                        start_time=start_time,
                         tool_calls=tool_calls,
+                        response=response,
                         success=True,
                     )
 
@@ -3047,14 +3125,8 @@ Final Answer: <the answer>
 
             # ---- Check for Final Answer (ReAct format) ----
             if self._parser.is_final_answer(content):
-                needs_tool = False
-                rejection_reason = ""
-                if self.tool_choice.type == ToolChoiceType.REQUIRED and tool_calls == 0:
-                    needs_tool = True
-                    rejection_reason = "tool_choice='required' but no tool was called"
-                elif self.tool_choice.type == ToolChoiceType.SPECIFIC and tool_calls == 0:
-                    needs_tool = True
-                    rejection_reason = f"tool_choice requires '{self.tool_choice.name}' but no tool was called"
+                # MAINT-04 Phase 3a (R06.59): shared _check_tool_choice_required.
+                needs_tool, rejection_reason = self._check_tool_choice_required(tool_calls)
                 if needs_tool:
                     self.memory.add("assistant", content)
                     if self.tool_choice.type == ToolChoiceType.SPECIFIC:
@@ -3077,14 +3149,8 @@ Final Answer: <the answer>
                 break
 
             # ---- No tool call, no final answer ----
-            needs_tool = False
-            rejection_reason = ""
-            if self.tool_choice.type == ToolChoiceType.REQUIRED and tool_calls == 0:
-                needs_tool = True
-                rejection_reason = "tool_choice='required' but no tool was called"
-            elif self.tool_choice.type == ToolChoiceType.SPECIFIC and tool_calls == 0:
-                needs_tool = True
-                rejection_reason = f"tool_choice requires '{self.tool_choice.name}' but no tool was called"
+            # MAINT-04 Phase 3a (R06.59): shared _check_tool_choice_required.
+            needs_tool, rejection_reason = self._check_tool_choice_required(tool_calls)
             if needs_tool:
                 self.memory.add("assistant", content)
                 if self.tool_choice.type == ToolChoiceType.SPECIFIC:
@@ -3104,17 +3170,14 @@ Final Answer: <the answer>
                     tokens_used=tokens,
                     reasoning_content=reasoning_content,
                 ))
-                if response.status == ResponseStatus.IN_PROGRESS:
-                    response.mark_completed()
-                self._response_history[response.id] = response
-                response.usage["total_tokens"] = total_tokens
-                total_ms = (time.time() - start_time) * 1000
-                return AgentRun(
+                # MAINT-04 Phase 3c (R06.59): finalize via shared helper.
+                return self._finalize_run(
                     final_answer=final_answer,
                     steps=steps,
                     total_tokens=total_tokens,
-                    total_ms=total_ms,
+                    start_time=start_time,
                     tool_calls=tool_calls,
+                    response=response,
                     success=True,
                 )
 
@@ -3138,23 +3201,17 @@ Final Answer: <the answer>
                 content="Maximum steps reached without final answer",
             ))
 
-        total_ms = (time.time() - start_time) * 1000
-        if response.status == ResponseStatus.IN_PROGRESS:
-            response.mark_completed()
-        self._response_history[response.id] = response
-        final_answer = ""
-        for step in reversed(steps):
-            if step.type == StepResultType.FINAL_ANSWER:
-                final_answer = step.content or ""
-                break
-        response.usage["total_tokens"] = total_tokens
-        return AgentRun(
-            final_answer=final_answer,
+        # MAINT-04 Phase 3c (R06.59): finalize via shared helper.
+        # mark_completed=False because we already marked it above.
+        return self._finalize_run(
+            final_answer=self._extract_last_final_answer(steps),
             steps=steps,
             total_tokens=total_tokens,
-            total_ms=total_ms,
+            start_time=start_time,
             tool_calls=tool_calls,
-            success=bool(final_answer),
+            response=response,
+            success=bool(self._extract_last_final_answer(steps)),
+            mark_completed=False,
         )
 
     def _execute_tool(self, name: str, args: dict, user_prompt: str = "") -> Any:
