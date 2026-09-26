@@ -520,16 +520,21 @@ class TestOrcaRouterToolSupport:
 # ---------------------------------------------------------------------------
 
 class TestOrcaRouterBackendType:
-    """Verify backend_type returns a valid BackendType.
+    """Verify backend_type returns BackendType.ORCAROUTER (R07.05).
 
-    R07.05: OrcaRouterBackend currently returns BackendType.ZAI as a
-    placeholder — a dedicated BackendType.ORCAROUTER should be added
-    in R07.06.
+    The dedicated enum value was added to core/types.py alongside the
+    plugin itself — without it, the footer would show ``🔌 zai`` even
+    when ``--backend orcarouter`` is used.
     """
 
-    def test_backend_type_returns_valid_enum(self, backend):
-        """backend_type returns a BackendType enum value (ZAI placeholder for now)."""
-        assert backend.backend_type == BackendType.ZAI  # placeholder, R07.06 will replace
+    def test_backend_type_returns_orcarouter(self, backend):
+        """backend_type returns BackendType.ORCAROUTER (not ZAI placeholder)."""
+        assert backend.backend_type == BackendType.ORCAROUTER
+
+    def test_backend_type_value_is_orcarouter_string(self, backend):
+        """backend_type.value is the lowercase string 'orcarouter' (used by
+        the CLI footer formatter to display the backend name)."""
+        assert backend.backend_type.value == "orcarouter"
 
 
 # ---------------------------------------------------------------------------
