@@ -76,8 +76,11 @@ def cmd_models(args: argparse.Namespace) -> int:
             print("No free models found on OpenRouter.")
             return 0
     elif backend_name == "zai" and ZAI_FREE_ONLY:
-        # Only glm-4.5-flash and glm-4.7-flash are free on ZAI
-        models = [m for m in models if m["name"] in ["glm-4.5-flash", "glm-4.7-flash"]]
+        # Free = zero pricing in the ZAI catalog (glm-4.5-flash and
+        # glm-4.7-flash ONLY — glm-5.3-flash is paid despite the name).
+        # Use the backend's _is_free_model() instead of a hard-coded list
+        # so catalog updates are picked up automatically.
+        models = [m for m in models if getattr(backend, "_is_free_model", None) and backend._is_free_model(m["name"])]
         if not models:
             print("No free models found on ZAI.")
             return 0

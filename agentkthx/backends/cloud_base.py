@@ -285,6 +285,9 @@ class CloudBackend(OpenAICompatibleBackend):
                 "family": self._catalog_family_name(),
                 "backend": self._catalog_backend_name(),
                 "context_length": meta.get("context_length", 128000),
+                # free_tier from catalog pricing so /models labels match
+                # the catalog (default False = paid when pricing unknown).
+                "free_tier": self._is_free_model(model_key),
             },
         }
 
@@ -457,6 +460,9 @@ class CloudBackend(OpenAICompatibleBackend):
                     "family": self._catalog_family_name(),
                     "backend": self._catalog_backend_name(),
                     "context_length": meta.get("context_length", 128000),
+                    # free_tier from catalog pricing so /models free works
+                    # for catalog-driven backends too.
+                    "free_tier": self._is_free_model(name),
                 },
             })
         return models

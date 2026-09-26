@@ -70,7 +70,9 @@ from agentkthx.config import ZAI_BASE_URL, ZAI_API_KEY, ZAI_FREE_ONLY, ZAI_FREE_
 # Context lengths and pricing sourced from https://docs.z.ai.
 # The /api/paas/v4/models endpoint may not return all models —
 # this catalog ensures flash variants and other models are always available.
-# Updated: 2026-04-15
+# Updated: 2026-09-27 — pricing synced with ZAI's official per-1M-token table.
+# Free models (zero pricing): glm-4.5-flash and glm-4.7-flash ONLY.
+# glm-5.3-flash is NOT free ($0.15/$0.50) despite the name.
 ZAI_MODELS: dict[str, dict] = {
     # ── GLM 5.x ──────────────────────────────────────────────────────
     "glm-5.1": {
@@ -83,7 +85,7 @@ ZAI_MODELS: dict[str, dict] = {
         "context_length": 1048576,  # 1M for display (1024 * 1024)
         "default_temperature": 0.7,
         "default_max_tokens": 131072,  # 128K maximum output
-        "pricing": {"input": 0.6, "output": 2.2},
+        "pricing": {"input": 1.4, "output": 4.4},  # $1.4 / $4.4 per 1M
     },
     "glm-5": {
         "context_length": 204800,  # 200K for display (200 * 1024)
@@ -102,19 +104,19 @@ ZAI_MODELS: dict[str, dict] = {
         "context_length": 1048576,  # 1M for display (1024 * 1024)
         "default_temperature": 0.7,
         "default_max_tokens": 131072,  # 128K maximum output
-        "pricing": {"input": 0.6, "output": 2.2},
+        "pricing": {"input": 1.4, "output": 4.4},  # $1.4 / $4.4 per 1M
     },
     "glm-5.3-flash": {
         "context_length": 1048576,  # 1M for display (1024 * 1024)
         "default_temperature": 0.7,
         "default_max_tokens": 131072,  # 128K maximum output
-        "pricing": {"input": 0.0, "output": 0.0},
+        "pricing": {"input": 0.15, "output": 0.5},  # $0.15 / $0.50 per 1M — NOT free
     },
     "glm-5.3-flashx": {
         "context_length": 1048576,  # 1M for display (1024 * 1024)
         "default_temperature": 0.7,
         "default_max_tokens": 131072,  # 128K maximum output
-        "pricing": {"input": 0.07, "output": 0.4},
+        "pricing": {"input": 0.37, "output": 1.25},  # $0.37 / $1.25 per 1M
     },
     # ── GLM 4.7 ─────────────────────────────────────────────────────
     "glm-4.7": {
@@ -128,6 +130,12 @@ ZAI_MODELS: dict[str, dict] = {
         "default_temperature": 0.7,
         "default_max_tokens": 131072,  # 128K maximum output
         "pricing": {"input": 0.0, "output": 0.0},  # Free
+    },
+    "glm-4.7-flashx": {
+        "context_length": 204800,  # 200K for display (200 * 1024)
+        "default_temperature": 0.7,
+        "default_max_tokens": 131072,  # 128K maximum output
+        "pricing": {"input": 0.07, "output": 0.4},  # $0.07 / $0.40 per 1M
     },
     # ── GLM 4.6 ─────────────────────────────────────────────────────
     "glm-4.6": {
@@ -154,6 +162,24 @@ ZAI_MODELS: dict[str, dict] = {
         "default_temperature": 0.7,
         "default_max_tokens": 98304,  # Model-specific maximum (96K)
         "pricing": {"input": 0.2, "output": 1.1},
+    },
+    "glm-4.5-x": {
+        "context_length": 132000,  # 128K rounded for display
+        "default_temperature": 0.7,
+        "default_max_tokens": 98304,  # Model-specific maximum (96K)
+        "pricing": {"input": 2.2, "output": 8.9},  # $2.2 / $8.9 per 1M
+    },
+    "glm-4.5-airx": {
+        "context_length": 132000,  # 128K rounded for display
+        "default_temperature": 0.7,
+        "default_max_tokens": 98304,  # Model-specific maximum (96K)
+        "pricing": {"input": 1.1, "output": 4.5},  # $1.1 / $4.5 per 1M
+    },
+    "glm-4-32b-0414-128k": {
+        "context_length": 131072,  # 128K
+        "default_temperature": 0.7,
+        "default_max_tokens": 16384,
+        "pricing": {"input": 0.1, "output": 0.1},  # $0.1 / $0.1 per 1M
     },
     # ── GLM 4.x variants ─────────────────────────────────────────────
 }
@@ -259,6 +285,16 @@ class ZaiBackend(CloudBackend):
         (e.g., flash variants), so the catalog fills in the gaps.
 
         Enriches API results with context_length from the static catalog.
+
+        R07.05 fix: sets ``free_tier`` from the catalog pricing via
+        ``_is_free_model()``. The in-chat ``/models`` command labels each
+        model free/paid from ``details.free_tier`` (defaulting to False =
+        paid), so without this every ZAI model — including the genuinely
+        free glm-4.5-flash / glm-4.7-flash — displayed as ``paid``. Same
+        bug class OpenRouter had in R07.05 (see
+        ``tests/test_openrouter_free_models.py``); the catalog pricing is
+        the ground truth here because ZAI's discovery endpoint does not
+        return pricing data.
         """
         import urllib.request
         import urllib.error
@@ -317,6 +353,9 @@ class ZaiBackend(CloudBackend):
                     "family": "glm",
                     "backend": "zai",
                     "context_length": meta.get("context_length", 128000),
+                    "free_tier": self._is_free_model(model_key),
+                    "is_chat_model": True,
+                    "pricing": meta.get("pricing", {}),
                 },
             })
 
@@ -332,6 +371,9 @@ class ZaiBackend(CloudBackend):
                         "family": "glm",
                         "backend": "zai",
                         "context_length": meta.get("context_length", 128000),
+                        "free_tier": self._is_free_model(name),
+                        "is_chat_model": True,
+                        "pricing": meta.get("pricing", {}),
                     },
                 })
 
@@ -348,11 +390,22 @@ class ZaiBackend(CloudBackend):
         returns ``None`` for models not in the catalog. ZAI accepts any
         valid model ID, so this override returns a default 128K-context
         entry for unknown models instead of ``None``.
+
+        R07.05 fix: enriches catalog hits with ``free_tier`` (derived
+        from catalog pricing) so ``/models`` labels match the catalog —
+        see ``list_models()`` for the bug history.
         """
         info = super().get_model_info(model)
         if info is not None:
+            info["details"]["free_tier"] = self._is_free_model(model)
+            info["details"]["is_chat_model"] = True
+            info["details"]["pricing"] = ZAI_MODELS.get(
+                model.split("/")[-1] if "/" in model else model, {}
+            ).get("pricing", {})
             return info
         # Model not in static catalog — still valid if ZAI knows it.
+        # free_tier defaults to False (paid) — the safe assumption for
+        # a model we have no pricing data for.
         model_key = model.split("/")[-1] if "/" in model else model
         return {
             "name": model_key,
@@ -361,6 +414,8 @@ class ZaiBackend(CloudBackend):
                 "family": "glm",
                 "backend": "zai",
                 "context_length": 128000,
+                "free_tier": False,
+                "is_chat_model": True,
             },
         }
 
