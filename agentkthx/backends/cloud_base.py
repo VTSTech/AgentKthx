@@ -327,6 +327,85 @@ class CloudBackend(OpenAICompatibleBackend):
             max_tokens, context_length, temperature=temperature
         )
 
+    # ─────────────────────────────────────────────────────────────────────
+    # Context-window reporting (R07.05 — fixes ``agentkthx models`` crash)
+    # ─────────────────────────────────────────────────────────────────────
+    #
+    # The ``agentkthx models`` CLI command (agentkthx/cli/commands/models.py:138-139)
+    # calls ``backend.get_model_runtime_context(name)`` and
+    # ``backend.get_model_max_context(name, family=family)`` on every model
+    # in the list. ``OpenAICompatibleBackend.get_model_runtime_context``
+    # delegates to ``self.get_model_max_context(model)``, but that method
+    # was only defined on ``OllamaBackend`` (which uses Ollama's ``/api/show``
+    # endpoint). Cloud backends (ZAI, OpenRouter, OpenAI, HuggingFace,
+    # OrcaRouter) crashed with ``AttributeError: ... has no attribute
+    # 'get_model_max_context'`` when ``agentkthx models --backend <cloud>``
+    # was invoked.
+    #
+    # The fix: ``CloudBackend`` provides a catalog-based implementation.
+    # For cloud backends, the "runtime" context equals the model's max
+    # trained context (no separate runtime context like Ollama's
+    # Modelfile ``num_ctx``). The catalog lookup falls back to 128K
+    # (a safe default for modern cloud chat models).
+
+    def get_model_max_context(self, model: str, family: str | None = None) -> int:
+        """Return the model's maximum trained context window size.
+
+        For cloud backends, this is the ``context_length`` field from the
+        static ``MODELS`` catalog. The ``family`` argument is ignored for
+        cloud backends (the catalog is authoritative per-model, not
+        per-family). Falls back to 128000 (128K) if the model is not in
+        the catalog — a safe default for modern cloud chat models.
+
+        Cloud backends don't have Ollama's ``/api/show`` endpoint, so we
+        can't probe the model's actual context window at runtime. The
+        catalog is the source of truth.
+
+        Args:
+            model: Model name (provider prefix stripped automatically).
+            family: Ignored for cloud backends (catalog is per-model).
+
+        Returns:
+            Maximum context window size in tokens (default: 128000).
+        """
+        # Try the static catalog first (CloudBackend.MODELS)
+        model_key = model.split("/")[-1] if "/" in model else model
+        meta = self.MODELS.get(model_key, {})
+        if meta:
+            ctx = meta.get("context_length")
+            if ctx and isinstance(ctx, int) and ctx > 0:
+                return ctx
+
+        # Try the live model cache (populated by list_models() for
+        # backends like OrcaRouter that query /v1/models at runtime)
+        info = self.get_model_info(model)
+        if info and "details" in info:
+            ctx = info["details"].get("context_length")
+            if ctx and isinstance(ctx, int) and ctx > 0:
+                return ctx
+
+        # Safe fallback — 128K is the minimum for modern cloud chat models
+        # (GPT-4o-mini, Claude Haiku, Gemini Flash, GLM-4-Flash all support
+        # at least 128K). Older models that support less will trigger the
+        # _handle_context_length_400 recovery on first request.
+        return 128000
+
+    def get_model_runtime_context(self, model: str) -> int:
+        """Return the runtime context window size for a model.
+
+        For cloud backends, the runtime context equals the max context —
+        there's no separate "runtime" context like Ollama's Modelfile
+        ``num_ctx`` (which can be set below the model's max for memory
+        savings). Cloud backends always use the model's full context.
+
+        This override replaces the broken default on
+        ``OpenAICompatibleBackend`` (which called
+        ``self.get_model_max_context(model)`` — the method we define
+        just above — but only ``OllamaBackend`` had previously defined
+        it, so cloud backends crashed with ``AttributeError``).
+        """
+        return self.get_model_max_context(model)
+
     def test_tool_support(
         self,
         model: str,
