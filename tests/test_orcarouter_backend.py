@@ -301,6 +301,287 @@ class TestOrcaRouterRateLimitDetection:
 
 
 # ---------------------------------------------------------------------------
+# Free-tier error classification: retryable vs terminal (R07.05 follow-up)
+# ---------------------------------------------------------------------------
+
+class TestOrcaRouterFreeTierClassification:
+    """Verify the retryable-vs-terminal free-tier error classification.
+
+    OrcaRouter's free-tier errors come in two flavors:
+      - Retryable (rate-limited): err_free_rate, free_rate_limited → wait + retry
+      - Terminal (account-level): err_free_used, free_quota_exhausted,
+        err_free_access_denied, err_free_prompt_cap → surface buy_credits_url + terminate
+
+    The bug this prevents: if the user runs `agentkthx chat --backend orcarouter
+    --model orcarouter/free` and gets a terminal err_free_used, the old code
+    swapped to ORCAROUTER_FREE_FALLBACK_MODEL (also orcarouter/free) and retried
+    3 times — wasting time and producing confusing "falling back to X" messages
+    when the fallback IS X.
+    """
+
+    def test_err_free_rate_is_retryable(self):
+        """err_free_rate (per-minute/per-day rate window full) is retryable."""
+        from agentkthx.plugins.orcarouter.orcarouter import (
+            _is_free_rate_retryable, _is_free_rate_terminal
+        )
+        err = '{"error":{"metadata":{"reason":"err_free_rate"}}}'
+        assert _is_free_rate_retryable(err) is True
+        assert _is_free_rate_terminal(err) is False
+
+    def test_free_rate_limited_code_is_retryable(self):
+        """error.code == free_rate_limited is retryable."""
+        from agentkthx.plugins.orcarouter.orcarouter import (
+            _is_free_rate_retryable, _is_free_rate_terminal
+        )
+        err = '{"error":{"code":"free_rate_limited"}}'
+        assert _is_free_rate_retryable(err) is True
+        assert _is_free_rate_terminal(err) is False
+
+    def test_err_free_used_is_terminal(self):
+        """err_free_used (allowance used up / account not eligible) is TERMINAL.
+
+        This is the error from the user's live test — a brand-new API key
+        whose workspace isn't eligible for the free tier (GitHub account
+        not "established" per OrcaRouter's requirement).
+        """
+        from agentkthx.plugins.orcarouter.orcarouter import (
+            _is_free_rate_retryable, _is_free_rate_terminal
+        )
+        err = '{"error":{"metadata":{"reason":"err_free_used"}}}'
+        assert _is_free_rate_retryable(err) is False
+        assert _is_free_rate_terminal(err) is True
+
+    def test_free_quota_exhausted_is_terminal(self):
+        """free_quota_exhausted (no free model available) is TERMINAL."""
+        from agentkthx.plugins.orcarouter.orcarouter import (
+            _is_free_rate_retryable, _is_free_rate_terminal
+        )
+        err = '{"error":{"code":"free_quota_exhausted"}}'
+        assert _is_free_rate_retryable(err) is False
+        assert _is_free_rate_terminal(err) is True
+
+    def test_err_free_access_denied_is_terminal(self):
+        """err_free_access_denied (GitHub not linked) is TERMINAL."""
+        from agentkthx.plugins.orcarouter.orcarouter import (
+            _is_free_rate_retryable, _is_free_rate_terminal
+        )
+        err = '{"error":{"metadata":{"reason":"err_free_access_denied"}}}'
+        assert _is_free_rate_retryable(err) is False
+        assert _is_free_rate_terminal(err) is True
+
+    def test_err_free_prompt_cap_is_terminal(self):
+        """err_free_prompt_cap (per-request prompt-token cap exceeded) is TERMINAL.
+
+        Not retryable — the user must shorten the prompt.
+        """
+        from agentkthx.plugins.orcarouter.orcarouter import (
+            _is_free_rate_retryable, _is_free_rate_terminal
+        )
+        err = '{"error":{"code":"err_free_prompt_cap"}}'
+        assert _is_free_rate_retryable(err) is False
+        assert _is_free_rate_terminal(err) is True
+
+    def test_is_free_rate_limited_returns_true_for_both_classes(self):
+        """_is_free_rate_limited (the original API) returns True for any
+        free-tier error — both retryable and terminal. This preserves
+        backward compat with the existing check in _iter_sse_lines."""
+        from agentkthx.plugins.orcarouter.orcarouter import _is_free_rate_limited
+        # Retryable
+        assert _is_free_rate_limited('{"reason":"err_free_rate"}') is True
+        # Terminal
+        assert _is_free_rate_limited('{"reason":"err_free_used"}') is True
+        assert _is_free_rate_limited('{"code":"free_quota_exhausted"}') is True
+
+
+class TestOrcaRouterBuyCreditsUrlExtraction:
+    """Verify _extract_buy_credits_url pulls the billing URL from errors."""
+
+    def test_extracts_url_from_err_free_used(self):
+        """The buy_credits_url field is extracted from an err_free_used error."""
+        from agentkthx.plugins.orcarouter.orcarouter import _extract_buy_credits_url
+        err = (
+            '{"error":{"metadata":{'
+            '"buy_credits_url":"https://www.orcarouter.ai/console/billing?ref=err_free_used#add-credits",'
+            '"reason":"err_free_used"}}}'
+        )
+        url = _extract_buy_credits_url(err)
+        assert url is not None
+        assert "orcarouter.ai/console/billing" in url
+        assert "err_free_used" in url
+
+    def test_returns_none_when_no_url(self):
+        """None is returned when the error has no buy_credits_url field."""
+        from agentkthx.plugins.orcarouter.orcarouter import _extract_buy_credits_url
+        err = '{"error":{"message":"some other error"}}'
+        assert _extract_buy_credits_url(err) is None
+
+    def test_extracts_url_from_real_402_payload(self):
+        """Verify extraction from the actual 402 payload seen in the live test."""
+        from agentkthx.plugins.orcarouter.orcarouter import _extract_buy_credits_url
+        # This is the exact payload from the user's live test
+        err = (
+            '{"error":{"code":"free_quota_exhausted",'
+            '"message":"your orcarouter/free allowance is used up",'
+            '"metadata":{"base_model":"",'
+            '"buy_credits_url":"https://www.orcarouter.ai/console/billing?ref=err_free_used#add-credits",'
+            '"free_model":"orcarouter/free","reason":"err_free_used"},'
+            '"type":"insufficient_quota"}}'
+        )
+        url = _extract_buy_credits_url(err)
+        assert url == "https://www.orcarouter.ai/console/billing?ref=err_free_used#add-credits"
+
+
+# ---------------------------------------------------------------------------
+# Regression: terminal free-tier errors don't retry the same model
+# ---------------------------------------------------------------------------
+
+class TestOrcaRouterTerminalNoRetry:
+    """Verify terminal free-tier errors raise immediately instead of retrying.
+
+    The bug: before this fix, an err_free_used error on orcarouter/free
+    would swap to ORCAROUTER_FREE_FALLBACK_MODEL (also orcarouter/free)
+    and retry 3 times — producing 3 confusing "falling back to
+    orcarouter/free" messages before finally surfacing the error.
+    """
+
+    def test_err_free_used_raises_immediately(self, monkeypatch):
+        """A terminal err_free_used error raises RuntimeError immediately,
+        without retrying the same model 3 times."""
+        monkeypatch.setenv("ORCAROUTER_API_KEY", "sk-orca-test1234567890")
+        from agentkthx.plugins.orcarouter.orcarouter import OrcaRouterBackend
+        from agentkthx.plugins.orcarouter import orcarouter as _orca_mod
+        # Disable fallback chain (don't want it interfering)
+        monkeypatch.setattr(_orca_mod, "ORCAROUTER_FALLBACK_MODELS", "", raising=False)
+
+        b = OrcaRouterBackend()
+
+        # Mock urllib.request.urlopen to raise an HTTPError with err_free_used
+        import urllib.error
+        import urllib.request
+
+        terminal_err_body = (
+            '{"error":{"code":"free_quota_exhausted",'
+            '"message":"your orcarouter/free allowance is used up",'
+            '"metadata":{"buy_credits_url":"https://www.orcarouter.ai/console/billing#add-credits",'
+            '"reason":"err_free_used"},"type":"insufficient_quota"}}'
+        )
+
+        call_count = {"chat_calls": 0, "models_calls": 0}
+
+        class _FakeHTTPError(urllib.error.HTTPError):
+            def __init__(self):
+                # Minimal HTTPError init — we only need .code, .fp, .headers.
+                # .fp must be truthy so the production code path
+                # ``error_body = e.read().decode("utf-8") if e.fp else ""``
+                # actually reads the body. We set .fp to a sentinel object
+                # and patch .read() to return the error body.
+                self.code = 402
+                self.fp = True  # truthy sentinel — triggers the read() path
+                self.headers = {}
+
+        def _fake_urlopen(req, timeout=None):
+            # Count chat-completions calls separately from /v1/models calls.
+            # The /v1/models call happens once during _get_model_defaults
+            # (to populate the model cache) — that's expected and not a retry.
+            url = str(req.full_url) if hasattr(req, "full_url") else str(req)
+            if "/chat/completions" in url:
+                call_count["chat_calls"] += 1
+            elif "/models" in url:
+                call_count["models_calls"] += 1
+            err = _FakeHTTPError()
+            # Patch .read() to return the error body as bytes
+            err.read = lambda: terminal_err_body.encode("utf-8")
+            raise err
+
+        monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen)
+
+        # The generate() call should raise RuntimeError with the buy_credits_url
+        with pytest.raises(RuntimeError) as exc_info:
+            b.generate(model="orcarouter/free",
+                       messages=[{"role": "user", "content": "hi"}])
+
+        # Verify the error message surfaces the remedy + buy_credits_url
+        err_msg = str(exc_info.value)
+        assert "free-tier access denied" in err_msg.lower(), (
+            f"Error message should mention free-tier access denied, got: {err_msg!r}"
+        )
+        assert "orcarouter.ai/console/billing" in err_msg
+        assert "err_free_used" in err_msg or "free_quota_exhausted" in err_msg
+
+        # CRITICAL: the /chat/completions endpoint should have been called
+        # exactly ONCE — not retried 3 times like the old code did.
+        # (The /v1/models call is a separate concern — it populates the
+        # model cache during _get_model_defaults and is not a retry.)
+        assert call_count["chat_calls"] == 1, (
+            f"Terminal free-tier error should NOT retry the /chat/completions "
+            f"endpoint — expected 1 call, got {call_count['chat_calls']}. "
+            f"The old behavior would have made 4 calls (1 original + 3 retries "
+            f"of the same model)."
+        )
+
+    def test_err_free_used_error_message_mentions_20_threshold(self, monkeypatch):
+        """The terminal error message surfaces the $20 lifetime-purchase
+        threshold and the 50→800 daily-cap lift — so the user knows what
+        they're buying when they add credits.
+
+        Per OrcaRouter's free-tier access requirements: any paid purchase
+        lifts the always-free access gate, and $20+ in lifetime purchases
+        raises the workspace's daily request cap from 50 to 800.
+        """
+        monkeypatch.setenv("ORCAROUTER_API_KEY", "sk-orca-test1234567890")
+        from agentkthx.plugins.orcarouter.orcarouter import OrcaRouterBackend
+        from agentkthx.plugins.orcarouter import orcarouter as _orca_mod
+        monkeypatch.setattr(_orca_mod, "ORCAROUTER_FALLBACK_MODELS", "", raising=False)
+
+        b = OrcaRouterBackend()
+
+        import urllib.error
+        import urllib.request
+
+        terminal_err_body = (
+            '{"error":{"code":"free_quota_exhausted",'
+            '"message":"your orcarouter/free allowance is used up",'
+            '"metadata":{"buy_credits_url":"https://www.orcarouter.ai/console/billing?ref=err_free_used#add-credits",'
+            '"reason":"err_free_used"},"type":"insufficient_quota"}}'
+        )
+
+        class _FakeHTTPError(urllib.error.HTTPError):
+            def __init__(self):
+                self.code = 402
+                self.fp = True
+                self.headers = {}
+
+        def _fake_urlopen(req, timeout=None):
+            err = _FakeHTTPError()
+            err.read = lambda: terminal_err_body.encode("utf-8")
+            raise err
+
+        monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen)
+
+        with pytest.raises(RuntimeError) as exc_info:
+            b.generate(model="orcarouter/free",
+                       messages=[{"role": "user", "content": "hi"}])
+
+        err_msg = str(exc_info.value).lower()
+
+        # Verify the remedy mentions the $20 threshold + the 50→800 daily cap lift
+        assert "$20" in err_msg, (
+            f"Error message should mention the $20 lifetime-purchase threshold, "
+            f"got: {exc_info.value}"
+        )
+        assert "800" in err_msg, (
+            f"Error message should mention the 800 daily-cap lift, got: {exc_info.value}"
+        )
+        # Verify both remedy paths (add credits OR link GitHub) are surfaced
+        assert "github" in err_msg, (
+            f"Error message should mention the GitHub-account alternative, "
+            f"got: {exc_info.value}"
+        )
+        # Verify the actual buy_credits_url from the API response is preserved
+        assert "orcarouter.ai/console/billing?ref=err_free_used#add-credits" in err_msg
+
+
+# ---------------------------------------------------------------------------
 # Retry-After parsing
 # ---------------------------------------------------------------------------
 

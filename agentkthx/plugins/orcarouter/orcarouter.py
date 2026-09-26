@@ -104,47 +104,130 @@ _ORCA_NAMED_ROUTERS: frozenset[str] = frozenset({
 
 
 # ---------------------------------------------------------------------------
-# Free-tier rate-limit detection
+# Free-tier error classification
 # ---------------------------------------------------------------------------
 #
-# OrcaRouter's free-tier 429s carry ``error.metadata.reason`` indicating
-# which fixed window tripped. Unlike paid 429s, free-tier 429s MUST NOT
-# use exponential backoff — the window refills entirely at its boundary,
-# so backing off further just wastes time. Wait exactly
-# ``retry_after_seconds`` and retry once.
+# OrcaRouter's free-tier errors come in two flavors:
+#
+# **Retryable (rate-limited)** — wait ``Retry-After`` seconds and retry once.
+# Fixed-window rate limiting, NOT exponential backoff.
+#   - ``error.metadata.reason == "err_free_rate"`` (HTTP 429)
+#   - ``error.code == "free_rate_limited"`` (HTTP 429)
+# These mean: "your workspace hit the per-minute or per-UTC-day request cap.
+# Wait for the window to reset, then retry."
+#
+# **Terminal (account-level)** — retrying the same free model is pointless.
+# The free allowance is exhausted or the workspace isn't eligible.
+#   - ``error.metadata.reason == "err_free_used"`` (HTTP 402)
+#     Means: "free allowance used up — top up balance to keep going"
+#     OR: "workspace not eligible for free tier (GitHub account not 'established')"
+#   - ``error.metadata.reason == "err_free_access_denied"`` (HTTP 429)
+#     Means: "workspace owner hasn't linked established GitHub account"
+#   - ``error.code == "free_quota_exhausted"`` (HTTP 403)
+#     Means: "orcarouter/free had no free model available (all saturated)"
+#   - ``error.code == "err_free_prompt_cap"`` (HTTP 400)
+#     Means: "per-request prompt-token cap exceeded (shorten prompt, not retryable)"
+# For terminal errors, we should NOT swap to ``ORCAROUTER_FREE_FALLBACK_MODEL``
+# and retry — if the user is already on ``orcarouter/free``, swapping to
+# ``orcarouter/free`` is a no-op. And if they're on a specific free model
+# like ``deepseek/deepseek-v4-flash-free``, the account-level gate applies
+# to ALL free models, so swapping won't help. Surface the
+# ``metadata.buy_credits_url`` clearly and terminate.
 #
 # Sources:
 #   - docs/ORCAROUTER_API_TECHNICAL_REFERENCE.md §Free-tier error reasons
-#   - HTTP 429 + error.code == "free_rate_limited"
-_FREE_RATE_REASON_PATTERNS = (
-    "err_free_rate",
-    "err_free_access_denied",
+#   - https://docs.orcarouter.ai/routing/free-models (free-tier access requirements)
+_FREE_RATE_RETRYABLE_REASONS = (
+    "err_free_rate",  # per-minute or per-UTC-day rate window full
 )
-_FREE_RATE_CODE_PATTERNS = (
-    "free_rate_limited",
-    "free_quota_exhausted",
+_FREE_RATE_RETRYABLE_CODES = (
+    "free_rate_limited",  # HTTP 429 — same as err_free_rate
+)
+_FREE_RATE_TERMINAL_REASONS = (
+    "err_free_used",            # free allowance used up OR workspace not eligible
+    "err_free_access_denied",   # GitHub account not linked / not "established"
+)
+_FREE_RATE_TERMINAL_CODES = (
+    "free_quota_exhausted",  # orcarouter/free had no free model available
+    "err_free_prompt_cap",   # per-request prompt-token cap exceeded (not retryable)
 )
 
 
 def _is_free_rate_limited(err_str: str) -> bool:
-    """Detect OrcaRouter free-tier rate-limit / quota-exhaustion errors.
+    """Detect OrcaRouter free-tier errors (any flavor — retryable OR terminal).
 
-    Returns True if the error string matches any of the free-tier-specific
-    error reasons or error codes. These require fixed-window retry (wait
-    ``retry_after_seconds``, retry once) rather than exponential backoff.
+    Returns True if the error string matches any free-tier-specific error
+    reason or error code. Use this when you want to know "is this a
+    free-tier error at all?" (e.g. for surfacing buy_credits_url).
 
-    Matches both ``error.metadata.reason`` values (err_free_rate,
-    err_free_access_denied) and ``error.code`` values
-    (free_rate_limited, free_quota_exhausted).
+    For the retry-vs-terminate decision, use ``_is_free_rate_retryable()``
+    or ``_is_free_rate_terminal()`` instead.
     """
     err_lower = err_str.lower()
-    for pat in _FREE_RATE_REASON_PATTERNS:
+    for pat in (_FREE_RATE_RETRYABLE_REASONS + _FREE_RATE_TERMINAL_REASONS):
         if pat in err_lower:
             return True
-    for pat in _FREE_RATE_CODE_PATTERNS:
+    for pat in (_FREE_RATE_RETRYABLE_CODES + _FREE_RATE_TERMINAL_CODES):
         if pat in err_lower:
             return True
     return False
+
+
+def _is_free_rate_retryable(err_str: str) -> bool:
+    """Detect OrcaRouter free-tier RATE-LIMIT errors (retryable).
+
+    These are HTTP 429s where the workspace hit the per-minute or
+    per-UTC-day request cap. The fix: wait ``Retry-After`` seconds
+    (fixed-window retry, NOT exponential) and retry once.
+
+    Returns False for terminal free-tier errors (``err_free_used``,
+    ``free_quota_exhausted``, ``err_free_access_denied``,
+    ``err_free_prompt_cap``) — those don't benefit from retrying.
+    """
+    err_lower = err_str.lower()
+    for pat in _FREE_RATE_RETRYABLE_REASONS:
+        if pat in err_lower:
+            return True
+    for pat in _FREE_RATE_RETRYABLE_CODES:
+        if pat in err_lower:
+            return True
+    return False
+
+
+def _is_free_rate_terminal(err_str: str) -> bool:
+    """Detect OrcaRouter free-tier TERMINAL errors (NOT retryable).
+
+    These mean the free allowance is exhausted or the workspace isn't
+    eligible for the free tier. Retrying the same free model (or swapping
+    to ``orcarouter/free``) won't help — the account-level gate applies
+    to ALL free models.
+
+    The right action is to surface ``metadata.buy_credits_url`` and
+    terminate the run with a clear error message.
+
+    Returns False for retryable rate-limit errors (``err_free_rate``,
+    ``free_rate_limited``).
+    """
+    err_lower = err_str.lower()
+    for pat in _FREE_RATE_TERMINAL_REASONS:
+        if pat in err_lower:
+            return True
+    for pat in _FREE_RATE_TERMINAL_CODES:
+        if pat in err_lower:
+            return True
+    return False
+
+
+def _extract_buy_credits_url(err_str: str) -> str | None:
+    """Extract ``metadata.buy_credits_url`` from an OrcaRouter error response.
+
+    OrcaRouter's free-tier rejection errors always include a
+    ``buy_credits_url`` field pointing to the billing page. Surface it
+    in the user-facing error message so the user knows where to top up.
+    """
+    import re
+    m = re.search(r'"buy_credits_url"\s*:\s*"([^"]+)"', err_str)
+    return m.group(1) if m else None
 
 
 def _is_free_model(model_id: str) -> bool:
@@ -675,28 +758,106 @@ class OrcaRouterBackend(CloudBackend):
                     body.pop("tool_choice", None)
                     continue
 
-                # Free-tier rate limit / quota exhaustion — swap to fallback model
-                if _is_free_rate_limited(error_msg) and attempt < 3:
-                    fallback = ORCAROUTER_FREE_FALLBACK_MODEL
-                    retry_after = _parse_retry_after_seconds(
-                        error_body,
-                        e.headers.get("Retry-After") if e.headers else None,
-                    )
-                    if retry_after:
-                        print(
-                            f"\n  \033[33m[OrcaRouter] Free-tier rate-limited — waiting "
-                            f"{retry_after:.1f}s then retrying with {fallback!r}\033[0m",
-                            file=sys.stderr,
+                # Free-tier error handling — classify as retryable vs terminal.
+                # See the long comment block above _FREE_RATE_RETRYABLE_REASONS
+                # for the full taxonomy.
+                if _is_free_rate_limited(error_msg):
+                    # TERMINAL: account-level free-tier rejection (err_free_used,
+                    # free_quota_exhausted, err_free_access_denied, err_free_prompt_cap).
+                    # Retrying the same model (or swapping to orcarouter/free) won't
+                    # help — the gate applies to ALL free models. Surface the
+                    # buy_credits_url and terminate.
+                    if _is_free_rate_terminal(error_msg):
+                        buy_url = _extract_buy_credits_url(error_body) or \
+                            "https://www.orcarouter.ai/console/billing"
+                        # err_free_access_denied and err_free_used are both
+                        # account-level gates — but the remedy differs slightly.
+                        # err_free_access_denied specifically means "GitHub not
+                        # linked / not established". err_free_used means the
+                        # workspace's free allowance is used up OR the workspace
+                        # doesn't meet either free-tier access gate (no $20+
+                        # lifetime purchases AND no established GitHub account).
+                        if "err_free_access_denied" in error_msg:
+                            remedy = (
+                                "Either (a) link an established GitHub account "
+                                "to your OrcaRouter workspace at "
+                                "https://www.orcarouter.ai/console/settings "
+                                "(new GitHub accounts become eligible after a "
+                                "waiting period), OR (b) add credits at "
+                                f"{buy_url} — any paid purchase lifts the "
+                                "always-free access gate. After $20+ in "
+                                "lifetime purchases, the workspace's daily "
+                                "request cap also rises from 50 to 800."
+                            )
+                        else:
+                            # err_free_used / free_quota_exhausted — the
+                            # workspace either exhausted its free allowance
+                            # or doesn't meet the free-tier access gates.
+                            remedy = (
+                                "Either (a) add credits at " + buy_url + " "
+                                "and call a specific paid model with wallet "
+                                "billing to keep going (any paid purchase "
+                                "also lifts the always-free access gate, "
+                                "and $20+ in lifetime purchases raises the "
+                                "workspace's daily request cap from 50 to "
+                                "800), OR (b) if you've already added credits, "
+                                "link an established GitHub account at "
+                                "https://www.orcarouter.ai/console/settings "
+                                "(new GitHub accounts become eligible after "
+                                "a waiting period)."
+                            )
+                        raise RuntimeError(
+                            f"OrcaRouter free-tier access denied.\n"
+                            f"  Reason: your workspace's free allowance is "
+                            f"used up, or your workspace doesn't meet the "
+                            f"free-tier access gates (no $20+ lifetime paid "
+                            f"purchases AND no established GitHub account "
+                            f"linked).\n"
+                            f"  Remedy: {remedy}\n"
+                            f"  Raw error: {error_body}"
                         )
-                        time.sleep(retry_after)
-                    else:
-                        print(
-                            f"\n  \033[33m[OrcaRouter] Free-tier exhausted — falling back "
-                            f"to {fallback!r}\033[0m",
-                            file=sys.stderr,
+
+                    # RETRYABLE: rate-limit (err_free_rate, free_rate_limited).
+                    # Wait Retry-After seconds (fixed-window, NOT exponential),
+                    # retry once. Only swap to the fallback model if we're
+                    # not already on it — otherwise the swap is a no-op.
+                    if attempt < 3:
+                        fallback = ORCAROUTER_FREE_FALLBACK_MODEL
+                        current_model = body.get("model", model)
+
+                        if current_model == fallback:
+                            # Already on the fallback — just wait and retry the
+                            # same model (the rate window will reset).
+                            if os.environ.get("AGENTKTHX_DEBUG"):
+                                print(f"  [OrcaRouter] Already on fallback {fallback!r}; "
+                                      f"not swapping, just waiting for rate window.")
+                        else:
+                            # Swap to the free router for the retry
+                            body["model"] = fallback
+
+                        retry_after = _parse_retry_after_seconds(
+                            error_body,
+                            e.headers.get("Retry-After") if e.headers else None,
                         )
-                    body["model"] = fallback
-                    continue
+                        if retry_after:
+                            print(
+                                f"\n  \033[33m[OrcaRouter] Free-tier rate-limited — waiting "
+                                f"{retry_after:.1f}s then retrying with {body['model']!r}\033[0m",
+                                file=sys.stderr,
+                            )
+                            time.sleep(retry_after)
+                        else:
+                            # No Retry-After — wait a short fixed delay (10s)
+                            # before the single retry. This is the "free channel
+                            # timed out upstream" case from the doc.
+                            print(
+                                f"\n  \033[33m[OrcaRouter] Free-tier rate-limited (no "
+                                f"Retry-After) — waiting 10s then retrying with "
+                                f"{body['model']!r}\033[0m",
+                                file=sys.stderr,
+                            )
+                            time.sleep(10)
+                        continue
 
                 # 401 / 403 access_denied — fatal
                 if e.code in (401, 403) and "access_denied" in error_msg:
@@ -763,28 +924,85 @@ class OrcaRouterBackend(CloudBackend):
                     body.pop("tool_choice", None)
                     continue
 
-                # Free-tier rate limit / quota exhaustion — fixed-window retry
-                if _is_free_rate_limited(error_msg) and attempt < 3:
-                    fallback = ORCAROUTER_FREE_FALLBACK_MODEL
-                    retry_after = _parse_retry_after_seconds(
-                        error_body,
-                        e.headers.get("Retry-After") if e.headers else None,
-                    )
-                    if retry_after:
-                        print(
-                            f"\n  \033[33m[OrcaRouter-Stream] Free-tier rate-limited — waiting "
-                            f"{retry_after:.1f}s then retrying with {fallback!r}\033[0m",
-                            file=sys.stderr,
+                # Free-tier error handling — classify as retryable vs terminal.
+                # Mirrors the non-streaming path's logic (see comment block above).
+                if _is_free_rate_limited(error_msg):
+                    # TERMINAL: account-level rejection. Don't retry — surface
+                    # the buy_credits_url and terminate.
+                    if _is_free_rate_terminal(error_msg):
+                        buy_url = _extract_buy_credits_url(error_body) or \
+                            "https://www.orcarouter.ai/console/billing"
+                        if "err_free_access_denied" in error_msg:
+                            remedy = (
+                                "Either (a) link an established GitHub account "
+                                "to your OrcaRouter workspace at "
+                                "https://www.orcarouter.ai/console/settings "
+                                "(new GitHub accounts become eligible after a "
+                                "waiting period), OR (b) add credits at "
+                                f"{buy_url} — any paid purchase lifts the "
+                                "always-free access gate. After $20+ in "
+                                "lifetime purchases, the workspace's daily "
+                                "request cap also rises from 50 to 800."
+                            )
+                        else:
+                            remedy = (
+                                "Either (a) add credits at " + buy_url + " "
+                                "and call a specific paid model with wallet "
+                                "billing to keep going (any paid purchase "
+                                "also lifts the always-free access gate, "
+                                "and $20+ in lifetime purchases raises the "
+                                "workspace's daily request cap from 50 to "
+                                "800), OR (b) if you've already added credits, "
+                                "link an established GitHub account at "
+                                "https://www.orcarouter.ai/console/settings "
+                                "(new GitHub accounts become eligible after "
+                                "a waiting period)."
+                            )
+                        raise RuntimeError(
+                            f"OrcaRouter free-tier access denied.\n"
+                            f"  Reason: your workspace's free allowance is "
+                            f"used up, or your workspace doesn't meet the "
+                            f"free-tier access gates (no $20+ lifetime paid "
+                            f"purchases AND no established GitHub account "
+                            f"linked).\n"
+                            f"  Remedy: {remedy}\n"
+                            f"  Raw error: {error_body}"
                         )
-                        time.sleep(retry_after)
-                    else:
-                        print(
-                            f"\n  \033[33m[OrcaRouter-Stream] Free-tier exhausted — falling back "
-                            f"to {fallback!r}\033[0m",
-                            file=sys.stderr,
+
+                    # RETRYABLE: rate-limit. Wait Retry-After, retry once.
+                    # Skip the swap if already on the fallback (no-op).
+                    if attempt < 3:
+                        fallback = ORCAROUTER_FREE_FALLBACK_MODEL
+                        current_model = body.get("model", "")
+
+                        if current_model == fallback:
+                            if os.environ.get("AGENTKTHX_DEBUG"):
+                                print(f"  [OrcaRouter-Stream] Already on fallback "
+                                      f"{fallback!r}; not swapping, just waiting.")
+                        else:
+                            body["model"] = fallback
+
+                        retry_after = _parse_retry_after_seconds(
+                            error_body,
+                            e.headers.get("Retry-After") if e.headers else None,
                         )
-                    body["model"] = fallback
-                    continue
+                        if retry_after:
+                            print(
+                                f"\n  \033[33m[OrcaRouter-Stream] Free-tier rate-limited — "
+                                f"waiting {retry_after:.1f}s then retrying with "
+                                f"{body['model']!r}\033[0m",
+                                file=sys.stderr,
+                            )
+                            time.sleep(retry_after)
+                        else:
+                            print(
+                                f"\n  \033[33m[OrcaRouter-Stream] Free-tier rate-limited (no "
+                                f"Retry-After) — waiting 10s then retrying with "
+                                f"{body['model']!r}\033[0m",
+                                file=sys.stderr,
+                            )
+                            time.sleep(10)
+                        continue
 
                 # 401 / 403 access_denied — fatal
                 if e.code in (401, 403) and "access_denied" in error_msg:
