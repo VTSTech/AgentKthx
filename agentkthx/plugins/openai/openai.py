@@ -541,12 +541,21 @@ OPENAI_MODELS: dict[str, dict] = {
 #   - gpt-realtime-2.1-mini: realtime/voice mini
 #   - gpt-4o-mini-transcribe, gpt-transcribe: transcription
 # See docs/OPENAI_API_TECHNICAL_REFERENCE.md §Free Tier & Trial Credits.
-OPENAI_FREE_MODEL_WHITELIST: frozenset[str] = frozenset({
-    "gpt-6-luna",
-    "gpt-4o-mini",
-    "gpt-4.1-mini",
-    "gpt-realtime-2.1-mini",
-})
+# R07.03: OPENAI_FREE_MODEL_WHITELIST is EMPTY.
+# OpenAI has NO genuinely free ($0/token) models — every model has
+# per-token pricing that consumes the $1 trial credit and $10/mo API
+# credit. The whitelist was previously populated with "very low cost"
+# models (gpt-6-luna at $0.10/$0.50 per 1M), but "low cost" is not
+# "free" — the user's trial credit was exhausted by gpt-4o-mini despite
+# being whitelisted. FREE_ONLY means $0/token, not "cheap enough that
+# the credit lasts a while".
+#
+# When OPENAI_FREE_ONLY=true, all model requests are rejected with a
+# clear message directing the user to set OPENAI_FREE_ONLY=false (which
+# requires acknowledging that paid API calls will consume credit) or
+# use the Hugging Face backend (HF_FREE_ONLY=true) for genuinely free
+# models served by partner providers.
+OPENAI_FREE_MODEL_WHITELIST: frozenset[str] = frozenset()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1535,15 +1544,16 @@ class OpenAIBackend(OpenAICompatibleBackend):
         # OPENAI_FREE_ONLY: reject non-whitelisted models upfront (before
         # any HTTP request is made — prevents accidental paid API calls
         # that burn trial credit).
-        if OPENAI_FREE_ONLY and not _is_free_model(model):
+        if OPENAI_FREE_ONLY:
             raise RuntimeError(
-                f"Model '{model}' is not in the OpenAI free-tier "
-                f"whitelist (OPENAI_FREE_MODEL_WHITELIST in "
-                f"agentkthx/plugins/openai/openai.py). Either "
-                f"set OPENAI_FREE_ONLY=false (requires paid OpenAI API "
-                f"key with billing enabled) or pick a whitelisted model. "
-                f"See OPENAI_API_TECHNICAL_REFERENCE.md §Free Tier & "
-                f"Trial Credits for the list."
+                f"OPENAI_FREE_ONLY=true but OpenAI has no genuinely free "
+                f"($0/token) models — every model has per-token pricing "
+                f"that consumes your trial credit ($1) and monthly API "
+                f"credit ($10). Model '{model}' costs money per token. "
+                f"Set OPENAI_FREE_ONLY=false to use paid models with your "
+                f"API credit, or use --backend hf (Hugging Face) with "
+                f"HF_FREE_ONLY=true for genuinely free models served by "
+                f"partner providers at $0/token."
             )
 
         # Use model defaults from catalog/cache if not specified
@@ -1880,11 +1890,11 @@ class OpenAIBackend(OpenAICompatibleBackend):
         plugin (R07.02 polish) — see HuggingFaceBackend override.
         """
         # OPENAI_FREE_ONLY: reject non-whitelisted models upfront
-        if OPENAI_FREE_ONLY and not _is_free_model(model):
+        if OPENAI_FREE_ONLY:
             raise RuntimeError(
-                f"Model '{model}' is not in the OpenAI free-tier "
-                f"whitelist. Set OPENAI_FREE_ONLY=false or pick a "
-                f"whitelisted model. See OPENAI_API_TECHNICAL_REFERENCE.md."
+                f"OPENAI_FREE_ONLY=true but OpenAI has no genuinely free "
+                f"models. Model '{model}' costs money per token. Set "
+                f"OPENAI_FREE_ONLY=false or use --backend hf."
             )
 
         yield from super().generate_completions_stream(
@@ -1912,11 +1922,11 @@ class OpenAIBackend(OpenAICompatibleBackend):
         (from OpenAICompatibleBackend).
         """
         # OPENAI_FREE_ONLY: reject non-whitelisted models upfront
-        if OPENAI_FREE_ONLY and not _is_free_model(model):
+        if OPENAI_FREE_ONLY:
             raise RuntimeError(
-                f"Model '{model}' is not in the OpenAI free-tier "
-                f"whitelist. Set OPENAI_FREE_ONLY=false or pick a "
-                f"whitelisted model. See OPENAI_API_TECHNICAL_REFERENCE.md."
+                f"OPENAI_FREE_ONLY=true but OpenAI has no genuinely free "
+                f"models. Model '{model}' costs money per token. Set "
+                f"OPENAI_FREE_ONLY=false or use --backend hf."
             )
 
         for chunk in self.generate_completions_stream(

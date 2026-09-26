@@ -100,7 +100,7 @@ for m in models:
             priced.append((m["id"], p["provider"], pr["input"], pr.get("output", 0)))
 priced.sort(key=lambda x: x[2])
 for mid, prov, in_r, out_r in priced[:10]:
-    print(f"    {mid:50s} via {prov:15s}  in=${in_r*1e6:.4f}/1M  out=${out_r*1e6:.4f}/1M")
+    print(f"    {mid:50s} via {prov:15s}  in=${in_r:.4f}/1M  out=${out_r:.4f}/1M")
 
 # $0 pricing (genuinely free?)
 zero_cost = [(mid, prov) for mid, prov, in_r, out_r in priced if in_r == 0 and out_r == 0]

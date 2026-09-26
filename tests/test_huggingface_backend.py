@@ -103,13 +103,11 @@ class TestWhitelistAndCatalog:
     def test_whitelist_subset_of_known_open_models(self):
         # Spot-check: the headline open-weight models from each major
         # family should be in the whitelist.
+        # R07.03: Only genuinely $0/token models (verified via probe)
         expected = {
-            "openai/gpt-oss-120b",
-            "Qwen/Qwen3-4B-Thinking-2507",
-            "deepseek-ai/DeepSeek-R1",
-            "meta-llama/Llama-3.3-70B-Instruct",
-            "google/gemma-3-12b-it",
-            "zai-org/GLM-4.5",
+            "inclusionAI/Ling-3.0-flash-Fin",
+            "prism-ml/Ternary-Bonsai-27B-gguf",
+            "prism-ml/Ternary-Bonsai-27B-AWQ-4bit",
         }
         assert expected <= HF_FREE_MODEL_WHITELIST
 
@@ -128,17 +126,17 @@ class TestIsFreeModel:
     """_is_free_model strips the routing suffix before checking whitelist."""
 
     def test_whitelisted_base_id(self):
-        assert _is_free_model("openai/gpt-oss-120b") is True
+        assert _is_free_model("prism-ml/Ternary-Bonsai-27B-gguf") is True
 
     def test_whitelisted_with_fastest_suffix(self):
-        assert _is_free_model("openai/gpt-oss-120b:fastest") is True
+        assert _is_free_model("prism-ml/Ternary-Bonsai-27B-gguf:fastest") is True
 
     def test_whitelisted_with_cheapest_suffix(self):
-        assert _is_free_model("openai/gpt-oss-120b:cheapest") is True
+        assert _is_free_model("prism-ml/Ternary-Bonsai-27B-gguf:cheapest") is True
 
     def test_whitelisted_with_provider_suffix(self):
         # Suffix can be any partner name; whitelist check ignores it.
-        assert _is_free_model("openai/gpt-oss-20b:groq") is True
+        assert _is_free_model("prism-ml/Ternary-Bonsai-27B-gguf:together") is True
 
     def test_paid_model_not_in_whitelist(self):
         # Closed-weight models never appear in the whitelist
@@ -360,7 +358,7 @@ class TestGenerateFlow(unittest.TestCase):
         # back to the static catalog. Good.
 
         result = self.backend.generate(
-            model="openai/gpt-oss-120b",
+            model="prism-ml/Ternary-Bonsai-27B-gguf",
             messages=[{"role": "user", "content": "What is 15 * 8?"}],
             tools=[_make_tool()],
             temperature=0.1,
@@ -419,7 +417,7 @@ class TestGenerateFlow(unittest.TestCase):
         mock_urlopen.side_effect = [real_http_err, success_response]
 
         result = self.backend.generate(
-            model="openai/gpt-oss-120b",
+            model="prism-ml/Ternary-Bonsai-27B-gguf",
             messages=[{"role": "user", "content": "What is 15 * 8?"}],
             tools=[_make_tool()],
             temperature=0.1,
@@ -451,7 +449,7 @@ class TestGenerateFlow(unittest.TestCase):
         ]
         with self.assertRaises(RuntimeError) as ctx:
             self.backend.generate(
-                model="openai/gpt-oss-120b",
+                model="prism-ml/Ternary-Bonsai-27B-gguf",
                 messages=[{"role": "user", "content": "test"}],
                 max_tokens=128,
             )
@@ -581,12 +579,12 @@ class TestFreeOnlyEnforcement(unittest.TestCase):
             }
         b._make_api_request = fake_request
         result = b.generate(
-            model="openai/gpt-oss-120b",  # in whitelist
+            model="prism-ml/Ternary-Bonsai-27B-gguf",  # genuinely $0/token
             messages=[{"role": "user", "content": "hi"}],
             max_tokens=10,
         )
         # HF_FREE_ONLY forces :cheapest suffix when no explicit suffix
-        assert called["model"] == "openai/gpt-oss-120b:cheapest"
+        assert called["model"] == "prism-ml/Ternary-Bonsai-27B-gguf:cheapest"
         assert result["content"] == "ok"
 
 
@@ -629,7 +627,7 @@ class TestCreditExhaustionFallback(unittest.TestCase):
         b._make_api_request = raise_402
         with self.assertRaises(RuntimeError) as ctx:
             b.generate(
-                model="openai/gpt-oss-120b",
+                model="prism-ml/Ternary-Bonsai-27B-gguf",
                 messages=[{"role": "user", "content": "hi"}],
                 max_tokens=10,
             )
@@ -693,7 +691,7 @@ class TestPluginManifest(unittest.TestCase):
         assert defaults["HF_BASE_URL"] == "https://router.huggingface.co/v1"
         assert defaults["HF_DEFAULT_MODEL"] == "openai/gpt-oss-120b"
         assert defaults["HF_FREE_ONLY"] == "false"
-        assert defaults["HF_FREE_FALLBACK_MODEL"] == "openai/gpt-oss-20b"
+        assert defaults["HF_FREE_FALLBACK_MODEL"] == "prism-ml/Ternary-Bonsai-27B-gguf"
         assert defaults["HF_PROVIDER_POLICY"] == ""
 
 
@@ -918,16 +916,16 @@ class TestIsFreeModelLive(unittest.TestCase):
         b = HuggingFaceBackend()
         # Force-clear the cache (it's populated on init via list_models)
         b._model_cache = None
-        assert b._is_free_model_live("openai/gpt-oss-120b") is True
+        assert b._is_free_model_live("prism-ml/Ternary-Bonsai-27B-gguf") is True
 
     def test_static_whitelist_hit_with_suffix_returns_true(self):
         """A whitelisted model with a routing suffix should still match
         (suffix is stripped before whitelist check)."""
         b = HuggingFaceBackend()
         b._model_cache = None
-        assert b._is_free_model_live("openai/gpt-oss-120b:cheapest") is True
-        assert b._is_free_model_live("openai/gpt-oss-120b:groq") is True
-        assert b._is_free_model_live("openai/gpt-oss-20b:fastest") is True
+        assert b._is_free_model_live("prism-ml/Ternary-Bonsai-27B-gguf:cheapest") is True
+        assert b._is_free_model_live("prism-ml/Ternary-Bonsai-27B-AWQ-4bit:together") is True
+        assert b._is_free_model_live("prism-ml/Ternary-Bonsai-27B-gguf:fastest") is True
 
     def test_non_whitelisted_returns_false_when_no_live_data(self):
         """A non-whitelisted model with no live API data should return

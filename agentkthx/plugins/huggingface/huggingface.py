@@ -26,7 +26,7 @@ OpenAICompatibleBackend and adds:
   - HF_PROVIDER_POLICY: env-var-driven default routing suffix
   - 429 retry loop with Retry-After honor + exponential back-off
   - Reasoning-content capture for thinking-capable HF models
-    (Qwen3-Thinking, DeepSeek-R1, openai/gpt-oss-20b-reasoning)
+    (Qwen3-Thinking, DeepSeek-R1, prism-ml/Ternary-Bonsai-27B-gguf-reasoning)
   - ReAct fallback when a partner provider rejects the `tools` field
     (some providers serve the same model id from different underlying
     deployments — tool support may vary)
@@ -45,7 +45,7 @@ Configuration:
   HF_FREE_ONLY            — Strict free-tier enforcement (default: false)
   HF_FREE_FALLBACK_MODEL  — Model to swap to on HTTP 402 when
                             HF_FREE_ONLY=false
-                            (default: openai/gpt-oss-20b)
+                            (default: prism-ml/Ternary-Bonsai-27B-gguf)
   HF_PROVIDER_POLICY      — Auto-suffix for routing (default: "")
                             One of: "", "fastest", "cheapest",
                             "preferred", or a partner name like "groq".
@@ -103,7 +103,7 @@ from agentkthx.core.types import ApiMode, BackendType, ToolSupportLevel
 # model whitelist)
 HF_MODELS: dict[str, dict] = {
     # OpenAI open-weighted models (free at HF partner providers)
-    "openai/gpt-oss-20b": {
+    "prism-ml/Ternary-Bonsai-27B-gguf": {
         "context_length": 131_072,
         "max_completion_tokens": 8_192,
         "provider": "openai",
@@ -217,6 +217,29 @@ HF_MODELS: dict[str, dict] = {
     # Phi family — Microsoft
 
     # Cohere Command R family
+
+    # === Genuinely $0/token models (verified via live API probe 2026-09-26) ===
+    # These 3 models have pricing: {input: 0, output: 0} on at least one
+    # partner provider. is_free=false for all 3 (HF's flag is conservative)
+    # but the pricing data confirms $0/token — truly free, zero cost.
+    "inclusionAI/Ling-3.0-flash-Fin": {
+        "context_length": 131_072,
+        "max_completion_tokens": 8_192,
+        "provider": "inclusionai",
+        "description": "Ling-3.0-flash-Fin — financial domain, $0/token via Novita",
+    },
+    "prism-ml/Ternary-Bonsai-27B-gguf": {
+        "context_length": 131_072,
+        "max_completion_tokens": 4_096,
+        "provider": "prism-ml",
+        "description": "Ternary-Bonsai-27B GGUF — 1.58-bit ternary, $0/token via Together",
+    },
+    "prism-ml/Ternary-Bonsai-27B-AWQ-4bit": {
+        "context_length": 131_072,
+        "max_completion_tokens": 4_096,
+        "provider": "prism-ml",
+        "description": "Ternary-Bonsai-27B AWQ 4-bit, $0/token via Together",
+    },
 }
 
 
@@ -231,23 +254,22 @@ HF_MODELS: dict[str, dict] = {
 #
 # See HUGGINGFACE_API_TECHNICAL_REFERENCE.md §Free Tier Behavior for the
 # full rationale.
+# R07.03: Whitelist contains ONLY models with genuinely $0/token
+# pricing (verified via live API probe on 2026-09-26). These 3 models
+# have pricing: {input: 0, output: 0} on at least one partner provider.
+# The is_free flag is false for all 3 (HF's flag is conservative) but
+# the pricing data confirms $0/token — truly free, zero cost.
+#
+# Previously this whitelist had 16 "low-cost" models (gpt-oss-120b,
+# DeepSeek-R1, etc.) — but those all have per-token pricing ($0.42-$30K
+# per 1M). "Low cost" is not "free" — the $0.10/mo free-tier credit
+# covers some usage but eventually runs out. FREE_ONLY means $0/token.
+#
+# Re-validate quarterly with: bash scripts/probe_huggingface.sh
 HF_FREE_MODEL_WHITELIST: frozenset[str] = frozenset({
-    "openai/gpt-oss-20b",
-    "openai/gpt-oss-120b",
-    "Qwen/Qwen3-4B-Thinking-2507",
-    "Qwen/Qwen3-Coder-480B-A35B-Instruct",
-    "Qwen/Qwen2.5-Coder-32B-Instruct",
-    "Qwen/Qwen2.5-72B-Instruct",
-    "deepseek-ai/DeepSeek-R1",
-    "deepseek-ai/DeepSeek-V3",
-    "deepseek-ai/DeepSeek-V3.1",
-    "meta-llama/Llama-3.3-70B-Instruct",
-    "meta-llama/Llama-3.1-8B-Instruct",
-    "google/gemma-3-4b-it",
-    "google/gemma-3-12b-it",
-    "google/gemma-3-27b-it",
-    "zai-org/GLM-4.5",
-    "zai-org/GLM-4.5-Air",
+    "inclusionAI/Ling-3.0-flash-Fin",        # $0 via Novita
+    "prism-ml/Ternary-Bonsai-27B-gguf",       # $0 via Together
+    "prism-ml/Ternary-Bonsai-27B-AWQ-4bit",   # $0 via Together
 })
 
 

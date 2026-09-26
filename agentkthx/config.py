@@ -117,7 +117,7 @@ HF_FREE_ONLY = os.environ.get("HF_FREE_ONLY", "").lower() in ("1", "true", "yes"
 # Used when HF_FREE_ONLY=false and HTTP 402 is received mid-run — the
 # backend swaps to this model and retries. Mirrors the ZAI plugin's
 # ZAI_FREE_FALLBACK_MODEL pattern (zai.py:706-714).
-HF_FREE_FALLBACK_MODEL = os.environ.get("HF_FREE_FALLBACK_MODEL", "openai/gpt-oss-20b")
+HF_FREE_FALLBACK_MODEL = os.environ.get("HF_FREE_FALLBACK_MODEL", "prism-ml/Ternary-Bonsai-27B-gguf")
 # Provider routing policy — auto-appended as a suffix to the model id
 # when no explicit suffix is present. Empty string (default) means no
 # suffix (router's :fastest default applies). One of:

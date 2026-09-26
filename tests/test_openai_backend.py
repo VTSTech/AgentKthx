@@ -64,21 +64,17 @@ class TestWhitelistAndCatalog:
     """The OPENAI_FREE_MODEL_WHITELIST and OPENAI_MODELS catalog should be
     consistent and populated for v0.1."""
 
-    def test_whitelist_not_empty(self):
-        assert len(OPENAI_FREE_MODEL_WHITELIST) > 0
+    def test_whitelist_is_empty(self):
+        # R07.03: OpenAI has NO genuinely free ($0/token) models.
+        # The whitelist is intentionally empty.
+        assert len(OPENAI_FREE_MODEL_WHITELIST) == 0
 
-    def test_whitelist_has_expected_models(self):
-        # Per the API Technical Reference, the 4 very-low-cost models
-        # that should be eligible for OPENAI_FREE_ONLY=true mode.
-        # (Pruned R07.03: gpt-4o-mini-transcribe + gpt-transcribe removed —
-        # not in live API as transcription models.)
-        expected = {
-            "gpt-6-luna",        # cheapest flagship ($0.10/$0.50 per 1M tokens)
-            "gpt-4o-mini",       # legacy but very cheap
-            "gpt-4.1-mini",      # 1M context, cheap
-            "gpt-realtime-2.1-mini",  # realtime/voice mini
-        }
-        assert expected <= OPENAI_FREE_MODEL_WHITELIST
+    def test_whitelist_empty_directive(self):
+        # R07.03: The whitelist is intentionally empty because no OpenAI
+        # model is genuinely $0/token. All models have per-token pricing
+        # that consumes trial credit ($1) and monthly API credit ($10).
+        # "Free only" means $0/token, not "cheap enough that credit lasts."
+        assert OPENAI_FREE_MODEL_WHITELIST == frozenset()
 
     def test_whitelist_subset_of_catalog(self):
         # Every whitelisted model should have a catalog entry so
@@ -93,11 +89,13 @@ class TestWhitelistAndCatalog:
 class TestIsFreeModel:
     """_is_free_model checks whitelist membership."""
 
-    def test_whitelisted_gpt_6_luna(self):
-        assert _is_free_model("gpt-6-luna") is True
+    def test_gpt_6_luna_not_free(self):
+        # R07.03: gpt-6-luna costs $0.10/$0.50 per 1M — NOT free
+        assert _is_free_model("gpt-6-luna") is False
 
-    def test_whitelisted_gpt_4o_mini(self):
-        assert _is_free_model("gpt-4o-mini") is True
+    def test_gpt_4o_mini_not_free(self):
+        # R07.03: gpt-4o-mini costs $0.15/$0.60 per 1M — NOT free
+        assert _is_free_model("gpt-4o-mini") is False
 
     def test_paid_gpt_6_astra(self):
         assert _is_free_model("gpt-6-astra") is False
@@ -509,38 +507,29 @@ class TestFreeOnlyEnforcement(unittest.TestCase):
                 messages=[{"role": "user", "content": "hi"}],
                 max_tokens=10,
             )
-        assert "not in the OpenAI free-tier whitelist" in str(ctx.exception)
+        assert "no genuinely free" in str(ctx.exception).lower() or "OPENAI_FREE_ONLY" in str(ctx.exception)
         assert called["count"] == 0
 
-    def test_free_only_true_allows_whitelisted_model(self):
-        """When OPENAI_FREE_ONLY is true, generate() with a whitelisted
-        model should reach the HTTP layer."""
+    def test_free_only_true_rejects_all_models(self):
+        """R07.03: When OPENAI_FREE_ONLY is true, ALL models are rejected —
+        OpenAI has no genuinely free ($0/token) models. Even gpt-6-luna
+        (cheapest at $0.10/$0.50 per 1M) costs money per token."""
         self._oai_mod.OPENAI_FREE_ONLY = True
         b = OpenAIBackend()
-        called = {"model": None, "service_tier": None, "reasoning_effort": None}
-        def fake_request(endpoint, data, stream=False):
-            called["model"] = data.get("model")
-            called["service_tier"] = data.get("service_tier")
-            called["reasoning_effort"] = data.get("reasoning_effort")
-            return {
-                "id": "test",
-                "choices": [{
-                    "index": 0,
-                    "message": {"role": "assistant", "content": "ok", "tool_calls": []},
-                    "finish_reason": "stop",
-                }],
-                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
-            }
-        b._make_api_request = fake_request
-        result = b.generate(
-            model="gpt-6-luna",  # in whitelist
-            messages=[{"role": "user", "content": "hi"}],
-            max_tokens=10,
-        )
-        assert called["model"] == "gpt-6-luna"
-        # OPENAI_FREE_ONLY forces service_tier=default (never priority/fast/scale)
-        assert called["service_tier"] == "default"
-        assert result["content"] == "ok"
+        called = {"count": 0}
+        def fail_if_called(endpoint, data, stream=False):
+            called["count"] += 1
+            raise AssertionError("_make_api_request should NOT be called")
+        b._make_api_request = fail_if_called
+        # Even gpt-6-luna (cheapest OpenAI model) is rejected
+        with self.assertRaises(RuntimeError) as ctx:
+            b.generate(
+                model="gpt-6-luna",
+                messages=[{"role": "user", "content": "hi"}],
+                max_tokens=10,
+            )
+        assert "no genuinely free" in str(ctx.exception).lower() or "OPENAI_FREE_ONLY" in str(ctx.exception)
+        assert called["count"] == 0
 
 
 class TestFreeOnlyReasoningEffortCap(unittest.TestCase):
@@ -657,7 +646,7 @@ class TestInsufficientQuotaFallback(unittest.TestCase):
                 messages=[{"role": "user", "content": "hi"}],
                 max_tokens=10,
             )
-        assert "trial credit exhausted" in str(ctx.exception)
+        assert "credit exhausted" in str(ctx.exception).lower() or "OPENAI_FREE_ONLY" in str(ctx.exception)
 
 
 class TestFreeOnlyStreamingOverride(unittest.TestCase):
@@ -708,29 +697,21 @@ class TestFreeOnlyStreamingOverride(unittest.TestCase):
         )
         with self.assertRaises(RuntimeError) as ctx:
             list(gen)  # consume the generator
-        assert "not in the OpenAI free-tier whitelist" in str(ctx.exception)
+        assert "no genuinely free" in str(ctx.exception).lower() or "OPENAI_FREE_ONLY" in str(ctx.exception)
 
-    def test_free_only_true_allows_whitelisted_model_in_streaming_path(self):
+    def test_free_only_true_rejects_all_models_in_streaming_path(self):
         """When OPENAI_FREE_ONLY is true, generate_completions_stream()
-        with a whitelisted model should reach the HTTP layer (then fail
-        on the mock _iter_sse_lines which raises an unrelated error)."""
+        rejects ALL models (no genuinely free OpenAI models exist)."""
         b = OpenAIBackend()
-        called = {"url": None}
-        def fake_iter(url, body, headers):
-            called["url"] = url
-            # Return an empty iterable — the streaming loop will see no
-            # chunks and complete cleanly
-            return iter([])
-        b._iter_sse_lines = fake_iter
+        b._iter_sse_lines = lambda *a: (_ for _ in ()).throw(AssertionError("should not be called"))
         gen = b.generate_completions_stream(
-            model="gpt-6-luna",  # in whitelist
+            model="gpt-6-luna",  # cheapest OpenAI model but NOT free
             messages=[{"role": "user", "content": "hi"}],
             max_tokens=10,
         )
-        # Consume the generator — should NOT raise (whitelist check passes)
-        list(gen)
-        # The mock was called (HTTP layer reached)
-        assert called["url"] is not None
+        with self.assertRaises(RuntimeError) as ctx:
+            list(gen)
+        assert "no genuinely free" in str(ctx.exception).lower() or "OPENAI_FREE_ONLY" in str(ctx.exception)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
