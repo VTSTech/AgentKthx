@@ -34,11 +34,43 @@ from agentkthx.plugins.huggingface.huggingface import (
     HF_FREE_MODEL_WHITELIST,
     HF_MODELS,
     _apply_provider_policy,
+    _apply_provider_policy_live,
     _has_provider_suffix,
     _is_free_model,
 )
 from agentkthx.core.models import Tool, ToolParam
 from agentkthx.core.types import ApiMode, BackendType, ToolSupportLevel
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Module-level mock for _probe_whoami (R07.02 polish)
+# ─────────────────────────────────────────────────────────────────────────────
+# R07.02 polish added _probe_whoami() which is called on every
+# HuggingFaceBackend __init__ to validate the token + detect free-tier
+# users. In tests we use a fake token (hf_fake_test_token_for_scaffold),
+# so the real network call would 401 + 5s timeout. Mock it module-wide
+# to a no-op (self._user_info stays None, _resolve_free_only_mode falls
+# back to the module-level HF_FREE_ONLY constant which each test
+# controls directly via self._hf_mod.HF_FREE_ONLY).
+#
+# unittest's setUpModule/tearDownModule hooks run before/after ALL tests
+# in this module — works across all TestCase classes without needing
+# per-class setUp boilerplate.
+
+_orig_probe_whoami = HuggingFaceBackend._probe_whoami
+
+
+def _noop_probe_whoami(self):
+    """No-op replacement for _probe_whoami in tests."""
+    self._user_info = None
+
+
+def setUpModule():
+    HuggingFaceBackend._probe_whoami = _noop_probe_whoami
+
+
+def tearDownModule():
+    HuggingFaceBackend._probe_whoami = _orig_probe_whoami
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -433,17 +465,25 @@ class TestGenerateFlow(unittest.TestCase):
 
 class TestFreeOnlyEnforcement(unittest.TestCase):
     """HF_FREE_ONLY mode should reject non-whitelisted models BEFORE any
-    HTTP request is made — preventing accidental paid API calls."""
+    HTTP request is made — preventing accidental paid API calls.
+
+    R07.02 polish: the effective free-only mode is now resolved at
+    ``__init__`` time via ``_resolve_free_only_mode()``, which reads the
+    ``HF_FREE_ONLY`` env var directly (not the module-level constant).
+    The new ``_probe_whoami()`` would also try a real network call on
+    init — we mock it to a no-op so the tests don't hit the network
+    and don't slow down waiting for the 5s timeout on the fake token.
+    """
 
     def setUp(self):
         os.environ["HF_TOKEN"] = "hf_fake_test_token_for_scaffold"
         # Save and clear HF_FREE_ONLY so the default path is testable
         self._saved_free_only = os.environ.get("HF_FREE_ONLY", "")
         os.environ["HF_FREE_ONLY"] = "false"
-        # Patch the module-level HF_FREE_ONLY constant directly. The
-        # generate() method reads from this constant, not from os.environ
-        # at call time, so we must patch the module attribute. setUp runs
-        # before each test, ensuring consistent state.
+        # Patch the module-level HF_FREE_ONLY constant directly. Used
+        # as the fallback in _resolve_free_only_mode() when whoami is
+        # unreachable (which it is in tests — _probe_whoami is mocked
+        # module-wide via setUpModule).
         from agentkthx.plugins.huggingface import huggingface as hf_mod
         self._hf_mod = hf_mod
         self._original_free_only = hf_mod.HF_FREE_ONLY
@@ -461,8 +501,11 @@ class TestFreeOnlyEnforcement(unittest.TestCase):
         """When HF_FREE_ONLY is false (the default), generate() with a
         paid model id should reach the HTTP layer — the whitelist check
         is skipped."""
+        os.environ["HF_FREE_ONLY"] = "false"
         self._hf_mod.HF_FREE_ONLY = False
         b = HuggingFaceBackend()
+        # _free_only_effective should be False (explicit env var)
+        assert b._free_only_effective is False
         # Verify the check is OFF — calling generate with a paid model
         # should reach the HTTP layer (which will fail with a fake token,
         # but that's a different error than the whitelist rejection).
@@ -493,8 +536,13 @@ class TestFreeOnlyEnforcement(unittest.TestCase):
     def test_free_only_true_rejects_non_whitelisted_model(self):
         """When HF_FREE_ONLY is true, generate() with a paid model
         should raise RuntimeError BEFORE any HTTP request is made."""
+        # R07.02: set the ENV VAR (which _resolve_free_only_mode reads
+        # directly) AND the module constant (fallback when whoami fails).
+        os.environ["HF_FREE_ONLY"] = "true"
         self._hf_mod.HF_FREE_ONLY = True
         b = HuggingFaceBackend()
+        # _free_only_effective should be True (explicit env var)
+        assert b._free_only_effective is True
         # Verify _make_api_request is NEVER called for a paid model
         called = {"count": 0}
         def fail_if_called(endpoint, data, stream=False):
@@ -516,8 +564,10 @@ class TestFreeOnlyEnforcement(unittest.TestCase):
     def test_free_only_true_allows_whitelisted_model(self):
         """When HF_FREE_ONLY is true, generate() with a whitelisted
         model should reach the HTTP layer."""
+        os.environ["HF_FREE_ONLY"] = "true"
         self._hf_mod.HF_FREE_ONLY = True
         b = HuggingFaceBackend()
+        assert b._free_only_effective is True
         called = {"model": None}
         def fake_request(endpoint, data, stream=False):
             called["model"] = data.get("model")
@@ -695,3 +745,544 @@ class TestPluginDiscovery(unittest.TestCase):
             self.assertFalse(pm.is_loaded("huggingface"))
         finally:
             del os.environ["HF_TOKEN"]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# R07.02 polish: per-provider parse shape, _is_free_model_live, whoami probe,
+# _resolve_free_only_mode auto-detection
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestParseHfModelShape(unittest.TestCase):
+    """R07.02 polish: _parse_hf_model() should capture the per-provider
+    shape from the live /v1/models response (pricing, is_free,
+    supports_tools, latency, throughput, status), not just the top-level
+    fields. Verified Sept 2026 via direct probe — the live response shape
+    is documented in _parse_hf_model()'s docstring."""
+
+    def setUp(self):
+        os.environ["HF_TOKEN"] = "hf_fake_test_token_for_scaffold"
+
+    def tearDown(self):
+        del os.environ["HF_TOKEN"]
+
+    def _make_sample_model_data(self) -> dict:
+        """Build a sample /v1/models response object that mirrors the
+        live HF Router shape (verified Sept 2026)."""
+        return {
+            "id": "Qwen/Qwen3.8-27B",
+            "object": "model",
+            "created": 1785918179,
+            "owned_by": "Qwen",
+            "architecture": {
+                "input_modalities": ["text", "image"],
+                "output_modalities": ["text"],
+            },
+            "providers": [
+                {
+                    "provider": "novita",
+                    "status": "live",
+                    "context_length": 1_000_000,
+                    "pricing": {"input": 0.42, "output": 3.0},
+                    "is_free": False,
+                    "supports_tools": True,
+                    "supports_structured_output": False,
+                    "first_token_latency_ms": 762.6,
+                    "throughput": 39.32,
+                    "is_model_author": False,
+                },
+                {
+                    "provider": "cerebras",
+                    "status": "live",
+                    "context_length": 65_536,
+                    "pricing": {"input": 0.99, "output": 1.49},
+                    "is_free": False,
+                    "supports_tools": True,
+                    "supports_structured_output": True,
+                    "first_token_latency_ms": 4926.0,
+                    "throughput": 166.42,
+                    "is_model_author": False,
+                },
+                {
+                    "provider": "featherless-ai",
+                    "status": "live",
+                    "is_free": False,
+                    "is_model_author": False,
+                },
+            ],
+        }
+
+    def test_parse_captures_per_provider_list(self):
+        """The full per-provider array should be preserved on the parsed
+        model under the 'providers' key (shortcut for _is_free_model_live
+        and similar queries)."""
+        b = HuggingFaceBackend()
+        parsed = b._parse_hf_model(self._make_sample_model_data())
+        assert "providers" in parsed
+        assert isinstance(parsed["providers"], list)
+        assert len(parsed["providers"]) == 3
+        assert parsed["providers"][0]["provider"] == "novita"
+
+    def test_parse_aggregates_context_length_max(self):
+        """Top-level context_length should be the MAX across providers
+        (best-case budget for routing decisions)."""
+        b = HuggingFaceBackend()
+        parsed = b._parse_hf_model(self._make_sample_model_data())
+        # novita=1_000_000, cerebras=65_536 → max=1_000_000
+        assert parsed["details"]["context_length"] == 1_000_000
+
+    def test_parse_aggregates_cheapest_pricing(self):
+        """cheapest_input_per_1m and cheapest_output_per_1m should be
+        the MIN across providers' pricing.input and pricing.output."""
+        b = HuggingFaceBackend()
+        parsed = b._parse_hf_model(self._make_sample_model_data())
+        # novita input=0.42, cerebras input=0.99 → min=0.42
+        assert parsed["details"]["cheapest_input_per_1m"] == 0.42
+        # novita output=3.0, cerebras output=1.49 → min=1.49
+        assert parsed["details"]["cheapest_output_per_1m"] == 1.49
+
+    def test_parse_aggregates_is_free_any(self):
+        """any_free_provider should be True if ANY provider has is_free=true.
+        Currently all are False (matches live Sept 2026 state)."""
+        b = HuggingFaceBackend()
+        parsed = b._parse_hf_model(self._make_sample_model_data())
+        assert parsed["details"]["any_free_provider"] is False
+
+        # Now flip one provider to is_free=True and re-check
+        data = self._make_sample_model_data()
+        data["providers"][1]["is_free"] = True  # cerebras becomes free
+        parsed = b._parse_hf_model(data)
+        assert parsed["details"]["any_free_provider"] is True
+
+    def test_parse_aggregates_supports_tools_signals(self):
+        """any_supports_tools and all_support_tools should be computed
+        correctly across providers."""
+        b = HuggingFaceBackend()
+        parsed = b._parse_hf_model(self._make_sample_model_data())
+        # novita=True, cerebras=True, featherless-ai missing → any=True, all=False
+        assert parsed["details"]["any_supports_tools"] is True
+        assert parsed["details"]["all_support_tools"] is False
+
+    def test_parse_captures_provider_count_and_owned_by(self):
+        """provider_count and owned_by should be surfaced for richer
+        model listing display (Change #4, deferred)."""
+        b = HuggingFaceBackend()
+        parsed = b._parse_hf_model(self._make_sample_model_data())
+        assert parsed["details"]["provider_count"] == 3
+        assert parsed["details"]["owned_by"] == "Qwen"
+
+    def test_parse_handles_missing_providers_array(self):
+        """A model with no providers array should not crash — falls back
+        to conservative defaults for context_length and max_completion_tokens."""
+        b = HuggingFaceBackend()
+        parsed = b._parse_hf_model({
+            "id": "test/no-providers-model",
+            "object": "model",
+            # no "providers" key at all
+        })
+        assert parsed["name"] == "test/no-providers-model"
+        assert parsed["details"]["context_length"] == 128_000  # conservative default
+        assert parsed["details"]["max_completion_tokens"] == 8192
+        assert parsed["details"]["any_free_provider"] is False
+        assert parsed["details"]["provider_count"] == 0
+        assert parsed["providers"] == []  # shortcut key, empty list
+
+    def test_parse_preserves_raw_model_data_for_debug(self):
+        """The full raw response should be preserved under 'model_data'
+        for forward-compat (any future field the API adds is available
+        without code change)."""
+        b = HuggingFaceBackend()
+        raw = self._make_sample_model_data()
+        parsed = b._parse_hf_model(raw)
+        assert parsed["model_data"] is raw  # same object, no copy
+        # Architecture field is preserved (not consumed by _parse_hf_model)
+        assert parsed["model_data"]["architecture"]["input_modalities"] == ["text", "image"]
+
+
+class TestIsFreeModelLive(unittest.TestCase):
+    """R07.02 polish: _is_free_model_live() instance method supplements
+    the static whitelist with live API is_free flag consultation.
+
+    As of 2026-09-26: is_free is false for all 336 combos even with auth
+    — the free-tier model is purely credit-based. But HF can flip this
+    true at any time for sponsored/promo windows, and this method auto-
+    picks that up with zero code change."""
+
+    def setUp(self):
+        os.environ["HF_TOKEN"] = "hf_fake_test_token_for_scaffold"
+
+    def tearDown(self):
+        del os.environ["HF_TOKEN"]
+
+    def test_static_whitelist_hit_returns_true_without_cache(self):
+        """A whitelisted model returns True even before the cache is
+        populated — the static whitelist is the fast path."""
+        b = HuggingFaceBackend()
+        # Force-clear the cache (it's populated on init via list_models)
+        b._model_cache = None
+        assert b._is_free_model_live("openai/gpt-oss-120b") is True
+
+    def test_static_whitelist_hit_with_suffix_returns_true(self):
+        """A whitelisted model with a routing suffix should still match
+        (suffix is stripped before whitelist check)."""
+        b = HuggingFaceBackend()
+        b._model_cache = None
+        assert b._is_free_model_live("openai/gpt-oss-120b:cheapest") is True
+        assert b._is_free_model_live("openai/gpt-oss-120b:groq") is True
+        assert b._is_free_model_live("Qwen/Qwen2.5-7B-Instruct-1M:fastest") is True
+
+    def test_non_whitelisted_returns_false_when_no_live_data(self):
+        """A non-whitelisted model with no live API data should return
+        False (the cache is empty or model not in cache)."""
+        b = HuggingFaceBackend()
+        b._model_cache = None
+        assert b._is_free_model_live("anthropic/claude-3.5-sonnet") is False
+        assert b._is_free_model_live("some-unknown/model") is False
+
+    def test_live_is_free_true_combo_returns_true(self):
+        """A non-whitelisted model with a provider flagged is_free=true
+        in the live API cache should return True (auto-detection)."""
+        b = HuggingFaceBackend()
+        # Inject a fake cache entry: non-whitelisted model, but one
+        # provider has is_free=true (simulates HF flipping a sponsored
+        # combo free).
+        b._model_cache = [{
+            "name": "sponsored/some-paid-model",
+            "providers": [
+                {"provider": "novita", "is_free": False},
+                {"provider": "groq", "is_free": True},  # sponsored free!
+                {"provider": "together", "is_free": False},
+            ],
+        }]
+        # Not in static whitelist
+        from agentkthx.plugins.huggingface.huggingface import HF_FREE_MODEL_WHITELIST
+        assert "sponsored/some-paid-model" not in HF_FREE_MODEL_WHITELIST
+        # But auto-detected as free via live API cache
+        assert b._is_free_model_live("sponsored/some-paid-model") is True
+
+    def test_live_is_free_false_combos_return_false(self):
+        """A non-whitelisted model with all providers is_free=false
+        should return False (matches live Sept 2026 state for all 336
+        combos)."""
+        b = HuggingFaceBackend()
+        b._model_cache = [{
+            "name": "paid/some-paid-model",
+            "providers": [
+                {"provider": "novita", "is_free": False},
+                {"provider": "cerebras", "is_free": False},
+                {"provider": "together", "is_free": False},
+            ],
+        }]
+        assert b._is_free_model_live("paid/some-paid-model") is False
+
+    def test_live_falls_back_to_model_data_providers(self):
+        """When the shortcut 'providers' key is missing (older cache
+        shape), the method should fall back to model_data.providers."""
+        b = HuggingFaceBackend()
+        b._model_cache = [{
+            "name": "legacy/old-cache-shape-model",
+            # No 'providers' shortcut key — only model_data.providers
+            "model_data": {
+                "providers": [
+                    {"provider": "novita", "is_free": True},
+                ],
+            },
+        }]
+        assert b._is_free_model_live("legacy/old-cache-shape-model") is True
+
+    def test_live_model_not_in_cache_returns_false(self):
+        """A model that's not in the cache AND not in the static whitelist
+        should return False (no signal either way)."""
+        b = HuggingFaceBackend()
+        b._model_cache = [
+            {"name": "other/model-1", "providers": []},
+            {"name": "other/model-2", "providers": []},
+        ]
+        assert b._is_free_model_live("not/in-cache") is False
+
+
+class TestProbeWhoami(unittest.TestCase):
+    """R07.02 polish: _probe_whoami() validates the token via
+    /api/whoami-v2 and detects free-tier users. Tests use the
+    module-level mock (no-op) by default — these tests temporarily
+    restore the original method and patch urlopen to verify the real
+    behavior with a controlled response."""
+
+    def setUp(self):
+        os.environ["HF_TOKEN"] = "hf_fake_test_token_for_scaffold"
+
+    def tearDown(self):
+        del os.environ["HF_TOKEN"]
+
+    def test_probe_skips_when_no_api_key(self):
+        """When api_key is empty, _probe_whoami should bail out early
+        (no network call, _user_info stays None)."""
+        b = HuggingFaceBackend()
+        b.api_key = ""  # clear the token
+        # Manually call _probe_whoami (already mocked module-wide, so
+        # we restore the original first)
+        from agentkthx.plugins.huggingface.huggingface import HuggingFaceBackend as _Cls
+        original = _Cls._probe_whoami
+        _Cls._probe_whoami = _orig_probe_whoami  # restore real method
+        try:
+            b._user_info = "stale-value"
+            b._probe_whoami()
+            assert b._user_info is None  # bailed out, didn't make a call
+        finally:
+            _Cls._probe_whoami = _noop_probe_whoami  # restore mock
+
+    def test_probe_populates_user_info_on_success(self):
+        """A successful whoami-v2 response should populate _user_info
+        with the parsed JSON (name, canPay, billingMode, periodEnd)."""
+        from agentkthx.plugins.huggingface.huggingface import HuggingFaceBackend as _Cls
+        original = _Cls._probe_whoami
+        _Cls._probe_whoami = _orig_probe_whoami  # restore real method
+        try:
+            # Mock urlopen to return a sample whoami-v2 response
+            sample_response = {
+                "type": "user",
+                "id": "abc123",
+                "name": "VTSTech",
+                "email": "veritas@vts-tech.org",
+                "canPay": False,  # free tier
+                "billingMode": "prepaid",
+                "periodEnd": 1790812800,
+                "isPro": False,
+                "orgs": [],
+                "auth": {
+                    "type": "access_token",
+                    "accessToken": {"displayName": "dev", "role": "read"},
+                },
+            }
+            mock_resp = MagicMock()
+            mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+            mock_resp.__exit__ = MagicMock(return_value=False)
+            mock_resp.read = MagicMock(return_value=json.dumps(sample_response).encode("utf-8"))
+            with patch("urllib.request.urlopen", return_value=mock_resp):
+                b = HuggingFaceBackend()
+                assert b._user_info is not None
+                assert b._user_info["name"] == "VTSTech"
+                assert b._user_info["canPay"] is False
+                assert b._user_info["billingMode"] == "prepaid"
+                assert b._user_info["periodEnd"] == 1790812800
+                assert b._user_info["auth"]["accessToken"]["role"] == "read"
+        finally:
+            _Cls._probe_whoami = _noop_probe_whoami
+
+    def test_probe_swallows_errors_on_unreachable(self):
+        """Network failures (DNS, timeout, 401 with bad token, 5xx)
+        should be swallowed — _user_info stays None, no exception
+        propagates."""
+        from agentkthx.plugins.huggingface.huggingface import HuggingFaceBackend as _Cls
+        original = _Cls._probe_whoami
+        _Cls._probe_whoami = _orig_probe_whoami  # restore real method
+        try:
+            # Mock urlopen to raise (simulates network failure)
+            with patch("urllib.request.urlopen", side_effect=Exception("network unreachable")):
+                b = HuggingFaceBackend()  # should NOT raise
+                assert b._user_info is None  # silently swallowed
+        finally:
+            _Cls._probe_whoami = _noop_probe_whoami
+
+    def test_probe_populates_paid_user_can_pay_true(self):
+        """A paid user (canPay=True) should be detected as paid —
+        _resolve_free_only_mode then leaves _free_only_effective=False
+        (permissive, no auto-enforcement)."""
+        from agentkthx.plugins.huggingface.huggingface import HuggingFaceBackend as _Cls
+        original = _Cls._probe_whoami
+        _Cls._probe_whoami = _orig_probe_whoami
+        try:
+            sample_response = {
+                "name": "PaidUser",
+                "canPay": True,  # paid tier (billing card on file)
+                "billingMode": "prepaid",
+                "isPro": True,
+            }
+            mock_resp = MagicMock()
+            mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+            mock_resp.__exit__ = MagicMock(return_value=False)
+            mock_resp.read = MagicMock(return_value=json.dumps(sample_response).encode("utf-8"))
+            # Clear HF_FREE_ONLY so auto-detect kicks in
+            saved = os.environ.pop("HF_FREE_ONLY", None)
+            try:
+                with patch("urllib.request.urlopen", return_value=mock_resp):
+                    b = HuggingFaceBackend()
+                    assert b._user_info["canPay"] is True
+                    assert b._free_only_effective is False  # paid user → permissive
+            finally:
+                if saved is not None:
+                    os.environ["HF_FREE_ONLY"] = saved
+        finally:
+            _Cls._probe_whoami = _noop_probe_whoami
+
+
+class TestResolveFreeOnlyMode(unittest.TestCase):
+    """R07.02 polish: _resolve_free_only_mode() resolves the effective
+    HF_FREE_ONLY behavior — explicit env var > whoami auto-detect >
+    module constant fallback. Tests patch _probe_whoami to inject a
+    controlled user_info dict."""
+
+    def setUp(self):
+        os.environ["HF_TOKEN"] = "hf_fake_test_token_for_scaffold"
+        self._saved_free_only = os.environ.get("HF_FREE_ONLY", "")
+        os.environ.pop("HF_FREE_ONLY", None)  # unset by default
+        # Patch module-level HF_FREE_ONLY to False so the fallback path
+        # returns False (matches the live default when env var is unset).
+        from agentkthx.plugins.huggingface import huggingface as hf_mod
+        self._hf_mod = hf_mod
+        self._original_free_only = hf_mod.HF_FREE_ONLY
+        hf_mod.HF_FREE_ONLY = False
+
+    def tearDown(self):
+        del os.environ["HF_TOKEN"]
+        if self._saved_free_only:
+            os.environ["HF_FREE_ONLY"] = self._saved_free_only
+        else:
+            os.environ.pop("HF_FREE_ONLY", None)
+        self._hf_mod.HF_FREE_ONLY = self._original_free_only
+
+    def _inject_user_info(self, backend, can_pay: bool, period_end: int = 1790812800):
+        """Manually set backend._user_info to simulate whoami response
+        (avoids needing to mock urlopen — the upstream method is already
+        mocked to a no-op via setUpModule)."""
+        backend._user_info = {
+            "name": "TestUser",
+            "canPay": can_pay,
+            "billingMode": "prepaid",
+            "isPro": not can_pay,  # free users aren't pro
+            "periodEnd": period_end,
+        }
+
+    def test_explicit_true_overrides_auto_detect(self):
+        """HF_FREE_ONLY=true env var → strict mode regardless of whoami."""
+        os.environ["HF_FREE_ONLY"] = "true"
+        b = HuggingFaceBackend()
+        # Even if whoami says paid user, explicit env var wins
+        self._inject_user_info(b, can_pay=True)  # paid user
+        # _free_only_effective was already set during __init__ — re-resolve
+        effective = b._resolve_free_only_mode()
+        assert effective is True
+
+    def test_explicit_false_overrides_auto_detect(self):
+        """HF_FREE_ONLY=false env var → permissive regardless of whoami."""
+        os.environ["HF_FREE_ONLY"] = "false"
+        b = HuggingFaceBackend()
+        # Even if whoami says free-tier user, explicit env var wins
+        self._inject_user_info(b, can_pay=False)  # free tier
+        effective = b._resolve_free_only_mode()
+        assert effective is False
+
+    def test_unset_with_free_tier_auto_enables(self):
+        """HF_FREE_ONLY unset + whoami says canPay=False (free tier) →
+        auto-enables strict mode (with one-time stderr warning)."""
+        b = HuggingFaceBackend()
+        self._inject_user_info(b, can_pay=False)  # free tier
+        # _free_only_effective was set during __init__ when _user_info was
+        # None (no whoami). Re-resolve now that _user_info is populated.
+        effective = b._resolve_free_only_mode()
+        assert effective is True
+
+    def test_unset_with_paid_user_stays_permissive(self):
+        """HF_FREE_ONLY unset + whoami says canPay=True (paid) →
+        permissive (no auto-enforcement)."""
+        b = HuggingFaceBackend()
+        self._inject_user_info(b, can_pay=True)  # paid user
+        effective = b._resolve_free_only_mode()
+        assert effective is False
+
+    def test_unset_with_whoami_unreachable_falls_back_to_module_constant(self):
+        """HF_FREE_ONLY unset + whoami unreachable (_user_info=None) →
+        fall back to module-level HF_FREE_ONLY constant."""
+        b = HuggingFaceBackend()
+        # _user_info is None (default — _probe_whoami was mocked to no-op)
+        assert b._user_info is None
+        effective = b._resolve_free_only_mode()
+        # Falls back to module constant (set to False in setUp)
+        assert effective is False
+
+        # Now flip module constant to True and re-check
+        self._hf_mod.HF_FREE_ONLY = True
+        effective = b._resolve_free_only_mode()
+        assert effective is True
+
+    def test_explicit_yes_and_1_are_accepted_as_true(self):
+        """Env var accepts '1', 'true', 'yes' (case-insensitive) as True."""
+        for val in ("1", "true", "TRUE", "Yes", "YES"):
+            os.environ["HF_FREE_ONLY"] = val
+            b = HuggingFaceBackend()
+            assert b._free_only_effective is True, f"HF_FREE_ONLY={val!r} should resolve to True"
+
+    def test_explicit_no_and_0_are_accepted_as_false(self):
+        """Env var accepts '0', 'false', 'no' (case-insensitive) as False."""
+        for val in ("0", "false", "FALSE", "No", "NO"):
+            os.environ["HF_FREE_ONLY"] = val
+            b = HuggingFaceBackend()
+            assert b._free_only_effective is False, f"HF_FREE_ONLY={val!r} should resolve to False"
+
+
+class TestApplyProviderPolicyLiveForceCheapest(unittest.TestCase):
+    """R07.02 polish: _apply_provider_policy_live() passes
+    force_cheapest=self._free_only_effective so the auto-detected
+    free-tier mode (from whoami) honors the :cheapest suffix even
+    when the user did NOT set HF_FREE_ONLY env var explicitly."""
+
+    def setUp(self):
+        os.environ["HF_TOKEN"] = "hf_fake_test_token_for_scaffold"
+        self._saved_free_only = os.environ.get("HF_FREE_ONLY", "")
+        os.environ.pop("HF_FREE_ONLY", None)
+        from agentkthx.plugins.huggingface import huggingface as hf_mod
+        self._hf_mod = hf_mod
+        self._original_free_only = hf_mod.HF_FREE_ONLY
+        hf_mod.HF_FREE_ONLY = False
+
+    def tearDown(self):
+        del os.environ["HF_TOKEN"]
+        if self._saved_free_only:
+            os.environ["HF_FREE_ONLY"] = self._saved_free_only
+        else:
+            os.environ.pop("HF_FREE_ONLY", None)
+        self._hf_mod.HF_FREE_ONLY = self._original_free_only
+
+    def test_force_cheapest_true_appends_cheapest_suffix(self):
+        """When force_cheapest=True, :cheapest is appended (no env var
+        or HF_PROVIDER_POLICY consulted)."""
+        result = _apply_provider_policy("openai/gpt-oss-120b", force_cheapest=True)
+        assert result == "openai/gpt-oss-120b:cheapest"
+
+    def test_force_cheapest_false_does_not_append_when_no_policy(self):
+        """When force_cheapest=False and no env var, no suffix is appended
+        (router's :fastest default applies)."""
+        # Clear HF_PROVIDER_POLICY for a clean test
+        saved_policy = os.environ.pop("HF_PROVIDER_POLICY", None)
+        try:
+            result = _apply_provider_policy("openai/gpt-oss-120b", force_cheapest=False)
+            assert result == "openai/gpt-oss-120b"
+        finally:
+            if saved_policy is not None:
+                os.environ["HF_PROVIDER_POLICY"] = saved_policy
+
+    def test_explicit_suffix_wins_over_force_cheapest(self):
+        """User's explicit :suffix always wins, even when
+        force_cheapest=True."""
+        result = _apply_provider_policy("openai/gpt-oss-120b:groq", force_cheapest=True)
+        assert result == "openai/gpt-oss-120b:groq"
+
+    def test_live_method_passes_force_cheapest_from_effective_mode(self):
+        """_apply_provider_policy_live(backend, model_id) should pass
+        force_cheapest=backend._free_only_effective to the module-level
+        helper — so the auto-detected mode is honored."""
+        b = HuggingFaceBackend()
+        # Default state in tests: _free_only_effective=False (module
+        # constant False, no env var, whoami mocked to None)
+        b._free_only_effective = False
+        saved_policy = os.environ.pop("HF_PROVIDER_POLICY", None)
+        try:
+            result = _apply_provider_policy_live(b, "openai/gpt-oss-120b")
+            assert result == "openai/gpt-oss-120b"  # no suffix
+        finally:
+            if saved_policy is not None:
+                os.environ["HF_PROVIDER_POLICY"] = saved_policy
+
+        # Now flip _free_only_effective to True and re-check
+        b._free_only_effective = True
+        result = _apply_provider_policy_live(b, "openai/gpt-oss-120b")
+        assert result == "openai/gpt-oss-120b:cheapest"

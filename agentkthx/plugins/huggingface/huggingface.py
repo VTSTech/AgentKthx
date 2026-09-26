@@ -392,21 +392,28 @@ def _has_provider_suffix(model_id: str) -> bool:
     return ":" in model_id
 
 
-def _apply_provider_policy(model_id: str) -> str:
+def _apply_provider_policy(model_id: str, force_cheapest: bool = False) -> str:
     """Append the HF_PROVIDER_POLICY suffix if model_id has no explicit suffix.
 
     HF_PROVIDER_POLICY is read from the env var at module import time
     (see config.py). When empty, no suffix is appended — the router
     defaults to :fastest.
 
-    When HF_FREE_ONLY is true, the policy is forced to ``:cheapest``
+    When ``force_cheapest=True`` is passed (or when ``HF_FREE_ONLY`` is
+    true at module-import time), the policy is forced to ``:cheapest``
     regardless of HF_PROVIDER_POLICY (free-tier routing for cost
     minimization).
+
+    R07.02 polish: callers that respect auto-detected free-tier mode
+    (via ``self._free_only_effective``) should pass ``force_cheapest``
+    explicitly; module-level callers that just want the env-var
+    behavior can omit it (defaults to ``False``, falls back to the
+    ``HF_FREE_ONLY`` module constant for backward compat with tests).
     """
     if _has_provider_suffix(model_id):
         return model_id  # user's explicit suffix wins
 
-    if HF_FREE_ONLY:
+    if force_cheapest or HF_FREE_ONLY:
         return f"{model_id}:cheapest"
 
     policy = (HF_PROVIDER_POLICY or "").strip()
@@ -414,6 +421,20 @@ def _apply_provider_policy(model_id: str) -> str:
         return model_id  # router default (:fastest) applies
 
     return f"{model_id}:{policy}"
+
+
+def _apply_provider_policy_live(backend: "HuggingFaceBackend", model_id: str) -> str:
+    """Instance-aware version of :func:`_apply_provider_policy`.
+
+    Forwards to the module-level helper with
+    ``force_cheapest=backend._free_only_effective`` so the auto-detected
+    free-tier mode (from ``_probe_whoami``) is honored even when the
+    user did NOT set the ``HF_FREE_ONLY`` env var explicitly.
+    """
+    return _apply_provider_policy(
+        model_id,
+        force_cheapest=getattr(backend, "_free_only_effective", False),
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -516,6 +537,27 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
             "User-Agent": "AgentKthx/0.x (+https://github.com/VTSTech/AgentKthx)",
         }
 
+        # R07.02 polish: probe /api/whoami-v2 to (a) validate the token
+        # before the first chat call (catches typos / expired tokens
+        # early with a clear actionable error instead of a confusing
+        # 401 mid-conversation), and (b) detect free-tier users
+        # (canPay=False → auto-enable HF_FREE_ONLY-style whitelist
+        # protection even when the user did NOT set the env var).
+        # Failures here are non-fatal — the backend still works without
+        # a valid token for /v1/models (which is anonymous), but paid
+        # inference calls will fail with 401 at request time.
+        self._user_info: dict | None = None  # populated by _probe_whoami()
+        self._probe_whoami()  # best-effort, never raises
+
+        # Resolve effective HF_FREE_ONLY behavior:
+        # - User explicitly set HF_FREE_ONLY=true  → strict (no auto-detect)
+        # - User explicitly set HF_FREE_ONLY=false → permissive (opt-out)
+        # - User did NOT set HF_FREE_ONLY          → auto-detect via whoami:
+        #     canPay=False (free tier) → strict + one-time warning
+        #     canPay=True  (paid tier) → permissive
+        #     whoami unreachable        → fall back to module constant
+        self._free_only_effective: bool = self._resolve_free_only_mode()
+
         # Force model list to be loaded on initialization so the cache
         # is populated (mirrors OpenRouterBackend). Failures are silent
         # — the static HF_MODELS catalog is the fallback.
@@ -526,6 +568,146 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
         except Exception as e:
             if os.environ.get("AGENTKTHX_DEBUG"):
                 print(f"  [HF Debug] Failed to initialize models: {e}")
+
+    # ─────────────────────────────────────────────────────────────────────
+    # whoami-v2 probe + free-tier auto-detection (R07.02 polish)
+    # ─────────────────────────────────────────────────────────────────────
+
+    def _probe_whoami(self) -> None:
+        """Probe ``https://huggingface.co/api/whoami-v2`` to validate the
+        token and detect free-tier users.
+
+        Stores the response (or ``None`` on failure) on
+        ``self._user_info``. Never raises — failures here are
+        non-fatal. The CLI surfaces the result in ``--debug`` output
+        and ``_resolve_free_only_mode()`` uses ``canPay=False`` to
+        auto-enable free-tier protection when ``HF_FREE_ONLY`` is
+        unset.
+
+        Token-role check: a ``read``-role token (the default fine-
+        grained token) is enough for ``whoami-v2`` — the endpoint
+        returns the user's name, email, billing mode, and free-tier
+        period end. Higher-role endpoints (``/api/inference-providers``,
+        ``/api/billing/usage``) require ``write`` or ``admin`` role
+        and return 401 for ``read``-role tokens — we don't need them
+        for the AgentKthx use case.
+        """
+        if not self.api_key:
+            # Nothing to probe — ensure _user_info is None so
+            # _resolve_free_only_mode falls back cleanly.
+            self._user_info = None
+            return
+        try:
+            req = urllib.request.Request(
+                "https://huggingface.co/api/whoami-v2",
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "User-Agent": "AgentKthx/0.x (+https://github.com/VTSTech/AgentKthx)",
+                },
+                method="GET",
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            self._user_info = data
+            if os.environ.get("AGENTKTHX_DEBUG"):
+                name = data.get("name", "<unknown>")
+                role = (
+                    data.get("auth", {})
+                    .get("accessToken", {})
+                    .get("role", "?")
+                )
+                can_pay = data.get("canPay", True)
+                period_end = data.get("periodEnd")
+                tier = "free" if not can_pay else "paid"
+                period_str = ""
+                if period_end:
+                    import datetime as _dt
+                    period_dt = _dt.datetime.fromtimestamp(
+                        period_end, tz=_dt.timezone.utc
+                    )
+                    period_str = (
+                        f", period ends {period_dt.strftime('%Y-%m-%d')}"
+                    )
+                print(
+                    f"  [HF Debug] Token valid for user '{name}' "
+                    f"(role={role}, {tier} tier{period_str})"
+                )
+        except Exception as e:
+            # whoami-v2 unreachable (network down, DNS fail, 401 with
+            # bad token, 5xx, etc.). Non-fatal — the backend still
+            # works for /v1/models (anonymous) and paid inference
+            # (will surface its own 401 at request time).
+            if os.environ.get("AGENTKTHX_DEBUG"):
+                print(f"  [HF Debug] /api/whoami-v2 unreachable: {e}")
+            self._user_info = None
+
+    def _resolve_free_only_mode(self) -> bool:
+        """Resolve effective ``HF_FREE_ONLY`` behavior.
+
+        Returns ``True`` if free-tier whitelist enforcement should be
+        active. Resolution order:
+
+        1. **User explicitly set ``HF_FREE_ONLY=true``** → strict
+           (no auto-detect; respect explicit opt-in)
+        2. **User explicitly set ``HF_FREE_ONLY=false``** → permissive
+           (opt-out; user accepts paid API calls)
+        3. **User did NOT set ``HF_FREE_ONLY``** → auto-detect via
+           whoami-v2 response:
+              - ``canPay=False`` (free tier) → strict + one-time
+                warning to stderr (so the user knows why their paid
+                model request was rejected)
+              - ``canPay=True`` (paid tier) → permissive
+              - whoami unreachable → fall back to module-level
+                ``HF_FREE_ONLY`` constant (parsed from env at
+                config.py import time, defaults to False)
+
+        The env-var check is done by reading ``os.environ`` directly
+        (not the parsed bool constant) so we can distinguish "user
+        set the var" from "default false" — critical for the auto-
+        detect path to work correctly.
+        """
+        env_val = os.environ.get("HF_FREE_ONLY", "").strip().lower()
+        if env_val in ("1", "true", "yes"):
+            return True  # explicit strict
+        if env_val in ("0", "false", "no"):
+            return False  # explicit permissive (opt-out)
+
+        # User didn't set HF_FREE_ONLY → auto-detect from whoami
+        if self._user_info is not None:
+            can_pay = self._user_info.get("canPay", True)
+            if not can_pay:
+                # Free-tier user — auto-enable free-tier protection
+                # and emit a one-time warning so the user understands
+                # why their non-whitelisted model request will be
+                # rejected (and how to override).
+                import sys
+                period_end = self._user_info.get("periodEnd")
+                period_str = ""
+                if period_end:
+                    import datetime as _dt
+                    period_dt = _dt.datetime.fromtimestamp(
+                        period_end, tz=_dt.timezone.utc
+                    )
+                    period_str = (
+                        f" Credit refreshes "
+                        f"{period_dt.strftime('%Y-%m-%d')}."
+                    )
+                print(
+                    f"\n  \033[33m[HF] Detected free-tier account "
+                    f"(no billing card on file, $0.10/mo credit at "
+                    f"partner provider rates.{period_str})\n"
+                    f"  Auto-enabling HF_FREE_ONLY whitelist — only "
+                    f"models in HF_FREE_MODEL_WHITELIST are accepted "
+                    f"to prevent accidental paid API calls.\n"
+                    f"  Set HF_FREE_ONLY=false to override (requires "
+                    f"a paid HF token with billing enabled).\033[0m\n",
+                    file=sys.stderr,
+                )
+                return True
+        # Fall back: HF_FREE_ONLY unset AND (whoami unreachable OR
+        # paid-tier user). Use module-level constant (parsed from env
+        # at config.py import time, defaults to False).
+        return HF_FREE_ONLY
 
     # ─────────────────────────────────────────────────────────────────────
     # Required BaseBackend properties
@@ -548,28 +730,122 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
     def _parse_hf_model(self, model_data: dict) -> dict:
         """Parse HF Router /v1/models response into AgentKthx format.
 
-        Uses live API data for context_length and max_completion_tokens
-        (per-provider values are merged into a single best-of field).
+        Live API response shape (verified Sept 2026 via direct probe of
+        https://router.huggingface.co/v1/models)::
+
+            {
+              "id": "Qwen/Qwen3.8-27B",
+              "object": "model",
+              "created": 1785918179,
+              "owned_by": "Qwen",
+              "architecture": {
+                "input_modalities": ["text", "image"],
+                "output_modalities": ["text"]
+              },
+              "providers": [
+                {
+                  "provider": "novita",
+                  "status": "live",                          # "live" / "down" / "loading"
+                  "context_length": 1000000,
+                  "pricing": {"input": 0.42, "output": 3.0}, # USD per 1M tokens
+                  "is_free": false,                          # ← free-tier flag
+                  "supports_tools": true,
+                  "supports_structured_output": false,
+                  "first_token_latency_ms": 762.6,
+                  "throughput": 39.32,                        # tokens/sec
+                  "is_model_author": false
+                },
+                ...
+              ]
+            }
+
+        The full per-provider list is preserved under the ``providers``
+        key so callers (e.g. ``_is_free_model_live()``) can inspect
+        per-provider fields. Top-level ``context_length`` and
+        ``max_completion_tokens`` are aggregated as the max across
+        providers (best-case budget — the actual budget per request
+        depends on which provider the router picks, which is non-
+        deterministic under :fastest routing).
+
+        As of 2026-09-26: ``is_free`` is ``false`` for all 336 combos
+        even with auth — the free-tier model is purely credit-based
+        ($0.10/mo credit, see HUGGINGFACE_API_TECHNICAL_REFERENCE.md).
+        The ``is_free`` flag is captured anyway so HF can flip any
+        combo free tomorrow (sponsored/promo window) and AgentKthx
+        auto-picks it up with zero code change via
+        ``_is_free_model_live()``.
         """
         model_id = model_data.get("id", "")
         if not model_id:
             return {}
 
-        context_length = model_data.get("context_length", 128_000)
-        # The router exposes a `providers` array with per-provider
-        # max_completion_tokens; we take the max across providers so
-        # the agent sees the best-case output budget.
-        providers = model_data.get("providers") or []
-        if providers:
-            max_completion_tokens = max(
-                (p.get("max_completion_tokens") or 4096)
-                for p in providers
+        raw_providers = model_data.get("providers") or []
+
+        # Aggregate per-provider context_length (take max across providers
+        # — gives the agent the best-case budget for routing decisions)
+        context_lengths = [
+            p.get("context_length")
+            for p in raw_providers
+            if isinstance(p.get("context_length"), int)
+        ]
+        if context_lengths:
+            context_length = max(context_lengths)
+        else:
+            # Fall back to top-level field (some legacy models may
+            # expose it there). Conservative default if neither.
+            context_length = (
+                model_data.get("context_length")
+                or 128_000
             )
+
+        # max_completion_tokens is not consistently exposed per-provider
+        # in the current /v1/models response. Take the max across
+        # providers when available; conservative default 8192 otherwise.
+        max_completion_tokens_list = [
+            p.get("max_completion_tokens")
+            for p in raw_providers
+            if isinstance(p.get("max_completion_tokens"), int)
+        ]
+        if max_completion_tokens_list:
+            max_completion_tokens = max(max_completion_tokens_list)
         else:
             max_completion_tokens = (
                 model_data.get("max_completion_tokens")
-                or model_data.get("top_provider", {}).get("max_completion_tokens", 4096)
+                or model_data.get("top_provider", {}).get("max_completion_tokens")
+                or 8192
             )
+
+        # Cheapest provider rates (USD per 1M tokens) — for surfacing
+        # in the model listing later (Change #4, deferred). Captured
+        # now for forward-compat.
+        input_rates = [
+            p.get("pricing", {}).get("input")
+            for p in raw_providers
+            if isinstance(p.get("pricing", {}).get("input"), (int, float))
+        ]
+        output_rates = [
+            p.get("pricing", {}).get("output")
+            for p in raw_providers
+            if isinstance(p.get("pricing", {}).get("output"), (int, float))
+        ]
+        cheapest_input = min(input_rates) if input_rates else None
+        cheapest_output = min(output_rates) if output_rates else None
+
+        # Free-tier signals aggregated across providers
+        any_free_provider = any(
+            bool(p.get("is_free", False)) for p in raw_providers
+        )
+        # Tool-support signals (any provider supports tools → model is
+        # tool-callable via that provider)
+        any_supports_tools = any(
+            bool(p.get("supports_tools", False)) for p in raw_providers
+        )
+        all_support_tools = bool(raw_providers) and all(
+            bool(p.get("supports_tools", False)) for p in raw_providers
+        )
+        any_supports_structured = any(
+            bool(p.get("supports_structured_output", False)) for p in raw_providers
+        )
 
         # Family detection: the org prefix in the model id (e.g.
         # "openai/" in "openai/gpt-oss-120b") is a good proxy for family.
@@ -583,9 +859,70 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
                 "backend": "huggingface",
                 "context_length": context_length,
                 "max_completion_tokens": max_completion_tokens,
+                # New per-provider aggregated fields (R07.02 polish):
+                "cheapest_input_per_1m": cheapest_input,
+                "cheapest_output_per_1m": cheapest_output,
+                "any_free_provider": any_free_provider,
+                "any_supports_tools": any_supports_tools,
+                "all_support_tools": all_support_tools,
+                "any_supports_structured_output": any_supports_structured,
+                "owned_by": model_data.get("owned_by", ""),
+                "provider_count": len(raw_providers),
             },
-            "model_data": model_data,
+            "model_data": model_data,  # full raw response preserved (debug, future-proofing)
+            "providers": raw_providers,  # shortcut for _is_free_model_live() and friends
         }
+
+    # ─────────────────────────────────────────────────────────────────────
+    # Live-API-supplemented free-model check (R07.02 polish)
+    # ─────────────────────────────────────────────────────────────────────
+
+    def _is_free_model_live(self, model_id: str) -> bool:
+        """Live-API-supplemented free-model check.
+
+        Returns True if EITHER:
+        (a) The model is in the static ``HF_FREE_MODEL_WHITELIST`` (the
+            ground truth when /v1/models is unreachable), OR
+        (b) The live /v1/models response has any provider with
+            ``is_free=true`` for this model.
+
+        As of 2026-09-26: ``is_free`` is ``false`` for all 336 combos
+        even with auth — the free-tier model is purely credit-based.
+        But HF can flip this true at any time for sponsored/promo
+        windows, and this method auto-picks that up with zero code
+        change. The static whitelist stays as the documented ground
+        truth fallback.
+
+        Strips the provider suffix before lookup — the suffix is a
+        routing hint, not part of the model identity.
+        """
+        # Fast path: static whitelist (no instance state needed)
+        base = model_id.split(":", 1)[0]
+        if base in HF_FREE_MODEL_WHITELIST:
+            return True
+
+        # Slow path: consult live API cache for any provider flagged
+        # is_free=true. The cache is populated by list_models() on
+        # init; if it's empty (API unreachable, falling back to
+        # static catalog), there's nothing live to consult.
+        if not self._model_cache:
+            return False
+
+        for cached in self._model_cache:
+            if cached.get("name") != base:
+                continue
+            # Use the shortcut `providers` array set by _parse_hf_model.
+            # Fall back to model_data.providers for older cache entries
+            # that don't have the shortcut (defensive).
+            providers = cached.get("providers") or []
+            if not providers:
+                providers = (
+                    cached.get("model_data", {}).get("providers", [])
+                )
+            return any(bool(p.get("is_free", False)) for p in providers)
+
+        # Model not in cache (not in static whitelist, not in live API)
+        return False
 
     def list_models(self) -> list[dict]:
         """List available models from HF Router /v1/models with caching.
@@ -640,11 +977,18 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
                         },
                     })
 
-            # HF_FREE_ONLY: filter to whitelist only
-            if HF_FREE_ONLY:
+            # HF_FREE_ONLY: filter to whitelist only (R07.02 polish: use
+            # self._free_only_effective so auto-detected free-tier mode
+            # also filters — and consult both the static whitelist AND
+            # the live is_free flag from freshly-parsed providers).
+            if self._free_only_effective:
                 available_models = [
                     m for m in available_models
                     if _is_free_model(m["name"])
+                    or any(
+                        bool(p.get("is_free", False))
+                        for p in (m.get("providers") or [])
+                    )
                 ]
 
             self._model_cache = sorted(available_models, key=lambda x: x["name"])
@@ -677,8 +1021,8 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
                     },
                 })
 
-            if HF_FREE_ONLY:
-                catalog_models = [m for m in catalog_models if _is_free(m["name"])]
+            if self._free_only_effective:
+                catalog_models = [m for m in catalog_models if _is_free_model(m["name"])]
 
             self._model_cache = sorted(catalog_models, key=lambda x: x["name"])
             self._cache_time = current_time
@@ -840,8 +1184,11 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
 
         # Pre-emptive: ensure the model id carries the right routing suffix
         # (no-op if user already appended one explicitly).
+        # R07.02 polish: use _apply_provider_policy_live so the auto-detected
+        # free-tier mode (via _probe_whoami + _resolve_free_only_mode) is
+        # honored, not just the explicit HF_FREE_ONLY env var.
         if "model" in data:
-            data = {**data, "model": _apply_provider_policy(data["model"])}
+            data = {**data, "model": _apply_provider_policy_live(self, data["model"])}
 
         max_retries = self._max_429_retries()
         last_retryable_error: str | None = None
@@ -869,7 +1216,7 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
                 # ---- 402 Payment Required: free-tier credit exhausted ----
                 if status_code == 402:
                     current_model = data.get("model", "")
-                    if HF_FREE_ONLY:
+                    if self._free_only_effective:
                         # Strict mode: no retry, no fallback — surface
                         # actionable error.
                         raise RuntimeError(
@@ -881,7 +1228,7 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
                         )
                     # Non-strict: swap to HF_FREE_FALLBACK_MODEL, retry once
                     fallback = HF_FREE_FALLBACK_MODEL
-                    if _is_free_model(current_model):
+                    if self._is_free_model_live(current_model):
                         # Already a free model and still 402 — credit is
                         # truly exhausted. Don't retry; surface the error.
                         raise RuntimeError(
@@ -891,7 +1238,7 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
                             f"https://huggingface.co/settings/billing."
                         )
                     if not _has_provider_suffix(fallback):
-                        fallback = _apply_provider_policy(fallback)
+                        fallback = _apply_provider_policy_live(self, fallback)
                     import sys
                     print(
                         f"\n  \033[33m[HF] Free-tier credit exhausted for "
@@ -1031,7 +1378,7 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
         """
         # Apply provider policy to streaming requests too
         if "model" in data:
-            data = {**data, "model": _apply_provider_policy(data["model"])}
+            data = {**data, "model": _apply_provider_policy_live(self, data["model"])}
 
         req = urllib.request.Request(
             url,
@@ -1045,11 +1392,11 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
             error_body = e.read().decode("utf-8") if e.fp else ""
             # Surface 402 / 429 / 5xx as RuntimeError so callers can
             # pattern-match (same as _make_api_request above).
-            if e.code == 402 and not HF_FREE_ONLY:
+            if e.code == 402 and not self._free_only_effective:
                 # Try the free fallback on streaming 402 too
                 current = data.get("model", "")
-                fallback = _apply_provider_policy(HF_FREE_FALLBACK_MODEL)
-                if _is_free_model(current):
+                fallback = _apply_provider_policy_live(self, HF_FREE_FALLBACK_MODEL)
+                if self._is_free_model_live(current):
                     raise RuntimeError(
                         f"Hugging Face free-tier credit exhausted (stream) "
                         f"and fallback '{fallback}' is also a free model."
@@ -1174,7 +1521,7 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
 
         # HF_FREE_ONLY: reject non-whitelisted models upfront (before any
         # HTTP request is made — prevents accidental paid API calls).
-        if HF_FREE_ONLY and not _is_free_model(model):
+        if self._free_only_effective and not self._is_free_model_live(model):
             raise RuntimeError(
                 f"Model '{model}' is not in the Hugging Face free-tier "
                 f"whitelist (HF_FREE_MODEL_WHITELIST in "
@@ -1186,7 +1533,7 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
             )
 
         # Apply provider policy (no-op if user already appended a suffix)
-        routed_model = _apply_provider_policy(model)
+        routed_model = _apply_provider_policy_live(self, model)
 
         # Use model defaults from catalog/cache if not specified
         defaults = self._get_model_defaults(routed_model)
@@ -1424,7 +1771,7 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
         """
         # Apply provider policy for streaming requests too
         if "model" in body:
-            body = {**body, "model": _apply_provider_policy(body["model"])}
+            body = {**body, "model": _apply_provider_policy_live(self, body["model"])}
 
         for attempt in range(2):  # max 2 attempts (original + 1 retry)
             req = urllib.request.Request(
@@ -1451,10 +1798,10 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
                         continue
 
                 # 402 streaming fallback (mirror _stream_request above)
-                if e.code == 402 and not HF_FREE_ONLY:
+                if e.code == 402 and not self._free_only_effective:
                     current = body.get("model", "")
-                    fallback = _apply_provider_policy(HF_FREE_FALLBACK_MODEL)
-                    if not _is_free_model(current):
+                    fallback = _apply_provider_policy_live(self, HF_FREE_FALLBACK_MODEL)
+                    if not self._is_free_model_live(current):
                         import sys
                         print(
                             f"\n  \033[33m[HF-Stream] Free-tier credit "
@@ -1569,7 +1916,7 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
         API calls).
         """
         # HF_FREE_ONLY: reject non-whitelisted models upfront
-        if HF_FREE_ONLY and not _is_free_model(model):
+        if self._free_only_effective and not self._is_free_model_live(model):
             raise RuntimeError(
                 f"Model '{model}' is not in the Hugging Face free-tier "
                 f"whitelist. Set HF_FREE_ONLY=false or pick a whitelisted "
@@ -1577,7 +1924,7 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
             )
 
         # Apply provider policy (no-op if user already appended a suffix)
-        routed_model = _apply_provider_policy(model)
+        routed_model = _apply_provider_policy_live(self, model)
 
         yield from super().generate_completions_stream(
             model=routed_model,
@@ -1605,7 +1952,7 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
         _get_auth_headers(), _iter_sse_lines(), and _build_openai_body(stream=True).
         """
         # HF_FREE_ONLY: reject non-whitelisted models upfront
-        if HF_FREE_ONLY and not _is_free_model(model):
+        if self._free_only_effective and not self._is_free_model_live(model):
             raise RuntimeError(
                 f"Model '{model}' is not in the Hugging Face free-tier "
                 f"whitelist. Set HF_FREE_ONLY=false or pick a whitelisted "
@@ -1613,7 +1960,7 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
             )
 
         # Apply provider policy (no-op if user already appended a suffix)
-        routed_model = _apply_provider_policy(model)
+        routed_model = _apply_provider_policy_live(self, model)
 
         for chunk in self.generate_completions_stream(
             model=routed_model,
