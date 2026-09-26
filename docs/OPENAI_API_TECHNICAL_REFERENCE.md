@@ -598,6 +598,20 @@ For `OPENAI_FREE_ONLY=true` mode, the backend should:
 
 ## Model Family Specifications
 
+> **R07.03 update**: The live `/v1/models` API (queried with a real
+> `OPENAI_API_KEY`) returns 128 models — much more than the 15-model
+> catalog documented below. The static `OPENAI_MODELS` catalog in
+> `agentkthx/plugins/openai/openai.py` has been expanded from 15 → 38
+> models to include the o-series (o1/o3/o3-mini/o4-mini), the full
+> GPT-5.0 family (gpt-5/mini/nano/pro/codex), GPT-5.1/5.2 variants,
+> GPT-5.4 mini/nano/pro, GPT-5.5-pro, GPT-5.6-luna/terra (the missing
+> Daybreak variants), GPT-4.1/nano, and legacy GPT-3.5-turbo. A
+> `_NON_CHAT_PATTERNS` filter excludes ~34 non-chat models (embeddings,
+> TTS, transcribe, whisper, image gen, sora, moderation, babbage,
+> davinci) from the listing. The catalog below documents the
+> originally-identified models with full pricing metadata — the expanded
+> entries use the same schema but omit pricing (not yet documented).
+
 ### Current text/multimodal models (Sept 2026)
 
 ```python
@@ -1482,13 +1496,28 @@ PDF input is supported via:
 
 ## Implementation Notes for AgentKthx
 
-### Backend file location (proposed)
+> **R07.03 update**: The OpenAI plugin has been scaffolded and shipped as
+> `agentkthx/plugins/openai/`. The live `/v1/models` API returns 128
+> models; the static `OPENAI_MODELS` catalog (expanded from 15 → 38
+> models after discovering the full Sept 2026 lineup) provides richer
+> metadata (context_length, pricing, capability flags) for the models
+> documented here. A `_NON_CHAT_PATTERNS` filter (mirroring
+> GeminiBackend's pattern) excludes ~34 non-chat models (embeddings,
+> TTS, image gen, video gen, moderation, ASR, legacy completions) from
+> the listing so users see only chat-capable models (~94 after
+> filtering). The `OPENAI_FREE_MODEL_WHITELIST` (6 very-low-cost
+> models) filters further when `OPENAI_FREE_ONLY=true`. See the
+> `test_tool_support()` method — non-chat models return
+> `ToolSupportLevel.NONE` so users don't accidentally try to chat
+> with an embedding model.
+
+### Backend file location
 
 ```
 agentkthx/plugins/openai/
-├── __init__.py            # register()/unregister()
-├── plugin.json            # plugin manifest (see Proposed plugin.json below)
-└── openai.py              # OpenAIBackend class
+├── __init__.py            # register()/unregister() with alias_of="openai" for `oai`
+├── plugin.json            # plugin manifest (v0.2 schema, shipped in R07.03)
+└── openai.py              # OpenAIBackend class (1967 lines, shipped in R07.03)
 ```
 
 ### Key methods (mirror OpenRouterBackend shape)
@@ -1496,7 +1525,7 @@ agentkthx/plugins/openai/
 | Method | Purpose |
 |--------|---------|
 | `__init__()` | Initializes with `OPENAI_API_KEY` env var, detects key type (legacy `sk-`, `sk-proj-`, `sk-sa-`), sets HTTP headers including `OpenAI-Organization` / `OpenAI-Project` if env vars present, populates `_model_cache` via `list_models()` |
-| `list_models()` | Fetches `/v1/models`, caches for 1 hour (`_CACHE_TIMEOUT = 3600`), filters to `OPENAI_FREE_MODEL_WHITELIST` if `OPENAI_FREE_ONLY=true` |
+| `list_models()` | Fetches `/v1/models` (auth required — unlike HF Router which is anonymous), caches for 1 hour (`_CACHE_TIMEOUT = 3600`). Filters via `_NON_CHAT_PATTERNS` (excludes embeddings, TTS, image gen, video gen, moderation, ASR, legacy completions — ~34 of 128 live models excluded). Filters to `OPENAI_FREE_MODEL_WHITELIST` if `OPENAI_FREE_ONLY=true`. Static `OPENAI_MODELS` catalog (38 chat-capable models, expanded R07.03) provides richer metadata (context_length, pricing, capability flags) for models documented here — falls back to conservative defaults (128K context, 16K max_tokens) for models only in the live API. |
 | `is_running()` | Always returns `True` (cloud API, no local server) |
 | `generate(model, messages, tools, **kwargs)` | Main entry point. Dispatches to `_make_api_request()`. Implements ReAct fallback (rarely needed for OpenAI but kept for parity). Enforces `OPENAI_FREE_ONLY` whitelist. Caps `reasoning_effort` at `low` if free-only. |
 | `generate_stream(model, messages, **kwargs)` | SSE streaming variant. Yields `delta` chunks. Captures `reasoning` content for thinking models. |

@@ -923,3 +923,167 @@ class TestPluginDiscovery(unittest.TestCase):
             self.assertFalse(pm.is_loaded("openai"))
         finally:
             del os.environ["OPENAI_API_KEY"]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# R07.03 polish: _NON_CHAT_PATTERNS filter + expanded catalog
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestNonChatPatterns(unittest.TestCase):
+    """The _NON_CHAT_PATTERNS filter should exclude obvious non-chat
+    models (embeddings, TTS, image gen, video gen, moderation, ASR,
+    legacy completions) from the model listing, mirroring the
+    GeminiBackend._NON_CHAT_PATTERNS pattern."""
+
+    def test_embeddings_filtered(self):
+        from agentkthx.plugins.openai.openai import _is_chat_model
+        for m in ("text-embedding-3-large", "text-embedding-3-small", "text-embedding-ada-002"):
+            assert _is_chat_model(m) is False, f"{m} should be filtered as non-chat"
+
+    def test_tts_filtered(self):
+        from agentkthx.plugins.openai.openai import _is_chat_model
+        for m in ("tts-1", "tts-1-hd", "tts-1-1106", "gpt-4o-mini-tts", "gpt-4o-mini-tts-2025-12-15"):
+            assert _is_chat_model(m) is False, f"{m} should be filtered as non-chat"
+
+    def test_transcribe_filtered(self):
+        from agentkthx.plugins.openai.openai import _is_chat_model
+        for m in ("gpt-4o-transcribe", "gpt-4o-transcribe-diarize",
+                  "gpt-4o-mini-transcribe", "gpt-transcribe",
+                  "gpt-live-transcribe", "gpt-4o-mini-transcribe-2025-03-20"):
+            assert _is_chat_model(m) is False, f"{m} should be filtered as non-chat"
+
+    def test_whisper_filtered(self):
+        from agentkthx.plugins.openai.openai import _is_chat_model
+        assert _is_chat_model("whisper-1") is False
+
+    def test_image_gen_filtered(self):
+        from agentkthx.plugins.openai.openai import _is_chat_model
+        for m in ("gpt-image-1", "gpt-image-1-mini", "gpt-image-1.5",
+                  "gpt-image-2", "gpt-image-2.5-flare",
+                  "gpt-image-2.5-sunburst", "chatgpt-image-latest",
+                  "gpt-image-2-2026-04-21"):
+            assert _is_chat_model(m) is False, f"{m} should be filtered as non-chat"
+
+    def test_sora_filtered(self):
+        from agentkthx.plugins.openai.openai import _is_chat_model
+        for m in ("sora-2", "sora-2-pro"):
+            assert _is_chat_model(m) is False, f"{m} should be filtered as non-chat"
+
+    def test_moderation_filtered(self):
+        from agentkthx.plugins.openai.openai import _is_chat_model
+        for m in ("omni-moderation-latest", "omni-moderation-2024-09-26"):
+            assert _is_chat_model(m) is False, f"{m} should be filtered as non-chat"
+
+    def test_legacy_completions_filtered(self):
+        from agentkthx.plugins.openai.openai import _is_chat_model
+        for m in ("babbage-002", "davinci-002"):
+            assert _is_chat_model(m) is False, f"{m} should be filtered as non-chat (legacy /completions, not /chat/completions)"
+
+    def test_chat_models_pass_through(self):
+        from agentkthx.plugins.openai.openai import _is_chat_model
+        for m in (
+            "gpt-6-astra", "gpt-6-sol", "gpt-6-luna",
+            "gpt-5.6-sol", "gpt-5.6-cyber", "gpt-5.6-luna", "gpt-5.6-terra",
+            "gpt-5.5", "gpt-5.5-pro",
+            "gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-5-pro", "gpt-5-codex",
+            "gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano",
+            "gpt-3.5-turbo", "gpt-3.5-turbo-16k",
+            "o1", "o3", "o3-mini", "o4-mini",
+            "chat-latest", "gpt-rosalind-research",
+            "gpt-5.3-codex", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano", "gpt-5.4-pro",
+        ):
+            assert _is_chat_model(m) is True, f"{m} should pass through as chat-capable"
+
+    def test_dated_snapshots_pass_through(self):
+        from agentkthx.plugins.openai.openai import _is_chat_model
+        for m in (
+            "gpt-4o-2024-05-13", "gpt-4o-2024-08-06", "gpt-4o-2024-11-20",
+            "gpt-5-2025-08-07", "gpt-5.4-2026-03-05",
+            "gpt-4o-mini-2024-07-18", "o3-2025-04-16", "o4-mini-2025-04-16",
+        ):
+            assert _is_chat_model(m) is True, f"{m} should pass through (dated snapshot of chat model)"
+
+    def test_search_preview_passes_through(self):
+        from agentkthx.plugins.openai.openai import _is_chat_model
+        for m in ("gpt-4o-search-preview", "gpt-4o-mini-search-preview", "gpt-5-search-api"):
+            assert _is_chat_model(m) is True, f"{m} should pass through (search-preview is chat-capable)"
+
+
+class TestExpandedCatalog(unittest.TestCase):
+    """Verify the R07.03 polish expanded the static catalog with the
+    missed families discovered via the live /v1/models API."""
+
+    def test_catalog_includes_o_series(self):
+        from agentkthx.plugins.openai.openai import OPENAI_MODELS
+        for m in ("o1", "o3", "o3-mini", "o4-mini"):
+            assert m in OPENAI_MODELS, f"{m} should be in expanded catalog"
+
+    def test_catalog_includes_gpt5_family(self):
+        from agentkthx.plugins.openai.openai import OPENAI_MODELS
+        for m in ("gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-5-pro", "gpt-5-codex"):
+            assert m in OPENAI_MODELS, f"{m} should be in expanded catalog"
+
+    def test_catalog_includes_gpt56_daybreak_expanded(self):
+        from agentkthx.plugins.openai.openai import OPENAI_MODELS
+        for m in ("gpt-5.6-luna", "gpt-5.6-terra"):
+            assert m in OPENAI_MODELS, f"{m} should be in expanded catalog (discovered via live API)"
+
+    def test_catalog_includes_gpt54_expanded(self):
+        from agentkthx.plugins.openai.openai import OPENAI_MODELS
+        for m in ("gpt-5.4-mini", "gpt-5.4-nano", "gpt-5.4-pro"):
+            assert m in OPENAI_MODELS, f"{m} should be in expanded catalog"
+
+    def test_catalog_includes_gpt55_pro(self):
+        from agentkthx.plugins.openai.openai import OPENAI_MODELS
+        assert "gpt-5.5-pro" in OPENAI_MODELS, "gpt-5.5-pro should be in expanded catalog"
+
+    def test_catalog_includes_gpt41_family(self):
+        from agentkthx.plugins.openai.openai import OPENAI_MODELS
+        for m in ("gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano"):
+            assert m in OPENAI_MODELS, f"{m} should be in expanded catalog"
+
+    def test_catalog_includes_legacy_gpt35(self):
+        from agentkthx.plugins.openai.openai import OPENAI_MODELS
+        for m in ("gpt-3.5-turbo", "gpt-3.5-turbo-16k"):
+            assert m in OPENAI_MODELS, f"{m} should be in catalog (legacy but chat-capable)"
+
+    def test_catalog_size_grew(self):
+        from agentkthx.plugins.openai.openai import OPENAI_MODELS
+        assert len(OPENAI_MODELS) >= 35, (
+            f"Catalog should have grown to 35+ models after R07.03 polish, "
+            f"got {len(OPENAI_MODELS)} (was 15 before)"
+        )
+
+
+class TestTestToolSupportNonChatClassification(unittest.TestCase):
+    """test_tool_support() should classify non-chat models as NONE
+    (not NATIVE) so users don't accidentally try to chat with an
+    embedding model."""
+
+    def setUp(self):
+        os.environ["OPENAI_API_KEY"] = "sk-proj-fake_test_token_for_scaffold"
+
+    def tearDown(self):
+        del os.environ["OPENAI_API_KEY"]
+
+    def test_embedding_model_classified_as_none(self):
+        b = OpenAIBackend()
+        assert b.test_tool_support("text-embedding-3-large") is ToolSupportLevel.NONE
+
+    def test_tts_model_classified_as_none(self):
+        b = OpenAIBackend()
+        assert b.test_tool_support("tts-1") is ToolSupportLevel.NONE
+
+    def test_image_model_classified_as_none(self):
+        b = OpenAIBackend()
+        assert b.test_tool_support("gpt-image-2") is ToolSupportLevel.NONE
+
+    def test_moderation_model_classified_as_none(self):
+        b = OpenAIBackend()
+        assert b.test_tool_support("omni-moderation-latest") is ToolSupportLevel.NONE
+
+    def test_chat_model_classified_as_native(self):
+        b = OpenAIBackend()
+        assert b.test_tool_support("gpt-6-sol") is ToolSupportLevel.NATIVE
+        assert b.test_tool_support("gpt-4o-mini") is ToolSupportLevel.NATIVE
+        assert b.test_tool_support("o3-mini") is ToolSupportLevel.NATIVE

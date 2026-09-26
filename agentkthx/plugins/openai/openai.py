@@ -323,6 +323,236 @@ OPENAI_MODELS: dict[str, dict] = {
         "tier": "mini",
         "free_tier_eligible": True,
     },
+
+    # === o-series — reasoning models (added R07.03 polish, discovered via live API) ===
+    "o1": {
+        "context_length": 200_000,
+        "max_completion_tokens": 100_000,
+        "supports_thinking": True,
+        "supports_reasoning_effort": True,
+        "supports_function_calling": True,
+        "supports_multimodal_input": True,
+        "family": "o-series",
+        "tier": "flagship",
+    },
+    "o3": {
+        "context_length": 200_000,
+        "max_completion_tokens": 100_000,
+        "supports_thinking": True,
+        "supports_reasoning_effort": True,
+        "supports_function_calling": True,
+        "supports_multimodal_input": True,
+        "family": "o-series",
+        "tier": "flagship",
+    },
+    "o3-mini": {
+        "context_length": 200_000,
+        "max_completion_tokens": 100_000,
+        "supports_thinking": True,
+        "supports_reasoning_effort": True,
+        "supports_function_calling": True,
+        "supports_multimodal_input": True,
+        "family": "o-series",
+        "tier": "mini",
+    },
+    "o4-mini": {
+        "context_length": 200_000,
+        "max_completion_tokens": 100_000,
+        "supports_thinking": True,
+        "supports_reasoning_effort": True,
+        "supports_function_calling": True,
+        "supports_multimodal_input": True,
+        "family": "o-series",
+        "tier": "mini",
+    },
+
+    # === GPT-5.0 family — original gpt-5 release (discovered via live API) ===
+    "gpt-5": {
+        "context_length": 200_000,
+        "max_completion_tokens": 100_000,
+        "supports_thinking": True,
+        "supports_reasoning_effort": True,
+        "supports_function_calling": True,
+        "supports_multimodal_input": True,
+        "family": "gpt-5",
+        "tier": "flagship",
+    },
+    "gpt-5-mini": {
+        "context_length": 200_000,
+        "max_completion_tokens": 100_000,
+        "supports_thinking": True,
+        "supports_reasoning_effort": True,
+        "supports_function_calling": True,
+        "family": "gpt-5",
+        "tier": "mini",
+    },
+    "gpt-5-nano": {
+        "context_length": 200_000,
+        "max_completion_tokens": 100_000,
+        "supports_thinking": True,
+        "supports_reasoning_effort": True,
+        "supports_function_calling": True,
+        "family": "gpt-5",
+        "tier": "nano",
+    },
+    "gpt-5-pro": {
+        "context_length": 200_000,
+        "max_completion_tokens": 100_000,
+        "supports_thinking": True,
+        "supports_reasoning_effort": True,
+        "supports_function_calling": True,
+        "supports_multimodal_input": True,
+        "family": "gpt-5",
+        "tier": "pro",
+    },
+    "gpt-5-codex": {
+        "context_length": 200_000,
+        "max_completion_tokens": 100_000,
+        "supports_thinking": True,
+        "supports_reasoning_effort": True,
+        "supports_function_calling": True,
+        "supports_code_interpreter_tool": True,
+        "family": "gpt-5",
+        "tier": "codex",
+    },
+
+    # === GPT-5.1 family (discovered via live API) ===
+    "gpt-5.1": {
+        "context_length": 200_000,
+        "max_completion_tokens": 100_000,
+        "supports_thinking": True,
+        "supports_reasoning_effort": True,
+        "supports_function_calling": True,
+        "family": "gpt-5",
+        "tier": "standard",
+    },
+    "gpt-5.1-codex": {
+        "context_length": 200_000,
+        "max_completion_tokens": 100_000,
+        "supports_thinking": True,
+        "supports_function_calling": True,
+        "family": "gpt-5",
+        "tier": "codex",
+    },
+
+    # === GPT-5.2 family (discovered via live API) ===
+    "gpt-5.2": {
+        "context_length": 200_000,
+        "max_completion_tokens": 100_000,
+        "supports_thinking": True,
+        "supports_reasoning_effort": True,
+        "supports_function_calling": True,
+        "family": "gpt-5",
+        "tier": "standard",
+    },
+    "gpt-5.2-pro": {
+        "context_length": 200_000,
+        "max_completion_tokens": 100_000,
+        "supports_thinking": True,
+        "supports_reasoning_effort": True,
+        "supports_function_calling": True,
+        "family": "gpt-5",
+        "tier": "pro",
+    },
+
+    # === GPT-5.4 expanded family (discovered via live API — had only base 5.4) ===
+    "gpt-5.4-mini": {
+        "context_length": 128_000,
+        "max_completion_tokens": 16_384,
+        "supports_thinking": True,
+        "supports_function_calling": True,
+        "family": "gpt-5",
+        "tier": "mini",
+    },
+    "gpt-5.4-nano": {
+        "context_length": 128_000,
+        "max_completion_tokens": 16_384,
+        "supports_thinking": True,
+        "supports_function_calling": True,
+        "family": "gpt-5",
+        "tier": "nano",
+    },
+    "gpt-5.4-pro": {
+        "context_length": 200_000,
+        "max_completion_tokens": 100_000,
+        "supports_thinking": True,
+        "supports_reasoning_effort": True,
+        "supports_function_calling": True,
+        "family": "gpt-5",
+        "tier": "pro",
+    },
+
+    # === GPT-5.5 pro variant (discovered via live API — had only base 5.5) ===
+    "gpt-5.5-pro": {
+        "context_length": 200_000,
+        "max_completion_tokens": 100_000,
+        "supports_thinking": True,
+        "supports_reasoning_effort": True,
+        "supports_function_calling": True,
+        "family": "gpt-5",
+        "tier": "pro",
+    },
+
+    # === GPT-5.6 Daybreak expanded (discovered via live API — had only sol+cyber) ===
+    "gpt-5.6-luna": {
+        "context_length": 200_000,
+        "max_completion_tokens": 65_536,
+        "supports_thinking": True,
+        "supports_reasoning_effort": True,
+        "supports_function_calling": True,
+        "family": "gpt-5.6",
+        "tier": "daybreak",
+    },
+    "gpt-5.6-terra": {
+        "context_length": 200_000,
+        "max_completion_tokens": 65_536,
+        "supports_thinking": True,
+        "supports_reasoning_effort": True,
+        "supports_function_calling": True,
+        "family": "gpt-5.6",
+        "tier": "daybreak",
+    },
+
+    # === Legacy GPT-3.5 (still served, chat-capable via /chat/completions) ===
+    "gpt-3.5-turbo": {
+        "context_length": 16_384,
+        "max_completion_tokens": 4_096,
+        "supports_thinking": False,
+        "supports_function_calling": True,
+        "family": "gpt-3.5",
+        "tier": "legacy",
+    },
+    "gpt-3.5-turbo-16k": {
+        "context_length": 16_384,
+        "max_completion_tokens": 4_096,
+        "supports_thinking": False,
+        "supports_function_calling": True,
+        "family": "gpt-3.5",
+        "tier": "legacy",
+    },
+
+    # === GPT-4.1 family (discovered via live API — had only gpt-4.1-mini) ===
+    "gpt-4.1": {
+        "context_length": 1_047_576,           # ~1M tokens
+        "max_completion_tokens": 32_768,
+        "supports_thinking": False,
+        "supports_function_calling": True,
+        "supports_parallel_function_calling": True,
+        "supports_response_format_json_schema": True,
+        "supports_multimodal_input": True,
+        "family": "gpt-4.1",
+        "tier": "standard",
+    },
+    "gpt-4.1-nano": {
+        "context_length": 1_047_576,
+        "max_completion_tokens": 32_768,
+        "supports_thinking": False,
+        "supports_function_calling": True,
+        "supports_response_format_json_schema": True,
+        "supports_multimodal_input": True,
+        "family": "gpt-4.1",
+        "tier": "nano",
+    },
 }
 
 
@@ -381,6 +611,50 @@ OPENAI_FREE_ONLY_REASONING_EFFORT_CAP = "low"
 # When OPENAI_FREE_ONLY is true, service_tier is forced to this value
 # (never priority/fast/scale — those carry 2x pricing premium).
 OPENAI_FREE_ONLY_SERVICE_TIER_FORCED = "default"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Non-chat model filter (mirrors GeminiBackend._NON_CHAT_PATTERNS pattern)
+# ─────────────────────────────────────────────────────────────────────────────
+# OpenAI's /v1/models endpoint returns 128+ models, but many aren't
+# chat-capable (embeddings, TTS, image gen, video gen, moderation, ASR,
+# legacy completions). These models don't work with /chat/completions —
+# they use separate endpoints (/embeddings, /audio/speech, /images/
+# generations, /moderations, etc.). Filter them out of the default
+# listing so users see only chat-capable models.
+#
+# Matched case-insensitively against the model ID via substring match.
+# To verify a pattern doesn't accidentally exclude a chat model, run:
+#   agentkthx models --backend openai 2>&1 | grep -i "<pattern>"
+# and confirm every result is genuinely non-chat.
+_NON_CHAT_PATTERNS: tuple[str, ...] = (
+    "embedding",        # text-embedding-3-large, text-embedding-3-small, text-embedding-ada-002
+    "tts",              # tts-1, tts-1-hd, gpt-4o-mini-tts → /audio/speech
+    "transcribe",       # gpt-4o-transcribe, gpt-4o-mini-transcribe, gpt-transcribe, gpt-live-transcribe → /audio/transcriptions
+    "whisper",          # whisper-1 → legacy /audio/transcriptions
+    "image",            # gpt-image-1, gpt-image-2, gpt-image-2.5-flare, gpt-image-2.5-sunburst, chatgpt-image-latest → /images/generations
+    "sora",             # sora-2, sora-2-pro → video generation
+    "moderation",       # omni-moderation-latest, omni-moderation-2024-09-26 → /moderations
+    "babbage",          # babbage-002 → legacy /completions (not /chat/completions)
+    "davinci",          # davinci-002 → legacy /completions (not /chat/completions)
+)
+
+
+def _is_chat_model(model_id: str) -> bool:
+    """Return True if the model id looks like a chat-capable model.
+
+    Checks against ``_NON_CHAT_PATTERNS`` — if any pattern is a
+    case-insensitive substring of the model id, the model is classified
+    as non-chat (embeddings, TTS, image gen, etc.) and excluded from the
+    default listing. Chat-capable models (gpt-*, o-*, chat-*) pass through.
+    """
+    if not model_id:
+        return False
+    m = model_id.lower()
+    for pattern in _NON_CHAT_PATTERNS:
+        if pattern in m:
+            return False
+    return True
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -700,7 +974,7 @@ class OpenAIBackend(OpenAICompatibleBackend):
             available_models: list[dict] = []
             for model in models_data.get("data", []):
                 model_id = model.get("id")
-                if model_id:
+                if model_id and _is_chat_model(model_id):
                     available_models.append(self._parse_openai_model(model))
 
             # Add catalog-only models (not returned by API but still in
@@ -1144,11 +1418,15 @@ class OpenAIBackend(OpenAICompatibleBackend):
         rare exceptions for transcription-only models like gpt-transcribe
         which aren't chat backends anyway). We assume NATIVE for every
         chat-capable model without probing — no live API call is made.
-        The actual generate() path keeps a defensive ReAct fallback for
-        the rare case where a specific model rejects the `tools` field
-        at runtime (HTTP 400), so text-format tool calls can still flow
-        through the Agent's ToolParser.
+
+        Non-chat models (embeddings, TTS, image gen, etc. — detected
+        via ``_NON_CHAT_PATTERNS``) return ``NONE`` so users don't
+        accidentally try to chat with an embedding model.
         """
+        # Non-chat models (embeddings, TTS, image gen, moderation, etc.)
+        # don't support /chat/completions — classify as NONE.
+        if not _is_chat_model(model):
+            return ToolSupportLevel.NONE
         return ToolSupportLevel.NATIVE
 
     # ─────────────────────────────────────────────────────────────────────
