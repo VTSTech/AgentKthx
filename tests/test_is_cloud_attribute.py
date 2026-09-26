@@ -33,6 +33,7 @@ from agentkthx.plugins.bitnet.bitnet import BitNetBackend
 from agentkthx.plugins.zai.zai import ZaiBackend
 from agentkthx.plugins.openrouter.openrouter import OpenRouterBackend
 from agentkthx.plugins.gemini.gemini import GeminiBackend
+from agentkthx.plugins.huggingface.huggingface import HuggingFaceBackend
 
 
 class TestIsCloudAttribute:
@@ -86,6 +87,15 @@ class TestIsCloudAttribute:
     def test_gemini_inherits_true(self):
         """GeminiBackend extends OpenAICompatibleBackend — cloud."""
         assert GeminiBackend.is_cloud is True
+
+    def test_huggingface_inherits_true(self):
+        """HuggingFaceBackend extends OpenAICompatibleBackend — cloud.
+
+        Mirrors the OpenRouterBackend pattern. HF Router is a cloud-
+        hosted OpenAI-compat API at https://router.huggingface.co/v1 —
+        same semantics (rate-limited, billed, OpenAI-mode-only).
+        """
+        assert HuggingFaceBackend.is_cloud is True
 
 
 class TestFifthCloudBackend:

@@ -1081,9 +1081,27 @@ class PluginManager:
         self._backend_aliases.pop(name, None)
 
     def find_plugin_for_backend(self, backend_name: str) -> str | None:
-        """Reverse-mapping backend name -> plugin name (uses the cache)."""
+        """Reverse-mapping backend name -> plugin name (uses the cache).
+
+        Checks two locations so that aliases declared in
+        ``cli_flags."--backend"`` (e.g. ``"hf"`` for the huggingface
+        plugin) resolve to the right plugin before the plugin's
+        ``register()`` has had a chance to call
+        ``register_backend(alias_of=...)``. Without this lookup, the
+        ``_ensure_plugin()`` chicken-and-egg path fails because the
+        alias map is only populated AFTER the plugin loads, but the
+        plugin loads only AFTER ``_ensure_plugin`` resolves the name.
+        """
         for manifest in self.discover():
             if backend_name in manifest.provides.get("backends", {}):
+                return manifest.name
+            # Also check the --backend cli_flags for declared aliases
+            # (e.g. the huggingface plugin declares ["huggingface", "hf"]
+            # — both should resolve to the "huggingface" plugin name).
+            cli_backend_choices = (
+                manifest.provides.get("cli_flags", {}).get("--backend", [])
+            )
+            if backend_name in cli_backend_choices:
                 return manifest.name
         return None
 

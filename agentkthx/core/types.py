@@ -71,6 +71,7 @@ class BackendType(Enum):
     ZAI = "zai"
     OPENROUTER = "openrouter"
     GEMINI = "gemini"
+    HUGGINGFACE = "huggingface"
 
 
 class ApiMode(Enum):

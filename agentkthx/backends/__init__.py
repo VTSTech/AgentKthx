@@ -152,16 +152,27 @@ def get_backend_choices() -> list[str]:
     """
     Get the merged list of available backend names for CLI ``--backend``.
 
-    Includes native backends plus any registered by plugins.
+    Includes native backends plus any registered by plugins. The
+    PluginManager version reads from each plugin's
+    ``cli_flags."--backend"`` manifest entry — this means a plugin
+    that registers aliases (e.g. huggingface plugin registers both
+    ``huggingface`` and ``hf``) will have all of them surfaced as
+    valid CLI choices.
     """
     from ..plugins import get_plugin_manager
     pm = get_plugin_manager()
+    # R07: delegate to PluginManager.get_backend_choices() so plugin-
+    # registered aliases (e.g. "hf" → "huggingface") are surfaced as
+    # valid --backend choices. Previously this called pm.list_backend_names()
+    # which only returns the canonical names registered via
+    # register_backend() — aliases declared in plugin.json's cli_flags
+    # were silently dropped.
     native = list(_BACKENDS.keys())
-    plugin_names = pm.list_backend_names()
+    plugin_values = pm.get_backend_choices()
     # Merge, deduplicate, preserve order
     seen = set()
     result = []
-    for n in native + plugin_names:
+    for n in native + plugin_values:
         if n not in seen:
             seen.add(n)
             result.append(n)

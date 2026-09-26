@@ -94,6 +94,42 @@ GEMINI_THINKING_LEVEL = os.environ.get("GEMINI_THINKING_LEVEL", "")
 GEMINI_SERVICE_TIER = os.environ.get("GEMINI_SERVICE_TIER", "standard")
 
 
+# Hugging Face plugin (agentkthx/plugins/huggingface/)
+# Inference Router — OpenAI-compatible /v1/chat/completions endpoint.
+# The router proxies to ~18 partner providers (Together, Groq, Novita,
+# DeepInfra, Fireworks, etc.) with :fastest / :cheapest / :preferred
+# / :provider-name model-id suffixes for routing control.
+HF_BASE_URL = os.environ.get("HF_BASE_URL", "https://router.huggingface.co/v1")
+# Legacy Serverless TGI surface — documented in the API Technical Reference
+# but NOT used by the v0.1 backend (router is preferred). Kept here so
+# future versions can fall back without re-parsing env vars.
+HF_BASE_URL_LEGACY = os.environ.get("HF_BASE_URL_LEGACY", "https://api-inference.huggingface.co")
+# HF_TOKEN is the documented env var. HUGGING_FACE_HUB_TOKEN is the
+# older form (still used by huggingface_hub SDK). Accept either.
+HF_TOKEN = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN", "")
+HF_DEFAULT_MODEL = os.environ.get("HF_DEFAULT_MODEL", "openai/gpt-oss-120b")
+# Strict free-tier enforcement: when true, only models in the
+# HF_FREE_MODEL_WHITELIST are accepted; the :cheapest suffix is
+# auto-appended to the model id; HTTP 402 (free-tier credit exhausted)
+# is treated as a hard failure (no retry) instead of triggering fallback.
+HF_FREE_ONLY = os.environ.get("HF_FREE_ONLY", "").lower() in ("1", "true", "yes")
+# Used when HF_FREE_ONLY=false and HTTP 402 is received mid-run — the
+# backend swaps to this model and retries. Mirrors the ZAI plugin's
+# ZAI_FREE_FALLBACK_MODEL pattern (zai.py:706-714).
+HF_FREE_FALLBACK_MODEL = os.environ.get("HF_FREE_FALLBACK_MODEL", "Qwen/Qwen2.5-7B-Instruct-1M")
+# Provider routing policy — auto-appended as a suffix to the model id
+# when no explicit suffix is present. Empty string (default) means no
+# suffix (router's :fastest default applies). One of:
+#   ""          — no suffix (router uses :fastest by default)
+#   "fastest"   — highest throughput (router default)
+#   "cheapest"  — lowest price per output token
+#   "preferred" — user's configured preference order at
+#                 https://huggingface.co/settings/inference-providers
+#   "<name>"    — pin to a specific partner provider (groq, together,
+#                 novita, fireworks, deepinfra, cerebras, ...)
+HF_PROVIDER_POLICY = os.environ.get("HF_PROVIDER_POLICY", "")
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # BACKEND SELECTION
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -121,6 +157,8 @@ elif AGENTKTHX_BACKEND == "openrouter":
     DEFAULT_MODEL = os.environ.get("AGENTKTHX_MODEL", "anthropic/claude-3.5-sonnet")
 elif AGENTKTHX_BACKEND == "gemini":
     DEFAULT_MODEL = os.environ.get("AGENTKTHX_MODEL", "gemini-3.8-flash")
+elif AGENTKTHX_BACKEND == "huggingface" or AGENTKTHX_BACKEND == "hf":
+    DEFAULT_MODEL = os.environ.get("AGENTKTHX_MODEL", "openai/gpt-oss-120b")
 else:
     DEFAULT_MODEL = os.environ.get("AGENTKTHX_MODEL", "qwen2.5:0.5b")
 
