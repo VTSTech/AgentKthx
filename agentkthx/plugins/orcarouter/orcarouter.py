@@ -237,13 +237,14 @@ class OrcaRouterBackend(CloudBackend):
 
     @property
     def backend_type(self) -> BackendType:
-        """OrcaRouter does not have a dedicated BackendType enum value yet
-        (R07.05 — added in this release). We return ZAI as a placeholder
-        so the cloud-backend attribute checks in agentkthx/core/ work
-        correctly. A dedicated ``BackendType.ORCAROUTER`` should be added
-        to core/types.py in a future release."""
-        # TODO R07.06: add BackendType.ORCAROUTER and return it here
-        return BackendType.ZAI
+        """OrcaRouter's dedicated BackendType enum value (R07.05).
+
+        Added to ``core/types.py`` in R07.05 alongside the plugin itself.
+        The CLI's footer formatter reads ``backend_type.value`` to display
+        the backend name in the status line — without this, the footer
+        would show ``🔌 zai`` even when ``--backend orcarouter`` is used.
+        """
+        return BackendType.ORCAROUTER
 
     def _validate_api_key(self, key: str) -> None:
         """Warn (not error) if the API key doesn't start with ``sk-orca-``.
