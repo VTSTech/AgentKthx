@@ -41,6 +41,8 @@ Inspired by the architecture of OpenClaw, rebuilt from scratch for local-first o
 | [ZAI_API_TECHNICAL_REFERENCE.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/ZAI_API_TECHNICAL_REFERENCE.md) | ZAI API technical reference (auth, endpoints, parameters, error codes) |
 | [OPENROUTER_API_TECHNICAL_REFERENCE.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/OPENROUTER_API_TECHNICAL_REFERENCE.md) | OpenRouter API technical reference (sampling params, model catalog, provider routing, rate limits) |
 | [GEMINI_API_TECHNICAL_REFERENCE.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/GEMINI_API_TECHNICAL_REFERENCE.md) | Gemini API technical reference (OpenAI-compat endpoint, thinking config, free-tier limits, Gemma `<thought>` tag parser, 71-model catalog) |
+| [HUGGINGFACE_API_TECHNICAL_REFERENCE.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/HUGGINGFACE_API_TECHNICAL_REFERENCE.md) | Hugging Face Inference Router technical reference (router.huggingface.co/v1, 18 partner providers, :fastest/:cheapest/:preferred routing suffixes, 31-model free-tier whitelist, HF_FREE_ONLY enforcement, HTTP 402 credit-exhaustion fallback) |
+| [OPENAI_API_TECHNICAL_REFERENCE.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/OPENAI_API_TECHNICAL_REFERENCE.md) | OpenAI API technical reference (Chat Completions + Responses API, GPT-6/GPT-5.6 Daybreak/gpt-realtime/gpt-image/gpt-transcribe lineup, service tiers, reasoning_effort enum, OPENAI_FREE_MODEL_WHITELIST) — blueprint for the planned R07.0x OpenAI plugin |
 | [CREDITS.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/CREDITS.md) | Acknowledges every project, inspiration, API, model creator, and specification that makes AgentKthx possible |
 
 ## Features
@@ -144,6 +146,10 @@ agentkthx chat -m glm-4.5-flash --backend zai                       # ZAI (free 
 agentkthx chat -m glm-5.1 --backend zai                             # ZAI (paid, plugin)
 agentkthx chat -m gemini-3.8-flash --backend gemini               # Google Gemini (free tier, plugin)
 agentkthx chat -m gemma-4-26b-a4b-it --backend gemini              # Gemma via Gemini API (free, generous RPD)
+agentkthx chat -m openai/gpt-oss-120b --backend huggingface          # Hugging Face Inference Router (plugin)
+agentkthx chat -m openai/gpt-oss-120b --backend hf                  # Same as above, using the `hf` alias
+agentkthx chat -m Qwen/Qwen3-4B-Thinking-2507 --backend hf --think   # Reasoning model + chain-of-thought display
+agentkthx chat -m deepseek-ai/DeepSeek-R1 --backend hf               # Reasoning model via HF Router
 
 # Plugin management
 agentkthx plugins                    # List discovered plugins
@@ -422,6 +428,67 @@ GEMINI_FREE_ONLY=1 agentkthx models --backend gemini
 
 See [docs/GEMINI_API_TECHNICAL_REFERENCE.md](docs/GEMINI_API_TECHNICAL_REFERENCE.md) for the full 11-section reference (auth, models, function calling, streaming, error codes, rate limits, multimodal, thinking config, integration notes, troubleshooting, 71-model catalog with free-tier data transcribed from Google AI Studio).
 
+### Hugging Face Configuration
+
+Hugging Face Inference Router backend (`https://router.huggingface.co/v1`) — proxies 100+ open-weight models (Llama, Qwen, DeepSeek, Mistral, Gemma, GLM, Phi, Command-R, gpt-oss) served by ~18 partner providers (Together, Groq, Novita, DeepInfra, Fireworks, Cerebras, Replicate, Fal AI, Featherless, Baseten, Cohere, Nscale, OVHcloud, Public AI, Scaleway, WaveSpeedAI, Z.ai, HF Inference) through a single OpenAI-compatible `/chat/completions` endpoint. Unlike OpenRouter, HF doesn't use a `:free` model-id suffix — free-tier status is determined by account credit + provider routing, so `HF_FREE_ONLY` enforces a curated 31-model whitelist.
+
+#### Environment Variables
+
+```bash
+export HF_TOKEN="hf_your_fine_grained_token"     # Required (or HUGGING_FACE_HUB_TOKEN)
+export HF_BASE_URL="https://router.huggingface.co/v1"  # Optional (default — Inference Router)
+export HF_DEFAULT_MODEL="openai/gpt-oss-120b"    # Optional
+export HF_FREE_ONLY="1"                           # Optional (strict 31-model whitelist)
+export HF_FREE_FALLBACK_MODEL="Qwen/Qwen2.5-7B-Instruct-1M"  # Optional (swap on HTTP 402)
+export HF_PROVIDER_POLICY="cheapest"              # Optional: "" | fastest | cheapest | preferred | <partner-name>
+```
+
+If `HF_FREE_ONLY` is **unset**, the backend probes `https://huggingface.co/api/whoami-v2` on init and auto-detects free-tier users (`canPay=false`) — auto-enables the whitelist + emits a one-time stderr warning. Explicit `HF_FREE_ONLY=false` opts out (no auto-detect, no warning).
+
+#### Provider Routing
+
+The router supports a suffix on the model id to control which partner provider serves the request:
+
+- **No suffix** (default) — `:fastest` (highest throughput, router default)
+- **`:cheapest`** — lowest price per output token (auto-applied when `HF_FREE_ONLY=true`)
+- **`:preferred`** — your preference order at huggingface.co/settings/inference-providers
+- **`:<partner-name>`** — pin to a specific partner (`:groq`, `:together`, `:novita`, `:deepinfra`, `:fireworks`, `:cerebras`, etc.)
+
+```bash
+# Default routing (fastest)
+agentkthx chat --backend hf --model openai/gpt-oss-120b
+
+# Pin to Groq (very fast for Llama-3.x)
+agentkthx chat --backend hf --model meta-llama/Llama-3.3-70B-Instruct:groq
+
+# Pin to Together (better for Qwen3-Coder)
+agentkthx chat --backend hf --model Qwen/Qwen3-Coder-480B-A35B-Instruct:together
+```
+
+#### Usage Examples
+
+```bash
+# Basic usage — openai/gpt-oss-120b is the default model
+agentkthx chat --backend hf
+
+# Reasoning model with chain-of-thought display
+agentkthx chat --backend hf -m Qwen/Qwen3-4B-Thinking-2507 --stream --think
+
+# DeepSeek-R1 for hard reasoning tasks
+agentkthx chat --backend hf -m deepseek-ai/DeepSeek-R1 --stream --think
+
+# List available models (live /v1/models + 31-model static catalog fallback)
+agentkthx models --backend hf
+
+# Free-tier whitelist only (31 models, auto-appends :cheapest suffix)
+HF_FREE_ONLY=1 agentkthx models --backend hf
+
+# Pin to a specific partner provider
+agentkthx chat --backend hf -m "meta-llama/Llama-3.3-70B-Instruct:groq"
+```
+
+See [docs/HUGGINGFACE_API_TECHNICAL_REFERENCE.md](docs/HUGGINGFACE_API_TECHNICAL_REFERENCE.md) for the full 14-section reference (auth, request/response, sampling params, model catalog, function calling, streaming, provider routing, error codes, rate limits, free-tier behavior, multimodal, implementation notes, proposed plugin.json, troubleshooting matrix).
+
 ### Chat-Completions Streaming
 
 ```python
@@ -605,6 +672,16 @@ GEMINI_FREE_ONLY=1                                # Optional (filter to free-tie
 GEMINI_THINKING_LEVEL=minimal                     # Optional: minimal|low|medium|high (Gemini 3.x)
 GEMINI_SERVICE_TIER=standard                      # Optional: standard|flex|priority
 GEMINI_MAX_429_RETRIES=6                          # Optional (default 6, 5s→90s backoff)
+
+# Hugging Face plugin
+HF_TOKEN=hf_...                                 # Required (or HUGGING_FACE_HUB_TOKEN)
+HF_BASE_URL=https://router.huggingface.co/v1     # Optional (default — Inference Router)
+HF_BASE_URL_LEGACY=https://api-inference.huggingface.co  # Legacy Serverless TGI surface (not used by v0.1)
+HF_DEFAULT_MODEL=openai/gpt-oss-120b             # Optional
+HF_FREE_ONLY=true                               # Strict free-tier whitelist (31 models)
+HF_FREE_FALLBACK_MODEL=Qwen/Qwen2.5-7B-Instruct-1M  # Swap on HTTP 402 when HF_FREE_ONLY=false
+HF_PROVIDER_POLICY=cheapest                     # Optional: "" | fastest | cheapest | preferred | <partner-name>
+                                                # When HF_FREE_ONLY=true, policy is forced to :cheapest
 
 # ACP plugin
 ACP_BASE_URL=http://localhost:8766                 # ACP server URL

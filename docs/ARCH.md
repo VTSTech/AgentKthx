@@ -2,9 +2,9 @@
 
 AgentKthx is a modular agent framework designed for local LLMs with tool-calling capabilities. It implements the OpenResponses specification for multi-provider, interoperable LLM interfaces.
 
-**Specification Compliance**: 100% (R03.5+) -- R04.x, R05.x, R06.0–R07.00
+**Specification Compliance**: 100% (R03.5+) -- R04.x, R05.x, R06.0–R07.02
 
-**Version**: R07.00
+**Version**: R07.02
 - OpenResponses API: 100%
 - Chat Completions API: 100%
 - Soul Spec v0.5: 100%
@@ -15,7 +15,7 @@ AgentKthx is a modular agent framework designed for local LLMs with tool-calling
 ```
 agentkthx/
 ├── core/
-│   ├── types.py              # Enum types (StepResultType, BackendType, ApiMode.OPENRE/OPENAI, ToolSupportLevel)
+│   ├── types.py              # Enum types (StepResultType, BackendType.{OLLAMA, LLAMA_SERVER, BITNET, ZAI, OPENROUTER, GEMINI, HUGGINGFACE}, ApiMode.OPENRE/OPENAI, ToolSupportLevel)
 │   ├── models.py             # Data models (Tool, ToolParam, StepResult, AgentRun)
 │   ├── memory.py             # Sliding window conversation memory
 │   ├── persistent_memory.py  # SQLite-backed PersistentMemory(Memory) subclass (R04.3)
@@ -92,6 +92,13 @@ agentkthx/
 │   │   └── gemini.py          # GeminiBackend: 71-model catalog, <thought> tag parser,
 │   │                         # free-tier data from AI Studio, thinking config routing,
 │   │                         # 429 retry with spend-limit detection
+│   ├── huggingface/          # Hugging Face Inference Router plugin (R07.02)
+│   │   ├── plugin.json       # Manifest (type: backend, provides: huggingface + hf alias)
+│   │   ├── __init__.py       # register()/unregister() with alias_of="huggingface"
+│   │   └── huggingface.py    # HuggingFaceBackend: 154-model live catalog, per-provider
+│   │                         # is_free auto-detection, whoami-v2 free-tier probe,
+│   │                         # :cheapest routing suffix support, HTTP 402 credit-
+│   │                         # exhaustion fallback to HF_FREE_FALLBACK_MODEL
 │   ├── turboquant/           # TurboQuant server management plugin
 │   │   ├── plugin.json       # Manifest (type: feature, provides: turbo CLI command)
 │   │   └── turbo.py           # Server lifecycle, Ollama model registry, GGUF parsing
@@ -548,6 +555,7 @@ The `--backend` flag selects which backend to use:
 | `zai` | plugin | `ZaiBackend` | ZAI cloud API (GLM models) |
 | `openrouter` | plugin | `OpenRouterBackend` | OpenRouter cloud API (500+ models) |
 | `gemini` | plugin | `GeminiBackend` | Google Gemini API (71 models, free tier, Gemma) |
+| `huggingface` (alias: `hf`) | plugin | `HuggingFaceBackend` | Hugging Face Inference Router (154 models, 18 partner providers, free-tier auto-detect) |
 
 Plugin backends are automatically discovered and loaded on first use. See `docs/PLUGIN_SPEC.md` for the full plugin specification.
 
@@ -660,6 +668,50 @@ See `docs/GEMINI_API_TECHNICAL_REFERENCE.md` for the 1553-line technical referen
 
 ---
 
+### Hugging Face Backend (`plugins/huggingface/`) (R07.02)
+
+The Hugging Face backend is a plugin that provides `HuggingFaceBackend`, inheriting from `OpenAICompatibleBackend` (the shared base class extracted in R06.55). It connects to the Hugging Face Inference Router at `https://router.huggingface.co/v1` — a unified proxy that exposes 100+ open-weight models (Llama, Qwen, DeepSeek, Mistral, Gemma, GLM, Phi, Command-R, gpt-oss) served by ~18 partner providers (Together, Groq, Novita, DeepInfra, Fireworks, Cerebras, Replicate, Fal AI, Featherless, Baseten, Cohere, Nscale, OVHcloud, Public AI, Scaleway, WaveSpeedAI, Z.ai, HF Inference) through a single OpenAI-compatible `/chat/completions` endpoint. This is the third cloud-provider backend (after ZAI and OpenRouter) and the first to ship with a dedicated API Technical Reference written **before** the implementation, as the blueprint (see `docs/HUGGINGFACE_API_TECHNICAL_REFERENCE.md` committed in R07.01).
+
+Key features:
+- **154-model live catalog** from `/v1/models` (with 31-model static catalog `HF_MODELS` as fallback when the API is unreachable)
+- **Per-provider parse shape** (R07.02 polish) — `_parse_hf_model()` captures the full per-provider array: `pricing: {input, output}` (USD per 1M tokens, MIN aggregated as `cheapest_input_per_1m` / `cheapest_output_per_1m`), `is_free` (OR aggregated as `any_free_provider`), `supports_tools` (any/all signals), `supports_structured_output`, `first_token_latency_ms`, `throughput`, `status`, `is_model_author`. Top-level `context_length` and `max_completion_tokens` aggregated as MAX across providers (best-case budget — actual budget depends on which partner the router picks under `:fastest` routing). Full raw `providers[]` array preserved on the parsed model for forward-compat.
+- **`is_free` auto-detection** (R07.02 polish) — `_is_free_model_live()` instance method supplements the static `HF_FREE_MODEL_WHITELIST` (31 open-weight models verified to have free-tier access via partner providers) with live API `is_free` flag consultation. Currently `false` for all 336 combos even with auth (Sept 2026 state), but if HF flips any combo free tomorrow (sponsored/promo window), AgentKthx auto-picks it up with zero code change.
+- **`whoami-v2` free-tier probe** (R07.02 polish) — `_probe_whoami()` hits `https://huggingface.co/api/whoami-v2` on every `__init__` to (a) validate the token before the first chat call (catches typos/expired tokens early), and (b) detect free-tier users via `canPay=false`. Best-effort — failures swallowed; `_user_info` stays None and the backend still works (paid inference will surface its own 401 at request time). A `read`-role fine-grained token (the default) is enough; higher-role endpoints (`/api/inference-providers`, `/api/billing/usage`) require `write`/`admin` role but we don't need them.
+- **`_resolve_free_only_mode()` auto-detection** (R07.02 polish) — explicit env var > whoami auto-detect > module-constant fallback: explicit `HF_FREE_ONLY=true` → strict (no auto-detect); explicit `HF_FREE_ONLY=false` → permissive (opt-out — skips whoami entirely); unset → auto-detect: `canPay=false` → strict + one-time stderr warning, `canPay=true` → permissive, whoami unreachable → fall back to module-level `HF_FREE_ONLY` constant. VTSTech's account (`canPay=false`) gets auto-enabled whitelist protection + warning even without setting the env var explicitly; if a billing card is later added, the auto-detection flips to permissive with no code change.
+- **Provider routing via model-id suffix** — `:fastest` (default), `:cheapest` (auto-applied when `HF_FREE_ONLY=true`), `:preferred` (user's preference order at huggingface.co/settings/inference-providers), `:<partner-name>` (pin to a specific partner like `:groq`, `:together`, `:novita`, `:deepinfra`, `:fireworks`, `:cerebras`). Controlled by the `HF_PROVIDER_POLICY` env var (auto-applied when no explicit suffix on the model id).
+- **`HF_FREE_FALLBACK_MODEL` swap on HTTP 402** (mirrors ZAI's 429 insufficient-balance fallback at `zai.py:706-714`) — when free-tier credit is exhausted mid-run, the backend swaps to the configured fallback model (default `Qwen/Qwen2.5-7B-Instruct-1M`) and retries once. Strict mode (`HF_FREE_ONLY=true`) treats 402 as a hard failure (no retry — retrying burns router quota without resolving).
+- **429 retry with `Retry-After` honor** — exponential back-off schedule (5s → 10s → 20s → 40s → 80s → 90s cap with ±20% jitter, 6 retries default — mirrors OpenRouter R06.54). Override via `HF_MAX_429_RETRIES`.
+- **ReAct fallback** when a partner provider rejects the `tools` field — HF-specific error patterns added beyond the OpenRouter set: `tool use is not supported`, `tool_calls not supported on this model`, plus the TGI/llama-server form `unsupported param: tools`.
+- **Reasoning-content capture** for thinking-capable HF models (Qwen3-Thinking family, DeepSeek-R1, openai/gpt-oss-20b-reasoning) via the `reasoning` field on the response message (mirrors OpenRouter's R06.53 streaming capture — surfaced in the CLI `reasoning:` panel above the `AgentKthx:` prompt when `--think` is set).
+- **Context-length 400 recovery** via the shared `OpenAICompatibleBackend._handle_context_length_400` helper (ARCH-03 R06.57 — HF Router's error format matches the base-class default regex patterns, so no override is needed).
+- **JEV dispatch** via `_jev_call_completions()` routing through `self.generate()` so auth + 429 retry + `HF_FREE_ONLY` are preserved for decision-mode calls.
+- **Both canonical (`huggingface`) and alias (`hf`) `--backend` values** work end-to-end (alias registered via `alias_of="huggingface"` in `__init__.py`).
+- **Once-per-process warning flag** (R07.02 polish) — the free-tier stderr warning is process-scoped via a class-level `_free_tier_warning_emitted: bool = False` flag. The CLI may instantiate `HuggingFaceBackend` twice in one command (once for `_probe_backend` feature discovery, once for the actual `cmd_models` / `cmd_chat` invocation), and the flag prevents the warning from firing twice — subsequent instances in the same process skip the print but **still enforce the whitelist**.
+
+Configuration env vars: `HF_TOKEN` (or `HUGGING_FACE_HUB_TOKEN` fallback), `HF_BASE_URL`, `HF_BASE_URL_LEGACY` (documented but not used by v0.1), `HF_DEFAULT_MODEL`, `HF_FREE_ONLY`, `HF_FREE_FALLBACK_MODEL`, `HF_PROVIDER_POLICY`, `HF_MAX_429_RETRIES`.
+
+See `docs/HUGGINGFACE_API_TECHNICAL_REFERENCE.md` for the 1019-line technical reference covering all endpoints, error codes, rate limits, and implementation details. The parallel `docs/OPENAI_API_TECHNICAL_REFERENCE.md` (1677 lines, also committed in R07.01) awaits the planned R07.0x OpenAI plugin — same blueprint pattern.
+
+```bash
+# Default routing (fastest)
+agentkthx chat --backend hf --model openai/gpt-oss-120b
+
+# Pin to Groq (very fast for Llama-3.x)
+agentkthx chat --backend hf --model meta-llama/Llama-3.3-70B-Instruct:groq
+
+# Reasoning model with chain-of-thought display
+agentkthx chat --backend hf --model Qwen/Qwen3-4B-Thinking-2507 --stream --think
+
+# Free-tier whitelist only (31 models, auto-appends :cheapest suffix)
+HF_FREE_ONLY=1 agentkthx models --backend hf
+
+# Auto-detection mode (unset HF_FREE_ONLY — probe whoami-v2 first)
+unset HF_FREE_ONLY
+agentkthx models --backend hf   # warning fires once, 31-model whitelist auto-enforced
+```
+
+---
+
 ## Plugin System (R05.0)
 
 The plugin system enables extending AgentKthx with additional backends, CLI commands, and configuration without modifying the core framework. See `docs/PLUGIN_SPEC.md` for the full specification.
@@ -717,6 +769,7 @@ Each plugin ships a `plugin.json` manifest:
 | `zai` | backend | `zai` backend (GLM models via ZAI API, 13-model catalog) |
 | `openrouter` | backend | `openrouter` backend (500+ models via OpenRouter API) |
 | `gemini` | backend | `gemini` backend (71 Gemini/Gemma models, free-tier data, `<thought>` tag parser) |
+| `huggingface` (alias: `hf`) | backend | `huggingface` backend (154 models via HF Inference Router, 31-model free-tier whitelist, per-provider `is_free` auto-detection, whoami-v2 free-tier probe) |
 | `turboquant` | feature | `turbo` CLI command (server lifecycle, model registry) |
 | `test-plugin` | feature | `test-backend` backend, `plugin-test` CLI command |
 
@@ -1619,7 +1672,7 @@ The CLI lives in the `agentkthx/cli/` package (Phase 8 split of the former 4270-
 | `-m, --model` | run, chat, agent, test | Model to use |
 | `--tools` | run, chat, agent | Comma-separated tool list |
 | `--skills` | run, chat, agent | Comma-separated skill names to load |
-| `--backend` | all | Backend (ollama, bitnet, llama-server, zai, openrouter, gemini) |
+| `--backend` | all | Backend (ollama, bitnet, llama-server, zai, openrouter, gemini, huggingface/hf) |
 | `--api` | run, chat, agent, test | API mode: `openre` (OpenResponses) or `openai` (OpenAI Chat-Completions) |
 | `--response-format` | run, chat, agent | Response format: `text` or `json` (Chat-Completions mode) |
 | `--truncation` | run, chat, agent | Truncation behavior: `auto` or `disabled` |
