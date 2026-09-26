@@ -826,6 +826,17 @@ def build_retry_context(
 # *mention* errors ("grep found no matches for 'error'...", a log excerpt
 # containing "timeout") were misclassified as failures — which poisoned the
 # recovery tracker and terminated otherwise healthy audit runs.
+#
+# ROB-07 (R07.06): Python emits alternative traceback framings that the
+# original single "traceback (most recent call last)" alternative missed —
+# exception-chain headers ("During handling of the above exception, another
+# exception occurred:", "The above exception was the direct cause of the
+# following exception:") and truncated tracebacks whose captured first line
+# is a bare ``File "...", line N`` frame (common when python_repl output is
+# clipped to the tail). Those results were misclassified as successes,
+# corrupting the ErrorRecoveryTracker state. All three formats are matched
+# below; the File-alternative requires the quoted path form so prose like
+# "File not found" still takes its own (pre-existing) alternative.
 _ERROR_FIRST_LINE_RE = re.compile(
     r"^\s*(?:"
     r"error|"
@@ -835,6 +846,9 @@ _ERROR_FIRST_LINE_RE = re.compile(
     r"permission denied|"
     r"command timed out|"
     r"traceback \(most recent call last\)|"
+    r"during handling of the above exception|"
+    r"the above exception was the direct cause|"
+    r"file\s+\"|"
     r"\[error\]|"
     r"\[sandbox error\]|"
     r"\[sandbox\].*(?:timeout|timed out|failed|exited)|"

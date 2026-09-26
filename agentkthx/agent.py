@@ -1076,7 +1076,9 @@ class Agent(AgentSetupMixin, CompactionMixin, ToolExecutionMixin, StreamingMixin
         clear-and-rebuild behavior (rare — mostly for soul swaps).
         """
         self.tools.register_tool(tool)
-        self._parser = ToolParser(self.tools.names())
+        # ROB-13 (R07.06): keep the parse-failure debug flag on the
+        # re-created parser.
+        self._parser = ToolParser(self.tools.names(), debug=getattr(self, "debug", False))
         self._rebuild_system_prompt_with_tools()
 
     def _rebuild_system_prompt_with_tools(self) -> None:

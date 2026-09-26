@@ -1,0 +1,43 @@
+{
+  "$schema": "https://raw.githubusercontent.com/VTSTech/AgentKthx/main/schemas/v0.2/plugin.schema.json",
+  "name": "openrouter",
+  "version": "0.1.0",
+  "description": "OpenRouter API backend for 500+ models via OpenAI Chat-Completions API",
+  "author": {
+    "name": "VTSTech",
+    "url": "https://www.vts-tech.org"
+  },
+  "license": "MIT",
+  "extensions": {
+    "org.vts-tech.agentkthx": {
+      "display_name": "OpenRouter Cloud Backend",
+      "type": "backend",
+      "entrypoint": "__init__",
+      "depends": [],
+      "optional_depends": [],
+      "config": {
+        "env_prefix": "OPENROUTER",
+        "defaults": {
+          "OPENROUTER_API_KEY": "",
+          "OPENROUTER_BASE_URL": "https://openrouter.ai/api/v1",
+          "OPENROUTER_DEFAULT_MODEL": "anthropic/claude-3.5-sonnet",
+          "OPENROUTER_FREE_ONLY": "false"
+        }
+      },
+      "provides": {
+        "backends": {
+          "openrouter": "openrouter.OpenRouterBackend"
+        },
+        "cli_commands": [],
+        "cli_flags": {
+          "--backend": [
+            "openrouter"
+          ]
+        }
+      },
+      "compatibility": {
+        "agentkthx": ">=0.5.0"
+      }
+    }
+  }
+}

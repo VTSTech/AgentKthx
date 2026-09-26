@@ -54,6 +54,7 @@ from .agent_factory import (
     _load_skills_prompt,
     _build_agent,
     _get_catalog_defaults,
+    apply_model_switch,
 )
 
 # ── headers ──
@@ -111,6 +112,7 @@ __all__ = [
     "_load_skills_prompt",
     "_build_agent",
     "_get_catalog_defaults",
+    "apply_model_switch",
     "_print_session_header",
     "_print_run_header",
     "_print_run_summary",

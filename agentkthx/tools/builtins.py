@@ -11,6 +11,8 @@ import json
 import math
 import os
 import subprocess
+import urllib.error
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -357,6 +359,24 @@ def list_directory(path: str = ".") -> str:
 # HTTP Tool
 # ============================================================================
 
+class _SSRFSafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """
+    Redirect handler that re-runs SSRF validation on every target (SEC-03).
+
+    Without this, validating only the original URL is bypassable by any
+    public URL that 302s to ``http://127.0.0.1/`` (or any other private
+    address) — urllib's default redirect handling would follow it blindly.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        is_safe, error = is_safe_url(newurl)
+        if not is_safe:
+            raise urllib.error.URLError(
+                f"SSRF protection: redirect to {newurl} blocked: {error}"
+            )
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
 def http_get(url: str, headers: dict | None = None) -> str:
     """
     Make an HTTP GET request (up to 256 KB response).
@@ -387,7 +407,10 @@ def http_get(url: str, headers: dict | None = None) -> str:
                 safe_val = str(value).replace("\r", "").replace("\n", "")
                 req.add_header(safe_key, safe_val)
 
-        with urllib.request.urlopen(req, timeout=30) as response:
+        # SEC-03: open through a redirect handler that re-validates every
+        # hop, so a 30x from a public URL cannot bounce us at localhost.
+        opener = urllib.request.build_opener(_SSRFSafeRedirectHandler())
+        with opener.open(req, timeout=30) as response:
             raw = response.read(MAX_HTTP_BYTES + 1)
             truncated = len(raw) > MAX_HTTP_BYTES
 

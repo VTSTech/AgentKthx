@@ -506,8 +506,11 @@ class AgenticLoopMixin:
 
         Returns:
             "continue" — process the next tool call in this step
-            "break"    — stop processing tool calls (state.terminated
-                         and/or cancellation semantics are in ``state``)
+            "break"    — stop processing tool calls. Every "break" path
+                         also sets ``state.terminated`` (terminal tool
+                         failure, repeat-guard, or Ctrl+C cancellation —
+                         ROB-01), so the caller stops the WHOLE run, not
+                         just the inner tool loop.
         """
         tool_name = tc["name"]
         tool_args = tc["arguments"]
@@ -566,6 +569,19 @@ class AgenticLoopMixin:
         try:
             result = self._execute_tool(tool_name, tool_args)
         except KeyboardInterrupt:
+            # ROB-01 (R07.06): Ctrl+C during tool execution used to return
+            # "break" WITHOUT setting ``state.terminated`` — the inner tool
+            # loop stopped, but the outer step loop then called the model
+            # again with the cancelled state still in memory (half-cancelled:
+            # the response was already marked CANCELLED, yet the run could
+            # fire more tool calls before the user could interrupt again).
+            # Mark the run terminated so the caller's
+            # ``if state.terminated:`` check finalizes the whole run
+            # immediately. ``response.mark_cancelled()`` below keeps the
+            # response in CANCELLED status (``_finalize_run`` is called with
+            # ``mark_completed=False`` on this path, so it won't be flipped
+            # to COMPLETED).
+            state.terminated = True
             fc_item.status = ItemStatus.FAILED
             response.mark_cancelled(debug=self.debug)
             steps.append(StepResult(

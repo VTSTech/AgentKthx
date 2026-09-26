@@ -1,0 +1,49 @@
+{
+  "$schema": "https://raw.githubusercontent.com/VTSTech/AgentKthx/main/schemas/v0.2/plugin.schema.json",
+  "name": "openai",
+  "version": "0.1.0",
+  "description": "OpenAI API backend for GPT-6/GPT-5.6/GPT-4o families via OpenAI Chat-Completions API (free tier + paid, with OPENAI_FREE_ONLY enforcement and trial-credit-exhaustion fallback)",
+  "author": {
+    "name": "VTSTech",
+    "url": "https://www.vts-tech.org"
+  },
+  "license": "MIT",
+  "extensions": {
+    "org.vts-tech.agentkthx": {
+      "display_name": "OpenAI Cloud Backend",
+      "type": "backend",
+      "entrypoint": "__init__",
+      "depends": [],
+      "optional_depends": [],
+      "config": {
+        "env_prefix": "OPENAI",
+        "defaults": {
+          "OPENAI_BASE_URL": "https://api.openai.com/v1",
+          "OPENAI_API_KEY": "",
+          "OPENAI_ORGANIZATION_ID": "",
+          "OPENAI_PROJECT_ID": "",
+          "OPENAI_DEFAULT_MODEL": "gpt-6-sol",
+          "OPENAI_FREE_ONLY": "false",
+          "OPENAI_FREE_FALLBACK_MODEL": "gpt-4o-mini",
+          "OPENAI_SERVICE_TIER": "",
+          "OPENAI_REASONING_EFFORT": ""
+        }
+      },
+      "provides": {
+        "backends": {
+          "openai": "openai.OpenAIBackend"
+        },
+        "cli_commands": [],
+        "cli_flags": {
+          "--backend": [
+            "openai",
+            "oai"
+          ]
+        }
+      },
+      "compatibility": {
+        "agentkthx": ">=0.5.0"
+      }
+    }
+  }
+}

@@ -1,0 +1,52 @@
+diff --git a/src/llama-graph.cpp b/src/llama-graph.cpp
+index abcdef01..12345678 100644
+--- a/src/llama-graph.cpp
++++ b/src/llama-graph.cpp
+@@ -2109,11 +2109,14 @@ ggml_tensor * llm_graph_context::build_attn(
+     // TurboQuant: if V was padded, the output has padded dimensions.
+     // Extract original V head_dim after inverse WHT (applied inside build_attn_mha).
+     if (k->type == GGML_TYPE_TURBO3_0 || k->type == GGML_TYPE_TURBO4_0 || k->type == GGML_TYPE_TURBO2_0) {
+         const int64_t orig_v_head = hparams.n_embd_head_v(il);
+         // cur is 2D: (n_embd_head * n_head, n_tokens) after build_attn_mha
+-        const int64_t padded_v_head = v->ne[0];
++        // FIX: v->ne[0] is n_kv when v_trans=true (FA), not padded head dim.
++        // Compute padded value directly from orig_v_head.
++        const int64_t padded_v_head = ((orig_v_head + 127) / 128) * 128;
+         if (padded_v_head != orig_v_head) {
+             // Reshape to 4D, extract original head_dim, reshape back to 2D
+-            const int64_t n_head_v = hparams.n_head_kv(il);
++            // FIX: attention output has n_head dimensions (one per query head),
++            // not n_head_kv — GQA expansion happens inside the attention kernel.
++            const int64_t n_head_v = hparams.n_head(il);
+             const int64_t n_tokens_cur = cur->ne[1];
+             cur = ggml_reshape_3d(ctx0, cur, padded_v_head, n_head_v, n_tokens_cur);
+             // ggml_view_3d to extract first orig_v_head elements per head
+@@ -2226,10 +2229,13 @@ ggml_tensor * llm_graph_context::build_attn(
+     // extract original V head_dim after inverse WHT.
+     if (k->type == GGML_TYPE_TURBO3_0 || k->type == GGML_TYPE_TURBO4_0 || k->type == GGML_TYPE_TURBO2_0) {
+         const int64_t orig_v_head = v_cur->ne[0];  // original V head_dim from model
+-        const int64_t padded_v_head = v->ne[0];     // padded V head_dim in cache
++        // FIX: compute padded value directly (v->ne[0] may be original dim for MLA views)
++        const int64_t padded_v_head = ((orig_v_head + 127) / 128) * 128;
+         if (padded_v_head != orig_v_head) {
+             // cur is 2D: (padded_v_head * n_head, n_tokens) after build_attn_mha
+-            const int64_t n_head_v = hparams.n_head_kv(il);
++            // FIX: use n_head, not n_head_kv — attention output has one group per query head
++            const int64_t n_head_v = hparams.n_head(il);
+             const int64_t n_tokens_cur = cur->ne[1];
+             cur = ggml_reshape_3d(ctx0, cur, padded_v_head, n_head_v, n_tokens_cur);
+             cur = ggml_view_3d(ctx0, cur, orig_v_head, n_head_v, n_tokens_cur,
+@@ -2320,10 +2326,13 @@ ggml_tensor * llm_graph_context::build_attn(
+     // TurboQuant: if V was padded, extract original V head_dim after inverse WHT
+     if (k->type == GGML_TYPE_TURBO3_0 || k->type == GGML_TYPE_TURBO4_0 || k->type == GGML_TYPE_TURBO2_0) {
+         const int64_t orig_v_head = hparams.n_embd_head_v(il);
+-        const int64_t padded_v_head = v->ne[0];
++        // FIX: v->ne[0] is n_kv when v_trans=true (FA), not padded head dim
++        const int64_t padded_v_head = ((orig_v_head + 127) / 128) * 128;
+         if (padded_v_head != orig_v_head) {
+-            const int64_t n_head_v = hparams.n_head_kv(il);
++            // FIX: use n_head, not n_head_kv — attention output has one group per query head
++            const int64_t n_head_v = hparams.n_head(il);
+             const int64_t n_tokens_cur = cur->ne[1];
+             cur = ggml_reshape_3d(ctx0, cur, padded_v_head, n_head_v, n_tokens_cur);
+             cur = ggml_view_3d(ctx0, cur, orig_v_head, n_head_v, n_tokens_cur,

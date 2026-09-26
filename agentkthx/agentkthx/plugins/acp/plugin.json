@@ -1,0 +1,36 @@
+{
+  "$schema": "https://raw.githubusercontent.com/VTSTech/AgentKthx/main/schemas/v0.2/plugin.schema.json",
+  "name": "acp",
+  "version": "0.4.8",
+  "description": "ACP v1.0.6 integration for monitoring, token tracking, STOP/Resume control, and A2A agent-to-agent messaging",
+  "author": {
+    "name": "VTSTech",
+    "url": "https://www.vts-tech.org"
+  },
+  "license": "MIT",
+  "extensions": {
+    "org.vts-tech.agentkthx": {
+      "display_name": "Agent Control Panel",
+      "type": "feature",
+      "entrypoint": "__init__",
+      "depends": [],
+      "optional_depends": [],
+      "config": {
+        "env_prefix": "ACP",
+        "defaults": {
+          "ACP_BASE_URL": "http://localhost:8766",
+          "ACP_USER": "admin",
+          "ACP_PASS": ""
+        }
+      },
+      "provides": {
+        "backends": {},
+        "cli_commands": [],
+        "cli_flags": {}
+      },
+      "compatibility": {
+        "agentkthx": ">=0.4.0"
+      }
+    }
+  }
+}

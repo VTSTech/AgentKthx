@@ -145,12 +145,20 @@ def _extract_tool_from_json(obj: dict, debug: bool = False) -> tuple[str | None,
 #  ReAct parser                                                       #
 # ------------------------------------------------------------------ #
 
-def _parse_react(text: str, tool_names: list[str] | None = None) -> tuple[str | None, str | None, dict | None, str | None]:
+def _parse_react(text: str, tool_names: list[str] | None = None, debug: bool = False) -> tuple[str | None, str | None, dict | None, str | None]:
     """
     Returns (thought, tool_name, tool_args, final_answer).
     Any field may be None if not present.
     
     Handles multiple format variations from small models.
+
+    ROB-13 (R07.06): the JSON fallback chain below has 4 levels; when the
+    first two fail, every deeper level silently swallowed the original
+    error and the final fallback returned ``{'input': raw_args}`` — args
+    that almost no tool accepts, with no trace of WHY. With ``debug=True``
+    the full failure chain (one line per failed parser, then the rescue or
+    fallback that produced the final args) is printed so the degraded
+    args can be traced from the model output that caused them.
     """
     # Fix repetition issues from small models (qwen3:0.6b, etc.)
     from .helpers import detect_and_fix_repetition
@@ -201,19 +209,24 @@ def _parse_react(text: str, tool_names: list[str] | None = None) -> tuple[str | 
                 raw_args = raw_args[json_start:json_end + 1]
         
         # Try to parse JSON args
+        # ROB-13 (R07.06): every failed parser appends a reason to
+        # ``parse_failures``; the chain is printed when ``debug`` is set.
+        parse_failures: list[str] = []
         try:
             tool_args = json.loads(raw_args)
             # Ensure tool_args is a dict - json.loads can return str, list, etc.
             if not isinstance(tool_args, dict):
                 tool_args = {"input": str(tool_args)}
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as _e1:
+            parse_failures.append(f"json.loads: {_e1.msg} (line {_e1.lineno}, col {_e1.colno})")
             sanitized = _sanitize_model_json(raw_args)
             try:
                 tool_args = json.loads(sanitized)
                 # Ensure tool_args is a dict
                 if not isinstance(tool_args, dict):
                     tool_args = {"input": str(tool_args)}
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as _e2:
+                parse_failures.append(f"json.loads after _sanitize_model_json: {_e2.msg} (line {_e2.lineno}, col {_e2.colno})")
                 # SEC-02 (R07.05): the previous fallback used
                 # ``ast.literal_eval`` to accept Python dict literals with
                 # single quotes (``{'expression': '15 + 27'}``) that small
@@ -243,7 +256,9 @@ def _parse_react(text: str, tool_names: list[str] | None = None) -> tuple[str | 
                         tool_args = json.loads(py_to_json)
                         if not isinstance(tool_args, dict):
                             tool_args = {"input": str(tool_args)}
-                    except json.JSONDecodeError:
+                    except json.JSONDecodeError as _e3:
+                        parse_failures.append(
+                            f"json.loads after python-dict→JSON conversion: {_e3.msg} (line {_e3.lineno}, col {_e3.colno})")
                         tool_args = None
 
                 if tool_args is None:
@@ -252,10 +267,29 @@ def _parse_react(text: str, tool_names: list[str] | None = None) -> tuple[str | 
                     expr_match = re.search(r'[\'"]expression[\'"]:\s*[\'"]([^\'"]+)[\'"]', raw_args)
                     if expr_match:
                         tool_args = {"expression": expr_match.group(1)}
+                        parse_failures.append("rescued 'expression' value via regex fallback")
                     elif raw_args.startswith('{') and '=' in raw_args and 'arguments' not in raw_args.lower():
                         tool_args = {"input": raw_args}
+                        parse_failures.append(
+                            "all parsers failed — fell back to {'input': raw_args} "
+                            "(downstream tools may reject these args)")
                     else:
                         tool_args = {"input": raw_args}
+                        parse_failures.append(
+                            "all parsers failed — fell back to {'input': raw_args} "
+                            "(downstream tools may reject these args)")
+
+        # ROB-13 (R07.06): surface the failure chain instead of silently
+        # degrading the args. Truncated to keep a single tool call from
+        # flooding the debug console.
+        if debug and parse_failures:
+            print("    [tool-parse] ReAct 'Action Input' could not be parsed as JSON — fallback chain:")
+            for _i, _reason in enumerate(parse_failures, 1):
+                print(f"      {_i}. {_reason}")
+            _preview = repr(tool_args)
+            if len(_preview) > 200:
+                _preview = _preview[:197] + "..."
+            print(f"    [tool-parse] Args handed to the tool: {_preview}")
 
     # Extract final answer
     fa_match = _FINAL_RE.search(text)
@@ -280,14 +314,18 @@ class ToolParser:
     - Markdown code blocks with JSON
     """
 
-    def __init__(self, tool_names: list[str] | None = None):
+    def __init__(self, tool_names: list[str] | None = None, debug: bool = False):
         """
         Initialize parser with known tool names for fuzzy matching.
 
         Args:
             tool_names: List of valid tool names
+            debug: When True, print the ReAct JSON parse-failure chain
+                (ROB-13, R07.06) so unparseable ``Action Input`` blocks can
+                be traced to the fallback that produced the final args.
         """
         self.tool_names = set(tool_names or [])
+        self.debug = debug
 
     def parse(self, text: str) -> list[ToolCall]:
         """
@@ -416,7 +454,7 @@ class ToolParser:
 
     def _parse_react(self, text: str) -> list[ToolCall]:
         """Parse ReAct format tool calls."""
-        thought, name, args, final = _parse_react(text, list(self.tool_names))
+        thought, name, args, final = _parse_react(text, list(self.tool_names), debug=self.debug)
         
         if name:
             return [ToolCall(

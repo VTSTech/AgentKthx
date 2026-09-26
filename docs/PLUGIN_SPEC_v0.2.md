@@ -269,12 +269,56 @@ Each is also accepted as a legacy top-level field with a deprecation warning.
 | `config` | `object` | No | `{}` | Configuration defaults. See §Config. |
 | `provides` | `object` | No | `{}` | What the plugin registers. See §Provides. |
 | `compatibility` | `object` | No | `{}` | Version constraints. See §Compatibility. |
+| `sha256` | `string` or `object` | No | — | Optional integrity pin (SEC-06, v0.2 loader support). A 64-hex-char string pins the package `__init__.py`; an object maps relative file paths inside the plugin dir to 64-hex-char hashes. The loader verifies every pinned file BEFORE executing any plugin code and refuses to load on mismatch, missing file, or a malformed pin (fail closed). See §sha256 pin. |
 
 Unknown top-level fields and unknown fields inside the AgentKthx extension
 namespace MUST be reported with a warning and ignored. The client MUST NOT
 assign semantics to unknown fields. (Unlike the Agent Plugins Specification,
 v0.2 does not treat unknown fields as fatal; closing the schema is planned for
 v0.3 once the dual-form migration completes.)
+
+### `sha256` pin (trust boundary)
+
+Plugin roots (the built-in package dir, `~/.agentkthx/plugins/`, and
+`$AGENTKTHX_PLUGIN_PATH`) are **trusted code paths**: any `__init__.py` under
+them executes at startup with the full privileges of the user running
+agentkthx. There is no sandboxing — by design, plugins are code.
+
+The optional `sha256` pin adds integrity verification for external installs:
+
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/VTSTech/AgentKthx/main/schemas/v0.2/plugin.schema.json",
+  "name": "my-plugin",
+  "description": "Example",
+  "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+}
+```
+
+or, pinning multiple files (dict form):
+
+```json
+{
+  "sha256": {
+    "__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "worker.py": "ca3d1c6d15e17a4b9ee9f70c0a5c9ff2b1d2c17e1b6c2b6a19e50f31e4ad9e4c"
+  }
+}
+```
+
+Processing rules:
+
+1. Pins are validated at manifest-parse time. A malformed pin (not 64 hex
+   chars, wrong type, empty dict, traversal (`..`), absolute path) fails the
+   manifest parse — the plugin is un-discoverable. Fail closed: a typo'd pin
+   must never silently skip verification.
+2. Pins are verified before `exec_module`. On mismatch or missing file the
+   load fails with `sha256 pin mismatch ... refusing to execute unverified
+   plugin code`; no plugin code has run.
+3. Unpinned plugins keep trusted-path semantics — the pin is opt-in
+   hardening for verified installs, not a replacement for filesystem
+   permissions. Keep `~/.agentkthx/plugins/` at mode `0700`; the loader
+   warns when an external plugin dir is group/world-writable.
 
 ### Plugin name constraints
 

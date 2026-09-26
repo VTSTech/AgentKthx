@@ -1,0 +1,38 @@
+{
+  "$schema": "https://raw.githubusercontent.com/VTSTech/AgentKthx/main/schemas/v0.2/plugin.schema.json",
+  "name": "turboquant",
+  "version": "0.4.8",
+  "description": "llama.cpp TurboQuant server lifecycle management (start/stop/status) with auto KV cache detection and Ollama model discovery",
+  "author": {
+    "name": "VTSTech",
+    "url": "https://www.vts-tech.org"
+  },
+  "license": "MIT",
+  "extensions": {
+    "org.vts-tech.agentkthx": {
+      "display_name": "TurboQuant Server Manager",
+      "type": "feature",
+      "entrypoint": "__init__",
+      "depends": [],
+      "optional_depends": [],
+      "config": {
+        "env_prefix": "TURBOQUANT",
+        "defaults": {
+          "TURBOQUANT_SERVER_PATH": "llama-server",
+          "TURBOQUANT_PORT": "8764",
+          "TURBOQUANT_CTX": "8192"
+        }
+      },
+      "provides": {
+        "backends": {},
+        "cli_commands": [
+          "turbo"
+        ],
+        "cli_flags": {}
+      },
+      "compatibility": {
+        "agentkthx": ">=0.4.0"
+      }
+    }
+  }
+}

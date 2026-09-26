@@ -1,0 +1,47 @@
+{
+  "$schema": "https://raw.githubusercontent.com/VTSTech/AgentKthx/main/schemas/v0.2/plugin.schema.json",
+  "name": "huggingface",
+  "version": "0.1.0",
+  "description": "Hugging Face Inference Router backend for 100+ open models via OpenAI Chat-Completions API (free-tier + paid, with HF_FREE_ONLY enforcement and credit-exhaustion fallback)",
+  "author": {
+    "name": "VTSTech",
+    "url": "https://www.vts-tech.org"
+  },
+  "license": "MIT",
+  "extensions": {
+    "org.vts-tech.agentkthx": {
+      "display_name": "Hugging Face Inference Router Backend",
+      "type": "backend",
+      "entrypoint": "__init__",
+      "depends": [],
+      "optional_depends": [],
+      "config": {
+        "env_prefix": "HF",
+        "defaults": {
+          "HF_BASE_URL": "https://router.huggingface.co/v1",
+          "HF_BASE_URL_LEGACY": "https://api-inference.huggingface.co",
+          "HF_TOKEN": "",
+          "HF_DEFAULT_MODEL": "openai/gpt-oss-120b",
+          "HF_FREE_ONLY": "false",
+          "HF_FREE_FALLBACK_MODEL": "prism-ml/Ternary-Bonsai-27B-gguf",
+          "HF_PROVIDER_POLICY": ""
+        }
+      },
+      "provides": {
+        "backends": {
+          "huggingface": "huggingface.HuggingFaceBackend"
+        },
+        "cli_commands": [],
+        "cli_flags": {
+          "--backend": [
+            "huggingface",
+            "hf"
+          ]
+        }
+      },
+      "compatibility": {
+        "agentkthx": ">=0.5.0"
+      }
+    }
+  }
+}

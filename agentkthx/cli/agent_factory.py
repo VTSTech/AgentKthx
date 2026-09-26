@@ -259,6 +259,12 @@ def _build_agent(args: argparse.Namespace, config) -> Agent:
     # Stash loaded skill names on the agent so /skills and /status can show them
     # (Agent itself doesn't track skill names — only the prompt gets injected)
     agent._loaded_skills = loaded_skills
+    # R07.06 (ROB-14): remember whether num_ctx / num_predict were explicitly
+    # set by the user (CLI flag) versus derived from the catalog. The in-chat
+    # /model switch (apply_model_switch below) only re-derives UNPINNED
+    # values — a value the user chose explicitly survives model switches.
+    agent._num_ctx_explicit = getattr(args, "num_ctx", None) is not None
+    agent._num_predict_explicit = getattr(args, "num_predict", None) is not None
     # Set compaction threshold from --compaction arg
     agent._compaction_threshold = compaction_threshold
     return agent
@@ -308,3 +314,91 @@ def _get_catalog_defaults(backend, model: str) -> dict:
     except Exception:
         # If catalog lookup fails, return empty dict
         return {}
+
+
+def apply_model_switch(agent, new_model: str) -> dict:
+    """Switch the agent's model at runtime and re-derive per-model settings.
+
+    Backs the in-chat ``/model <name>`` slash command (chat mode). Simply
+    assigning ``agent.model`` leaves every per-model derived value stale
+    (ROB-14): the agent keeps the OLD model's context window and output
+    cap — e.g. switching glm-5.3 (1M ctx) → glm-4.7-flash (200K ctx) kept
+    ``num_ctx=1048576`` and every request invited a context-length 400.
+
+    Re-derived here, mirroring ``_build_agent`` startup precedence:
+
+      num_ctx:     explicit CLI arg  >  catalog context_length  >  config
+      num_predict: explicit CLI arg  >  catalog max_tokens (capped)
+
+    Also refreshed (pure functions of the model name):
+
+      - ``agent.model_config``  — stop tokens, default temp/max_tokens
+      - ``agent.model_family``  — backend-specific family behavior
+
+    Values the user pinned explicitly survive the switch:
+
+      - ``--num-ctx`` / ``--num-predict`` CLI args (stashed by
+        ``_build_agent`` as ``agent._num_ctx_explicit`` /
+        ``agent._num_predict_explicit``)
+      - ``/param num_ctx <v>`` / ``/param max_tokens <v>`` at runtime
+        (same flags; ``/param reset`` un-pins again)
+
+    Local backends (``is_cloud=False``) get ``{}`` catalog defaults, so
+    ``num_ctx`` stays config-derived and ``num_predict`` falls back to
+    the model default — identical to a fresh local startup.
+
+    The backend's ``_context_safe_max_tokens`` (persisted by
+    ``_handle_context_length_400`` for the OLD model) is cleared — the
+    safe value from a previous model's 400 must not cap the new one.
+
+    Args:
+        agent: Agent instance (any object with model/num_ctx/_num_predict/
+            model_config/model_family/backend attributes).
+        new_model: Target model name as typed by the user (provider
+            prefixes like ``zai/`` are stripped by the catalog lookups).
+
+    Returns:
+        Dict of ACTUAL changes, each as an ``(old, new)`` tuple:
+        ``{"model": ..., "num_ctx": ..., "num_predict": ...}``.
+        Keys are absent when the value did not change, so the caller
+        only prints what moved.
+    """
+    old_model = agent.model
+    old_ctx = agent.num_ctx
+    old_predict = getattr(agent, "_num_predict", None)
+
+    agent.model = new_model
+
+    changes: dict = {}
+    if new_model != old_model:
+        changes["model"] = (old_model, new_model)
+
+    # Family config is a pure function of the model name — re-derive so
+    # stop tokens / default generation params follow the switch.
+    from ..core.model_family_config import get_model_config, detect_family
+    agent.model_config = get_model_config(new_model)
+    agent.model_family = detect_family(new_model)
+
+    # The context-length-400 recovery persists a safe max_tokens on the
+    # BACKEND, derived from the OLD model's error payload. Clear it so
+    # the new model starts from its catalog defaults.
+    if getattr(agent.backend, "_context_safe_max_tokens", None) is not None:
+        agent.backend._context_safe_max_tokens = None
+
+    # Catalog defaults for the new model ({} for local backends —
+    # _get_catalog_defaults is fully offline: static catalog lookups).
+    catalog = _get_catalog_defaults(agent.backend, new_model)
+
+    if not getattr(agent, "_num_ctx_explicit", False):
+        new_ctx = catalog.get("num_ctx")
+        if new_ctx and new_ctx != old_ctx:
+            agent.num_ctx = new_ctx
+            changes["num_ctx"] = (old_ctx, new_ctx)
+
+    if not getattr(agent, "_num_predict_explicit", False):
+        new_predict = catalog.get("num_predict")
+        if new_predict != old_predict:
+            agent._num_predict = new_predict
+            changes["num_predict"] = (old_predict, new_predict)
+
+    return changes

@@ -1,0 +1,34 @@
+--- a/src/llama-graph.cpp
++++ b/src/llama-graph.cpp
+@@ -2023,7 +2023,10 @@ ggml_tensor * llm_graph_context::build_attn(...) {
+     if (k->type == GGML_TYPE_TURBO3_0 || k->type == GGML_TYPE_TURBO4_0 || k->type == GGML_TYPE_TURBO2_0) {
+         const int64_t orig_v_head = hparams.n_embd_head_v(il);
+-        const int64_t padded_v_head = v->ne[0];
++        // FIX: v->ne[0] is n_kv when v_trans=true (FA), not the padded head dim.
++        // The padded head dim for v_trans=true is at v->ne[2], but computing it
++        // directly from orig_v_head is more robust and works for all V layouts.
++        const int64_t padded_v_head = ((orig_v_head + 127) / 128) * 128;
+         if (padded_v_head != orig_v_head) {
+             const int64_t n_head_v = hparams.n_head_kv(il);
+             const int64_t n_tokens_cur = cur->ne[1];
+@@ -2138,7 +2141,10 @@ ggml_tensor * llm_graph_context::build_attn(...) {
+         const int64_t orig_v_head = v_cur->ne[0];
+-        const int64_t padded_v_head = v->ne[0];
++        // FIX: v is a view of k with ne[0]=v_cur->ne[0] (original, unpadded).
++        // Compute padded value directly from orig_v_head to correctly handle
++        // zero-padded head dimensions (e.g. 64 -> 128) for turbo compression.
++        const int64_t padded_v_head = ((orig_v_head + 127) / 128) * 128;
+         if (padded_v_head != orig_v_head) {
+             const int64_t n_head_v = hparams.n_head_kv(il);
+             const int64_t n_tokens_cur = cur->ne[1];
+@@ -2232,7 +2238,10 @@ ggml_tensor * llm_graph_context::build_attn(...) {
+     if (k->type == GGML_TYPE_TURBO3_0 || k->type == GGML_TYPE_TURBO4_0 || k->type == GGML_TYPE_TURBO2_0) {
+         const int64_t orig_v_head = hparams.n_embd_head_v(il);
+-        const int64_t padded_v_head = v->ne[0];
++        // FIX: v->ne[0] is n_kv when v_trans=true (FA), not the padded head dim.
++        // Same fix as Bug Site #1 — compute padded value directly.
++        const int64_t padded_v_head = ((orig_v_head + 127) / 128) * 128;
+         if (padded_v_head != orig_v_head) {
+             const int64_t n_head_v = hparams.n_head_kv(il);
+             const int64_t n_tokens_cur = cur->ne[1];
+

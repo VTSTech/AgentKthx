@@ -1,0 +1,41 @@
+{
+  "$schema": "https://raw.githubusercontent.com/VTSTech/AgentKthx/main/schemas/v0.2/plugin.schema.json",
+  "name": "bitnet",
+  "version": "0.4.8",
+  "description": "BitNet inference via llama.cpp server (thin wrapper around LlamaServerBackend with bitnet_mode=True)",
+  "author": {
+    "name": "VTSTech",
+    "url": "https://www.vts-tech.org"
+  },
+  "license": "MIT",
+  "extensions": {
+    "org.vts-tech.agentkthx": {
+      "display_name": "BitNet 1.58b Backend",
+      "type": "backend",
+      "entrypoint": "__init__",
+      "depends": [],
+      "optional_depends": [],
+      "config": {
+        "env_prefix": "BITNET",
+        "defaults": {
+          "BITNET_BASE_URL": "http://localhost:8765",
+          "BITNET_TUNNEL": ""
+        }
+      },
+      "provides": {
+        "backends": {
+          "bitnet": "bitnet.BitNetBackend"
+        },
+        "cli_commands": [],
+        "cli_flags": {
+          "--backend": [
+            "bitnet"
+          ]
+        }
+      },
+      "compatibility": {
+        "agentkthx": ">=0.4.0"
+      }
+    }
+  }
+}

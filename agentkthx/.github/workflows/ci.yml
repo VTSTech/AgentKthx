@@ -1,0 +1,112 @@
+# AgentKthx CI — runs the full pytest suite on every push and PR.
+#
+# Audit TEST-02 (R07.01): the project has 16 PyPI releases across 0.6.x–0.7.x
+# with substantial per-release churn, and prior to this workflow the 980-test
+# suite ran only on maintainer machines. This workflow stands up the same
+# command developers run locally (`pip install -e .[dev] && pytest`) on a
+# 2-version Python matrix covering the project's declared floor (>=3.12).
+#
+# Audit ARCH-02 (R07.01): the `coverage` job runs the suite with
+# `pytest --cov=agentkthx --cov-report=term-missing` and uploads the report
+# as a build artifact. No threshold is enforced yet — the baseline is
+# recorded as a starting point. Coverage is in a separate job so the
+# fast `test` matrix (2-3s) is not slowed by the 5s cov-instrumented run.
+#
+# Design notes:
+#  - Zero runtime deps means `pip install -e .[dev]` only fetches the dev
+#    extras (pytest, pytest-cov, black, ruff) — install is fast (~5s) and
+#    reproducible.
+#  - The `test` job does NOT run with coverage — keeps PR feedback at ~3s
+#    instead of ~5s. Coverage runs once per push (Python 3.12 only).
+#  - We don't gate on black/ruff here yet — that's an ARCH-02-tier decision
+#    (separate "lint" job is a clean extension point if/when wanted).
+
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+# Cancel in-flight runs for the same ref when a new commit lands — keeps PR
+# feedback fast and avoids burning Actions minutes on superseded pushes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: pytest (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install package + dev extras
+        # Zero runtime deps — install is fast and deterministic.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[dev]
+
+      - name: Run pytest
+        # Fast path: no coverage instrumentation. Suite runs in ~2-3s.
+        # Coverage runs in the separate `coverage` job below.
+        run: python -m pytest tests/ -q
+
+  coverage:
+    name: coverage (Python 3.12)
+    runs-on: ubuntu-latest
+    # Run in parallel with the test matrix — coverage does not gate PRs yet
+    # (no threshold enforced), so a coverage regression should not block a
+    # push that otherwise passes the test matrix. When a threshold is added,
+    # promote this to `needs: test` and add `if: always()` accordingly.
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install package + dev extras
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[dev]
+
+      - name: Run pytest with coverage
+        # `--cov=agentkthx` reads [tool.coverage] config from pyproject.toml.
+        # term-missing prints the missing line numbers per module in the
+        # job log; the XML is uploaded as an artifact for offline analysis
+        # and is the format Codecov/Coveralls consume if/when added.
+        run: |
+          python -m pytest tests/ -q \
+            --cov=agentkthx \
+            --cov-report=term-missing \
+            --cov-report=xml:coverage.xml
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ github.sha }}
+          path: coverage.xml
+          retention-days: 30
+          if-no-files-found: error
+

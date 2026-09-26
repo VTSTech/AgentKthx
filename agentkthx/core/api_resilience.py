@@ -74,33 +74,62 @@ _TRANSIENT_MARKERS = (
 # Substrings that mark an exception as PERMANENT — retrying is pointless and
 # only burns the user's time. These are checked first and win over transient
 # markers (an error containing both is treated as permanent).
+#
+# ROB-10 (R07.06): the snake_case variants below come from provider JSON
+# error BODIES, which backends embed verbatim in the raised message
+# (e.g. ``RuntimeError(f"ZAI HTTP error 500: {error_body}")``). Providers
+# return HTTP 500 for some PERMANENT conditions — ``model_not_found`` on
+# misconfigured deployments, ``context_length_exceeded`` variants,
+# ``invalid_request`` / ``invalid_api_key`` — and the bare ``"500"``
+# transient marker classified all of them as retryable, burning the full
+# retry budget (~6 minutes of back-off) before failing. The prose forms
+# ("not found", "invalid request") were already covered; the underscore
+# forms were not, because ``"not found" in "model_not_found"`` is False.
 _PERMANENT_MARKERS = (
     "authentication",
     "unauthorized",
     "api key",
     "invalid api",
+    "invalid_api_key",
     "401",
     "403",
     "forbidden",
     "not found",
+    "model_not_found",
     "404",
     "invalid request",
+    "invalid_request",
     "bad request",
     "malformed",
     "unsupported",
     "content filter",
+    "context_length",
     "insufficient",  # credits / quota exhausted on paid tier
 )
 
 
-def is_transient_api_error(exc: BaseException) -> bool:
+def is_transient_api_error(exc: BaseException, body: str | None = None) -> bool:
     """
     Decide whether an exception raised by ``backend.generate()`` is transient
     (worth retrying after a back-off) or permanent (fail immediately).
 
     Classification is text-based on ``str(exc)`` because backends raise plain
     ``RuntimeError`` exceptions carrying the upstream message.
+
+    ROB-10 (R07.06): ``body`` accepts the raw HTTP response body when the
+    caller has it (backends usually embed the body in the exception message
+    already, which is checked the same way). Permanent-error patterns found
+    in the body (``invalid_request``, ``context_length``,
+    ``model_not_found``, ``invalid_api_key``) win over the bare ``"500"``
+    transient marker — a 500 carrying a permanent-error body fails fast
+    instead of burning the full retry budget. The body is only consulted
+    for PERMANENT patterns: a clean-bodied 500 stays transient.
     """
+    if body:
+        body_text = body.lower()
+        for marker in _PERMANENT_MARKERS:
+            if marker in body_text:
+                return False
     msg = str(exc).lower()
     if not msg:
         return False

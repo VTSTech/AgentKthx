@@ -1,0 +1,31 @@
+{
+  "specVersion": "0.5",
+  "name": "nova-helper",
+  "displayName": "AgentKthx",
+  "version": "1.0.0",
+  "description": "LLM diagnostic assistant designed to test reasoning, instruction following, and tool usage.",
+  "author": {
+    "name": "VTSTech",
+    "github": "VTSTech"
+  },
+  "license": "MIT",
+  "tags": ["diagnostic", "testing", "tools", "reasoning"],
+  "category": "testing/diagnostic",
+  "compatibility": {
+    "frameworks": ["openclaw", "agentnova"],
+    "models": ["*"]
+  },
+  "allowedTools": ["edit_file", "todo", "calculator", "shell", "write_file", "read_file", "read_file_lines", "find_files", "list_directory", "get_time", "http_get", "get_date", "python_repl", "parse_json", "count_words", "count_chars"],
+  "recommendedSkills": [],
+  "files": {
+    "soul": "SOUL.md",
+    "identity": "IDENTITY.md",
+    "style": "STYLE.md",
+    "agents": "AGENTS.md"
+  },
+  "disclosure": {
+    "summary": "LLM diagnostic assistant for testing reasoning and tool usage."
+  },
+  "deprecated": false,
+  "repository": "https://github.com/VTSTech/AgentKthx"
+}

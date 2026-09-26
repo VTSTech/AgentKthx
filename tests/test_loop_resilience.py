@@ -392,7 +392,10 @@ class TestShellErrorFormat:
         from agentkthx.tools.builtins import shell
         script = tmp_path / "fail.sh"
         script.write_text("#!/bin/bash\necho 'partial output'\nexit 3\n")
-        result = shell(f"bash {script}")
+        # SEC-04: shells (bash/sh/...) are blocked as base commands —
+        # invoke the script directly; the shebang is still honored.
+        script.chmod(0o755)
+        result = shell(str(script))
         assert result.startswith("[Exit code: 3]")
         assert "partial output" in result
 
@@ -400,9 +403,17 @@ class TestShellErrorFormat:
         from agentkthx.tools.builtins import shell
         script = tmp_path / "ok.sh"
         script.write_text("#!/bin/bash\necho hello world\n")
-        result = shell(f"bash {script}")
+        script.chmod(0o755)
+        result = shell(str(script))
         assert result.startswith("hello world")
         assert "[Exit code" not in result
+
+    def test_bash_by_name_is_blocked(self):
+        """SEC-04 companion check: `bash <script>` is rejected outright."""
+        from agentkthx.tools.builtins import shell
+        result = shell("bash /tmp/whatever.sh")
+        assert result.startswith("Security error:")
+        assert "bash" in result
 
 
 # ============================================================================

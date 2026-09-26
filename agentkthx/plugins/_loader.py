@@ -29,16 +29,29 @@ Lifecycle:
   discover() -> load(name) -> register() -> [active: on_init / on_run_start /
   on_run_end / on_error / on_shutdown] -> unregister() -> unload()
 
+TRUST BOUNDARY (SEC-06, R07.05):
+  Plugin roots (the package dir, ``~/.agentkthx/plugins/``, and
+  ``$AGENTKTHX_PLUGIN_PATH``) are TRUSTED CODE PATHS: any ``__init__.py``
+  under them is executed at startup with the full privileges of the user
+  running agentkthx. There is no sandboxing — by design, plugins are code.
+  Keep ``~/.agentkthx/plugins/`` mode 0700; the loader warns when an
+  external plugin dir is group/world-writable. For verified installs,
+  manifests may carry an optional ``sha256`` pin (string pins the package
+  ``__init__.py``, dict form pins relative file paths); a mismatch or a
+  malformed pin refuses to execute the plugin (fail closed).
+
 Written by VTSTech -- https://www.vts-tech.org
 """
 
 from __future__ import annotations
 
+import hashlib
 import importlib
 import importlib.util
 import json
 import os
 import re
+import stat
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -61,7 +74,7 @@ CANONICAL_SCHEMA = (
 #: Top-level manifest fields understood by this client (v0.2 dual-form).
 KNOWN_TOP_LEVEL = {
     "$schema", "name", "version", "description", "author", "license",
-    "extensions",
+    "extensions", "sha256",
     # legacy v0.1 top-level fields (deprecated, still parsed)
     "display_name", "type", "entrypoint", "depends", "optional_depends",
     "config", "provides", "compatibility",
@@ -70,7 +83,7 @@ KNOWN_TOP_LEVEL = {
 #: AgentKthx-specific fields whose canonical home is the extension namespace.
 EXTENSION_FIELDS = {
     "display_name", "type", "entrypoint", "depends", "optional_depends",
-    "config", "provides", "compatibility",
+    "config", "provides", "compatibility", "sha256",
 }
 
 #: Known plugin types.
@@ -96,6 +109,9 @@ SECRET_SUFFIX_RE = re.compile(r"(KEY|PASS|TOKEN|SECRET|PASSWORD)$", re.IGNORECAS
 
 #: Placeholder pattern for ${PLUGIN_ROOT} / ${PLUGIN_DATA}.
 _PLACEHOLDER_RE = re.compile(r"\$\{([^}]+)\}")
+
+#: Well-formed sha256 pin: exactly 64 hex chars (SEC-06).
+_SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 
 
 def _warn(warnings: list[str] | None, msg: str) -> None:
@@ -207,6 +223,11 @@ class PluginManifest:
     dir: Path | None = None                     # plugin root directory
     root_kind: str = "builtin"                  # builtin | user | env
     legacy_fields_used: list[str] = field(default_factory=list)
+    # SEC-06 (R07.05): optional integrity pin. str pins the package
+    # __init__.py; dict pins relative file paths inside the plugin dir.
+    # None = unpinned (trusted-path semantics apply). Validated at parse
+    # time (malformed pin raises) and verified before exec (mismatch raises).
+    sha256: str | dict[str, str] | None = None
 
 
 def _normalize_author(raw: Any, plugin_name: str, warnings: list[str]) -> str:
@@ -239,6 +260,55 @@ def _check_spdx_license(license_id: str, name: str, warnings: list[str]) -> None
             )
     except ImportError:
         pass  # skills loader unavailable; skip advisory check
+
+
+def _validate_sha256_pin(value: Any, plugin_name: str) -> str | dict[str, str]:
+    """
+    Validate the optional manifest ``sha256`` integrity pin (SEC-06, R07.05).
+
+    Accepts:
+      - a 64-hex-char string        -> pins the package ``__init__.py``
+      - a dict of relative filename -> 64-hex-char hash (pins each file)
+
+    Malformed pins raise (fail closed): a typo'd pin must never silently
+    disable verification of the code it was supposed to protect.
+    """
+    if isinstance(value, str):
+        if not _SHA256_RE.match(value.strip()):
+            raise ValueError(
+                f"plugin {plugin_name!r}: sha256 pin must be exactly 64 hex "
+                f"characters (got {value!r})"
+            )
+        return value.strip().lower()
+
+    if isinstance(value, dict):
+        if not value:
+            raise ValueError(f"plugin {plugin_name!r}: sha256 pin dict is empty")
+        pin: dict[str, str] = {}
+        for fname, fhash in value.items():
+            if (
+                not isinstance(fname, str)
+                or not fname
+                or Path(fname).is_absolute()
+                or ".." in Path(fname).parts
+                or "\\" in fname
+            ):
+                raise ValueError(
+                    f"plugin {plugin_name!r}: sha256 pin keys must be relative "
+                    f"paths inside the plugin directory (got {fname!r})"
+                )
+            if not isinstance(fhash, str) or not _SHA256_RE.match(fhash.strip()):
+                raise ValueError(
+                    f"plugin {plugin_name!r}: sha256 pin for {fname!r} must be "
+                    f"exactly 64 hex characters (got {fhash!r})"
+                )
+            pin[fname] = fhash.strip().lower()
+        return pin
+
+    raise ValueError(
+        f"plugin {plugin_name!r}: sha256 pin must be a 64-hex-char string or a "
+        f"dict of relative file path -> hash"
+    )
 
 
 def _parse_manifest(
@@ -429,6 +499,11 @@ def _parse_manifest(
         _warn(warnings, f"{name}: version must be a string; using 0.0.0")
         version = "0.0.0"
 
+    # sha256 pin (SEC-06, R07.05) — validated here, verified pre-exec.
+    sha256 = ext_field("sha256", None)
+    if sha256 is not None:
+        sha256 = _validate_sha256_pin(sha256, name)
+
     return PluginManifest(
         name=name,
         version=version,
@@ -447,6 +522,7 @@ def _parse_manifest(
         dir=path.parent,
         root_kind=root_kind,
         legacy_fields_used=legacy_fields_used,
+        sha256=sha256,
     )
 
 
@@ -734,6 +810,63 @@ class PluginManager:
     #  Import / Entrypoint                                                #
     # ------------------------------------------------------------------ #
 
+    def _verify_sha256_pins(self, manifest: PluginManifest, plugin_dir: Path) -> None:
+        """
+        Verify the manifest's optional ``sha256`` integrity pins (SEC-06).
+
+        Runs BEFORE any plugin code is executed. String pins cover the
+        package ``__init__.py``; dict pins cover the listed relative paths.
+        Raises (fail closed) on a hash mismatch or on a pin that references
+        a missing / escaping file.
+        """
+        pin = manifest.sha256
+        if not pin:
+            return
+        if isinstance(pin, str):
+            pin = {"__init__.py": pin}
+        root = plugin_dir.resolve()
+        for rel, expected in pin.items():
+            target = (plugin_dir / rel).resolve()
+            if not target.is_relative_to(root):
+                raise ValueError(
+                    f"sha256 pin escapes the plugin directory: {rel!r}"
+                )
+            if not target.is_file():
+                raise ValueError(f"sha256 pin references a missing file: {rel!r}")
+            actual = hashlib.sha256(target.read_bytes()).hexdigest()
+            if actual != expected:
+                raise ValueError(
+                    f"sha256 pin mismatch for {rel!r} in plugin "
+                    f"{manifest.name!r}: expected {expected}, got {actual} — "
+                    f"refusing to execute unverified plugin code"
+                )
+
+    def _warn_loose_plugin_perms(self, manifest: PluginManifest, plugin_dir: Path) -> None:
+        """
+        Warn when an external plugin dir is group/world-writable (SEC-06).
+
+        Plugin roots are trusted paths — their code runs with the user's
+        full privileges at startup — so a writable-by-others plugin dir
+        means any local user can swap the code that will execute. Advisory
+        only (never blocks loading); POSIX only (Windows stat modes are
+        not meaningful for this check); built-ins are skipped because the
+        package tree is managed by the installer.
+        """
+        if os.name == "nt" or manifest.root_kind == "builtin":
+            return
+        try:
+            mode = stat.S_IMODE(os.stat(plugin_dir).st_mode)
+        except OSError:
+            return
+        if mode & 0o022:
+            who = "group-" if mode & 0o020 else "world-"
+            _warn(
+                self.warnings,
+                f"plugin dir for '{manifest.name}' is {who}writable "
+                f"({oct(mode)}); plugin roots are trusted paths — tighten "
+                f"permissions (0700 recommended)",
+            )
+
     def _import_entrypoint(self, manifest: PluginManifest, plugin_dir: Path):
         """
         Import the plugin's entrypoint module (spec §Entrypoint contract).
@@ -759,6 +892,12 @@ class PluginManager:
             init_file = plugin_dir / "__init__.py"
             if not init_file.exists():
                 raise ValueError(f"external plugin missing __init__.py: {plugin_dir}")
+
+            # SEC-06 (R07.05): verify integrity pins and flag loose
+            # permissions BEFORE executing any plugin code.
+            self._verify_sha256_pins(manifest, plugin_dir)
+            self._warn_loose_plugin_perms(manifest, plugin_dir)
+
             spec = importlib.util.spec_from_file_location(
                 pkg_name, init_file, submodule_search_locations=[str(plugin_dir)]
             )

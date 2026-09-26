@@ -1,0 +1,43 @@
+{
+  "$schema": "https://raw.githubusercontent.com/VTSTech/AgentKthx/main/schemas/v0.2/plugin.schema.json",
+  "name": "test-plugin",
+  "version": "0.1.0",
+  "description": "Validates the plugin system \u2014 discovery, loading, registration, CLI commands, backend, config, and dependencies",
+  "author": {
+    "name": "VTSTech",
+    "url": "https://www.vts-tech.org"
+  },
+  "license": "MIT",
+  "extensions": {
+    "org.vts-tech.agentkthx": {
+      "display_name": "Plugin System Test",
+      "type": "feature",
+      "entrypoint": "__init__",
+      "depends": [],
+      "optional_depends": [],
+      "config": {
+        "env_prefix": "TEST_PLUGIN",
+        "defaults": {
+          "TEST_PLUGIN_VALUE": "hello from plugin",
+          "TEST_PLUGIN_NUMBER": "42"
+        }
+      },
+      "provides": {
+        "backends": {
+          "test-backend": "test_backend.TestBackend"
+        },
+        "cli_commands": [
+          "plugin-test"
+        ],
+        "cli_flags": {
+          "--backend": [
+            "test-backend"
+          ]
+        }
+      },
+      "compatibility": {
+        "agentkthx": ">=0.5.0"
+      }
+    }
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "$schema": "https://raw.githubusercontent.com/VTSTech/AgentKthx/main/schemas/v0.2/plugin.schema.json",
+  "name": "gemini",
+  "version": "0.1.0",
+  "description": "Google Gemini API backend via OpenAI Chat-Completions (free tier + paid; gemini-3.x, gemini-2.5)",
+  "author": {
+    "name": "VTSTech",
+    "url": "https://www.vts-tech.org"
+  },
+  "license": "MIT",
+  "extensions": {
+    "org.vts-tech.agentkthx": {
+      "display_name": "Gemini Cloud Backend",
+      "type": "backend",
+      "entrypoint": "__init__",
+      "depends": [],
+      "optional_depends": [],
+      "config": {
+        "env_prefix": "GEMINI",
+        "defaults": {
+          "GEMINI_API_KEY": "",
+          "GEMINI_BASE_URL": "https://generativelanguage.googleapis.com/v1beta/openai/",
+          "GEMINI_DEFAULT_MODEL": "gemini-3.8-flash",
+          "GEMINI_FREE_ONLY": "false",
+          "GEMINI_THINKING_LEVEL": "",
+          "GEMINI_SERVICE_TIER": "standard"
+        }
+      },
+      "provides": {
+        "backends": {
+          "gemini": "gemini.GeminiBackend"
+        },
+        "cli_commands": [],
+        "cli_flags": {
+          "--backend": [
+            "gemini"
+          ]
+        }
+      },
+      "compatibility": {
+        "agentkthx": ">=0.5.0"
+      }
+    }
+  }
+}

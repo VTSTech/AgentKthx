@@ -479,15 +479,15 @@ class TestSSRFOctalHexDecimal:
     def test_decimal_localhost(self):
         """127.0.0.1 = 2130706433 in decimal."""
         is_safe, _ = is_safe_url("http://2130706433")
-        # hostname is "2130706433" which doesn't contain "127" or "localhost"
-        # so it might pass.  This is a known gap — document it.
-        # The test documents the expected behavior rather than asserting a fix.
-        assert isinstance(is_safe, bool)  # Just verify it returns a result
+        # SEC-03 (R07.05): the address layer normalizes legacy spellings
+        # via socket.inet_aton + ipaddress — decimal loopback is blocked.
+        assert not is_safe
 
     def test_hex_localhost(self):
         """127.0.0.1 = 0x7f000001 in hex."""
         is_safe, _ = is_safe_url("http://0x7f000001")
-        assert isinstance(is_safe, bool)
+        # SEC-03 (R07.05): hex spellings resolve to 127.0.0.1 — blocked.
+        assert not is_safe
 
 
 class TestSSRFCloudMetadata:

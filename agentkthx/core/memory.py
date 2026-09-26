@@ -13,9 +13,25 @@ from typing import Any, Optional
 
 @dataclass
 class MemoryConfig:
-    """Configuration for agent memory."""
+    """Configuration for agent memory.
+
+    ``max_tokens`` (ROB-08, R07.06): estimated-token budget for the
+    conversation window — the second pruning tier, evaluated after the
+    ``max_messages`` count tier on every ``add()``. Estimated via the
+    audit's ``len(content) // 4`` heuristic across NON-system messages
+    (the system prompt is fixed overhead pruning can never reclaim);
+    when exceeded, the window slides (oldest first, pairing-safe) down
+    to ``max_tokens * summarization_threshold`` estimated tokens.
+
+    Defaults to ``0`` (tier disabled). The historical default of 4096 was
+    NEVER enforced; turning it on unconditionally would prune tool-heavy
+    histories to ~2 results (tool output is capped at 8KB by result
+    sanitization ≈ 2K estimated tokens each), degrading agent quality —
+    so the tier ships opt-in. Set it explicitly to enable (e.g.
+    ``MemoryConfig(max_messages=200, max_tokens=100000)``).
+    """
     max_messages: int = 50
-    max_tokens: int = 4096
+    max_tokens: int = 0
     summarization_threshold: float = 0.8
     keep_system: bool = True
     keep_recent: int = 5
@@ -80,13 +96,25 @@ class Message:
         return result
 
 
+def _estimate_tokens(text: str) -> int:
+    """
+    Rough token estimate for the ROB-08 (R07.06) token-based pruning tier.
+
+    Uses the audit's ~4-chars-per-token heuristic. This deliberately errs
+    on the high side for dense tool output (JSON, base64, minified code
+    run closer to 2-3 chars/token) — an over-estimate prunes earlier,
+    which is the safe direction for context-window overflow.
+    """
+    return len(text) // 4 if text else 0
+
+
 class Memory:
     """
     Conversation memory with sliding window management.
 
     Features:
     - Configurable message limit
-    - Token-based pruning
+    - Token-based pruning (ROB-08, R07.06 — opt-in via ``max_tokens``)
     - System message preservation
     - Recent message retention
     """
@@ -220,38 +248,86 @@ class Memory:
         """
         Prune messages if limits exceeded (R06.52, pairing-safe).
 
-        Instead of collapsing history down to ``keep_recent`` messages (which
-        destroyed context and orphaned tool results mid-pair), the window
-        *slides* down to the summarization threshold:
+        Two tiers — either may fire; the count tier runs first:
 
-            keep_count = max(1, int(max_messages * summarization_threshold))
+        1. Message-count tier — the window *slides* down to the
+           summarization threshold when ``max_messages`` is exceeded:
 
-        e.g. 50 messages @ 0.8 → slide to 40. This reclaims headroom so the
-        next few adds don't re-trigger pruning, and keeps recent tool-call
-        pairs intact. Tool results whose announcing assistant message fell
-        out of the window are dropped from the head (they would otherwise
-        be orphaned and make the API sequence illegal).
+               keep_count = max(1, int(max_messages * summarization_threshold))
+
+           e.g. 50 messages @ 0.8 → slide to 40. This reclaims headroom so
+           the next few adds don't re-trigger pruning, and keeps recent
+           tool-call pairs intact.
+
+        2. Token tier (ROB-08, R07.06) — when ``max_tokens > 0`` and the
+           estimated tokens of the non-system messages
+           (``len(content) // 4``) exceed the budget, the window slides the
+           same way down to ``max_tokens * summarization_threshold``
+           estimated tokens. Catches conversations that stay under the
+           message-count window but overflow the context window with large
+           tool results (e.g. 10 × 50KB results = 500K chars ≈ 125K
+           estimated tokens, far past a 32K context).
+
+        Tool results whose announcing assistant message fell out of the
+        window are dropped from the head (they would otherwise be orphaned
+        and make the API sequence illegal).
         """
-        if len(self._messages) <= self.config.max_messages:
-            return
+        # ---- tier 1: message-count window ----
+        if len(self._messages) > self.config.max_messages:
+            keep_count = max(1, int(
+                self.config.max_messages * self.config.summarization_threshold
+            ))
 
-        keep_count = max(1, int(
-            self.config.max_messages * self.config.summarization_threshold
-        ))
+            systems = [m for m in self._messages if m.role == "system"]
+            non_system = [m for m in self._messages if m.role != "system"]
+
+            excess = len(non_system) - keep_count
+            if excess > 0:
+                non_system = non_system[excess:]
+
+            # Pairing-safe head trim: a kept window must not START with a
+            # tool result (its call is gone) — drop leading tool results.
+            while non_system and non_system[0].role == "tool":
+                non_system.pop(0)
+
+            self._messages = systems + non_system
+
+        # ---- tier 2: token budget (ROB-08, R07.06) ----
+        # ``max_tokens <= 0`` disables the tier (the default — see
+        # MemoryConfig for why the tier ships opt-in).
+        if self.config.max_tokens <= 0:
+            return
 
         systems = [m for m in self._messages if m.role == "system"]
         non_system = [m for m in self._messages if m.role != "system"]
+        if len(non_system) <= 1:
+            return
 
-        excess = len(non_system) - keep_count
-        if excess > 0:
-            non_system = non_system[excess:]
+        estimates = [_estimate_tokens(m.content) for m in non_system]
+        total = sum(estimates)
+        if total <= self.config.max_tokens:
+            return
 
-        # Pairing-safe head trim: a kept window must not START with a tool
-        # result (its call is gone) — drop leading tool results.
-        while non_system and non_system[0].role == "tool":
-            non_system.pop(0)
+        # Slide to the summarization threshold (mirrors the count tier's
+        # headroom approach so the next few adds don't immediately
+        # re-trigger pruning), keeping at least one message.
+        target = max(1, int(
+            self.config.max_tokens * self.config.summarization_threshold
+        ))
 
-        self._messages = systems + non_system
+        drop = 0
+        acc = total
+        while (len(non_system) - drop) > 1 and acc > target:
+            acc -= estimates[drop]
+            drop += 1
+        kept = non_system[drop:]
+
+        # Pairing-safe head trim, same rule as the count tier: a kept
+        # window must not START with a tool result whose call is gone.
+        while kept and kept[0].role == "tool":
+            kept.pop(0)
+
+        self._messages = systems + kept
 
     def compact_messages(self, keep_count: int = 10) -> int:
         """Compact older messages to reduce token usage without dropping context.

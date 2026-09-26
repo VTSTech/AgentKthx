@@ -1,0 +1,43 @@
+{
+  "$schema": "https://raw.githubusercontent.com/VTSTech/AgentKthx/main/schemas/v0.2/plugin.schema.json",
+  "name": "zai",
+  "version": "0.4.8",
+  "description": "ZAI API backend for GLM models via OpenAI Chat-Completions (free tier + paid, with credit-exhaustion fallback)",
+  "author": {
+    "name": "VTSTech",
+    "url": "https://www.vts-tech.org"
+  },
+  "license": "MIT",
+  "extensions": {
+    "org.vts-tech.agentkthx": {
+      "display_name": "ZAI Cloud Backend",
+      "type": "backend",
+      "entrypoint": "__init__",
+      "depends": [],
+      "optional_depends": [],
+      "config": {
+        "env_prefix": "ZAI",
+        "defaults": {
+          "ZAI_BASE_URL": "https://api.z.ai",
+          "ZAI_API_KEY": "",
+          "ZAI_FREE_ONLY": "false",
+          "ZAI_FREE_FALLBACK_MODEL": "glm-4.5-flash"
+        }
+      },
+      "provides": {
+        "backends": {
+          "zai": "zai.ZaiBackend"
+        },
+        "cli_commands": [],
+        "cli_flags": {
+          "--backend": [
+            "zai"
+          ]
+        }
+      },
+      "compatibility": {
+        "agentkthx": ">=0.4.0"
+      }
+    }
+  }
+}

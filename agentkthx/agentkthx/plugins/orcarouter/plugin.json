@@ -1,0 +1,47 @@
+{
+  "$schema": "https://raw.githubusercontent.com/VTSTech/AgentKthx/main/schemas/v0.2/plugin.schema.json",
+  "name": "orcarouter",
+  "version": "0.1.0",
+  "description": "OrcaRouter API backend for 200+ models via 11 upstream providers at zero markup (free tier with 4 genuinely $0/token models + paid, with ORCAROUTER_FREE_ONLY enforcement and fallback-chain routing)",
+  "author": {
+    "name": "VTSTech",
+    "url": "https://www.vts-tech.org"
+  },
+  "license": "MIT",
+  "extensions": {
+    "org.vts-tech.agentkthx": {
+      "display_name": "OrcaRouter Cloud Backend",
+      "type": "backend",
+      "entrypoint": "__init__",
+      "depends": [],
+      "optional_depends": [],
+      "config": {
+        "env_prefix": "ORCAROUTER",
+        "defaults": {
+          "ORCAROUTER_BASE_URL": "https://api.orcarouter.ai/v1",
+          "ORCAROUTER_API_KEY": "",
+          "ORCAROUTER_DEFAULT_MODEL": "orcarouter/auto",
+          "ORCAROUTER_FREE_ONLY": "false",
+          "ORCAROUTER_FREE_FALLBACK_MODEL": "orcarouter/free",
+          "ORCAROUTER_FALLBACK_MODELS": "",
+          "ORCAROUTER_INCLUDE_COST": "true"
+        }
+      },
+      "provides": {
+        "backends": {
+          "orcarouter": "orcarouter.OrcaRouterBackend"
+        },
+        "cli_commands": [],
+        "cli_flags": {
+          "--backend": [
+            "orcarouter",
+            "orca"
+          ]
+        }
+      },
+      "compatibility": {
+        "agentkthx": ">=0.5.0"
+      }
+    }
+  }
+}

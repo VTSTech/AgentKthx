@@ -1,0 +1,125 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentkthx"
+version = "0.7.04"
+description = "⚛️ AgentKthx - A minimal, hackable agentic framework for local LLM inference"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "VTSTech", email = "veritas@vts-tech.org"}
+]
+maintainers = [
+    {name = "VTSTech", email = "veritas@vts-tech.org"}
+]
+keywords = [
+    "llm",
+    "agent",
+    "ollama",
+    "bitnet",
+    "local-inference",
+    "tool-calling",
+    "react",
+    "autonomous",
+    "agentic",
+    "ai-agent",
+    "kthx",
+    "agentkthx",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+requires-python = ">=3.12"
+# Zero dependencies! Uses Python stdlib only.
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "black>=23.0",
+    "ruff>=0.1.0",
+]
+
+[project.urls]
+Homepage = "https://www.vts-tech.org"
+Documentation = "https://github.com/VTSTech/AgentKthx#readme"
+Repository = "https://github.com/VTSTech/AgentKthx"
+Issues = "https://github.com/VTSTech/AgentKthx/issues"
+
+[project.scripts]
+# Primary CLI binary
+agentkthx = "agentkthx.cli:main"
+# Backward-compat redirects (still installed by this package)
+agentnova = "agentnova:main"
+localclaw = "localclaw:main"
+
+[project.entry-points."agentkthx.backends"]
+ollama = "agentkthx.backends.ollama:OllamaBackend"
+
+# Backward-compat entry point name (so existing agentnova-based installs
+# still register the ollama backend entry point).
+[project.entry-points."agentnova.backends"]
+ollama = "agentkthx.backends.ollama:OllamaBackend"
+
+[tool.setuptools.packages.find]
+include = ["agentkthx", "agentkthx.*", "agentnova", "localclaw"]
+
+[tool.setuptools.package-data]
+agentkthx = ["py.typed", "skills/*/SKILL.md", "souls/*/soul.json", "souls/*/*.md", "plugins/*/plugin.json", "schemas/v0.2/plugin.schema.json"]
+
+[tool.black]
+line-length = 100
+target-version = ["py39", "py310", "py311", "py312"]
+
+[tool.ruff]
+line-length = 100
+select = ["E", "F", "W", "I"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+
+# Coverage configuration (audit ARCH-02, R07.01).
+# No threshold is enforced yet — the baseline is recorded as a starting point.
+# `--cov=agentkthx --cov-report=term-missing` is added by CI; running it locally
+# is opt-in to keep the default dev-loop run at ~2.5s instead of ~5s.
+[tool.coverage]
+source = ["agentkthx"]
+
+[tool.coverage.run]
+branch = false
+# Examples are demo scripts, not package code — exclude from the denominator
+# so the reported number reflects the testable surface.
+omit = [
+    "agentkthx/examples/*",
+    "agentkthx/plugins/test-plugin/*",
+    "agentkthx/_git_meta.py",
+    "*/__pycache__/*",
+]
+
+[tool.coverage.report]
+# Modules below this threshold are still listed, just sorted last.
+# Setting `skip_covered = true` would hide well-covered modules from the report;
+# we keep them visible so the test investment map is complete.
+skip_covered = false
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]

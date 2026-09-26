@@ -775,6 +775,12 @@ def cmd_chat(args: argparse.Namespace) -> int:
                         setattr(agent, attr, 8192)
                     else:
                         setattr(agent, attr, None)
+                    # ROB-14: reset un-pins the value — a later /model switch
+                    # may re-derive it from the new model's catalog again.
+                    if attr == "num_ctx":
+                        agent._num_ctx_explicit = False
+                    elif attr == "_num_predict":
+                        agent._num_predict_explicit = False
                 else:
                     agent._runtime_kwargs.pop(name, None)
                 print(green(f"Reset {name} to model default."))
@@ -888,6 +894,12 @@ def cmd_chat(args: argparse.Namespace) -> int:
             attr = spec.get("agent_attr")
             if attr:
                 setattr(agent, attr, value)
+                # ROB-14: pin explicitly-set num_ctx / num_predict so a later
+                # /model switch re-derives only UNPINNED values.
+                if attr == "num_ctx":
+                    agent._num_ctx_explicit = True
+                elif attr == "_num_predict":
+                    agent._num_predict_explicit = True
             else:
                 agent._runtime_kwargs[name] = value
 
@@ -985,9 +997,26 @@ def cmd_chat(args: argparse.Namespace) -> int:
             if not new_model:
                 print(yellow("Usage: /model <model_name>"))
             else:
-                old_model = agent.model
-                agent.model = new_model
+                # R07.06 (ROB-14): switching models must also re-derive the
+                # per-model settings — num_ctx, num_predict, family config —
+                # which previously stayed on the OLD model (stale num_ctx
+                # invited context-length 400s after switching to a smaller
+                # window). Explicitly pinned values (--num-ctx/--num-predict,
+                # /param) survive; everything else follows the new model's
+                # catalog entry, mirroring startup precedence.
+                changes = _cli.apply_model_switch(agent, new_model)
+                old_model, _ = changes.get("model", (new_model, new_model))
                 print(green(f"Model changed: {old_model} -> {new_model}"))
+
+                def _fmt_pred(v):
+                    return "(model default)" if v is None else str(v)
+
+                if "num_ctx" in changes:
+                    old_ctx, new_ctx = changes["num_ctx"]
+                    print(dim(f"  num_ctx: {old_ctx} -> {new_ctx}"))
+                if "num_predict" in changes:
+                    old_pred, new_pred = changes["num_predict"]
+                    print(dim(f"  num_predict: {_fmt_pred(old_pred)} -> {_fmt_pred(new_pred)}"))
             continue
 
         if user_input == "/debug":

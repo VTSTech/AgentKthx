@@ -1,0 +1,31 @@
+{
+  "specVersion": "0.5",
+  "name": "nova-skills",
+  "displayName": "AgentKthx (Skills)",
+  "version": "1.0.0",
+  "description": "Skill-guided assistant designed to follow skill instructions, use tools as directed, and produce structured output.",
+  "author": {
+    "name": "VTSTech",
+    "github": "VTSTech"
+  },
+  "license": "MIT",
+  "tags": ["skills", "testing", "structured-output", "tools"],
+  "category": "testing/skills",
+  "compatibility": {
+    "frameworks": ["agentnova"],
+    "models": ["*"]
+  },
+  "allowedTools": [],
+  "recommendedSkills": ["test-harness", "skill-creator"],
+  "files": {
+    "soul": "SOUL.md",
+    "identity": "IDENTITY.md",
+    "style": "STYLE.md",
+    "agents": "AGENTS.md"
+  },
+  "disclosure": {
+    "summary": "Skill-guided assistant for testing the AgentSkills system."
+  },
+  "deprecated": false,
+  "repository": "https://github.com/VTSTech/AgentKthx"
+}

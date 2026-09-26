@@ -433,7 +433,9 @@ class AgentSetupMixin:
                 print(f"[Skills] Appended skills prompt to system prompt ({len(skills_prompt)} chars)")
 
         # Initialize tool parser
-        self._parser = ToolParser(self.tools.names())
+        # ROB-13 (R07.06): thread the agent's debug flag into the parser so
+        # ReAct JSON parse-failure chains are visible under --debug.
+        self._parser = ToolParser(self.tools.names(), debug=self.debug)
 
         # Add system prompt to memory
         self.memory.add("system", self._custom_system_prompt)

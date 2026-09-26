@@ -7,8 +7,10 @@ Written by VTSTech — https://www.vts-tech.org
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import re
+import socket
 from difflib import SequenceMatcher
 from typing import Any, Literal
 from urllib.parse import urlparse
@@ -329,6 +331,16 @@ BLOCKED_COMMANDS = {
     # Dangerous shell features
     "exec", "eval", "source", ".", "alias",
 
+    # Shells (SEC-04, R07.05) — `bash -c "rm -rf /tmp/x"` previously slipped
+    # past this blocklist because only shell FEATURES (exec/eval/source)
+    # were blocked, not the shell binaries themselves. Any shell invoked by
+    # name executes an arbitrary command string without it ever passing
+    # through these checks, so the shells are blocked outright. The shell
+    # tool already runs through /bin/sh; legitimate uses of an interactive
+    # shell by an agent are rare — power users can opt out with
+    # `--security off`.
+    "bash", "sh", "zsh", "ksh", "fish",
+
     # Filesystem
     "mount", "umount", "chown", "chmod", "chattr", "lsattr",
 
@@ -555,6 +567,69 @@ def validate_path(path: str, allowed_dirs: list[str] | None = None) -> tuple[boo
     return False, f"Path not in allowed directories: {path}"
 
 
+def _ip_address_blocked(ip: "ipaddress.IPv4Address | ipaddress.IPv6Address") -> bool:
+    """
+    True if the address must NOT be fetchable by the model (SEC-03).
+
+    Blocks loopback, private ranges (RFC1918 + friends), link-local
+    (169.254/16 — including the 169.254.169.254 cloud metadata endpoint),
+    reserved, multicast, and unspecified (::) addresses. IPv4-mapped IPv6
+    (::ffff:a.b.c.d) is unwrapped first so `[::ffff:7f00:1]` cannot
+    smuggle in 127.0.0.1.
+    """
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    return (
+        ip.is_loopback
+        or ip.is_private
+        or ip.is_link_local
+        or ip.is_reserved
+        or ip.is_multicast
+        or ip.is_unspecified
+    )
+
+
+def _iter_hostname_ips(hostname: str) -> list[str]:
+    """
+    Normalize a URL hostname into the IP address(es) it can reach (SEC-03).
+
+    Covers every IP-literal spelling urllib accepts but a substring check
+    does not — decimal (``2130706433``), hex (``0x7f000001``), octal
+    (``0177.0.0.1``), short forms (``127.1``), and all IPv6 forms — plus
+    DNS names, which are resolved so every returned address can be judged.
+
+    A hostname that does not resolve yields an empty list (fail-open):
+    nothing can connect to a name that doesn't resolve, so we leave the
+    decision to the subsequent fetch instead of blocking on transient DNS
+    hiccups. Residual DNS-rebinding risk (address changes between this
+    check and the actual connect) is documented in is_safe_url.
+    """
+    host = hostname.strip("[]")  # belt+braces; urlparse already strips []
+
+    # 1. Modern IP literals: dotted-quad IPv4 + every IPv6 form.
+    try:
+        return [str(ipaddress.ip_address(host))]
+    except ValueError:
+        pass
+
+    # 2. Legacy inet_aton spellings that ipaddress rejects but sockets
+    #    happily connect to (decimal / hex / octal / shortened quads).
+    try:
+        packed = socket.inet_aton(host)
+        return [str(ipaddress.ip_address(socket.inet_ntoa(packed)))]
+    except (OSError, ValueError, UnicodeError):
+        pass
+
+    # 3. DNS name — resolve and return every address it maps to.
+    ips: list[str] = []
+    try:
+        for info in socket.getaddrinfo(host, None):
+            ips.append(str(info[4][0]))
+    except (socket.gaierror, OSError, UnicodeError):
+        pass  # unresolvable: the later fetch would fail too
+    return ips
+
+
 def is_safe_url(url: str, block_ssrf: bool = True) -> tuple[bool, str]:
     """
     Validate a URL for SSRF protection.
@@ -568,6 +643,31 @@ def is_safe_url(url: str, block_ssrf: bool = True) -> tuple[bool, str]:
 
     When security mode is "off", all checks are skipped and the URL is
     returned as safe. Use with caution — the model can fetch any URL.
+
+    THREAT MODEL (SEC-03, R07.05):
+    Three layers:
+
+    1. Scheme + netloc — only http/https, non-empty host.
+
+    2. Hostname substring patterns (BLOCKED_URL_PATTERNS) — catches
+       literal hostnames like ``localhost`` and ``internal.company.com``.
+
+    3. Address-level checks (new in R07.05) — the hostname is normalized
+       to IP addresses (including decimal/hex/octal IPv4 spellings and
+       all IPv6 forms via ``ipaddress``) and DNS names are resolved via
+       ``socket.getaddrinfo``; every resulting address is rejected if it
+       is loopback / private / link-local / reserved / multicast /
+       unspecified. This closes the decimal/hex/octal encodings, the
+       IPv4-mapped IPv6 forms, ``[::]``, and check-time DNS rebinding.
+
+    Known residual gaps, accepted for this guardrail tier:
+    - A name that does not resolve at check time fails OPEN (the later
+      fetch fails anyway — nothing can connect to an unresolvable name).
+    - Classic TOCTOU rebinding: an attacker with a short DNS TTL can
+      still serve a public IP here and a private IP at connect time.
+      Fully closing that requires pinning the connection to the checked
+      IP (breaking SNI/Host semantics) — out of scope for this layer;
+      http_get() at least re-validates every redirect target.
     """
     if not url:
         return False, "URL cannot be empty"
@@ -592,12 +692,27 @@ def is_safe_url(url: str, block_ssrf: bool = True) -> tuple[bool, str]:
     # parsed.hostname correctly handles IPv6 (e.g. "[::1]" -> "::1")
     # while parsed.netloc.split(":")[0] would return "[" for IPv6 URLs.
     hostname = (parsed.hostname or "").lower()
+    if not hostname:
+        return False, "URL must have a hostname"
 
     # Check for blocked patterns
     if block_ssrf:
         for pattern in BLOCKED_URL_PATTERNS:
             if pattern in hostname:
                 return False, f"SSRF protection: blocked hostname pattern '{pattern}'"
+
+        # SEC-03 (R07.05): substring checks are not enough — normalize the
+        # hostname to actual IP addresses and judge each one.
+        for ip_str in _iter_hostname_ips(hostname):
+            try:
+                ip = ipaddress.ip_address(ip_str)
+            except ValueError:
+                continue
+            if _ip_address_blocked(ip):
+                return False, (
+                    f"SSRF protection: hostname '{hostname}' resolves to "
+                    f"a non-public address ({ip_str})"
+                )
 
     return True, ""
 
@@ -622,6 +737,10 @@ def sanitize_command(command: str) -> tuple[bool, str, str]:
     1. ``BLOCKED_COMMANDS`` — denylist of obviously-dangerous binaries
        (rm, dd, mkfs, sudo, nc, etc.). Catches the model when it
        casually reaches for one of these because it misread a flag.
+       Since SEC-04 (R07.05) this also blocks invoking a shell by name
+       (``bash`` / ``sh`` / ``zsh`` / ``ksh`` / ``fish``), whose ``-c``
+       flag previously provided an unfiltered escape hatch past every
+       other layer.
 
     2. ``DANGEROUS_FLAG_COMBOS`` — context-aware blocks on otherwise-
        safe commands paired with dangerous flags. Catches the common
@@ -632,7 +751,9 @@ def sanitize_command(command: str) -> tuple[bool, str, str]:
 
     3. Injection pattern regex — catches shell metacharacter chaining
        (``;``, ``|``, ``&&``, ``||``, backticks, ``$()``, ``${}``,
-       ``>``, ``<``) and embedded newlines.
+       ``>``, ``<``), embedded newlines, and — since SEC-04 (R07.05) —
+       heredocs (``<<EOF``), which previously let a command smuggle an
+       arbitrary multi-line script body past the flag-combo checks.
 
     Layer 1 + 2 catch the obvious model-mistake and prompt-injection-
     via-tool-output payloads. Layer 3 catches classical shell injection.
@@ -692,6 +813,11 @@ def sanitize_command(command: str) -> tuple[bool, str, str]:
         r"`[^`]+`",  # Command substitution (backticks)
         r"\$\([^)]+\)",  # Command substitution ($())
         r"\$\{[^}]+\}",  # Variable expansion
+        # Heredoc (SEC-04, R07.05): `cmd <<'EOF'` feeds an arbitrary
+        # multi-line script to the command, e.g. `python3 - <<'EOF'` as a
+        # python -c replacement. Listed BEFORE the redirection patterns so
+        # the error message names the heredoc, not generic redirection.
+        r"<<\s*['\"]?[A-Za-z_]\w*",  # Heredoc body
         r">\s*\S+",  # Output redirection
         r"<\s*\S+",  # Input redirection
         # Bare pipe without space (e.g. "|cat") — \s* allows zero spaces
