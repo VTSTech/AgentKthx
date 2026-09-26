@@ -1131,6 +1131,14 @@ class TestResolveFreeOnlyMode(unittest.TestCase):
         self._hf_mod = hf_mod
         self._original_free_only = hf_mod.HF_FREE_ONLY
         hf_mod.HF_FREE_ONLY = False
+        # R07.02 polish: reset the process-scoped warning flag so each
+        # test starts with a clean slate. The flag prevents duplicate
+        # warnings across multiple HuggingFaceBackend instances in the
+        # same process (the CLI may instantiate twice — _probe_backend
+        # discovery + cmd_models), but tests need to verify the warning
+        # behavior in isolation.
+        self._original_warning_flag = HuggingFaceBackend._free_tier_warning_emitted
+        HuggingFaceBackend._free_tier_warning_emitted = False
 
     def tearDown(self):
         del os.environ["HF_TOKEN"]
@@ -1139,6 +1147,7 @@ class TestResolveFreeOnlyMode(unittest.TestCase):
         else:
             os.environ.pop("HF_FREE_ONLY", None)
         self._hf_mod.HF_FREE_ONLY = self._original_free_only
+        HuggingFaceBackend._free_tier_warning_emitted = self._original_warning_flag
 
     def _inject_user_info(self, backend, can_pay: bool, period_end: int = 1790812800):
         """Manually set backend._user_info to simulate whoami response
@@ -1217,6 +1226,86 @@ class TestResolveFreeOnlyMode(unittest.TestCase):
             os.environ["HF_FREE_ONLY"] = val
             b = HuggingFaceBackend()
             assert b._free_only_effective is False, f"HF_FREE_ONLY={val!r} should resolve to False"
+
+    def test_warning_fires_only_once_per_process(self):
+        """R07.02 polish: the free-tier warning should print at most
+        once per process — the CLI may instantiate HuggingFaceBackend
+        twice in one command (once for _probe_backend discovery, once
+        for the actual cmd_models call), and we don't want the user to
+        see the same nudge twice.
+
+        Verifies the class-level ``_free_tier_warning_emitted`` flag
+        suppresses the warning on the second+ instantiation, while
+        still enforcing the whitelist on every instance.
+        """
+        # setUp reset the flag to False, so the first instance fires
+        # the warning + sets the flag.
+        b1 = HuggingFaceBackend()
+        self._inject_user_info(b1, can_pay=False)
+        # Re-resolve now that _user_info is populated (during __init__,
+        # _user_info was None because _probe_whoami is mocked to no-op)
+        captured = []
+        original_print = __builtins__.print if hasattr(__builtins__, "print") else print
+        try:
+            # Capture stderr writes via patching builtins.print
+            import builtins
+            original = builtins.print
+            def capture_print(*args, **kwargs):
+                captured.append(args[0] if args else "")
+                # Don't actually print to keep test output clean
+            builtins.print = capture_print
+            # First call — should emit warning, set flag
+            effective1 = b1._resolve_free_only_mode()
+            assert effective1 is True
+            assert HuggingFaceBackend._free_tier_warning_emitted is True
+            assert len(captured) >= 1, "First call should emit the warning"
+
+            # Second instance — should NOT emit warning (flag is set)
+            # but still return True (enforcement active)
+            captured.clear()
+            b2 = HuggingFaceBackend()
+            self._inject_user_info(b2, can_pay=False)
+            effective2 = b2._resolve_free_only_mode()
+            assert effective2 is True  # enforcement still active
+            assert len(captured) == 0, (
+                f"Second call should NOT emit warning (flag is set), "
+                f"but captured: {captured}"
+            )
+        finally:
+            builtins.print = original
+
+    def test_warning_resets_when_flag_cleared(self):
+        """If the flag is manually cleared (e.g. by a test tearDown),
+        the next free-tier detection should fire the warning again.
+        Verifies the flag is the only thing suppressing the warning
+        (not some other state)."""
+        # Set the flag (simulating prior emission)
+        HuggingFaceBackend._free_tier_warning_emitted = True
+        b1 = HuggingFaceBackend()
+        self._inject_user_info(b1, can_pay=False)
+        captured = []
+        import builtins
+        original = builtins.print
+        def capture_print(*args, **kwargs):
+            captured.append(args[0] if args else "")
+        builtins.print = capture_print
+        try:
+            effective = b1._resolve_free_only_mode()
+            assert effective is True  # enforcement active
+            assert len(captured) == 0, "Flag set → no warning"
+        finally:
+            builtins.print = original
+
+        # Now clear the flag and re-resolve — warning should fire
+        HuggingFaceBackend._free_tier_warning_emitted = False
+        captured.clear()
+        builtins.print = capture_print
+        try:
+            effective = b1._resolve_free_only_mode()
+            assert effective is True
+            assert len(captured) >= 1, "Flag cleared → warning fires"
+        finally:
+            builtins.print = original
 
 
 class TestApplyProviderPolicyLiveForceCheapest(unittest.TestCase):

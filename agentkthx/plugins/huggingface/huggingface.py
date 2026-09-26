@@ -466,6 +466,16 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
     _cache_time: float = 0.0
     _CACHE_TIMEOUT: int = 3600  # 1 hour in seconds
 
+    # R07.02 polish: process-scoped flag so the free-tier warning
+    # prints at most once per process. The CLI may instantiate
+    # HuggingFaceBackend twice in one command (once for feature
+    # discovery via _probe_backend, once for the actual cmd_models
+    # call), and we don't want the user to see the same nudge twice.
+    # Class-level (not instance-level) so subsequent instances in the
+    # same process skip the print. Reset in tests via direct attribute
+    # write — see TestResolveFreeOnlyMode.setUp.
+    _free_tier_warning_emitted: bool = False
+
     # R06.54: maximum retries for rate-limit (429) and transient server
     # (502/503/504) responses before giving up. Partner providers
     # (especially on :cheapest routing) return 429 frequently during
@@ -680,29 +690,40 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
                 # and emit a one-time warning so the user understands
                 # why their non-whitelisted model request will be
                 # rejected (and how to override).
-                import sys
-                period_end = self._user_info.get("periodEnd")
-                period_str = ""
-                if period_end:
-                    import datetime as _dt
-                    period_dt = _dt.datetime.fromtimestamp(
-                        period_end, tz=_dt.timezone.utc
+                #
+                # R07.02 polish: the warning is process-scoped via the
+                # class-level _free_tier_warning_emitted flag — the
+                # CLI may instantiate HuggingFaceBackend twice in one
+                # command (once for _probe_backend discovery, once for
+                # the actual cmd_models call), and we don't want the
+                # user to see the same nudge twice. Subsequent instances
+                # in the same process skip the print but still get the
+                # enforcement (return True).
+                if not HuggingFaceBackend._free_tier_warning_emitted:
+                    HuggingFaceBackend._free_tier_warning_emitted = True
+                    import sys
+                    period_end = self._user_info.get("periodEnd")
+                    period_str = ""
+                    if period_end:
+                        import datetime as _dt
+                        period_dt = _dt.datetime.fromtimestamp(
+                            period_end, tz=_dt.timezone.utc
+                        )
+                        period_str = (
+                            f" Credit refreshes "
+                            f"{period_dt.strftime('%Y-%m-%d')}."
+                        )
+                    print(
+                        f"\n  \033[33m[HF] Detected free-tier account "
+                        f"(no billing card on file, $0.10/mo credit at "
+                        f"partner provider rates.{period_str})\n"
+                        f"  Auto-enabling HF_FREE_ONLY whitelist — only "
+                        f"models in HF_FREE_MODEL_WHITELIST are accepted "
+                        f"to prevent accidental paid API calls.\n"
+                        f"  Set HF_FREE_ONLY=false to override (requires "
+                        f"a paid HF token with billing enabled).\033[0m\n",
+                        file=sys.stderr,
                     )
-                    period_str = (
-                        f" Credit refreshes "
-                        f"{period_dt.strftime('%Y-%m-%d')}."
-                    )
-                print(
-                    f"\n  \033[33m[HF] Detected free-tier account "
-                    f"(no billing card on file, $0.10/mo credit at "
-                    f"partner provider rates.{period_str})\n"
-                    f"  Auto-enabling HF_FREE_ONLY whitelist — only "
-                    f"models in HF_FREE_MODEL_WHITELIST are accepted "
-                    f"to prevent accidental paid API calls.\n"
-                    f"  Set HF_FREE_ONLY=false to override (requires "
-                    f"a paid HF token with billing enabled).\033[0m\n",
-                    file=sys.stderr,
-                )
                 return True
         # Fall back: HF_FREE_ONLY unset AND (whoami unreachable OR
         # paid-tier user). Use module-level constant (parsed from env
