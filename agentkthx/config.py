@@ -105,8 +105,9 @@ HF_BASE_URL = os.environ.get("HF_BASE_URL", "https://router.huggingface.co/v1")
 # future versions can fall back without re-parsing env vars.
 HF_BASE_URL_LEGACY = os.environ.get("HF_BASE_URL_LEGACY", "https://api-inference.huggingface.co")
 # HF_TOKEN is the documented env var. HUGGING_FACE_HUB_TOKEN is the
-# older form (still used by huggingface_hub SDK). Accept either.
-HF_TOKEN = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN", "")
+# older form (still used by huggingface_hub SDK). HF_API_KEY is accepted
+# as a third fallback (some users set this instead of HF_TOKEN).
+HF_TOKEN = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN") or os.environ.get("HF_API_KEY", "")
 HF_DEFAULT_MODEL = os.environ.get("HF_DEFAULT_MODEL", "openai/gpt-oss-120b")
 # Strict free-tier enforcement: when true, only models in the
 # HF_FREE_MODEL_WHITELIST are accepted; the :cheapest suffix is

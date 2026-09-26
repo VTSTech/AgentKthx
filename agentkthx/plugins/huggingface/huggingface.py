@@ -423,7 +423,8 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
         # OpenRouterBackend pattern at openrouter.py:302.
         self.api_key: str = (
             os.environ.get("HF_TOKEN")
-            or os.environ.get("HUGGING_FACE_HUB_TOKEN", "")
+            or os.environ.get("HUGGING_FACE_HUB_TOKEN")
+            or os.environ.get("HF_API_KEY")
             or HF_TOKEN  # fall back to module-level (in case it was set at startup)
         )
 
