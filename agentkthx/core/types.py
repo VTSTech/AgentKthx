@@ -72,6 +72,7 @@ class BackendType(Enum):
     OPENROUTER = "openrouter"
     GEMINI = "gemini"
     HUGGINGFACE = "huggingface"
+    OPENAI = "openai"
 
 
 class ApiMode(Enum):

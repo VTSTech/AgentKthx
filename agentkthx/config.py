@@ -130,6 +130,48 @@ HF_FREE_FALLBACK_MODEL = os.environ.get("HF_FREE_FALLBACK_MODEL", "Qwen/Qwen2.5-
 HF_PROVIDER_POLICY = os.environ.get("HF_PROVIDER_POLICY", "")
 
 
+# OpenAI plugin (agentkthx/plugins/openai/)
+# OpenAI API direct surface — Chat Completions (/v1/chat/completions) is
+# the primary endpoint for v0.1. The Responses API (/v1/responses) is
+# newer and stateful — deferred to v0.2 of the plugin. Service tiers
+# (auto/default/flex/scale/priority/fast) control pricing and latency.
+OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
+# OPENAI_API_KEY accepts four key types (detected via prefix):
+#   sk-...      — legacy user key (deprecated, lacks project scoping)
+#   sk-proj-... — project key (recommended for production)
+#   sk-admin-.. — admin key (administration endpoints only, never inference)
+#   sk-sa-...   — service account key (long-running service workloads)
+# The backend surfaces a warning when a legacy `sk-` key is used in
+# production — see _detect_key_type() in openai.py.
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+# Optional headers for multi-org or project-scoped billing (only
+# relevant for sk-proj- and legacy sk- keys). Empty by default.
+OPENAI_ORGANIZATION_ID = os.environ.get("OPENAI_ORGANIZATION_ID", "")
+OPENAI_PROJECT_ID = os.environ.get("OPENAI_PROJECT_ID", "")
+OPENAI_DEFAULT_MODEL = os.environ.get("OPENAI_DEFAULT_MODEL", "gpt-6-sol")
+# Strict free-tier enforcement: when true, only models in the
+# OPENAI_FREE_MODEL_WHITELIST (6 very-low-cost models) are accepted,
+# `service_tier` is forced to `default` (never priority/fast/scale),
+# `reasoning_effort` is capped at `low` (reasoning tokens are billed
+# at output rate and can quickly exhaust trial credit), and HTTP 429
+# with `insufficient_quota` is treated as a hard failure (no retry).
+OPENAI_FREE_ONLY = os.environ.get("OPENAI_FREE_ONLY", "").lower() in ("1", "true", "yes")
+# Used when OPENAI_FREE_ONLY=false and HTTP 429 insufficient_quota is
+# received mid-run — the backend swaps to this model and retries once.
+# Mirrors the ZAI plugin's ZAI_FREE_FALLBACK_MODEL pattern.
+OPENAI_FREE_FALLBACK_MODEL = os.environ.get("OPENAI_FREE_FALLBACK_MODEL", "gpt-4o-mini")
+# Service tier — auto/default/flex/scale/priority/fast. Empty (default)
+# means don't send the parameter (OpenAI uses `auto` which resolves to
+# the project's configured tier, usually `default`). When OPENAI_FREE_ONLY
+# is true, this is forced to `default` regardless of the env var.
+OPENAI_SERVICE_TIER = os.environ.get("OPENAI_SERVICE_TIER", "")
+# Reasoning effort — none/minimal/low/medium/high/xhigh/max. Empty
+# (default) means don't send the parameter (model uses its default,
+# usually `medium` for gpt-5.5+ and gpt-6.x). When OPENAI_FREE_ONLY is
+# true, this is capped at `low`.
+OPENAI_REASONING_EFFORT = os.environ.get("OPENAI_REASONING_EFFORT", "")
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # BACKEND SELECTION
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -159,6 +201,8 @@ elif AGENTKTHX_BACKEND == "gemini":
     DEFAULT_MODEL = os.environ.get("AGENTKTHX_MODEL", "gemini-3.8-flash")
 elif AGENTKTHX_BACKEND == "huggingface" or AGENTKTHX_BACKEND == "hf":
     DEFAULT_MODEL = os.environ.get("AGENTKTHX_MODEL", "openai/gpt-oss-120b")
+elif AGENTKTHX_BACKEND == "openai" or AGENTKTHX_BACKEND == "oai":
+    DEFAULT_MODEL = os.environ.get("AGENTKTHX_MODEL", "gpt-6-sol")
 else:
     DEFAULT_MODEL = os.environ.get("AGENTKTHX_MODEL", "qwen2.5:0.5b")
 

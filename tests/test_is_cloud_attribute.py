@@ -34,6 +34,7 @@ from agentkthx.plugins.zai.zai import ZaiBackend
 from agentkthx.plugins.openrouter.openrouter import OpenRouterBackend
 from agentkthx.plugins.gemini.gemini import GeminiBackend
 from agentkthx.plugins.huggingface.huggingface import HuggingFaceBackend
+from agentkthx.plugins.openai.openai import OpenAIBackend
 
 
 class TestIsCloudAttribute:
@@ -96,6 +97,16 @@ class TestIsCloudAttribute:
         same semantics (rate-limited, billed, OpenAI-mode-only).
         """
         assert HuggingFaceBackend.is_cloud is True
+
+    def test_openai_inherits_true(self):
+        """OpenAIBackend extends OpenAICompatibleBackend — cloud.
+
+        R07.03: OpenAI is the canonical OpenAI Chat-Completions API
+        surface (https://api.openai.com/v1) — the same wire format
+        every other OpenAI-compatible backend in the framework speaks.
+        Cloud semantics (rate-limited, billed, OpenAI-mode-only).
+        """
+        assert OpenAIBackend.is_cloud is True
 
 
 class TestFifthCloudBackend:
