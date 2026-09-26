@@ -76,6 +76,35 @@ OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 OPENROUTER_DEFAULT_MODEL = os.environ.get("OPENROUTER_DEFAULT_MODEL", "anthropic/claude-3.5-sonnet")
 OPENROUTER_FREE_ONLY = os.environ.get("OPENROUTER_FREE_ONLY", "").lower() in ("1", "true", "yes")
 
+# OrcaRouter plugin (agentkthx/plugins/orcarouter/)
+# OrcaRouter is a zero-markup gateway to 11 upstream providers (OpenAI,
+# Anthropic, Google, DeepSeek, Grok, Qwen, Kimi, MiniMax, ZAI, Kling,
+# BytePlus). Free tier has 4 genuinely $0/token models; paid tier is
+# the upstream provider's per-token rate with no markup. See
+# docs/ORCAROUTER_API_TECHNICAL_REFERENCE.md for full details.
+ORCAROUTER_BASE_URL = os.environ.get("ORCAROUTER_BASE_URL", "https://api.orcarouter.ai/v1")
+ORCAROUTER_API_KEY = os.environ.get("ORCAROUTER_API_KEY", "")
+# Default to the "auto" named router — picks the cheapest live chat
+# model at request time. Set ORCAROUTER_DEFAULT_MODEL to a specific
+# provider-prefixed model (e.g. "openai/gpt-4o-mini") to override.
+ORCAROUTER_DEFAULT_MODEL = os.environ.get("ORCAROUTER_DEFAULT_MODEL", "orcarouter/auto")
+# When true, restricts model usage to the 4 genuinely-free models in
+# ORCAROUTER_FREE_MODEL_WHITELIST (see orcarouter.py). Prevents accidental
+# paid API calls.
+ORCAROUTER_FREE_ONLY = os.environ.get("ORCAROUTER_FREE_ONLY", "").lower() in ("1", "true", "yes")
+# Used when ORCAROUTER_FREE_ONLY=false and HTTP 403 free_quota_exhausted /
+# 429 err_free_rate is received mid-run — swap to the free router and retry.
+# Mirrors the ZAI/HF FREE_FALLBACK_MODEL pattern.
+ORCAROUTER_FREE_FALLBACK_MODEL = os.environ.get("ORCAROUTER_FREE_FALLBACK_MODEL", "orcarouter/free")
+# Comma-separated list of up to 5 provider-prefixed models to use as a
+# fallback chain via extra_body.models (route="fallback"). Empty by
+# default — set to enable cross-provider resilience.
+# Example: "openai/gpt-4o-mini,anthropic/claude-haiku-4.5,google/gemini-2.5-flash"
+ORCAROUTER_FALLBACK_MODELS = os.environ.get("ORCAROUTER_FALLBACK_MODELS", "")
+# When true (default), adds X-OrcaRouter-Include-Cost: true to every
+# request so the response includes usage.cost_usd. Disable to suppress.
+ORCAROUTER_INCLUDE_COST = os.environ.get("ORCAROUTER_INCLUDE_COST", "true").lower() in ("1", "true", "yes")
+
 # Gemini plugin (agentkthx/plugins/gemini/)
 # Google AI Studio / Gemini API via OpenAI-compatible endpoint.
 # Trailing slash on base URL matters — OpenAI SDK appends paths like
