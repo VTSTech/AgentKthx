@@ -338,6 +338,16 @@ class OpenRouterBackend(OpenAICompatibleBackend):
         Parse OpenRouter API model data into AgentKthx format.
         
         Uses live API data for context length and max tokens instead of static catalog.
+
+        R07.05: sets ``free_tier=True`` when the model ID ends with ``:free``
+        OR when the API response's ``is_free`` field is ``True``. The
+        ``:free`` suffix is OpenRouter's canonical marker for genuinely-free
+        models (the upstream's per-token rate is $0). The ``is_free`` API
+        field is conservative (only True for some models), so we OR the two
+        signals — if EITHER says free, mark it free. This fixes the
+        ``/models free`` filter showing ``:free``-suffix models as ``paid``.
+        Also sets ``is_chat_model=True`` by default (OpenRouter lists only
+        chat-capable models on the OpenAI-compatible endpoint).
         """
         model_id = model_data["id"]
         
@@ -348,6 +358,33 @@ class OpenRouterBackend(OpenAICompatibleBackend):
         # Determine family from provider or model name
         provider = model_data.get("top_provider", {}).get("provider", model_data.get("id", "/").split("/")[0])
         family = provider
+
+        # R07.05: detect free-tier models. OpenRouter marks genuinely-free
+        # models with the ``:free`` suffix on the model ID (e.g.
+        # ``google/gemma-3-27b-it:free``). The API response also has an
+        # ``is_free`` boolean field, but it's conservative — only True for
+        # a subset of free models. We OR the two signals so ``/models free``
+        # shows ALL genuinely-free models, not just the ones OpenRouter
+        # flags with is_free=True.
+        is_free_suffix = model_id.endswith(":free")
+        is_free_api = bool(model_data.get("is_free", False))
+        free_tier = is_free_suffix or is_free_api
+
+        # R07.05: OpenRouter's /v1/models endpoint lists only chat-capable
+        # models on the OpenAI-compatible surface. Non-chat models
+        # (embeddings, image gen, audio) are not returned here. Default
+        # is_chat_model=True; override via the ``modality`` field if present.
+        modality = model_data.get("modality", "text")
+        is_chat_model = "text" in modality if isinstance(modality, str) else True
+
+        # Capture pricing for display/debug (OpenRouter returns per-token USD)
+        pricing = model_data.get("pricing", {})
+        prompt_price = float(pricing.get("prompt", 0) or 0)
+        completion_price = float(pricing.get("completion", 0) or 0)
+        # A model is genuinely free if both prompt and completion are $0
+        is_zero_pricing = (prompt_price == 0.0 and completion_price == 0.0)
+        if is_zero_pricing:
+            free_tier = True  # pricing is the ground truth — overrides is_free
         
         return {
             "name": model_id,
@@ -357,6 +394,15 @@ class OpenRouterBackend(OpenAICompatibleBackend):
                 "backend": "openrouter",
                 "context_length": context_length,
                 "max_completion_tokens": max_completion_tokens,
+                "free_tier": free_tier,
+                "is_chat_model": is_chat_model,
+                "is_free_suffix": is_free_suffix,
+                "is_free_api": is_free_api,
+                "is_zero_pricing": is_zero_pricing,
+                "pricing": {
+                    "prompt": prompt_price,
+                    "completion": completion_price,
+                },
             },
             "model_data": model_data  # Store original data for future reference
         }
