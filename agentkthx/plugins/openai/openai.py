@@ -194,20 +194,6 @@ OPENAI_MODELS: dict[str, dict] = {
         "standard_input_per_1m": 4.00,
         "standard_output_per_1m": 20.00,
     },
-    "gpt-5.6-cyber": {  # alias: gpt-daybreak-red-latest
-        "context_length": 200_000,
-        "max_completion_tokens": 65_536,
-        "supports_thinking": True,
-        "supports_reasoning_effort": True,
-        "supports_reasoning_mode": True,
-        "supports_function_calling": True,
-        "supports_response_format_json_schema": True,
-        "supports_multimodal_input": True,
-        "family": "gpt-5.6",
-        "tier": "daybreak",
-        "standard_input_per_1m": 12.50,
-        "standard_output_per_1m": 75.00,
-    },
 
     # === GPT-5.x family — legacy but still served ===
     "gpt-5.5": {
@@ -292,17 +278,6 @@ OPENAI_MODELS: dict[str, dict] = {
         "tier": "chat-latest",
         "standard_input_per_1m": 5.00,
         "standard_output_per_1m": 30.00,
-    },
-    "gpt-rosalind-research": {  # Life sciences (restricted access)
-        "context_length": 200_000,
-        "max_completion_tokens": 65_536,
-        "supports_thinking": True,
-        "supports_function_calling": True,
-        "family": "rosalind",
-        "tier": "specialized",
-        "standard_input_per_1m": 5.00,
-        "standard_output_per_1m": 25.00,
-        "access_restricted": True,                # trusted-access program only
     },
 
     # === Realtime / audio / image models (not chat backends — listed for completeness) ===
@@ -571,8 +546,6 @@ OPENAI_FREE_MODEL_WHITELIST: frozenset[str] = frozenset({
     "gpt-4o-mini",
     "gpt-4.1-mini",
     "gpt-realtime-2.1-mini",
-    "gpt-4o-mini-transcribe",
-    "gpt-transcribe",
 })
 
 
@@ -934,6 +907,10 @@ class OpenAIBackend(OpenAICompatibleBackend):
                 "standard_input_per_1m": static_info.get("standard_input_per_1m"),
                 "standard_output_per_1m": static_info.get("standard_output_per_1m"),
                 "tier": static_info.get("tier", "unknown"),
+                # R07.03: capture shutdown_date if exposed by the API
+                # (OpenAI now returns this for models being deprecated —
+                # surfaced in the model listing as a deprecation warning).
+                "shutdown_date": model_data.get("shutdown_date"),
             },
             "model_data": model_data,  # full raw response preserved
         }

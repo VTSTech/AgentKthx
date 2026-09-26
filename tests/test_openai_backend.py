@@ -68,31 +68,25 @@ class TestWhitelistAndCatalog:
         assert len(OPENAI_FREE_MODEL_WHITELIST) > 0
 
     def test_whitelist_has_expected_models(self):
-        # Per the API Technical Reference, the 6 very-low-cost models
+        # Per the API Technical Reference, the 4 very-low-cost models
         # that should be eligible for OPENAI_FREE_ONLY=true mode.
+        # (Pruned R07.03: gpt-4o-mini-transcribe + gpt-transcribe removed —
+        # not in live API as transcription models.)
         expected = {
             "gpt-6-luna",        # cheapest flagship ($0.10/$0.50 per 1M tokens)
             "gpt-4o-mini",       # legacy but very cheap
             "gpt-4.1-mini",      # 1M context, cheap
             "gpt-realtime-2.1-mini",  # realtime/voice mini
-            "gpt-4o-mini-transcribe",
-            "gpt-transcribe",
         }
         assert expected <= OPENAI_FREE_MODEL_WHITELIST
 
     def test_whitelist_subset_of_catalog(self):
         # Every whitelisted model should have a catalog entry so
         # _get_model_defaults() works even when /v1/models is unreachable.
-        # Exception: gpt-4o-mini-transcribe and gpt-transcribe are
-        # transcription models not exposed by /v1/models in the chat-capable
-        # listing — they're listed in the catalog as fallback metadata.
         missing = OPENAI_FREE_MODEL_WHITELIST - set(OPENAI_MODELS.keys())
-        # The two transcription-only models may not be in the chat-capable
-        # catalog — that's expected (they're not chat backends).
-        assert missing <= {"gpt-4o-mini-transcribe", "gpt-transcribe"}, (
+        assert not missing, (
             f"Whitelist entries without catalog entries: {missing}. "
-            f"Transcription models are allowed to be missing from the "
-            f"chat-capable catalog (they're not chat backends)."
+            f"All whitelisted models must be in the chat-capable catalog."
         )
 
 
@@ -983,13 +977,13 @@ class TestNonChatPatterns(unittest.TestCase):
         from agentkthx.plugins.openai.openai import _is_chat_model
         for m in (
             "gpt-6-astra", "gpt-6-sol", "gpt-6-luna",
-            "gpt-5.6-sol", "gpt-5.6-cyber", "gpt-5.6-luna", "gpt-5.6-terra",
+            "gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.6-terra",
             "gpt-5.5", "gpt-5.5-pro",
             "gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-5-pro", "gpt-5-codex",
             "gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano",
             "gpt-3.5-turbo", "gpt-3.5-turbo-16k",
             "o1", "o3", "o3-mini", "o4-mini",
-            "chat-latest", "gpt-rosalind-research",
+            "chat-latest",
             "gpt-5.3-codex", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano", "gpt-5.4-pro",
         ):
             assert _is_chat_model(m) is True, f"{m} should pass through as chat-capable"
@@ -1049,8 +1043,8 @@ class TestExpandedCatalog(unittest.TestCase):
 
     def test_catalog_size_grew(self):
         from agentkthx.plugins.openai.openai import OPENAI_MODELS
-        assert len(OPENAI_MODELS) >= 35, (
-            f"Catalog should have grown to 35+ models after R07.03 polish, "
+        assert len(OPENAI_MODELS) >= 33, (
+            f"Catalog should have grown to 33+ models after R07.03 polish, "
             f"got {len(OPENAI_MODELS)} (was 15 before)"
         )
 
