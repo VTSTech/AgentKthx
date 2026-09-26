@@ -49,7 +49,7 @@ if pricing_count == 0:
 if ctx_count == 0:
     print(f"    → context_length NOT exposed (static catalog is the source of truth)")
 
-# Model families
+# Model families — expanded patterns (R07.03)
 families = Counter()
 for m in models:
     mid = m.get("id", "").lower()
@@ -67,9 +67,32 @@ for m in models:
         families["veo (video)"] += 1
     elif "lyria" in mid:
         families["lyria (music)"] += 1
+    elif "deep-research" in mid:
+        families["deep-research"] += 1
+    elif "antigravity" in mid:
+        families["antigravity"] += 1
+    elif "aqa" in mid:
+        families["aqa (answer quality)"] += 1
+    elif "computer-use" in mid:
+        families["computer-use"] += 1
+    elif "live" in mid or "transcribe" in mid or "translate" in mid:
+        families["live/asr"] += 1
+    elif "imagen" in mid or "image" in mid:
+        families["imagen (image gen)"] += 1
+    elif "robotics" in mid:
+        families["robotics"] += 1
+    elif "omni" in mid:
+        families["omni (video)"] += 1
     else:
         families["other"] += 1
 print(f"\n  Model family distribution:  {dict(families)}")
+
+# Print ALL model IDs so we can see what the "other" category contains
+print(f"\n  All {len(models)} model IDs:")
+for m in sorted(models, key=lambda x: x.get("id", "")):
+    mid = m.get("id", "?")
+    display = m.get("display_name", m.get("owned_by", ""))
+    print(f"    {mid:55s}  ({display})")
 
 print(f"\n{'─'*70}")
 print(f"  Raw JSON saved: /tmp/agentkthx_probe_gemini.json")
