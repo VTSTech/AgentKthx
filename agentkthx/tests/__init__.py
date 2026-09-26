@@ -1,3 +1,0 @@
-"""
-AgentKthx Test Suite
-"""
