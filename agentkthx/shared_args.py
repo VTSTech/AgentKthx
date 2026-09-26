@@ -163,7 +163,7 @@ def add_agent_args(
     parser.add_argument(
         "--backend",
         default=None,
-        help="Backend to use (e.g. ollama, bitnet, zai, llama-server)",
+        help="Backend to use (ollama, bitnet, llama-server, zai, openrouter, huggingface, gemini, openai)",
     )
     parser.add_argument(
         "--api",
