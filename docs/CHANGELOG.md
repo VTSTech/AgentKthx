@@ -5,7 +5,7 @@ All notable changes to AgentKthx will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [R07.06] - 2026-09-27 *(in progress — entry accumulates until release)*
+## [R07.06] - 2026-09-26 7:33:33 PM
 
 **Robustness batch — six R07.04-audit findings closed (ROB-10, ROB-13, ROB-01, ROB-07, ROB-08 + ROB-14 from owner smoke testing).** Version bumped to R07.06 (0.7.06). Two Mediums with user-visible impact: permanent 500s no longer burn the full ~6-minute retry budget (ROB-10), and degraded `{'input': ...}` tool args are traceable under `--debug` (ROB-13). Four Lows: Ctrl+C during a tool execution no longer leaves the run half-cancelled (ROB-01), alternative Python traceback framings are recognized as errors (ROB-07), `MemoryConfig.max_tokens` is now a real opt-in token-based pruning tier instead of a dead field (ROB-08 — **note the default flip: 4096 → 0, see Bug Fixes**), and `/model` in chat mode now re-derives the per-model settings instead of leaving them on the old model (ROB-14, found while smoke testing — **num_ctx/num_predict now follow the switched model**). Suite 1404 → **1461 passed, 9 skipped, 0 failures** (+57 new tests: 39 in `tests/test_r07_06_rob_fixes.py`, 18 in `tests/test_model_switch_context.py`).
 
@@ -33,9 +33,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
-- **`audit/audit.md` R07.06 delta** — header counts 19 CLOSED (4 R07.04 + 9 R07.05 + 6 R07.06) | 1 WONTFIX (ROB-05) | 42 OPEN, 63 findings total; ROB-01/07/08/10/13 marked CLOSED with FIXED notes in the detail sections; short-term priority matrix strikes ROB-10; new "R07.06 Closures (In-Progress)" section; cumulative closure state **26 of 62 (42%, +298 tests)**. R07.05 closures section marked Released. Second pass (ROB-14): second delta blockquote + summary-table row + detail section with "Found by: owner smoke test"; closures table gains the ROB-14 row; cumulative **27 of 63 (43%, +316 tests)**; header test-suite count 1461.
+- **`audit/audit.md` R07.06 delta** — header counts 19 CLOSED (4 R07.04 + 9 R07.05 + 6 R07.06) | 1 WONTFIX (ROB-05) | 43 OPEN, 63 findings total; ROB-01/07/08/10/13 marked CLOSED with FIXED notes in the detail sections; short-term priority matrix strikes ROB-10; new "R07.06 Closures (Released)" section; cumulative closure state **26 of 62 (42%, +298 tests)**. R07.05 closures section marked Released. Second pass (ROB-14): second delta blockquote + summary-table row + detail section with "Found by: owner smoke test"; closures table gains the ROB-14 row; cumulative **27 of 63 (43%, +316 tests)**; header test-suite count 1461.
 
-## [R07.05] - 2026-09-27
+## [R07.05] - 2026-09-26 4:13:00 PM
 
 **Audit follow-through release — nine R07.04-audit findings closed (SEC-07, ROB-03, ROB-04, MAINT-04, MAINT-05, MAINT-06, SEC-03, SEC-04, SEC-06) + ROB-05 ruled WONTFIX (intentional behavior) + free/paid model labeling fixed on BOTH OpenRouter and ZAI (`/models` showed genuinely-free models as "paid") + ZAI catalog pricing synced to the official per-1M-token table (glm-5.3-flash is NOT free).** Closes Known Landmine #1 from `audit/brief.md` (the `add_tool` memory wipe) and What's-Missing item #9 (the `model_config.py` deprecation with no removal date). Landed in commits `d6112c3` + `81d0087` (audit fixes + OpenRouter free-tier labels), the ZAI free/paid + catalog-pricing fix, and the SEC-batch pass (SSRF address-level checks, shell/heredoc blocking, plugin sha256 pinning). Suite 1290 → **1404 passed, 9 skipped, 0 failures** (+114 new tests across 4 new test files + 1 companion: `test_r07_05_audit_fixes.py` (20), `test_openrouter_free_models.py` (13), `test_zai_free_models.py` (13), `test_r07_05_sec_fixes.py` (67), +1 in `test_loop_resilience.py`).
 
@@ -87,7 +87,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`audit/audit.md` R07.05 delta** — findings summary updated to "13 CLOSED (4 in R07.04 + 9 in R07.05) | 1 WONTFIX (ROB-05 — intentional) | 48 OPEN"; SEC-07, ROB-03, ROB-04, MAINT-04, MAINT-05, MAINT-06, SEC-03, SEC-04, SEC-06 marked CLOSED with FIXED notes; ROB-05 marked WONTFIX (owner decision: the uncached 3-request update check is load-bearing for the refresh-repo-then-pip-update release workflow — not a bug); near-term priority matrix struck through the nine closures; cumulative closure state 21 of 62 (34%). Remaining near-term queue for R07.05–R07.06: SEC-09 (warn on non-HTTPS ACP), MAINT-01 (extract `ChatSession`), TEST-01 (integration test tier).
 
-## [R07.04] - 2026-09-26
+## [R07.04] - 2026-09-26 1:46:00 PM
 
 **Fifth cloud-provider plugin (OrcaRouter — zero-markup gateway to 11 upstream LLM providers) + four audit findings closed (SEC-02, SEC-10, FEAT-01, MAINT-02) + `get_model_max_context` crash fix on cloud backends + `BackendType.ORCAROUTER` enum value.** Driven by the R07.04 codebase audit (`audit/brief.md` + `audit/audit.md` regenerated by the `codebase-audit` skill at commit `45c7613`), which identified 62 findings across 7 categories. This release closes the four highest-leverage near-term findings and scaffolds the 10th backend (6th cloud backend, first scaffolded from scratch on top of the new `CloudBackend` base class from MAINT-02). Suite 1132 → **1290 passed, 9 skipped, 0 failures** (+158 new tests across 5 new test files: `test_tool_output_sanitization.py` (22), `test_cloud_backend_base.py` (46), `test_orcarouter_backend.py` (67), `test_get_model_max_context.py` (20), +3 new tests in `test_agent.py`).
 
@@ -153,7 +153,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`docs/ORCAROUTER_API_TECHNICAL_REFERENCE.md`** (760 lines, committed in R07.01) served as the blueprint for the OrcaRouter plugin — same pattern as the HF and OpenAI plugins. The proposed `plugin.json` was copied verbatim; the implementation notes section guided the method shape.
 
-## [R07.03] - 2026-09-26
+## [R07.03] - 2026-09-26 11:36:00 AM
 
 Fourth cloud-provider plugin (**OpenAI** direct API) + comprehensive catalog pruning across HF/ZAI/OpenAI backends based on live API probe data + strict `$0/token` free-tier enforcement ("free only means FREE, Zero cost"). The OpenAI plugin was scaffolded using the same blueprint pattern as the HF plugin — `docs/OPENAI_API_TECHNICAL_REFERENCE.md` (committed in R07.01) served as the spec, and the proposed `plugin.json` was copied verbatim. 8 probe scripts were added to `scripts/` for validating API technical references against live endpoints (GET-only, no paid inference calls). The `agentkthx config` command was expanded to expose all 48 environment variables across all 9 backends. Suite 1056 → **~1132 passed, 9 skipped, 0 failures** (+76 new tests: 75 in `tests/test_openai_backend.py`, 1 in `tests/test_is_cloud_attribute.py`).
 
