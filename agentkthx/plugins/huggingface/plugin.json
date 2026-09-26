@@ -23,7 +23,7 @@
           "HF_TOKEN": "",
           "HF_DEFAULT_MODEL": "openai/gpt-oss-120b",
           "HF_FREE_ONLY": "false",
-          "HF_FREE_FALLBACK_MODEL": "Qwen/Qwen2.5-7B-Instruct-1M",
+          "HF_FREE_FALLBACK_MODEL": "openai/gpt-oss-20b",
           "HF_PROVIDER_POLICY": ""
         }
       },

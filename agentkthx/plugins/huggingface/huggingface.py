@@ -45,7 +45,7 @@ Configuration:
   HF_FREE_ONLY            — Strict free-tier enforcement (default: false)
   HF_FREE_FALLBACK_MODEL  — Model to swap to on HTTP 402 when
                             HF_FREE_ONLY=false
-                            (default: Qwen/Qwen2.5-7B-Instruct-1M)
+                            (default: openai/gpt-oss-20b)
   HF_PROVIDER_POLICY      — Auto-suffix for routing (default: "")
                             One of: "", "fastest", "cheapest",
                             "preferred", or a partner name like "groq".
@@ -130,12 +130,6 @@ HF_MODELS: dict[str, dict] = {
         "provider": "qwen",
         "description": "Qwen3-Coder 480B — MoE coding model",
     },
-    "Qwen/Qwen2.5-7B-Instruct-1M": {
-        "context_length": 1_048_576,
-        "max_completion_tokens": 8_192,
-        "provider": "qwen",
-        "description": "Qwen2.5-7B with 1M token context",
-    },
     "Qwen/Qwen2.5-Coder-32B-Instruct": {
         "context_length": 131_072,
         "max_completion_tokens": 8_192,
@@ -147,12 +141,6 @@ HF_MODELS: dict[str, dict] = {
         "max_completion_tokens": 8_192,
         "provider": "qwen",
         "description": "Qwen2.5-72B Instruct",
-    },
-    "Qwen/Qwen2.5-Math-7B-Instruct": {
-        "context_length": 32_768,
-        "max_completion_tokens": 4_096,
-        "provider": "qwen",
-        "description": "Qwen2.5-Math 7B",
     },
 
     # DeepSeek family — reasoning models
@@ -183,18 +171,6 @@ HF_MODELS: dict[str, dict] = {
         "provider": "meta",
         "description": "Llama 3.3 70B Instruct",
     },
-    "meta-llama/Llama-3.2-3B-Instruct": {
-        "context_length": 131_072,
-        "max_completion_tokens": 4_096,
-        "provider": "meta",
-        "description": "Llama 3.2 3B Instruct",
-    },
-    "meta-llama/Llama-3.2-1B-Instruct": {
-        "context_length": 131_072,
-        "max_completion_tokens": 4_096,
-        "provider": "meta",
-        "description": "Llama 3.2 1B Instruct",
-    },
     "meta-llama/Llama-3.1-8B-Instruct": {
         "context_length": 131_072,
         "max_completion_tokens": 4_096,
@@ -203,18 +179,6 @@ HF_MODELS: dict[str, dict] = {
     },
 
     # Google Gemma family
-    "google/gemma-2-2b-it": {
-        "context_length": 8_192,
-        "max_completion_tokens": 4_096,
-        "provider": "google",
-        "description": "Gemma 2 2B instruct",
-    },
-    "google/gemma-2-9b-it": {
-        "context_length": 8_192,
-        "max_completion_tokens": 4_096,
-        "provider": "google",
-        "description": "Gemma 2 9B instruct",
-    },
     "google/gemma-3-4b-it": {
         "context_length": 32_768,
         "max_completion_tokens": 4_096,
@@ -235,24 +199,6 @@ HF_MODELS: dict[str, dict] = {
     },
 
     # Mistral family
-    "mistralai/Mistral-7B-Instruct-v0.3": {
-        "context_length": 32_768,
-        "max_completion_tokens": 4_096,
-        "provider": "mistral",
-        "description": "Mistral 7B v0.3",
-    },
-    "mistralai/Mistral-Nemo-Instruct-2407": {
-        "context_length": 131_072,
-        "max_completion_tokens": 4_096,
-        "provider": "mistral",
-        "description": "Mistral Nemo 12B",
-    },
-    "mistralai/Mixtral-8x7B-Instruct-v0.1": {
-        "context_length": 32_768,
-        "max_completion_tokens": 4_096,
-        "provider": "mistral",
-        "description": "Mixtral 8x7B MoE",
-    },
 
     # zai-org / GLM (also accessible via HF router)
     "zai-org/GLM-4.5": {
@@ -267,47 +213,10 @@ HF_MODELS: dict[str, dict] = {
         "provider": "zai",
         "description": "GLM-4.5-Air — lighter variant",
     },
-    "zai-org/GLM-Z1-32B-0414": {
-        "context_length": 65_536,
-        "max_completion_tokens": 8_192,
-        "provider": "zai",
-        "description": "GLM-Z1-32B reasoning model",
-        "supports_thinking": True,
-    },
 
     # Phi family — Microsoft
-    "microsoft/Phi-3.5-mini-instruct": {
-        "context_length": 131_072,
-        "max_completion_tokens": 4_096,
-        "provider": "microsoft",
-        "description": "Phi-3.5 mini",
-    },
-    "microsoft/Phi-3.5-MoE-instruct": {
-        "context_length": 131_072,
-        "max_completion_tokens": 4_096,
-        "provider": "microsoft",
-        "description": "Phi-3.5 MoE",
-    },
-    "microsoft/Phi-4-mini-instruct": {
-        "context_length": 16_384,
-        "max_completion_tokens": 4_096,
-        "provider": "microsoft",
-        "description": "Phi-4 mini",
-    },
 
     # Cohere Command R family
-    "CohereForAI/c4ai-command-r-plus-08-2024": {
-        "context_length": 131_072,
-        "max_completion_tokens": 4_096,
-        "provider": "cohere",
-        "description": "Command R+ (Aug 2024)",
-    },
-    "CohereForAI/c4ai-command-r-08-2024": {
-        "context_length": 131_072,
-        "max_completion_tokens": 4_096,
-        "provider": "cohere",
-        "description": "Command R (Aug 2024)",
-    },
 }
 
 
@@ -327,33 +236,18 @@ HF_FREE_MODEL_WHITELIST: frozenset[str] = frozenset({
     "openai/gpt-oss-120b",
     "Qwen/Qwen3-4B-Thinking-2507",
     "Qwen/Qwen3-Coder-480B-A35B-Instruct",
-    "Qwen/Qwen2.5-7B-Instruct-1M",
     "Qwen/Qwen2.5-Coder-32B-Instruct",
     "Qwen/Qwen2.5-72B-Instruct",
-    "Qwen/Qwen2.5-Math-7B-Instruct",
     "deepseek-ai/DeepSeek-R1",
     "deepseek-ai/DeepSeek-V3",
     "deepseek-ai/DeepSeek-V3.1",
     "meta-llama/Llama-3.3-70B-Instruct",
-    "meta-llama/Llama-3.2-3B-Instruct",
-    "meta-llama/Llama-3.2-1B-Instruct",
     "meta-llama/Llama-3.1-8B-Instruct",
-    "google/gemma-2-2b-it",
-    "google/gemma-2-9b-it",
     "google/gemma-3-4b-it",
     "google/gemma-3-12b-it",
     "google/gemma-3-27b-it",
-    "mistralai/Mistral-7B-Instruct-v0.3",
-    "mistralai/Mistral-Nemo-Instruct-2407",
-    "mistralai/Mixtral-8x7B-Instruct-v0.1",
     "zai-org/GLM-4.5",
     "zai-org/GLM-4.5-Air",
-    "zai-org/GLM-Z1-32B-0414",
-    "microsoft/Phi-3.5-mini-instruct",
-    "microsoft/Phi-3.5-MoE-instruct",
-    "microsoft/Phi-4-mini-instruct",
-    "CohereForAI/c4ai-command-r-plus-08-2024",
-    "CohereForAI/c4ai-command-r-08-2024",
 })
 
 

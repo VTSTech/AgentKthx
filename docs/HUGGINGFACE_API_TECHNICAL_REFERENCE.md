@@ -364,7 +364,43 @@ The cleanest AgentKthx interpretation of `HF_FREE_ONLY=true` is:
 - Append `:cheapest` to the model id automatically
 - Fail-fast with a clear error if the user tries to use a non-whitelisted paid model
 
-### Free model whitelist (AgentKthx-curated, updated 2026-09)
+### Free model whitelist (AgentKthx-curated, validated against live API 2026-09-26)
+
+> **R07.03 update**: The whitelist was pruned from 31 → 16 models after a live
+> API probe (`bash probe_huggingface.sh`) confirmed 15 catalog entries were no
+> longer served by any partner provider. Dead models removed: all Mistral
+> variants (Mistral-7B-Instruct-v0.3, Mistral-Nemo-Instruct-2407,
+> Mixtral-8x7B-Instruct-v0.1 — the entire Mistral family was rotated out),
+> all Phi variants (Phi-3.5-mini, Phi-3.5-MoE, Phi-4-mini), older Gemma 2
+> variants (gemma-2-2b-it, gemma-2-9b-it — superseded by Gemma 3), Llama 3.2
+> small variants (1B/3B — Llama 3.1-8B and 3.3-70B still served), Qwen
+> legacy variants (Qwen2.5-7B-Instruct-1M, Qwen2.5-Math-7B-Instruct —
+> superseded by Qwen3 variants), CohereForAI Command R variants (org renamed
+> to CohereLabs — live models now under `CohereLabs/` prefix), and
+> zai-org/GLM-Z1-32B-0414 (replaced by newer GLM variants).
+>
+> The `HF_FREE_FALLBACK_MODEL` default was also updated from the dead
+> `Qwen/Qwen2.5-7B-Instruct-1M` to `openai/gpt-oss-20b` (live, broad
+> partner support, small model).
+>
+> Live API probe findings (Sept 26 2026):
+> - **14 active partner providers** (not 18 — Fal AI, Replicate,
+>   WaveSpeedAI, and HF Inference are not currently serving models)
+> - **139 models** in the live `/v1/models` response, **337 (model,
+>   provider) combos**
+> - **`is_free=true` on 0/337 combos** — free-tier is purely credit-based
+> - **3 models with $0 pricing** (`prism-ml/Ternary-Bonsai-27B-*` via
+>   Together, `inclusionAI/Ling-3.0-flash-Fin` via Novita) — these
+>   have $0 input + $0 output but are still flagged `is_free=false`.
+>   May be genuinely free or a provider-side pricing default — worth
+>   probing with a single chat-completions call to confirm.
+> - **Pricing data quality issue**: some providers (nscale, novita)
+>   return pricing values like `$10,000/1M` — clearly misconfigured on
+>   the provider's side. HF Router forwards whatever the provider sends.
+>   The `_parse_hf_model()` aggregator takes the MIN across providers,
+>   so a single misconfigured provider doesn't dominate — but users
+>   should verify pricing at huggingface.co/playground before relying
+>   on the `cheapest_input_per_1m` field.
 
 ```python
 HF_FREE_MODEL_WHITELIST = {
@@ -372,54 +408,40 @@ HF_FREE_MODEL_WHITELIST = {
     "openai/gpt-oss-20b",
     "openai/gpt-oss-120b",
 
-    # Qwen family — Alibaba
+    # Qwen family — Alibaba (pruned: 7B-Instruct-1M, Math-7B removed —
+    # not in live API as of Sept 2026; superseded by Qwen3 variants)
     "Qwen/Qwen3-4B-Thinking-2507",
     "Qwen/Qwen3-Coder-480B-A35B-Instruct",
-    "Qwen/Qwen2.5-7B-Instruct-1M",
     "Qwen/Qwen2.5-Coder-32B-Instruct",
     "Qwen/Qwen2.5-72B-Instruct",
-    "Qwen/Qwen2.5-Math-7B-Instruct",
 
     # DeepSeek family — reasoning models
     "deepseek-ai/DeepSeek-R1",
     "deepseek-ai/DeepSeek-V3",
     "deepseek-ai/DeepSeek-V3.1",
 
-    # Meta Llama family
-    "meta-llama/Llama-3.3-70B-Instruct",
-    "meta-llama/Llama-3.2-3B-Instruct",
-    "meta-llama/Llama-3.2-1B-Instruct",
+    # Meta Llama family (pruned: Llama-3.2-1B/3B removed — not in live API)
     "meta-llama/Llama-3.1-8B-Instruct",
+    "meta-llama/Llama-3.3-70B-Instruct",
 
-    # Google Gemma family
-    "google/gemma-2-2b-it",
-    "google/gemma-2-9b-it",
+    # Google Gemma family (pruned: gemma-2-2b-it, gemma-2-9b-it removed —
+    # superseded by Gemma 3 variants which are still live)
     "google/gemma-3-4b-it",
     "google/gemma-3-12b-it",
     "google/gemma-3-27b-it",
 
-    # Mistral family
-    "mistralai/Mistral-7B-Instruct-v0.3",
-    "mistralai/Mistral-Nemo-Instruct-2407",
-    "mistralai/Mixtral-8x7B-Instruct-v0.1",
-
-    # zai-org / GLM
+    # zai-org / GLM (pruned: GLM-Z1-32B-0414 removed — not in live API)
     "zai-org/GLM-4.5",
     "zai-org/GLM-4.5-Air",
-    "zai-org/GLM-Z1-32B-0414",
-
-    # Phi family — Microsoft
-    "microsoft/Phi-3.5-mini-instruct",
-    "microsoft/Phi-3.5-MoE-instruct",
-    "microsoft/Phi-4-mini-instruct",
-
-    # Cohere Command R family
-    "CohereForAI/c4ai-command-r-plus-08-2024",
-    "CohereForAI/c4ai-command-r-08-2024",
 }
 ```
 
-**Caveat**: This whitelist reflects models that have historically been on HF partner providers' free or near-free routing. Always verify against the live `/v1/models` response — partner providers add and remove models continuously.
+**Caveat**: This whitelist was validated against the live `/v1/models`
+response on 2026-09-26 using `probe_huggingface.sh`. Partner providers
+rotate models continuously — re-run the probe quarterly to catch models
+that have been added or removed. Models not in the live API are pruned
+from the catalog (not kept as "fallback") since they cannot be used even
+if the static catalog lists them.
 
 ### Live API data vs static catalog
 

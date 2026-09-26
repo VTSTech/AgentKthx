@@ -105,11 +105,10 @@ class TestWhitelistAndCatalog:
         # family should be in the whitelist.
         expected = {
             "openai/gpt-oss-120b",
-            "Qwen/Qwen2.5-7B-Instruct-1M",
+            "Qwen/Qwen3-4B-Thinking-2507",
             "deepseek-ai/DeepSeek-R1",
             "meta-llama/Llama-3.3-70B-Instruct",
             "google/gemma-3-12b-it",
-            "mistralai/Mistral-7B-Instruct-v0.3",
             "zai-org/GLM-4.5",
         }
         assert expected <= HF_FREE_MODEL_WHITELIST
@@ -139,7 +138,7 @@ class TestIsFreeModel:
 
     def test_whitelisted_with_provider_suffix(self):
         # Suffix can be any partner name; whitelist check ignores it.
-        assert _is_free_model("Qwen/Qwen2.5-7B-Instruct-1M:groq") is True
+        assert _is_free_model("openai/gpt-oss-20b:groq") is True
 
     def test_paid_model_not_in_whitelist(self):
         # Closed-weight models never appear in the whitelist
@@ -694,7 +693,7 @@ class TestPluginManifest(unittest.TestCase):
         assert defaults["HF_BASE_URL"] == "https://router.huggingface.co/v1"
         assert defaults["HF_DEFAULT_MODEL"] == "openai/gpt-oss-120b"
         assert defaults["HF_FREE_ONLY"] == "false"
-        assert defaults["HF_FREE_FALLBACK_MODEL"] == "Qwen/Qwen2.5-7B-Instruct-1M"
+        assert defaults["HF_FREE_FALLBACK_MODEL"] == "openai/gpt-oss-20b"
         assert defaults["HF_PROVIDER_POLICY"] == ""
 
 
@@ -928,7 +927,7 @@ class TestIsFreeModelLive(unittest.TestCase):
         b._model_cache = None
         assert b._is_free_model_live("openai/gpt-oss-120b:cheapest") is True
         assert b._is_free_model_live("openai/gpt-oss-120b:groq") is True
-        assert b._is_free_model_live("Qwen/Qwen2.5-7B-Instruct-1M:fastest") is True
+        assert b._is_free_model_live("openai/gpt-oss-20b:fastest") is True
 
     def test_non_whitelisted_returns_false_when_no_live_data(self):
         """A non-whitelisted model with no live API data should return
