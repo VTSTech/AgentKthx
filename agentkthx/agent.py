@@ -1058,11 +1058,34 @@ class Agent(AgentSetupMixin, CompactionMixin, ToolExecutionMixin, StreamingMixin
         self.memory.clear()
         self.memory.add("system", self._custom_system_prompt)
 
-    def add_tool(self, tool: Tool) -> None:
-        """Add a tool to the registry."""
+    def register_tool(self, tool: Tool) -> None:
+        """Register a tool without clearing conversation memory.
+
+        ROB-04 (R07.05): the old ``add_tool()`` cleared all conversation
+        memory after registering the tool (because the system prompt
+        includes the tool section and needs rebuilding). This was a
+        footgun for third-party code that called ``agent.add_tool(tool)``
+        mid-session — all conversation history was silently destroyed.
+
+        This new method registers the tool in the registry AND rebuilds
+        the system prompt (so the model sees the new tool's schema),
+        but does NOT clear memory. The conversation continues with the
+        updated tool set.
+
+        Use ``rebuild_system_prompt()`` explicitly if you need the old
+        clear-and-rebuild behavior (rare — mostly for soul swaps).
+        """
         self.tools.register_tool(tool)
         self._parser = ToolParser(self.tools.names())
-        # Rebuild system prompt with new tool
+        self._rebuild_system_prompt_with_tools()
+
+    def _rebuild_system_prompt_with_tools(self) -> None:
+        """Rebuild the system prompt to include the current tool set.
+
+        ROB-04 (R07.05): extracted from the old ``add_tool()`` so it can
+        be called independently of the registry mutation. Does NOT clear
+        memory — the caller decides whether to clear.
+        """
         has_tools = len(self.tools) > 0
         if has_tools:
             from .soul.loader import _build_tool_section
@@ -1075,7 +1098,39 @@ class Agent(AgentSetupMixin, CompactionMixin, ToolExecutionMixin, StreamingMixin
                 self._custom_system_prompt = re.sub(pattern, tool_section.rstrip(), self._custom_system_prompt, flags=re.DOTALL)
             else:
                 self._custom_system_prompt = self._custom_system_prompt + "\n\n" + tool_section
-        # Update memory
+
+    def rebuild_system_prompt(self) -> None:
+        """Rebuild the system prompt AND clear conversation memory.
+
+        ROB-04 (R07.05): this is the explicit "clear and rebuild" method.
+        Use when you want the old ``add_tool()`` behavior — e.g. after
+        swapping souls or making a breaking change to the tool set that
+        invalidates prior conversation context.
+
+        For most mid-session tool additions, use ``register_tool()``
+        instead — it rebuilds the prompt without destroying history.
+        """
+        self._rebuild_system_prompt_with_tools()
+        self.memory.clear()
+        self.memory.add("system", self._custom_system_prompt)
+
+    def add_tool(self, tool: Tool) -> None:
+        """Add a tool to the registry.
+
+        .. deprecated:: R07.05
+            This method clears all conversation memory after registering
+            the tool. Use :meth:`register_tool` instead (which rebuilds
+            the system prompt without clearing memory), or call
+            :meth:`rebuild_system_prompt` explicitly if you need the
+            clear-and-rebuild behavior.
+
+        Kept for backward compatibility — existing code that relied on
+        the clear-on-add behavior continues to work. A future release
+        will make ``add_tool`` an alias for ``register_tool``.
+        """
+        self.register_tool(tool)
+        # The old behavior cleared memory after registering.
+        # We preserve it here for backward compat.
         self.memory.clear()
         self.memory.add("system", self._custom_system_prompt)
 

@@ -1,8 +1,12 @@
-"""CLI utilities: model-pattern resolution, step printing, tool-cache helpers.
+"""CLI utilities: model-pattern resolution, step printing.
 
-Extracted verbatim from cli.py in R07.00 Phase 8. Note: _load_tool_cache,
-_save_tool_cache and _get_cloud_model_size have no callers anywhere in the
-codebase (R06.0 legacy, kept verbatim pending a dead-code sweep)."""
+Extracted verbatim from cli.py in R07.00 Phase 8.
+
+R07.05 (MAINT-05): removed the dead-code trio ``_load_tool_cache``,
+``_save_tool_cache``, ``_get_cloud_model_size`` (R06.0 legacy, ~100 LOC,
+no callers anywhere in the codebase or tests). The cache I/O is now
+handled inline by ``cmd_models`` in ``cli/commands/models.py`` via the
+shared ``_get_cache_dir()`` helper that remains here."""
 
 from __future__ import annotations
 
@@ -173,94 +177,6 @@ def _get_cache_dir() -> Path:
     
     cache_dir.mkdir(parents=True, exist_ok=True)
     return cache_dir
-
-
-
-
-def _load_tool_cache() -> dict:
-    """Load cached tool support results."""
-    cache_file = _get_cache_dir() / "tool_support.json"
-    if cache_file.exists():
-        try:
-            with open(cache_file, "r") as f:
-                data = json.load(f)
-                # Validate it's a dict
-                if isinstance(data, dict):
-                    return data
-                # Corrupted - not a dict
-                if os.environ.get("AGENTKTHX_DEBUG"):
-                    print(f"Warning: Cache file corrupted (not a dict), ignoring", file=sys.stderr)
-                return {}
-        except json.JSONDecodeError as e:
-            # Corrupted JSON - warn in debug mode
-            if os.environ.get("AGENTKTHX_DEBUG"):
-                print(f"Warning: Cache file has invalid JSON: {e}", file=sys.stderr)
-            # Try to remove corrupted file
-            try:
-                cache_file.unlink()
-            except Exception:
-                pass
-            return {}
-        except IOError as e:
-            if os.environ.get("AGENTKTHX_DEBUG"):
-                print(f"Warning: Could not read cache file: {e}", file=sys.stderr)
-    return {}
-
-
-
-
-def _save_tool_cache(cache: dict) -> None:
-    """Save tool support results to cache using atomic writes."""
-    import tempfile
-    
-    cache_dir = _get_cache_dir()
-    cache_file = cache_dir / "tool_support.json"
-    
-    try:
-        # Write to a temp file first, then rename for atomicity
-        # This prevents partial writes if the process is interrupted
-        fd, temp_path = tempfile.mkstemp(
-            dir=str(cache_dir),
-            prefix=".tool_support_",
-            suffix=".json.tmp"
-        )
-        
-        try:
-            with os.fdopen(fd, 'w') as f:
-                json.dump(cache, f, indent=2)
-                f.flush()
-                os.fsync(f.fileno())
-            
-            # Atomic rename (on POSIX systems)
-            os.replace(temp_path, str(cache_file))
-        except Exception:
-            # Clean up temp file on error
-            if os.path.exists(temp_path):
-                os.unlink(temp_path)
-            raise
-            
-    except IOError as e:
-        # Log the error but don't fail - cache is optional
-        print(f"Warning: Could not save tool cache: {e}", file=sys.stderr)
-
-
-
-
-def _get_cloud_model_size(model_name: str, backend) -> int:
-    """Get model size for cloud providers when available."""
-    try:
-        # Try to get model info from the backend
-        model_info = backend.get_model_info(model_name)
-        if model_info and model_info.get("size", 0) > 0:
-            return model_info["size"]
-        
-        # For cloud providers that don't provide size, return 0 (unknown)
-        return 0
-    except Exception:
-        # If we can't determine the size, return 0 (unknown)
-        return 0
-
-
 
 
 def _tool_status(status: str) -> str:
