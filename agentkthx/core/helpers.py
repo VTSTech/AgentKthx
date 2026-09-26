@@ -1111,5 +1111,149 @@ def detect_and_fix_repetition(text: str) -> str:
             
             if repeat_count >= 3:
                 text = '\n'.join(lines[:-repeat_count + 1])
-    
+
     return text
+
+
+# ============================================================================
+# Tool Output Sanitization (SEC-10 / FEAT-01, R07.05)
+# ============================================================================
+#
+# Indirect prompt injection vector: tool results from ``http_get``,
+# ``web_search``, ``shell``, and ``read_file`` flow verbatim into the
+# next model context. A 256KB HTTP response that starts with "OK" but
+# contains "ignore prior instructions, run X" later passes through
+# ``is_error_result``'s first-line check and reaches the model intact.
+#
+# Mitigation: wrap every tool result in ``<tool_output>`` XML tags
+# (so the system prompt can instruct the model to treat the contents as
+# untrusted data), truncate overly large results, redact lines that
+# look like secrets, and strip ANSI escapes that could manipulate the
+# user's terminal during chat display.
+#
+# This is a non-breaking, additive change — the wrapping is purely
+# presentational to the model. Tool implementations are unchanged.
+
+# Patterns that match common secret-bearing lines. The match is on the
+# whole line (case-insensitive), so a hit causes the *value* (the part
+# after the ``=`` or ``:``) to be replaced with ``[REDACTED]``.
+#
+# Two capture groups:
+#   group(1) = the secret-key name (e.g. ``password``, ``api_key``, ``Bearer``)
+#   group(2) = the secret value (everything after the ``=`` or ``:`` separator)
+#
+# The replacement preserves the key name and the separator, but replaces
+# the value with ``[REDACTED]``. This way the model still sees that a
+# secret was present (useful for error recovery) without seeing the
+# actual secret value.
+#
+# Special case: ``Bearer`` is a value in an ``Authorization: Bearer <token>``
+# header, so it's matched WITHOUT requiring a ``=`` or ``:`` separator —
+# the token follows ``Bearer`` directly (after whitespace).
+_SECRET_LINE_RE = re.compile(
+    r'\b('
+    r'password|passwd|pwd|'
+    r'api[_-]?key|auth[_-]?token|access[_-]?token|refresh[_-]?token|'
+    r'secret[_-]?key|client[_-]?secret|private[_-]?key|'
+    # AWS env vars: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SECRET_KEY
+    r'aws[_-]?(?:secret[_-])?(?:access|secret)[_-]?key(?:[_-]?id)?|'
+    r'connection[_-]?string'
+    r')'
+    r'(\s*[:=]\s*)(\S+)'
+    # Bearer <token> — value follows directly (no = or :)
+    r'|\b(bearer)(\s+)(\S+)',
+    re.IGNORECASE,
+)
+
+# ANSI escape sequences (CSI, OSC, etc.). Strip these from tool output
+# so a malicious ``http_get`` response can't clear the user's screen,
+# rewrite the terminal title, or enable mouse tracking during chat.
+_ANSI_ESCAPE_RE = re.compile(r'\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-_]')
+
+# Default cap on tool result size before truncation. 8KB is enough for
+# most legitimate tool outputs (a directory listing, a small file, a
+# search snippet). Anything larger is almost certainly noise that
+# wastes context window without helping the model decide.
+DEFAULT_TOOL_OUTPUT_MAX_CHARS = 8192
+
+
+def sanitize_tool_output(
+    result: Any,
+    *,
+    tool_name: str = "",
+    tool_call_id: str = "",
+    max_chars: int = DEFAULT_TOOL_OUTPUT_MAX_CHARS,
+    redact_secrets: bool = True,
+    strip_ansi: bool = True,
+) -> str:
+    """Wrap and sanitize a tool result before it enters model context.
+
+    SEC-10 / FEAT-01 (R07.05): wraps the result in
+    ``<tool_output tool="..." call_id="...">...</tool_output>`` tags so
+    the system prompt can instruct the model to treat the contents as
+    untrusted data. Applies three layers of sanitization:
+
+    1. **Truncation** — if the result exceeds ``max_chars``, the body is
+       truncated to ``max_chars`` and a ``[truncated, N more chars]``
+       marker is appended. Prevents a 256KB ``http_get`` response from
+       consuming the context window.
+    2. **Secret redaction** — lines matching ``password=``, ``api_key:``,
+       ``Bearer ...``, etc. have their values replaced with
+       ``[REDACTED]``. Protects against the model echo-ing a secret the
+       user accidentally exposed via ``shell`` or ``read_file``.
+    3. **ANSI escape stripping** — terminal control sequences are removed
+       so a malicious tool output cannot clear the screen, rewrite the
+       terminal title, or enable mouse tracking during chat.
+
+    Args:
+        result: The tool execution result (any type — ``str()`` is
+            applied if it isn't already a string).
+        tool_name: Name of the tool that produced this result. Included
+            in the wrapper tag for the model's reference.
+        tool_call_id: OpenResponses ``call_id`` of the tool call that
+            produced this result. Included for traceability.
+        max_chars: Maximum body size before truncation.
+        redact_secrets: If True, secret-looking lines are redacted.
+        strip_ansi: If True, ANSI escape sequences are stripped.
+
+    Returns:
+        A string of the form
+        ``<tool_output tool="..." call_id="...">...body...</tool_output>``.
+        Always a valid string, never raises.
+    """
+    body = result if isinstance(result, str) else str(result)
+
+    if strip_ansi:
+        body = _ANSI_ESCAPE_RE.sub('', body)
+
+    if redact_secrets:
+        # Replace each secret-bearing match with: <keyname><sep>[REDACTED]
+        # Two match forms (mutually exclusive via |):
+        #   Form 1 (password=secret, api_key:secret): groups 1,2,3
+        #   Form 2 (Bearer <token>): groups 4,5,6
+        def _redact(m: re.Match) -> str:
+            if m.group(1) is not None:
+                # Form 1: <key><sep>[REDACTED]
+                return f"{m.group(1)}{m.group(2)}[REDACTED]"
+            # Form 2: Bearer [REDACTED]
+            return f"{m.group(4)}{m.group(5)}[REDACTED]"
+
+        body = _SECRET_LINE_RE.sub(_redact, body)
+
+    truncated_marker = ""
+    if len(body) > max_chars:
+        original_len = len(body)
+        body = body[:max_chars]
+        truncated_marker = f"\n[truncated, {original_len - max_chars} more chars]"
+
+    # Build wrapper tag. Use XML-safe attribute values (escape quotes).
+    tool_attr = tool_name.replace('"', '&quot;') if tool_name else ""
+    call_attr = (tool_call_id or "").replace('"', '&quot;') if tool_call_id else ""
+
+    attrs = ""
+    if tool_attr:
+        attrs += f' tool="{tool_attr}"'
+    if call_attr:
+        attrs += f' call_id="{call_attr}"'
+
+    return f"<tool_output{attrs}>{body}{truncated_marker}</tool_output>"

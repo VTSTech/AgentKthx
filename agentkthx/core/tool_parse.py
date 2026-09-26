@@ -214,21 +214,38 @@ def _parse_react(text: str, tool_names: list[str] | None = None) -> tuple[str | 
                 if not isinstance(tool_args, dict):
                     tool_args = {"input": str(tool_args)}
             except json.JSONDecodeError:
-                # Many small models (qwen2.5:0.5b, BitNet) output Python dict
-                # literals with single quotes instead of JSON double quotes.
-                # e.g.: {'expression': '15 + 27'} instead of {"expression": "15 + 27"}
-                # Use ast.literal_eval as fallback for Python syntax.
+                # SEC-02 (R07.05): the previous fallback used
+                # ``ast.literal_eval`` to accept Python dict literals with
+                # single quotes (``{'expression': '15 + 27'}``) that small
+                # models (qwen2.5:0.5b, BitNet) emit. ``ast.literal_eval``
+                # also accepts ``bytes`` (``b'...'``), ``complex``,
+                # ``frozenset``, ``tuple``, and ``set`` — none of which the
+                # tool schema expects. A malicious prompt injection that
+                # placed ``Action Input: {b'file_path': b'/etc/passwd'}``
+                # could feed ``bytes``-typed args to tool handlers that
+                # bypass ``validate_path``'s string-prefix checks (``os``
+                # accepts ``bytes`` for path operations). The fix: convert
+                # Python single-quote dict syntax to JSON before parsing,
+                # instead of using ``ast.literal_eval``.
                 if raw_args.startswith('{') and raw_args.endswith('}'):
+                    py_to_json = raw_args
+                    # Single→double quoted strings (avoid already-doubled)
+                    py_to_json = re.sub(
+                        r"(?<!\\)'((?:[^'\\]|\\.)*)'",
+                        r'"\1"',
+                        py_to_json,
+                    )
+                    # Python bool/None → JSON equivalents
+                    py_to_json = re.sub(r'\bTrue\b', 'true', py_to_json)
+                    py_to_json = re.sub(r'\bFalse\b', 'false', py_to_json)
+                    py_to_json = re.sub(r'\bNone\b', 'null', py_to_json)
                     try:
-                        import ast
-                        parsed = ast.literal_eval(raw_args)
-                        if isinstance(parsed, dict):
-                            tool_args = parsed
-                        else:
-                            tool_args = {"input": str(parsed)}
-                    except (ValueError, SyntaxError):
+                        tool_args = json.loads(py_to_json)
+                        if not isinstance(tool_args, dict):
+                            tool_args = {"input": str(tool_args)}
+                    except json.JSONDecodeError:
                         tool_args = None
-                
+
                 if tool_args is None:
                     # Last resort: check for known patterns in the raw text
                     # (works for both single and double quoted values)

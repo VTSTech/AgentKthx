@@ -132,6 +132,60 @@ Action Input: {"expression": "2 + 2"}"""
         assert calls[0].name == "calculator"
         assert calls[0].arguments == {"expression": "2 + 2"}
 
+    def test_parse_react_single_quote_python_dict(self):
+        """SEC-02 (R07.05): single-quoted Python dict literals (common from
+        small models like qwen2.5:0.5b and BitNet) must still parse to
+        valid string-typed args. Previously this fell through to
+        ``ast.literal_eval`` which also accepted ``bytes``, ``complex``,
+        ``frozenset``, etc. — a type-confusion vector that could bypass
+        ``validate_path``'s string-prefix checks.
+        """
+        parser = ToolParser(["calculator"])
+        text = "Action: calculator\nAction Input: {'expression': '15 + 27'}"
+
+        calls = parser.parse(text)
+        assert len(calls) == 1
+        assert calls[0].name == "calculator"
+        assert calls[0].arguments == {"expression": "15 + 27"}
+        # Critical: the value MUST be a str, not bytes
+        assert isinstance(calls[0].arguments["expression"], str)
+
+    def test_parse_react_python_bool_and_none(self):
+        """SEC-02 (R07.05): Python True/False/None literals in single-quoted
+        dict args must convert to JSON true/false/null. ``ast.literal_eval``
+        would have accepted these as native Python types, but downstream
+        tool handlers expect JSON-native types only.
+        """
+        parser = ToolParser(["test_tool"])
+        text = "Action: test_tool\nAction Input: {'flag': True, 'other': None, 'val': False}"
+
+        calls = parser.parse(text)
+        assert len(calls) == 1
+        assert calls[0].arguments == {"flag": True, "other": None, "val": False}
+
+    def test_parse_react_bytes_literal_rejected(self):
+        """SEC-02 (R07.05): ``ast.literal_eval`` accepted ``b'...'`` bytes
+        literals, which could bypass string-prefix security checks in tool
+        handlers (``os`` accepts bytes for paths). The new regex-based
+        converter must NOT produce bytes-typed values.
+        """
+        parser = ToolParser(["read_file"])
+        # Malicious payload that would have bypassed validate_path via
+        # bytes-typed arg under the old ast.literal_eval fallback.
+        text = "Action: read_file\nAction Input: {b'file_path': b'/etc/passwd'}"
+
+        calls = parser.parse(text)
+        # The parser must not produce a bytes-typed file_path value.
+        # It either rejects the call entirely (no calls) or coerces to str.
+        if calls:
+            for call in calls:
+                for key, val in call.arguments.items():
+                    # No bytes values should reach the tool handler
+                    assert not isinstance(val, bytes), (
+                        f"SEC-02 violation: argument {key!r}={val!r} is bytes-typed, "
+                        f"which can bypass validate_path string-prefix checks"
+                    )
+
     def test_parse_json_format(self):
         parser = ToolParser(["calculator"])
         text = '{"name": "calculator", "arguments": {"expression": "2 + 2"}}'

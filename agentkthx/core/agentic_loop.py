@@ -697,8 +697,26 @@ class AgenticLoopMixin:
         if self.debug and not self._is_comp_mode:
             print(f"  [OpenResponses] FunctionCallItem status: {fc_item.status.value}")
 
+        # SEC-10 / FEAT-01 (R07.05): sanitize and wrap the tool result
+        # before it enters model context. The wrapper:
+        # (a) wraps in <tool_output> tags so the system prompt can
+        #     instruct the model to treat the contents as untrusted data,
+        # (b) truncates to 8KB to prevent context exhaustion,
+        # (c) redacts secret-looking lines (password=, api_key:, Bearer),
+        # (d) strips ANSI escapes that could manipulate the user's
+        #     terminal during chat display.
+        # The wrapped result is what the model sees; the original `result`
+        # is still stored in the StepResult and FunctionCallOutputItem
+        # below for debugging / OpenResponses clients.
+        from .helpers import sanitize_tool_output
+        sanitized_output = sanitize_tool_output(
+            result,
+            tool_name=tool_name,
+            tool_call_id=fc_item.call_id,
+        )
+
         # Create FunctionCallOutputItem
-        fco_item = create_function_call_output(fc_item.call_id, str(result))
+        fco_item = create_function_call_output(fc_item.call_id, sanitized_output)
         response.add_output_item(fco_item, debug=not self._is_comp_mode and self.debug)
 
         if self.debug and not self._is_comp_mode:
@@ -709,7 +727,7 @@ class AgenticLoopMixin:
             self.memory.add_tool_result(
                 tool_call_id=fc_item.call_id,
                 name=tool_name,
-                content=str(result),
+                content=sanitized_output,
             )
             # Native tool calls also get retry context on error
             if is_error and self._retry_on_error:
@@ -727,7 +745,7 @@ class AgenticLoopMixin:
             # Use error recovery module for enhanced observation
             observation_msg = build_enhanced_observation(
                 tool_name=tool_name,
-                result=str(result),
+                result=sanitized_output,
                 tracker=self._error_tracker,
                 available_tools=self.tools.names(),
                 is_error=is_error,
@@ -743,9 +761,9 @@ class AgenticLoopMixin:
                 state.last_tool_name = None
             else:
                 from .error_recovery import _is_simple_result
-                if _is_simple_result(str(result), tool_name):
+                if _is_simple_result(sanitized_output, tool_name):
                     state.expecting_final_answer = True
-                    state.last_successful_result = str(result)
+                    state.last_successful_result = sanitized_output
                     state.last_tool_name = tool_name
                 else:
                     # Complex/intermediate result — allow more tool calls

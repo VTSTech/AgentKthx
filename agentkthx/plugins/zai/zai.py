@@ -58,7 +58,7 @@ import os
 import time
 from typing import Any, Generator
 
-from agentkthx.backends.openai_compat import OpenAICompatibleBackend
+from agentkthx.backends.cloud_base import CloudBackend
 from agentkthx.backends.base import BackendConfig
 from agentkthx.core.types import BackendType, ToolSupportLevel, ApiMode
 from agentkthx.core.models import Tool, ToolParam
@@ -172,25 +172,41 @@ def _is_free_model(model: str) -> bool:
     return pricing.get("input", -1) == 0.0 and pricing.get("output", -1) == 0.0
 
 
-class ZaiBackend(OpenAICompatibleBackend):
+class ZaiBackend(CloudBackend):
     """
     Backend for ZAI API (OpenAI Chat-Completions compatible).
 
-    Inherits the full OpenAI Chat Completions implementation from OllamaBackend
-    (generate_completions, generate_completions_stream, tool calling) and
-    customizes server management for ZAI's cloud endpoint.
+    MAINT-02 (R07.05): now inherits from ``CloudBackend`` instead of
+    ``OpenAICompatibleBackend`` directly. The shared cloud-backend
+    patterns (base-URL resolution, API-key validation,
+    ``_context_safe_max_tokens`` init, ``is_running()``, auth headers,
+    catalog-driven ``_get_model_defaults``, default ``test_tool_support``)
+    are consolidated in ``agentkthx.backends.cloud_base.CloudBackend``.
 
-    Key differences from Ollama:
-    - Always uses OPENAI API mode (no native /api/chat)
-    - Requires API key authentication via Bearer token
-    - Cloud endpoint (no local server management)
-    - Model catalog is static (no /api/show, /api/tags)
-    - No is_running() health check (always available)
+    ZAI-specific overrides remain here:
+      - ``MODELS`` catalog (hard-coded from ZAI docs)
+      - ``_get_chat_completions_url()`` — ZAI's ``/api/paas/v4/chat/completions``
+      - ``list_models()`` — queries ZAI's ``/api/paas/v4/models`` discovery
+        endpoint and merges with the static catalog
+      - ``_iter_sse_lines()`` — ZAI-specific 429 insufficient-credits
+        fallback + 400 no-tools retry
+      - ``generate_completions_stream()`` — ZAI_FREE_ONLY upfront gate
+      - ``_generate_with_auth()`` — non-streaming POST with the same
+        ZAI-specific error recovery as the streaming path
+      - ``_jev_call_completions()`` — JEV dispatch through ZAI's auth layer
 
     Usage:
         backend = get_backend("zai")
         backend = ZaiBackend(api_key="sk-...")
     """
+
+    # MAINT-02 (R07.05): catalog + provider identity as class attributes
+    # consumed by CloudBackend's shared implementations.
+    MODELS = ZAI_MODELS
+    _api_key_env_var = "ZAI_API_KEY"
+    _default_base_url = ZAI_BASE_URL
+    _default_model = ZAI_DEFAULT_MODEL
+    _provider_label = "ZAI"
 
     def __init__(
         self,
@@ -201,93 +217,38 @@ class ZaiBackend(OpenAICompatibleBackend):
         api_mode: ApiMode | str | None = None,
         api_key: str | None = None,
     ):
-        # Determine base URL — priority: base_url > host/port > env > default
-        if base_url:
-            resolved_url = base_url.rstrip("/")
-        elif host and port:
-            resolved_url = f"https://{host}:{port}"
-        else:
-            resolved_url = ZAI_BASE_URL.rstrip("/")
-
-        # ZAI is OpenAI-compatible. Both OPENAI and JEV modes use the
-        # same /v1/chat/completions endpoint underneath. JEV adds a
-        # decision-prompt wrapper on top, but the wire format is the
-        # same. Reject OPENRE (native /api/chat) since ZAI doesn't
-        # expose it.
-        if isinstance(api_mode, str):
-            api_mode = ApiMode(api_mode.lower())
-        if api_mode is None:
-            forced_mode = ApiMode.OPENAI
-        elif api_mode == ApiMode.JEV:
-            forced_mode = ApiMode.JEV  # accepted — generate_decision() handles the wrapper
-        elif api_mode == ApiMode.OPENAI:
-            forced_mode = ApiMode.OPENAI
-        else:
-            if os.environ.get("AGENTKTHX_DEBUG"):
-                print(f"  [ZAI] API mode '{api_mode}' not supported — ZAI only supports OpenAI / JEV, forcing OPENAI")
-            forced_mode = ApiMode.OPENAI
-
-        # Call parent (OpenAICompatibleBackend → BaseBackend) with resolved values.
+        # MAINT-02 (R07.05): delegate the shared cloud-backend
+        # initialization to CloudBackend.__init__, which resolves
+        # base_url/host/port, validates the API key, forces OPENAI/JEV,
+        # and initializes _context_safe_max_tokens. ~30 lines of
+        # boilerplate collapsed to one super().__init__ call.
         super().__init__(
-            base_url=resolved_url,
+            base_url=base_url,
+            host=host,
+            port=port,
             config=config,
-            api_mode=forced_mode,
+            api_mode=api_mode,
+            api_key=api_key,
         )
-
-        # ARCH-01: OllamaBackend.__init__ used to set this env var; since
-        # ZAI no longer inherits from OllamaBackend, set it here so
-        # is_openresponses_mode() in core/openresponses.py works correctly.
-        os.environ["AGENTKTHX_API_MODE"] = forced_mode.value
-
-        # API key — priority: explicit > env var > config module
-        self._api_key = api_key or os.environ.get("ZAI_API_KEY", "") or ZAI_API_KEY
-        if not self._api_key or not self._api_key.strip():
-            raise ValueError(
-                "ZAI_API_KEY is required for the ZAI backend. "
-                "Set it via --api-key, ZAI_API_KEY env var, or Config.zai_api_key."
-            )
-        if len(self._api_key.strip()) < 8:
-            raise ValueError(
-                f"ZAI_API_KEY appears invalid (too short: {len(self._api_key.strip())} chars). "
-                "Check your ZAI_API_KEY environment variable."
-            )
-
-        # R06.57: Persisted safe max_tokens after a context-length 400.
-        # Set by _iter_sse_lines() when a streaming call 400s with
-        # "context length" in the error message. Honored by
-        # _get_model_defaults() so future agentic-loop steps don't
-        # re-trigger the same 400. Mirrors OpenRouterBackend (R06.55)
-        # and GeminiBackend (R06.56).
-        self._context_safe_max_tokens: int | None = None
 
     @property
     def backend_type(self) -> BackendType:
         return BackendType.ZAI
 
-    @property
-    def base_url(self) -> str:
-        """Return the ZAI API base URL."""
-        return self._base_url
+    # ``base_url`` and ``api_key`` properties are inherited from
+    # CloudBackend — no override needed.
 
-    @property
-    def api_key(self) -> str:
-        """Return the API key."""
-        return self._api_key
+    # ``is_running()`` is inherited from CloudBackend — cloud service is
+    # "running" iff an API key is configured.
 
-    # ─────────────────────────────────────────────────────────────────────
-    # Server Management — ZAI is a cloud service
-    # ─────────────────────────────────────────────────────────────────────
+    # MAINT-02 (R07.05): ZAI's catalog uses "glm" as the family name
+    # (not "zai") and "zai" as the backend name. Override the CloudBackend
+    # defaults so catalog entries retain their historical shape.
+    def _catalog_family_name(self) -> str:
+        return "glm"
 
-    def is_running(self) -> bool:
-        """
-        Check if ZAI API is reachable.
-
-        Unlike local backends, ZAI is a cloud service — we check if we have
-        an API key configured rather than probing a health endpoint.
-        """
-        if not self._api_key:
-            return False
-        return True
+    def _catalog_backend_name(self) -> str:
+        return "zai"
 
     def list_models(self) -> list[dict]:
         """
@@ -381,30 +342,18 @@ class ZaiBackend(OpenAICompatibleBackend):
         return models
 
     def get_model_info(self, model: str) -> dict | None:
-        """
-        Get model information.
+        """Get model information from the ZAI catalog.
 
-        Checks the static catalog first for context_length metadata,
-        then queries the API to verify the model exists.
-        Always returns info for any model name (ZAI accepts any valid model ID).
+        MAINT-02 (R07.05): the parent ``CloudBackend.get_model_info``
+        returns ``None`` for models not in the catalog. ZAI accepts any
+        valid model ID, so this override returns a default 128K-context
+        entry for unknown models instead of ``None``.
         """
-        # Normalize: strip provider prefix if present (e.g., "zai/glm-4-plus")
+        info = super().get_model_info(model)
+        if info is not None:
+            return info
+        # Model not in static catalog — still valid if ZAI knows it.
         model_key = model.split("/")[-1] if "/" in model else model
-        meta = ZAI_MODELS.get(model_key, {})
-
-        # Return catalog info if available
-        if meta:
-            return {
-                "name": model_key,
-                "size": 0,
-                "details": {
-                    "family": "glm",
-                    "backend": "zai",
-                    "context_length": meta.get("context_length", 128000),
-                },
-            }
-
-        # Model not in static catalog — still valid if ZAI knows it
         return {
             "name": model_key,
             "size": 0,
@@ -415,35 +364,11 @@ class ZaiBackend(OpenAICompatibleBackend):
             },
         }
 
-    def _get_model_defaults(self, model: str) -> dict:
-        """
-        Get model-specific defaults from catalog.
-
-        ARCH-03 (R06.57): Cap + persisted-safe-value logic now inherited
-        from ``OpenAICompatibleBackend._apply_max_tokens_cap``. ZAI's
-        error format matches the base class defaults (``"maximum context
-        length is N tokens"`` + ``"N of text input"`` + ``"N of tool
-        input"``), so no regex override is needed.
-
-        Returns:
-            dict: temperature, max_tokens, and other model defaults
-        """
-        model_key = model.split("/")[-1] if "/" in model else model
-        meta = ZAI_MODELS.get(model_key, {})
-
-        max_tokens = meta.get("default_max_tokens", 8192)
-        context_length = meta.get("context_length", 128000)
-        temperature = meta.get("default_temperature", 0.7)
-
-        if os.environ.get("AGENTKTHX_DEBUG"):
-            capped = min(max_tokens, context_length // 32)
-            if capped < max_tokens:
-                print(f"  [ZAI Debug] Capped max_tokens {max_tokens} -> "
-                      f"{capped} (context={context_length}, divisor=32)")
-
-        return self._apply_max_tokens_cap(
-            max_tokens, context_length, temperature=temperature
-        )
+    # ``_get_model_defaults`` is inherited from CloudBackend — the
+    # catalog lookup + ``_apply_max_tokens_cap`` logic is identical for
+    # ZAI and the shared base. ARCH-03 (R06.57): ZAI's error format
+    # matches the base class default regex patterns, so no override
+    # needed.
 
     # ─────────────────────────────────────────────────────────────────────
     # Generation — always OpenAI Chat-Completions

@@ -14,6 +14,9 @@ from __future__ import annotations
 from .base import BaseBackend
 from .ollama import OllamaBackend
 from .llama_server import LlamaServerBackend
+# MAINT-02 (R07.05): expose CloudBackend so cloud plugin authors can
+# inherit from it instead of duplicating the cloud-backend boilerplate.
+from .cloud_base import CloudBackend
 from ..config import AGENTKTHX_BACKEND, OLLAMA_BASE_URL, LLAMA_SERVER_BASE_URL
 from ..core.types import ApiMode
 
@@ -181,6 +184,7 @@ def get_backend_choices() -> list[str]:
 
 __all__ = [
     "BaseBackend",
+    "CloudBackend",
     "OllamaBackend",
     "LlamaServerBackend",
     "get_backend",
