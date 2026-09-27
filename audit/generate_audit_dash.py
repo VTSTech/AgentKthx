@@ -835,44 +835,97 @@ def _summary_payload(meta, findings, closures, generated_at):
     }
 
 
-def _reconcile_payload(meta, findings, audit_md, generated_at):
+def _reconcile_payload(meta, findings, audit_md, generated_at, deltas_md=""):
     """Compare the audit.md header prose counts vs the parsed table counts.
 
     Flags drift so a stale hand-written prose summary can't silently mislead.
     The table is always the source of truth — it's what this very script
     parses to render the dashboard.
+
+    When deltas.md is present (the split is active), audit.md contains only
+    OPEN findings. The prose comparison is then against audit.md-only counts
+    (open), and the archived counts (closed/wontfix from deltas.md) are
+    reported separately. The ``matches`` flag is True if audit.md's prose
+    open count matches its parsed open count — the archived counts aren't
+    expected to appear in audit.md's prose (they're in deltas.md).
     """
     header = audit_md[:4096]
-    closed_m = re.search(r"(\d+)\s+CLOSED\b", header)
     open_m = re.search(r"(\d+)\s+OPEN\b", header)
+    closed_m = re.search(r"(\d+)\s+CLOSED\b", header)
     wontfix_m = re.search(r"(\d+)\s+WONTFIX\b", header)
     total_m = re.search(r"(\d+)\s+Findings\b", header)
-    prose = {
-        "closed": int(closed_m.group(1)) if closed_m else None,
-        "open": int(open_m.group(1)) if open_m else None,
-        "wontfix": int(wontfix_m.group(1)) if wontfix_m else None,
-        "total": int(total_m.group(1)) if total_m else None,
-        "raw": {
-            "closed": closed_m.group(0) if closed_m else None,
-            "open": open_m.group(0) if open_m else None,
-            "wontfix": wontfix_m.group(0) if wontfix_m else None,
-            "total": total_m.group(0) if total_m else None,
-        },
-    }
+
+    # Parse audit.md alone (open-only when split) for the audit-only table.
+    audit_only_findings = _parse_findings_from_md(audit_md)
+    audit_only_open = sum(1 for f in audit_only_findings.values() if f["status"] == "OPEN")
+
+    # The merged table (audit.md + deltas.md) = the full register.
     table = {
         "closed": sum(1 for f in findings if f["status"] == "CLOSED"),
         "open": sum(1 for f in findings if f["status"] == "OPEN"),
         "wontfix": sum(1 for f in findings if f["status"] == "WONTFIX"),
         "total": len(findings),
     }
-    drift = {
-        k: (None if prose[k] is None else prose[k] - table[k])
-        for k in ("closed", "open", "wontfix", "total")
+    audit_only_table = {
+        "open": audit_only_open,
+        "archivedInDeltas": table["closed"] + table["wontfix"],
     }
-    matches = all(
-        (prose[k] is None or prose[k] == table[k])
-        for k in ("closed", "open", "wontfix", "total")
-    )
+
+    if deltas_md:
+        # Split mode: audit.md prose should mention only OPEN count.
+        # The archived (closed/wontfix) counts live in deltas.md.
+        prose_open = int(open_m.group(1)) if open_m else None
+        matches = (prose_open is None or prose_open == audit_only_open)
+        prose = {
+            "open": prose_open,
+            "closed": int(closed_m.group(1)) if closed_m else None,  # shouldn't be in audit.md post-split
+            "wontfix": int(wontfix_m.group(1)) if wontfix_m else None,
+            "total": int(total_m.group(1)) if total_m else None,
+            "raw": {
+                "open": open_m.group(0) if open_m else None,
+                "closed": closed_m.group(0) if closed_m else None,
+                "wontfix": wontfix_m.group(0) if wontfix_m else None,
+                "total": total_m.group(0) if total_m else None,
+            },
+        }
+        drift = {
+            "open": (None if prose_open is None else prose_open - audit_only_open),
+            "note": "split mode — audit.md prose open vs audit.md-only open",
+        }
+        note = (
+            "Split mode: audit.md open count matches. "
+            f"({table['closed']} closed + {table['wontfix']} wontfix archived in deltas.md.)"
+            if matches
+            else f"Split mode DRIFT: audit.md prose says {prose_open} open but audit.md table has {audit_only_open} open. Update the prose."
+        )
+    else:
+        # Pre-split mode: audit.md has all findings, prose should match full table.
+        prose = {
+            "closed": int(closed_m.group(1)) if closed_m else None,
+            "open": int(open_m.group(1)) if open_m else None,
+            "wontfix": int(wontfix_m.group(1)) if wontfix_m else None,
+            "total": int(total_m.group(1)) if total_m else None,
+            "raw": {
+                "closed": closed_m.group(0) if closed_m else None,
+                "open": open_m.group(0) if open_m else None,
+                "wontfix": wontfix_m.group(0) if wontfix_m else None,
+                "total": total_m.group(0) if total_m else None,
+            },
+        }
+        drift = {
+            k: (None if prose[k] is None else prose[k] - table[k])
+            for k in ("closed", "open", "wontfix", "total")
+        }
+        matches = all(
+            (prose[k] is None or prose[k] == table[k])
+            for k in ("closed", "open", "wontfix", "total")
+        )
+        note = (
+            "Prose header matches the parsed table."
+            if matches
+            else "Prose header has drifted from the parsed table — the table is the source of truth (it's what generate_audit_dash.py reads). Update the prose."
+        )
+
     closed_findings = sorted(
         [{"id": f["id"], "closedIn": f["closedIn"]} for f in findings if f["status"] == "CLOSED"],
         key=lambda x: x["closedIn"] or "",
@@ -882,18 +935,15 @@ def _reconcile_payload(meta, findings, audit_md, generated_at):
         "generatedAt": generated_at,
         "prose": prose,
         "table": table,
+        "auditOnly": audit_only_table,
         "drift": drift,
         "matches": matches,
         "closedFindings": closed_findings,
-        "note": (
-            "Prose header matches the parsed table."
-            if matches
-            else "Prose header has drifted from the parsed table — the table is the source of truth (it's what generate_audit_dash.py reads). Update the prose."
-        ),
+        "note": note,
     }
 
 
-def write_endpoints(out_dir, meta, findings, closures, audit_md, generated_at):
+def write_endpoints(out_dir, meta, findings, closures, audit_md, generated_at, deltas_md=""):
     """Write static JSON endpoint files alongside index.html.
 
     Returns the list of file paths written.
@@ -930,7 +980,7 @@ def write_endpoints(out_dir, meta, findings, closures, audit_md, generated_at):
     # reconcile
     path = os.path.join(api_dir, "reconcile.json")
     with open(path, "w", encoding="utf-8") as f:
-        json.dump(_reconcile_payload(meta, findings, audit_md, generated_at), f, ensure_ascii=False, indent=2)
+        json.dump(_reconcile_payload(meta, findings, audit_md, generated_at, deltas_md), f, ensure_ascii=False, indent=2)
     written.append(path)
 
     # per-finding detail files (siblings = same category, for navigation)
@@ -1025,7 +1075,7 @@ Examples:
     if not args.no_endpoints:
         ep_dir = out_dir if out_dir else "."
         generated_at = datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
-        written = write_endpoints(ep_dir, meta, findings, closures, audit_md, generated_at)
+        written = write_endpoints(ep_dir, meta, findings, closures, audit_md, generated_at, deltas_md)
         api_root = os.path.join(ep_dir, "api", "findings")
         print(f"[gen] wrote {len(written)} endpoint JSON files into {api_root}/ "
               f"(findings.json, open.json, closed.json, wontfix.json, summary.json, "

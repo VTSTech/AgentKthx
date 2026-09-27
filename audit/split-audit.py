@@ -150,7 +150,8 @@ def build_audit_md(meta, open_findings, deltas_findings_count):
         "",
         f"**Repository:** {meta['repo']}  ",
         f"**Author:** {meta['author']} | **License:** {meta['license']} | **Date:** {meta['date']}  ",
-        f"**Commit:** `{meta['commit']}` | **Test Suite:** {meta['tests']} passed / {meta['testsSkipped']} skipped  ",
+        (f"**Commit:** `{meta['commit']}` | " if meta["commit"] else "**Commit:** (working tree) | ") +
+        f"**Test Suite:** {meta['tests']} passed / {meta['testsSkipped']} skipped  ",
         f"{len(open_findings)} Open Findings | 7 Categories | SEC, ROB, MAINT, PERF, FEAT, ARCH, TEST  ",
         f"Severity: {high} High | {medium} Medium | {low} Low  ",
         f"{len(open_findings)} OPEN (CLOSED + WONTFIX archived in deltas.md — generate_audit_dash.py merges both for the dashboard)",
