@@ -57,6 +57,180 @@ since the brief was generated, inform the user and offer to regenerate it.
 
 ---
 
+## Mode 2b: Re-audit (audit.md exists but code has changed)
+
+If an `audit.md` already exists AND the code has changed since it was
+generated (the brief's commit hash doesn't match `HEAD`, or files referenced
+in the brief have been modified/added/removed), the audit is stale. A fresh
+audit is needed — but the existing audit.md contains CLOSED + WONTFIX
+findings (with release tags, closure notes, reasoning) that are still valid
+and must be preserved. Rather than carrying them in the active audit.md
+(where they dilute the focus on OPEN work), move them to `deltas.md`.
+
+### The split design
+
+- **`audit.md`** = OPEN findings only (the active work items). Small, focused.
+- **`deltas.md`** = CLOSED + WONTFIX findings (the historical archive). Grows
+  over time as findings are resolved. Includes the closure timeline sections
+  (`## Rxx.xx Closures`).
+- **`generate_audit_dash.py`** reads BOTH files and merges them into the full
+  register for the dashboard. The dashboard, JSON endpoints, and reconcile
+  checker all see the complete picture (open + closed + wontfix); `audit.md`
+  itself stays small.
+
+### The archive-then-fresh workflow
+
+```
+audit.md exists + code changed
+    │
+    ├── 1. split audit.md → audit.md (open) + deltas.md (closed/wontfix)
+    │      via audit/split-audit.py — moves CLOSED + WONTFIX out of audit.md
+    │
+    ├── 2. re-audit the code: update OPEN findings, add new ones, close resolved ones
+    │      closed/wontfix findings stay in deltas.md; new closures get added there
+    │
+    └── 3. regenerate brief.md (the brief references audit findings)
+```
+
+### Step 1: Split the existing audit
+
+Run the split script to move CLOSED + WONTFIX findings from `audit.md` to
+`deltas.md`. This keeps `audit.md` focused on OPEN findings (the active work)
+while preserving the closure history in `deltas.md`. `generate_audit_dash.py`
+reads both files and merges them for the dashboard — the full register is
+unchanged.
+
+```bash
+python3 audit/split-audit.py
+# → moves CLOSED + WONTFIX findings from audit.md to deltas.md
+# → audit.md becomes open-only (small, focused)
+# → deltas.md accumulates the closed/wontfix archive + closure timeline
+# → --dry-run previews without writing
+# → idempotent: re-running on an already-split audit.md is a no-op
+```
+
+The script preserves the closure timeline sections (`## Rxx.xx Closures`) by
+moving them to `deltas.md` — they're about closed findings, so they belong
+there. The dashboard's closure-timeline cards continue to render.
+
+### Step 2: Re-audit the code
+
+With CLOSED/WONTFIX findings safely in `deltas.md`, re-audit the current code:
+
+1. **Re-evaluate OPEN findings** (still in `audit.md`): does the issue still
+   exist in the current code? If yes, keep it OPEN. If the code was refactored
+   and the issue no longer applies, note it in a delta block and omit it from
+   the Findings Summary table.
+
+2. **Close resolved findings**: if an OPEN finding has been fixed in the
+   current code, mark it `✓ CLOSED Rxx.xx` in `audit.md`'s Findings Summary,
+   add the `**FIXED (Rxx.xx):**` closure prose to its detail section, then
+   re-run `split-audit.py` to move it to `deltas.md`.
+
+3. **Add new findings**: assign new IDs (continue the numbering — if
+   `deltas.md` + `audit.md` together have SEC-01 through SEC-11, the first
+   new security finding is SEC-12) and mark them OPEN in `audit.md`.
+
+4. **Add a delta block** at the top of `audit.md` documenting the re-audit:
+   which findings were re-confirmed, which were closed, which no longer apply,
+   and which are new.
+
+**`audit.md` stays self-contained for OPEN findings.** `generate_audit_dash.py`
+reads `audit.md` (open) + `deltas.md` (closed/wontfix) and merges them — the
+dashboard shows the full register. You do NOT need to manually merge
+`deltas.md` into `audit.md`; the parser handles it.
+
+### Step 3: Regenerate brief.md
+
+The brief references audit findings (in the "What's Missing / Incomplete"
+section). Update it to reflect the fresh audit's OPEN findings + counts.
+
+### Why this matters
+
+Without the split, a re-audit would either:
+- **Lose history** — start fresh, forgetting which findings were closed
+  and why (the dashboard's closure timeline would reset to zero)
+- **Keep stale findings** — carry forward closed/wontfix findings that
+  dilute the focus on active OPEN work, making audit.md grow unboundedly
+
+The split preserves the closure history (in `deltas.md`) while keeping
+`audit.md` small and focused on OPEN findings. The dashboard sees the full
+register because `generate_audit_dash.py` merges both files.
+
+### deltas.md format
+
+`deltas.md` is the CLOSED + WONTFIX archive. `generate_audit_dash.py`
+reads it (alongside `audit.md`) and merges — it is NOT reference-only.
+The format:
+
+```markdown
+# Audit Deltas — Closed & Wontfix Archive
+
+**Project:** AgentKthx  
+**Release:** R07.08  
+**Date:** 2026-09-27  
+**Archived:** 2026-09-27 16:14 UTC+0  
+**Counts:** 30 CLOSED · 5 WONTFIX · 35 total
+
+This file is the archive of CLOSED and WONTFIX findings moved out of
+`audit.md` to keep the active audit focused on OPEN findings.
+`generate_audit_dash.py` reads BOTH `audit.md` (open) and `deltas.md`
+(closed/wontfix) and merges them into the full register for the dashboard.
+
+---
+
+## Findings Summary (Archived)
+
+| ID | Severity | Category | Status | Title |
+|----|----------|----------|--------|-------|
+| SEC-01 | Medium | Security | ✓ CLOSED R07.08 | sandbox escape |
+| SEC-08 | Low | Security | ⊘ WONTFIX (intentional) | audit log plaintext |
+| ...
+
+---
+
+## Detailed Findings (Archived)
+
+### Security
+
+#### SEC-01: sandbox escape
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Medium |
+| **Category** | Security |
+
+**Status:** ✓ CLOSED R07.08
+
+**Detail:** {closure note}
+
+---
+
+...
+
+## Closure Timeline
+
+<!-- Preserved from audit.md. The dashboard's closure-timeline cards parse these. -->
+
+## R07.08 Closures
+
+| ID | Severity | Status | Notes |
+|----|----------|--------|-------|
+| SEC-01 | Medium | ✓ CLOSED R07.08 | dropped 5 unsafe builtins |
+| ...
+
+Suite 1506 → 1567 passed.
+
+---
+```
+
+The split script (`audit/split-audit.py`) generates this structure automatically.
+`deltas.md` accumulates as findings are closed/wontfixed over time — re-run
+the split after each closure batch to move newly-resolved findings out of
+`audit.md`.
+
+---
+
 ## Mode 2: Audit (Brief Missing)
 
 If no `brief.md` exists, perform a full codebase audit and generate one.
@@ -168,6 +342,73 @@ prioritized in a timeline-based Priority Matrix.
 
 The report always ends with an **Architecture Strengths** section — document what
 the codebase does well so good patterns aren't lost during refactoring.
+
+### Dashboard Parser Contract (machine-readable audit.md)
+
+`generate_audit_dash.py` (in `audit/`) parses `audit.md` to produce the
+self-contained dashboard HTML + JSON API endpoints. The audit.md **is the
+single source of truth** — the dashboard, the `/api/findings/*.json`
+endpoints, the preview panel's live audit card, and the reconcile drift
+checker all read from it. To stay machine-parseable, the audit.md you
+generate **must** conform to these format rules:
+
+1. **Header counts line.** The prose header must include count tokens the
+   parser can find: `{N} CLOSED ... | {N} WONTFIX ... | {N} OPEN` and
+   `{N} Findings | {N} Categories | ...`. The reconcile endpoint compares
+   these prose counts against the actual table — if they drift, the
+   dashboard flags `matches: false`. **Always recompute the prose counts
+   after changing the findings table.**
+
+2. **Findings Summary table — 5 columns, Status mandatory.** The table
+   under `## Findings Summary` must have exactly these columns:
+   `| ID | Severity | Category | Status | Title |`. The parser's regex
+   captures 5 groups. The **Status** column drives the closed/open/wontfix
+   counts. Status cell formats the parser recognises:
+   - `OPEN`
+   - `✓ CLOSED R07.04` (release tag captured as `closedIn`)
+   - `CLOSED` or `✓` (CLOSED, `closedIn` null)
+   - `⊘ WONTFIX (intentional)` or `WONTFIX` or `⊘`
+   - Strikethrough `~~SEC-01~~` marks a finding as removed/renumbered
+     (parser still reads the row but the strikethrough is preserved).
+
+3. **New Findings delta table — 5 columns, File(s) instead of Status.**
+   Under `## Rxx.xx New Findings`: `| ID | Severity | Category | File(s) | Title |`.
+   The parser uses this to pick up `file` info for findings added since
+   the last audit pass.
+
+4. **Closures section — 4 columns.** Under `## Rxx.xx Closures`:
+   `| ID | Severity | Status | Notes |`. Findings marked CLOSED here
+   inherit the release tag as `closedIn`. The prose around the table
+   (e.g. `1132 → 1290 passed`) is parsed for the closure timeline's
+   test-count deltas.
+
+5. **Closure / WONTFIX prose.** Under each finding's detail section,
+   append a `**FIXED (Rxx.xx):** ...` or `**WONTFIX (Rxx.xx, owner decision):** ...`
+   paragraph before the `---` separator. The parser does NOT read this
+   prose (it reads the Status column), but it's the human-readable
+   closure record — keep it specific: what changed, which file, +N
+   regression tests, and the release tag. WONTFIX prose must explain
+   *why* the fix would make things worse or what existing mechanism
+   already covers the use case.
+
+6. **Release delta blockquotes.** Prepend a `> **Rxx.xx delta (...):**`
+   blockquote per release at the top of the file (newest first, below
+   the header counts line). One-sentence summary per closed/wontfixed
+   finding + the test-suite delta. The full closure detail lives in
+   the `**FIXED (Rxx.xx):**` paragraph under each finding.
+
+7. **Categories must be exact.** The parser only recognises these 7
+   category strings: `Security`, `Robustness`, `Maintainability`,
+   `Performance`, `New Features`, `Architecture`, `Testing`. Any other
+   category value causes the finding to be silently dropped from the
+   dashboard. (Note: the FEAT category is "New Features", not "New Feature".)
+
+**If you're unsure whether your audit.md parses cleanly**, run:
+```bash
+python3 audit/generate_audit_dash.py --audit path/to/audit.md --brief path/to/brief.md --output /tmp/test.html
+# then check /tmp/api/findings/reconcile.json — matches: true means the
+# prose header counts agree with the parsed table.
+```
 
 ### Content Principles for audit.md:
 
