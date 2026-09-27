@@ -133,11 +133,15 @@ def build_findings_table(findings):
     return "\n".join(lines)
 
 
-def build_audit_md(meta, open_findings, deltas_findings_count):
+def build_audit_md(meta, open_findings, deltas_findings_count, executive_summary="", detail_sections=None, priority_matrix=""):
     """Rebuild audit.md with only OPEN findings.
 
     Preserves the header metadata + a note about the deltas.md archive.
+    Also preserves the Executive Summary, Detailed Findings (open-only),
+    and Priority Matrix from the original audit.md. Architecture Strengths
+    is dropped (per owner decision — closed/wontfix history lives in deltas.md).
     """
+    detail_sections = detail_sections or []
     by_sev = Counter(f["severity"] for f in open_findings)
     high = by_sev.get("High", 0)
     medium = by_sev.get("Medium", 0)
@@ -162,36 +166,152 @@ def build_audit_md(meta, open_findings, deltas_findings_count):
         "",
         "---",
         "",
-        "## Findings Summary",
+        "## Table of Contents",
         "",
-        build_findings_table(open_findings),
-        "",
-        "---",
-        "",
-        "## Detailed Findings",
-        "",
-        f"<!-- Open findings only. CLOSED + WONTFIX detail sections are in deltas.md. -->",
-        "",
-        f"<!-- To view a closed/wontfix finding's detail, see deltas.md. -->",
+        "- [Executive Summary](#executive-summary)",
+        "- [Findings Summary](#findings-summary)",
+        "- [Detailed Findings](#detailed-findings)",
+        "- [Priority Matrix](#priority-matrix)",
         "",
         "---",
-        "",
-        "## Priority Matrix",
-        "",
-        "| Timeline | Findings |",
-        "|----------|----------|",
-        f"| **Near term** | {', '.join(f['id'] for f in open_findings if f['severity'] == 'High') or '—'} |",
-        f"| **Short term** | {', '.join(f['id'] for f in open_findings if f['severity'] == 'Medium') or '—'} |",
-        f"| **Medium term** | {', '.join(f['id'] for f in open_findings if f['severity'] == 'Low') or '—'} |",
-        "",
-        "---",
-        "",
-        "## Architecture Strengths",
-        "",
-        "<!-- Preserved from the original audit.md. See git history for the full text. -->",
         "",
     ]
+
+    # Executive Summary (preserved verbatim from the original audit.md)
+    if executive_summary:
+        lines.append(executive_summary)
+        lines.append("")
+        lines.append("---")
+        lines.append("")
+    else:
+        lines.append("## Executive Summary")
+        lines.append("")
+        lines.append(f"<!-- Executive Summary not found in the original audit.md. -->")
+        lines.append("")
+        lines.append("---")
+        lines.append("")
+
+    # Findings Summary (rebuilt from parsed findings — open-only)
+    lines.append("## Findings Summary")
+    lines.append("")
+    lines.append(build_findings_table(open_findings))
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+
+    # Detailed Findings (open-only — extracted from the original audit.md)
+    lines.append("## Detailed Findings")
+    lines.append("")
+    lines.append("<!-- Open findings only. CLOSED + WONTFIX detail sections are in deltas.md. -->")
+    lines.append("")
+    if detail_sections:
+        # Emit the category ### headings + the #### finding sections in order.
+        # The detail_sections list is in document order; we preserve that.
+        # Emit each section followed by a --- separator.
+        current_cat = None
+        for section in detail_sections:
+            # Detect category from the finding's ID prefix
+            m = re.match(r"^####\s+([A-Z]+)-(\d+):", section)
+            if m:
+                prefix = m.group(1)
+                cat_map = {"SEC": "Security", "ROB": "Robustness", "MAINT": "Maintainability",
+                           "PERF": "Performance", "FEAT": "New Features",
+                           "ARCH": "Architecture", "TEST": "Testing"}
+                cat = cat_map.get(prefix, "Other")
+                if cat != current_cat:
+                    if current_cat is not None:
+                        lines.append("")
+                    lines.append(f"### {cat}")
+                    lines.append("")
+                    current_cat = cat
+            lines.append(section)
+            lines.append("")
+            lines.append("---")
+            lines.append("")
+    else:
+        lines.append("<!-- No detail sections extracted. -->")
+        lines.append("")
+        lines.append("---")
+        lines.append("")
+
+    # Priority Matrix (preserved verbatim — it documents the timeline with
+    # strikethrough/closure markers, which is valuable history even after the split)
+    if priority_matrix:
+        lines.append(priority_matrix)
+        lines.append("")
+        lines.append("---")
+        lines.append("")
+    else:
+        # Fallback: auto-generated minimal matrix
+        lines.append("## Priority Matrix")
+        lines.append("")
+        lines.append("| Timeline | Findings |")
+        lines.append("|----------|----------|")
+        lines.append(f"| **Near term** | {', '.join(f['id'] for f in open_findings if f['severity'] == 'High') or '—'} |")
+        lines.append(f"| **Short term** | {', '.join(f['id'] for f in open_findings if f['severity'] == 'Medium') or '—'} |")
+        lines.append(f"| **Medium term** | {', '.join(f['id'] for f in open_findings if f['severity'] == 'Low') or '—'} |")
+        lines.append("")
+        lines.append("---")
+        lines.append("")
+
+    # Architecture Strengths dropped per owner decision — the historical
+    # strengths text lives in git history / deltas.md if ever needed.
     return "\n".join(lines)
+
+
+def extract_section(audit_md, heading_pattern):
+    """Extract a ## section from audit.md by heading regex.
+
+    Returns the section text (heading + body) up to the next ## heading,
+    or "" if not found. The heading_pattern is matched against lines
+    starting with "## ".
+    """
+    lines = audit_md.split("\n")
+    in_section = False
+    collected = []
+    for line in lines:
+        if in_section:
+            if line.startswith("## "):
+                # Next section — stop
+                break
+            collected.append(line)
+        elif line.startswith("## ") and re.match(heading_pattern, line):
+            in_section = True
+            collected.append(line)
+    return "\n".join(collected).rstrip() if collected else ""
+
+
+def extract_detail_sections_by_id(audit_md, open_ids):
+    """Extract the #### ID: Title detail sections for the given finding IDs.
+
+    Each section runs from the `#### ID:` heading to the next `####` or
+    `###` or `##` heading (or the `---` separator before one). Returns a
+    list of section strings in document order, filtered to open_ids.
+    """
+    lines = audit_md.split("\n")
+    sections = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        m = re.match(r"^####\s+([A-Z]+-\d+):\s*(.+)$", line)
+        if m:
+            fid = m.group(1)
+            section_lines = [line]
+            j = i + 1
+            while j < len(lines):
+                if re.match(r"^#{1,4}\s", lines[j]):
+                    break
+                section_lines.append(lines[j])
+                j += 1
+            # Trim trailing blank lines
+            while section_lines and section_lines[-1].strip() == "":
+                section_lines.pop()
+            if fid in open_ids:
+                sections.append("\n".join(section_lines))
+            i = j
+        else:
+            i += 1
+    return sections
 
 
 def extract_closure_sections(audit_md):
@@ -324,11 +444,24 @@ def split(audit_path, deltas_path, dry_run=False):
     # closure timeline and belong in deltas.md (they're about closed findings).
     closure_sections = extract_closure_sections(audit_md)
 
+    # Extract prose sections to preserve in audit.md (open-only):
+    #   - Executive Summary (the narrative paragraphs)
+    #   - Detailed Findings sections for OPEN findings only
+    #   - Priority Matrix (the timeline with strikethrough/closure markers)
+    # Architecture Strengths is dropped (per owner decision).
+    executive_summary = extract_section(audit_md, r"^##\s+Executive Summary\s*$")
+    open_ids = {f["id"] for f in open_findings}
+    detail_sections = extract_detail_sections_by_id(audit_md, open_ids)
+    priority_matrix = extract_section(audit_md, r"^##\s+Priority Matrix\s*$")
+
     if dry_run:
         print(f"[split] DRY RUN — would move {len(archived_findings)} closed/wontfix findings to {deltas_path}", file=sys.stderr)
         print(f"[split]   audit.md: {len(findings)} → {len(open_findings)} open findings ({len(archived_findings)} moved)", file=sys.stderr)
         print(f"[split]   deltas.md: {len(archived_findings)} archived ({sum(1 for f in archived_findings if f['status']=='CLOSED')} closed, {sum(1 for f in archived_findings if f['status']=='WONTFIX')} wontfix)", file=sys.stderr)
         print(f"[split]   closure sections: {len(closure_sections)} moved to deltas.md", file=sys.stderr)
+        print(f"[split]   executive summary: {'preserved' if executive_summary else 'not found'}", file=sys.stderr)
+        print(f"[split]   detail sections: {len(detail_sections)} open finding sections preserved", file=sys.stderr)
+        print(f"[split]   priority matrix: {'preserved' if priority_matrix else 'not found (will auto-generate)'}", file=sys.stderr)
         return 0
 
     # Build + write deltas.md
@@ -341,7 +474,10 @@ def split(audit_path, deltas_path, dry_run=False):
     print(f"[split] wrote {deltas_path} ({len(archived_findings)} archived findings)", file=sys.stderr)
 
     # Build + overwrite audit.md (open-only)
-    new_audit_md = build_audit_md(meta, open_findings, len(archived_findings))
+    new_audit_md = build_audit_md(meta, open_findings, len(archived_findings),
+                                  executive_summary=executive_summary,
+                                  detail_sections=detail_sections,
+                                  priority_matrix=priority_matrix)
     with open(audit_path, "w", encoding="utf-8") as f:
         f.write(new_audit_md)
     print(f"[split] rewrote {audit_path} ({len(open_findings)} open findings)", file=sys.stderr)
