@@ -2,7 +2,7 @@
 
 **Status: Alpha**
 
-A minimal, modular, python stdlib, agentic framework for tool calling AI agents. Runs **locally** with [Ollama](https://ollama.com), [BitNet](https://github.com/microsoft/BitNet), [TurboQuant](https://github.com/TheTom/llama-cpp-turboquant), **in the cloud** with [OpenRouter](https://openrouter.ai), [ZAI](https://api.z.ai), [HuggingFace](https://huggingface.co/), [OpenAI](https://openai.com), [OrcaRouter](https://www.orcarouter.ai) and [Google Gemini](https://ai.google.dev/gemini-api/docs). Extensible via a manifest-based **plugin system** for additional backends and features.
+A minimal, modular, python stdlib, agentic framework for tool calling AI agents. Runs **locally** with [Ollama](https://ollama.com), [BitNet](https://github.com/microsoft/BitNet), [TurboQuant](https://github.com/TheTom/llama-cpp-turboquant), **in the cloud** with [OpenRouter](https://openrouter.ai), [ZAI](https://api.z.ai), [HuggingFace](https://huggingface.co/), [OpenAI](https://openai.com), [OrcaRouter](https://www.orcarouter.ai), [Google Gemini](https://ai.google.dev/gemini-api/docs) and [Mistral](https://mistral.ai). Extensible via a manifest-based **plugin system** for additional backends and features.
 
 Inspired by the architecture of OpenClaw, rebuilt from scratch for local-first operation.
 
@@ -46,7 +46,7 @@ Inspired by the architecture of OpenClaw, rebuilt from scratch for local-first o
 - **Zero dependencies** — Uses Python stdlib only (urllib for HTTP)
 - **Plugin system** — Manifest-based plugin discovery, lazy loading, and dependency resolution (R05.0)
 - **Plugin Spec v0.2 (R06.5)** — Lifecycle hooks (`on_init`/`on_run_start`/`on_run_end`/`on_error`/`on_shutdown`), plugin-provided tools, external plugin roots (`~/.agentkthx/plugins/`, `$AGENTKTHX_PLUGIN_PATH`), dual-form manifests (`extensions` block) with deprecation warnings for legacy fields, optional `sha256` content pinning (R07.05 SEC-06), `plugins --load/--unload/--reload/--json/--verbose` management
-- **Native + plugin backends** — Ollama built-in; OpenRouter, BitNet, ZAI, ACP, TurboQuant, Gemini, OrcaRouter as plugins
+- **Native + plugin backends** — Ollama built-in; OpenRouter, BitNet, ZAI, ACP, TurboQuant, Gemini, OrcaRouter, Mistral as plugins
 - **Multi-cloud support** — Access to 500+ models from OpenRouter, OpenAI, Anthropic, Google (Gemini + Gemma), Cohere, plus 11 upstream providers via OrcaRouter's zero-markup gateway
 - **CloudBackend base class** (R07.05 MAINT-02) — shared cloud-backend boilerplate consolidated; new cloud backends are ~100 LOC instead of ~1500 LOC
 - **Dual API support** — OpenResponses (`--api openre`) and OpenAI Chat-Completions (`--api openai`)
@@ -153,6 +153,9 @@ agentkthx chat -m deepseek-ai/DeepSeek-R1 --backend hf               # Reasoning
 agentkthx chat -m orcarouter/free --backend orcarouter              # OrcaRouter free router (zero-markup, 11 providers)
 agentkthx chat -m deepseek/deepseek-v4-flash-free --backend orcarouter  # OrcaRouter specific free model
 agentkthx chat -m orcarouter/auto --backend orcarouter              # OrcaRouter auto-router (picks cheapest live model)
+agentkthx chat -m mistral-small-latest --backend mistral            # Mistral La Plateforme (Apache 2.0, plugin)
+agentkthx chat -m labs-leanstral-1-5 --backend mistral             # Mistral Labs free tier (plugin)
+agentkthx chat -m mistral-medium-latest --backend mst              # Mistral via `mst` alias
 
 # Plugin management
 agentkthx plugins                    # List discovered plugins
