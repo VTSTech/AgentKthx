@@ -54,17 +54,52 @@ def read_file(path):
         return f.read()
 
 def get_audit_brief(args):
-    """Return (audit_md, brief_md) from URL or local file."""
+    """Return (audit_md, brief_md, deltas_md) from URL or local file.
+
+    deltas.md holds the CLOSED + WONTFIX findings (the archive), while
+    audit.md holds the OPEN findings (the active register). The dashboard
+    merges both into the full register. If deltas.md is absent, audit.md
+    is treated as the complete register (backward-compatible).
+    """
     if args.audit and args.brief:
-        return read_file(args.audit), read_file(args.brief)
+        audit_md = read_file(args.audit)
+        brief_md = read_file(args.brief)
+        deltas_md = read_deltas(audit_md, args)
+        return audit_md, brief_md, deltas_md
     base = args.base_url.rstrip("/")
     audit_url = f"{base}/audit.md"
     brief_url = f"{base}/brief.md"
+    deltas_url = f"{base}/deltas.md"
     print(f"[gen] fetching {audit_url}", file=sys.stderr)
     audit_md = fetch(audit_url)
     print(f"[gen] fetching {brief_url}", file=sys.stderr)
     brief_md = fetch(brief_url)
-    return audit_md, brief_md
+    deltas_md = read_deltas(audit_md, args)
+    return audit_md, brief_md, deltas_md
+
+
+def read_deltas(audit_md, args):
+    """Read deltas.md if it exists alongside audit.md (local or URL).
+
+    deltas.md is the CLOSED + WONTFIX archive. If absent, return "" —
+    the parser then falls back to reading all findings from audit.md alone
+    (the pre-split behaviour, backward-compatible).
+    """
+    deltas_path = getattr(args, "deltas", None)
+    if deltas_path is None:
+        # Default: look for deltas.md next to audit.md
+        if args.audit:
+            deltas_path = os.path.join(os.path.dirname(args.audit) or ".", "deltas.md")
+        else:
+            base = args.base_url.rstrip("/")
+            try:
+                print(f"[gen] fetching {base}/deltas.md", file=sys.stderr)
+                return fetch(f"{base}/deltas.md")
+            except Exception:
+                return ""
+    if deltas_path and os.path.exists(deltas_path):
+        return read_file(deltas_path)
+    return ""
 
 # ─── parsing: metadata ─────────────────────────────────────────────────────
 
@@ -134,13 +169,42 @@ def parse_status_cell(cell):
         return "CLOSED", None
     return "OPEN", None
 
-def parse_findings(audit_md):
+def parse_findings(audit_md, deltas_md=""):
     """
     Parse findings from:
       1. The Findings Summary table (| ID | Severity | Category | Status | Title |)
       2. The R07.07 delta table (| ID | Severity | Category | File(s) | Title |)
       3. All Closure section tables (to mark CLOSED findings + their release)
+
+    If deltas_md is provided, also parse findings from it (the CLOSED + WONTFIX
+    archive) and merge. audit.md holds OPEN findings; deltas.md holds CLOSED +
+    WONTFIX. The merge is by finding ID — deltas.md findings supplement
+    audit.md's (they don't overlap because the split moves them out).
+
+    If deltas_md is empty (pre-split audit.md, or the file doesn't exist),
+    all findings come from audit.md alone (backward-compatible).
     Returns a list of finding dicts.
+    """
+    findings = _parse_findings_from_md(audit_md)
+    if deltas_md:
+        deltas_findings = _parse_findings_from_md(deltas_md)
+        for fid, f in deltas_findings.items():
+            if fid not in findings:
+                findings[fid] = f
+            # If the finding is in both (shouldn't happen post-split, but
+            # be defensive), the deltas version wins for CLOSED/WONTFIX status.
+            else:
+                existing = findings[fid]
+                if existing["status"] == "OPEN" and f["status"] != "OPEN":
+                    findings[fid] = f
+    return list(findings.values())
+
+
+def _parse_findings_from_md(md_text):
+    """Parse findings from a single markdown text (audit.md OR deltas.md).
+
+    Factored out so parse_findings can call it twice (audit + deltas) and
+    merge. Returns a dict {id: finding} (not a list) for easy merge.
     """
     findings = {}  # id → finding dict
 
@@ -150,7 +214,7 @@ def parse_findings(audit_md):
         r"^\|\s*(`?~~)?([A-Z]+-\d+)(~~`?)?\s*\|\s*(.+?)\s*\|\s*(.+?)\s*\|\s*(.+?)\s*\|\s*(.+?)\s*\|?\s*$"
     )
     in_summary = False
-    for line in audit_md.split("\n"):
+    for line in md_text.split("\n"):
         if "## Findings Summary" in line:
             in_summary = True
             continue
@@ -192,7 +256,7 @@ def parse_findings(audit_md):
         r"^\|\s*(`?~~)?([A-Z]+-\d+)(~~`?)?\s*\|\s*(.+?)\s*\|\s*(.+?)\s*\|\s*(`[^`]+`|.+?)\s*\|\s*(.+?)\s*\|?\s*$"
     )
     in_delta = False
-    for line in audit_md.split("\n"):
+    for line in md_text.split("\n"):
         if re.match(r"## R[\d.]+ New Findings", line):
             in_delta = True
             continue
@@ -238,7 +302,7 @@ def parse_findings(audit_md):
     )
     current_release = None
     in_closure_table = False
-    for line in audit_md.split("\n"):
+    for line in md_text.split("\n"):
         m_sec = closure_section_pat.match(line)
         if m_sec:
             current_release = m_sec.group(1)
@@ -283,7 +347,7 @@ def parse_findings(audit_md):
                        "ARCH": "Architecture", "TEST": "Testing"}
             f["category"] = cat_map.get(prefix, "Maintainability")
 
-    return list(findings.values())
+    return findings
 
 # ─── parsing: closures timeline ────────────────────────────────────────────
 
@@ -908,22 +972,40 @@ Examples:
                     help="output HTML path (default: audit-dash/index.html)")
     ap.add_argument("--audit", help="local audit.md path (overrides --base-url)")
     ap.add_argument("--brief", help="local brief.md path (overrides --base-url)")
+    ap.add_argument("--deltas", help="local deltas.md path (closed/wontfix archive; defaults to alongside audit.md)")
     ap.add_argument("--base-url", default=DEFAULT_BASE,
                     help=f"base URL for audit.md + brief.md (default: {DEFAULT_BASE})")
     ap.add_argument("--no-endpoints", action="store_true",
                     help="skip writing the JSON API endpoint files (default: write them)")
     args = ap.parse_args()
 
-    audit_md, brief_md = get_audit_brief(args)
+    audit_md, brief_md, deltas_md = get_audit_brief(args)
 
     meta = parse_meta(audit_md, brief_md)
     print(f"[gen] parsed metadata: {meta['release']} · v{meta['version']} · "
           f"{meta['tests']} tests · {meta['date']}", file=sys.stderr)
 
-    findings = parse_findings(audit_md)
-    print(f"[gen] parsed {len(findings)} findings", file=sys.stderr)
+    # Parse OPEN findings from audit.md + CLOSED/WONTFIX from deltas.md.
+    # If deltas.md is absent (pre-split audit.md), parse_findings handles
+    # the fallback (all findings from audit.md alone).
+    findings = parse_findings(audit_md, deltas_md)
+    deltas_count = sum(1 for f in findings if f["status"] != "OPEN") if deltas_md else 0
+    audit_count = sum(1 for f in findings if f["status"] == "OPEN")
+    if deltas_md:
+        print(f"[gen] parsed {len(findings)} findings: {audit_count} open (audit.md) + {deltas_count} archived (deltas.md)", file=sys.stderr)
+    else:
+        print(f"[gen] parsed {len(findings)} findings (no deltas.md — all from audit.md)", file=sys.stderr)
 
     closures = parse_closures(audit_md, findings)
+    # Also parse closure sections from deltas.md (archived audits may carry them)
+    if deltas_md:
+        deltas_closures = parse_closures(deltas_md, findings)
+        # Merge: dedupe by release (audit.md wins if overlap)
+        seen = {c["release"] for c in closures}
+        for c in deltas_closures:
+            if c["release"] not in seen:
+                closures.append(c)
+                seen.add(c["release"])
     print(f"[gen] parsed {len(closures)} closure sections: "
           f"{', '.join(c['release'] for c in closures)}", file=sys.stderr)
 
