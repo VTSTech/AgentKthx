@@ -454,27 +454,75 @@ def split(audit_path, deltas_path, dry_run=False):
     detail_sections = extract_detail_sections_by_id(audit_md, open_ids)
     priority_matrix = extract_section(audit_md, r"^##\s+Priority Matrix\s*$")
 
+    # If deltas.md already exists, merge: parse its archived findings + closure
+    # sections and merge with the new ones. This makes the split idempotent + 
+    # accumulative — re-running after closing more findings APPENDS to deltas.md
+    # rather than overwriting it.
+    existing_deltas_md = ""
+    existing_archived = []
+    existing_closure_sections = []
+    if os.path.exists(deltas_path):
+        existing_deltas_md = read_file(deltas_path)
+        existing_findings_dict = gad._parse_findings_from_md(existing_deltas_md)
+        existing_archived = list(existing_findings_dict.values())
+        existing_closure_sections = extract_closure_sections(existing_deltas_md)
+
+    # Merge archived findings: new ones from audit.md + existing ones from deltas.md.
+    # Dedup by ID — if a finding is in both (shouldn't happen normally), the new
+    # version (from audit.md) wins.
+    merged_archived = {}
+    for f in existing_archived:
+        merged_archived[f["id"]] = f
+    for f in archived_findings:
+        merged_archived[f["id"]] = f  # new wins on conflict
+    all_archived = list(merged_archived.values())
+
+    # Merge closure sections: dedup by release heading (existing wins if overlap,
+    # since the existing deltas.md may have richer prose from prior splits).
+    seen_releases = set()
+    merged_closures = []
+    for section in existing_closure_sections:
+        m = re.match(r"^##\s+(R[\d.]+)\s+Closures", section)
+        if m:
+            seen_releases.add(m.group(1))
+        merged_closures.append(section)
+    for section in closure_sections:
+        m = re.match(r"^##\s+(R[\d.]+)\s+Closures", section)
+        if m and m.group(1) in seen_releases:
+            continue  # already in deltas.md from a prior split
+        merged_closures.append(section)
+
+    new_count = len(archived_findings)
+    existing_count = len(existing_archived)
+    total_archived = len(all_archived)
+
     if dry_run:
-        print(f"[split] DRY RUN — would move {len(archived_findings)} closed/wontfix findings to {deltas_path}", file=sys.stderr)
-        print(f"[split]   audit.md: {len(findings)} → {len(open_findings)} open findings ({len(archived_findings)} moved)", file=sys.stderr)
-        print(f"[split]   deltas.md: {len(archived_findings)} archived ({sum(1 for f in archived_findings if f['status']=='CLOSED')} closed, {sum(1 for f in archived_findings if f['status']=='WONTFIX')} wontfix)", file=sys.stderr)
-        print(f"[split]   closure sections: {len(closure_sections)} moved to deltas.md", file=sys.stderr)
+        print(f"[split] DRY RUN — would move {new_count} newly-closed/wontfix findings to {deltas_path}", file=sys.stderr)
+        print(f"[split]   audit.md: {len(findings)} → {len(open_findings)} open findings ({new_count} moved)", file=sys.stderr)
+        if existing_count > 0:
+            print(f"[split]   deltas.md: {existing_count} existing + {new_count} new = {total_archived} total (APPEND mode)", file=sys.stderr)
+        else:
+            print(f"[split]   deltas.md: new file, {total_archived} archived ({sum(1 for f in all_archived if f['status']=='CLOSED')} closed, {sum(1 for f in all_archived if f['status']=='WONTFIX')} wontfix)", file=sys.stderr)
+        print(f"[split]   closure sections: {len(closure_sections)} new + {len(existing_closure_sections)} existing = {len(merged_closures)} total", file=sys.stderr)
         print(f"[split]   executive summary: {'preserved' if executive_summary else 'not found'}", file=sys.stderr)
         print(f"[split]   detail sections: {len(detail_sections)} open finding sections preserved", file=sys.stderr)
         print(f"[split]   priority matrix: {'preserved' if priority_matrix else 'not found (will auto-generate)'}", file=sys.stderr)
         return 0
 
-    # Build + write deltas.md
-    deltas_content = build_deltas_md(meta, archived_findings, closure_sections)
+    # Build + write deltas.md (merged: existing + new)
+    deltas_content = build_deltas_md(meta, all_archived, merged_closures)
     out_dir = os.path.dirname(deltas_path)
     if out_dir:
         os.makedirs(out_dir, exist_ok=True)
     with open(deltas_path, "w", encoding="utf-8") as f:
         f.write(deltas_content)
-    print(f"[split] wrote {deltas_path} ({len(archived_findings)} archived findings)", file=sys.stderr)
+    if existing_count > 0:
+        print(f"[split] wrote {deltas_path} ({existing_count} existing + {new_count} new = {total_archived} archived, APPEND mode)", file=sys.stderr)
+    else:
+        print(f"[split] wrote {deltas_path} ({total_archived} archived findings)", file=sys.stderr)
 
     # Build + overwrite audit.md (open-only)
-    new_audit_md = build_audit_md(meta, open_findings, len(archived_findings),
+    new_audit_md = build_audit_md(meta, open_findings, total_archived,
                                   executive_summary=executive_summary,
                                   detail_sections=detail_sections,
                                   priority_matrix=priority_matrix)
@@ -482,7 +530,7 @@ def split(audit_path, deltas_path, dry_run=False):
         f.write(new_audit_md)
     print(f"[split] rewrote {audit_path} ({len(open_findings)} open findings)", file=sys.stderr)
 
-    print(f"[split] {meta['project']} {meta['release']} · {len(findings)} total → {len(open_findings)} open (audit.md) + {len(archived_findings)} archived (deltas.md)", file=sys.stderr)
+    print(f"[split] {meta['project']} {meta['release']} · {len(findings)} in audit.md → {len(open_findings)} open (audit.md) + {total_archived} archived (deltas.md)", file=sys.stderr)
     return 0
 
 
