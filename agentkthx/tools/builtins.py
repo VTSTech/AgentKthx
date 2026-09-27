@@ -569,16 +569,30 @@ def web_search(query: str, num_results: int | None = None) -> str:
         encoded_query = urllib.parse.urlencode({"q": query})
         results: list[dict] = []
 
-        # --- Primary: html.duckduckgo.com (the endpoint that works in 2026) ---
-        # The lite endpoint (lite.duckduckgo.com/lite/) appears retired —
-        # timeouts on every request as of 2026-09-28. The html endpoint
-        # returns proper results with a browser User-Agent + Accept headers.
+        # --- Primary: html.duckduckgo.com via POST form data ---
+        # R07.10 fix: DuckDuckGo's html endpoint bot-detects urllib's GET
+        # requests (different TLS cipher ordering than real browsers) and
+        # serves a 14KB "anomaly" page with no results. The documented
+        # workaround is to POST the query as form data with
+        # Content-Type: application/x-www-form-urlencoded — this matches
+        # what DuckDuckGo's own search form does and bypasses the
+        # anomaly detection.
         try:
-            html_url = f"https://html.duckduckgo.com/html/?{encoded_query}"
-            req = urllib.request.Request(html_url, method="GET")
+            html_url = "https://html.duckduckgo.com/html/"
+            # POST body — same field names as DDG's own search form.
+            # ``q`` is the query; the others are optional defaults that
+            # match the live form submission (keeps DDG happy).
+            post_body = urllib.parse.urlencode({
+                "q": query,
+                "b": "",  # empty "b" matches DDG's own form
+            }).encode("utf-8")
+            req = urllib.request.Request(html_url, data=post_body, method="POST")
             req.add_header("User-Agent", _BROWSER_USER_AGENT)
             req.add_header("Accept", "text/html,application/xhtml+xml")
             req.add_header("Accept-Language", "en-US,en;q=0.9")
+            req.add_header("Content-Type", "application/x-www-form-urlencoded")
+            req.add_header("Origin", "https://html.duckduckgo.com")
+            req.add_header("Referer", "https://html.duckduckgo.com/html/")
 
             with urllib.request.urlopen(req, timeout=15) as response:
                 html = response.read().decode("utf-8", errors="replace")
@@ -625,14 +639,21 @@ def web_search(query: str, num_results: int | None = None) -> str:
             # Real errors will surface if BOTH endpoints fail.
             pass
 
-        # --- Fallback: lite.duckduckgo.com (may be retired, but try once) ---
+        # --- Fallback: lite.duckduckgo.com via POST (was GET, now POST) ---
         if not results:
             try:
-                lite_url = f"https://lite.duckduckgo.com/lite/?{encoded_query}"
-                req2 = urllib.request.Request(lite_url, method="GET")
+                lite_url = "https://lite.duckduckgo.com/lite/"
+                post_body2 = urllib.parse.urlencode({
+                    "q": query,
+                    "kl": "us-en",
+                }).encode("utf-8")
+                req2 = urllib.request.Request(lite_url, data=post_body2, method="POST")
                 req2.add_header("User-Agent", _BROWSER_USER_AGENT)
                 req2.add_header("Accept", "text/html,application/xhtml+xml")
                 req2.add_header("Accept-Language", "en-US,en;q=0.9")
+                req2.add_header("Content-Type", "application/x-www-form-urlencoded")
+                req2.add_header("Origin", "https://lite.duckduckgo.com")
+                req2.add_header("Referer", "https://lite.duckduckgo.com/lite/")
 
                 with urllib.request.urlopen(req2, timeout=15) as response:
                     html2 = response.read().decode("utf-8", errors="replace")
