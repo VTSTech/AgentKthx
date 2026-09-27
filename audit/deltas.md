@@ -3,8 +3,8 @@
 **Project:** AgentKthx  
 **Release:** R07.08  
 **Date:** 2026-09-27  
-**Archived:** 2026-09-27 12:53 UTC+0  
-**Counts:** 30 CLOSED · 5 WONTFIX · 35 total
+**Archived:** 2026-09-27 17:04 UTC+0  
+**Counts:** 33 CLOSED · 5 WONTFIX · 38 total
 
 This file is the archive of CLOSED and WONTFIX findings moved out of
 `audit.md` to keep the active audit focused on OPEN findings.
@@ -36,12 +36,14 @@ This file is the archive of CLOSED and WONTFIX findings moved out of
 | ARCH-01 | Medium | Architecture | ⊘ WONTFIX (intentional) | Backends split across backends/ (native) and plugins/ (cloud) — confusing module layout |
 | SEC-07 | Low | Security | ✓ CLOSED R07.05 | Default SQLite DB path created without explicit mode — umask typically 0644, leaks conversation history |
 | SEC-08 | Low | Security | ⊘ WONTFIX (intentional) | Audit log writes tool args (incl. shell commands, file contents) in plaintext with default umask |
+| SEC-12 | Low | Security | ✓ CLOSED R07.07 | sanitize_tool_output truncates AFTER redaction — secrets just past 8KB cutoff remain unredacted |
 | ROB-01 | Low | Robustness | ✓ CLOSED R07.06 | _execute_single_tool_call "break" return value doesn't distinguish terminated from cancelled |
 | ROB-07 | Low | Robustness | ✓ CLOSED R07.06 | _ERROR_FIRST_LINE_RE misses alternative traceback formats (During handling of the above exception) |
 | ROB-08 | Low | Robustness | ✓ CLOSED R07.06 | MemoryConfig.max_tokens is unused — sliding window only fires on message count |
 | ROB-14 | Low | Robustness | ✓ CLOSED R07.06 | In-chat /model switch only reassigns agent.model — num_ctx/num_predict/model_config stay on the OLD model (stale window invites context-400s) |
 | ROB-16 | Low | Robustness | ✓ CLOSED R07.07 | time.sleep(retry_after) unbounded — malicious Retry-After: 3600 hangs agent for 1 hour |
 | ROB-21 | Low | Robustness | ✓ CLOSED R07.07 | API key min length 8 chars — too weak; real keys are 30+ chars |
+| ROB-26 | Low | Robustness | ✓ CLOSED R07.07 | sanitize_tool_output REDACT-then-TRUNCATE ordering — secrets past 8KB cutoff not redacted (dup of SEC-12) |
 | MAINT-06 | Low | Maintainability | ✓ CLOSED R07.05 | core/model_config.py is a 30-line deprecated module — no removal date set |
 | MAINT-09 | Low | Maintainability | ✓ CLOSED R07.07 | extract_calc_expression has 12+ overlapping regex patterns — unpredictable which matches |
 | MAINT-11 | Low | Maintainability | ✓ CLOSED R07.08 | Path.home() in _default_roots returns wrong path on Windows under impersonation |
@@ -52,6 +54,7 @@ This file is the archive of CLOSED and WONTFIX findings moved out of
 | MAINT-20 | Low | Maintainability | ✓ CLOSED R07.07 | get_model_info sets free_tier twice for catalog hits (parent + override) — redundant |
 | PERF-07 | Low | Performance | ⊘ WONTFIX (intentional) | web_search has no result cache — same query re-fetches |
 | FEAT-04 | Low | New Features | ⊘ WONTFIX (intentional) | --dry-run flag for agentkthx run that previews planned tool calls |
+| TEST-08 | Low | Testing | ✓ CLOSED R07.08 | No adversarial test coverage for sandboxed_repl.py — sandbox escape regressions go undetected |
 
 ---
 
@@ -164,6 +167,19 @@ This file is the archive of CLOSED and WONTFIX findings moved out of
 **Status:** ✓ CLOSED R07.04
 
 **Detail:** sanitize_tool_output() helper in core/helpers.py wraps every tool result in <tool_output tool="X" call_id="Y">...</tool_output> tags with 3 layers of sanitization (8KB truncation, secret redaction, ANSI stripping). Wired into agentic_loop._process_tool_result. +22 regression tests in tests/test_tool
+
+---
+
+#### SEC-12: sanitize_tool_output truncates AFTER redaction — secrets just past 8KB cutoff remain unredacted
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Security |
+
+**Status:** ✓ CLOSED R07.07
+
+**Detail:** sanitize_tool_output truncates AFTER redaction — secrets just past 8KB cutoff remain unredacted
 
 ---
 
@@ -309,6 +325,19 @@ This file is the archive of CLOSED and WONTFIX findings moved out of
 **Status:** ✓ CLOSED R07.07
 
 **Detail:** CloudBackend._MIN_API_KEY_LEN (new class attribute, backends/cloud_base.py) bumped from 8 → 20 chars. The prior 8-char minimum only caught the most egregious typos; real cloud API keys are 30+ chars (OpenAI sk-... is 51 chars, ZAI is similar). Made it a class attribute so subclasses can override for
+
+---
+
+#### ROB-26: sanitize_tool_output REDACT-then-TRUNCATE ordering — secrets past 8KB cutoff not redacted (dup of SEC-12)
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Robustness |
+
+**Status:** ✓ CLOSED R07.07
+
+**Detail:** sanitize_tool_output REDACT-then-TRUNCATE ordering — secrets past 8KB cutoff not redacted (dup of SEC-12)
 
 ---
 
@@ -528,6 +557,21 @@ This file is the archive of CLOSED and WONTFIX findings moved out of
 
 ---
 
+### Testing
+
+#### TEST-08: No adversarial test coverage for sandboxed_repl.py — sandbox escape regressions go undetected
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Testing |
+
+**Status:** ✓ CLOSED R07.08
+
+**Detail:** No adversarial test coverage for sandboxed_repl.py — sandbox escape regressions go undetected
+
+---
+
 ## Closure Timeline
 
 <!-- Preserved from the original audit.md. The dashboard's
@@ -571,6 +615,9 @@ These are not yet formalized as numbered findings but are noted for the next aud
 
 ---
 
+
+---
+
 ## R07.05 Closures (Released)
 
 R07.05 closed 9 findings across two passes (post-R07.04 release): the first pass (+20 tests, `tests/test_r07_05_audit_fixes.py`, suite 1290 → 1310), the ZAI free/paid catalog fix (+13 tests, `tests/test_zai_free_models.py`, suite → 1336), and the second-pass SEC batch (+68 tests, `tests/test_r07_05_sec_fixes.py` + 1 companion in `test_loop_resilience.py`, suite → **1404 passed / 9 skipped in ~25s**, zero regressions). One finding (ROB-05) was ruled WONTFIX — intentional behavior, not a bug (see below).
@@ -604,6 +651,9 @@ R07.05 closed 9 findings across two passes (post-R07.04 release): the first pass
 
 ---
 
+
+---
+
 ## R07.06 Closures (In-Progress)
 
 R07.06 is a robustness batch: five findings closed with +39 regression tests in a single new test file (`tests/test_r07_06_rob_fixes.py`), then a sixth (ROB-14) found during the owner's smoke test of the packaged zip and closed with +18 more in `tests/test_model_switch_context.py` — suite 1404 → **1461 passed / 9 skipped in ~25s**, zero regressions. Version bumped to R07.06 (0.7.06). Two of the six are Mediums with user-visible impact (ROB-10's ~6-minute doom-retry on permanent 500s; ROB-13's invisible args degradation), four are Lows closing behavior gaps (half-cancelled runs, missed traceback framings, the dead `max_tokens` field, the stale per-model state on `/model` switches). One API-visible default changed: `MemoryConfig.max_tokens` 4096 → 0 (tier now real but opt-in — see ROB-08).
@@ -618,6 +668,9 @@ R07.06 is a robustness batch: five findings closed with +39 regression tests in 
 | ~~ROB-14~~ | Low | ✓ CLOSED R07.06 | In-chat `/model` switch now re-derives the per-model state via `apply_model_switch()` (`cli/agent_factory.py`): `num_ctx` + `num_predict` follow the new model's catalog (`--num-ctx`/`--num-predict`/`/param`-pinned values survive; `/param reset` un-pins), `model_config`/`model_family` re-derived, stale `backend._context_safe_max_tokens` from the old model's 400 recovery cleared. Local backends keep config-derived `num_ctx` (fresh-start semantics). `/model` prints the deltas. +18 tests in `tests/test_model_switch_context.py`. |
 
 42 findings remained open at the close of R07.06 (plus ROB-05 wontfix). The next highest-leverage moves from the near-term list: **MAINT-01** (extract `ChatSession` from the 1,199-line `cmd_chat`), **TEST-01** (add a thin integration test tier), **SEC-09** (warn on non-HTTPS ACP). The R07.07 re-audit delta below adds 25 new findings extending the ID sequence — see the [R07.07 New Findings (Re-Audit Delta)](#r07.07-new-findings-re-audit-delta) section.
+
+---
+
 
 ---
 
@@ -706,6 +759,9 @@ These were identified in the R07.07 re-audit but NOT closed in this batch — th
 3. **SEC-13** — add `AGENTKTHX_REQUIRE_PLUGIN_PINS=1` env var enforcement. ~15 LOC + 4 tests.
 4. **SEC-16** — validate `buy_credits_url` host before surfacing. ~5 LOC + 2 tests.
 5. **MAINT-11** — extract OrcaRouter shared retry helper. ~50 LOC refactor + 0 new tests.
+
+
+---
 
 
 ---
