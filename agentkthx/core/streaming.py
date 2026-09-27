@@ -606,7 +606,13 @@ class StreamingMixin:
                 # "AgentKthx:" prefix would never be emitted. Fix: emit the
                 # prefix before the reasoning panel so the user sees it even
                 # if the model's entire response is in reasoning_content.
+                #
+                # Layout: "AgentKthx:" on its own line, then "reasoning:"
+                # below it, so they don't run together on the same line.
                 _emit_prefix_once()
+                # If the prefix was just emitted (no newline after it),
+                # add a newline so "reasoning:" starts on its own line.
+                sys.stdout.write("\n")
                 sys.stdout.write(f"\033[90m  reasoning:\033[0m\n")
                 sys.stdout.flush()
                 _reasoning_panel_started = True
@@ -827,7 +833,23 @@ class StreamingMixin:
         # End of stream — print a newline if content didn't end with one
         # so the next prompt / step summary appears on its own line.
         content_str = "".join(content_acc)
-        if content_str and not content_str.endswith("\n"):
+        reasoning_str = "".join(reasoning_acc)
+
+        # Some models (e.g. glm-5.3-flash-free via OrcaRouter) put the
+        # actual answer in reasoning_content instead of content. If content
+        # is empty but reasoning_content exists AND there are no tool calls,
+        # the model intended the reasoning as its answer. Move it to content
+        # in the return dict so the agent loop treats it as the answer — but
+        # DON'T re-print it (it was already streamed in the reasoning panel).
+        # Just add a trailing newline after the reasoning panel for spacing.
+        if not content_str and reasoning_str and not tool_calls_acc:
+            content_str = reasoning_str
+            reasoning_str = ""
+            # The reasoning was already printed during streaming (in grey).
+            # Add a trailing newline so the next prompt doesn't run together.
+            sys.stdout.write("\n")
+            sys.stdout.flush()
+        elif content_str and not content_str.endswith("\n"):
             sys.stdout.write("\n")
             sys.stdout.flush()
 
