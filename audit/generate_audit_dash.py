@@ -6,11 +6,27 @@ Fetches audit.md + brief.md from the AgentKthx GitHub repo (main branch),
 parses the findings register + closure timeline, and writes a single
 self-contained index.html (no CDN, no build step, no external deps).
 
+Since the dashboard is a static site, it also emits a small set of static JSON
+"API endpoint" files into <output-dir>/api/findings/ so external clients (the
+preview panel, CI, curl) can consume the parsed register without scraping the
+page:
+
+    api/findings.json            all findings + totals
+    api/findings/open.json        open findings only
+    api/findings/closed.json      closed findings only
+    api/findings/wontfix.json     wontfix findings only
+    api/findings/summary.json     counts rollup + closures timeline
+    api/findings/reconcile.json   prose-vs-table drift check
+    api/findings/<ID>.json        per-finding detail (one per finding)
+
+Pass --no-endpoints to skip the JSON files and write only the HTML.
+
 Usage:
     python3 generate_audit_dash.py
     python3 generate_audit_dash.py --output audit-dash/index.html
     python3 generate_audit_dash.py --audit ./audit.md --brief ./brief.md
     python3 generate_audit_dash.py --base-url https://raw.githubusercontent.com/VTSTech/AgentKthx/main/audit
+    python3 generate_audit_dash.py --no-endpoints
 
 Stdlib only. Python 3.8+.
 """
@@ -673,6 +689,206 @@ def generate_html(findings, closures, meta):
     html = html.replace("__CLOSURES__", json.dumps(closures, ensure_ascii=False))
     return html
 
+# ─── API endpoints (static JSON) ──────────────────────────────────────────
+#
+# The dashboard is a self-contained static site, so "API endpoints" are
+# static JSON files written into <output-dir>/api/findings/ alongside
+# index.html. They expose the same parsed register the HTML dashboard
+# renders, so external clients (the preview panel, CI, curl) can consume
+# the findings without scraping the page.
+#
+# Layout (relative to the dashboard output dir):
+#   api/findings.json            all findings + totals
+#   api/findings/open.json        open findings only
+#   api/findings/closed.json      closed findings only
+#   api/findings/wontfix.json     wontfix findings only
+#   api/findings/summary.json     counts rollup + closures timeline
+#   api/findings/reconcile.json   prose-vs-table drift check
+#   api/findings/<ID>.json        per-finding detail (one per finding)
+#
+# Each list endpoint shares one envelope shape: callers can switch between
+# /open, /closed, /wontfix, /all with a single client implementation.
+
+def _endpoint_envelope(meta, findings, closures, generated_at):
+    """Common envelope for list endpoints — counts across the FULL register."""
+    by_status = {"OPEN": 0, "CLOSED": 0, "WONTFIX": 0}
+    by_severity = {}
+    by_category = {}
+    for f in findings:
+        by_status[f["status"]] = by_status.get(f["status"], 0) + 1
+        by_severity[f["severity"]] = by_severity.get(f["severity"], 0) + 1
+        cat = f["category"]
+        by_category[cat] = by_category.get(cat, 0) + 1
+    return {
+        "meta": meta,
+        "generatedAt": generated_at,
+        "total": len(findings),
+        "open": by_status.get("OPEN", 0),
+        "closed": by_status.get("CLOSED", 0),
+        "wontfix": by_status.get("WONTFIX", 0),
+        "high": by_severity.get("High", 0),
+        "medium": by_severity.get("Medium", 0),
+        "low": by_severity.get("Low", 0),
+        "byStatus": by_status,
+        "bySeverity": by_severity,
+        "byCategory": by_category,
+    }
+
+
+def _summary_payload(meta, findings, closures, generated_at):
+    """Counts-only rollup with per-category / per-severity breakdowns + closures timeline."""
+    by_category = {}
+    by_severity = {}
+    by_status = {"OPEN": 0, "CLOSED": 0, "WONTFIX": 0}
+    for f in findings:
+        st = f["status"]
+        by_status[st] = by_status.get(st, 0) + 1
+        cat = f["category"]
+        if cat not in by_category:
+            by_category[cat] = {"total": 0, "open": 0, "closed": 0, "wontfix": 0}
+        by_category[cat]["total"] += 1
+        by_category[cat][st.lower()] += 1
+        sev = f["severity"]
+        if sev not in by_severity:
+            by_severity[sev] = {"total": 0, "open": 0, "closed": 0, "wontfix": 0}
+        by_severity[sev]["total"] += 1
+        by_severity[sev][st.lower()] += 1
+    closed = by_status.get("CLOSED", 0)
+    return {
+        "meta": meta,
+        "generatedAt": generated_at,
+        "totals": {
+            "total": len(findings),
+            "open": by_status.get("OPEN", 0),
+            "closed": closed,
+            "wontfix": by_status.get("WONTFIX", 0),
+            "closureRate": round(closed / len(findings) * 100) if findings else 0,
+        },
+        "byCategory": by_category,
+        "bySeverity": by_severity,
+        "byStatus": by_status,
+        "closures": closures,
+    }
+
+
+def _reconcile_payload(meta, findings, audit_md, generated_at):
+    """Compare the audit.md header prose counts vs the parsed table counts.
+
+    Flags drift so a stale hand-written prose summary can't silently mislead.
+    The table is always the source of truth — it's what this very script
+    parses to render the dashboard.
+    """
+    header = audit_md[:4096]
+    closed_m = re.search(r"(\d+)\s+CLOSED\b", header)
+    open_m = re.search(r"(\d+)\s+OPEN\b", header)
+    wontfix_m = re.search(r"(\d+)\s+WONTFIX\b", header)
+    total_m = re.search(r"(\d+)\s+Findings\b", header)
+    prose = {
+        "closed": int(closed_m.group(1)) if closed_m else None,
+        "open": int(open_m.group(1)) if open_m else None,
+        "wontfix": int(wontfix_m.group(1)) if wontfix_m else None,
+        "total": int(total_m.group(1)) if total_m else None,
+        "raw": {
+            "closed": closed_m.group(0) if closed_m else None,
+            "open": open_m.group(0) if open_m else None,
+            "wontfix": wontfix_m.group(0) if wontfix_m else None,
+            "total": total_m.group(0) if total_m else None,
+        },
+    }
+    table = {
+        "closed": sum(1 for f in findings if f["status"] == "CLOSED"),
+        "open": sum(1 for f in findings if f["status"] == "OPEN"),
+        "wontfix": sum(1 for f in findings if f["status"] == "WONTFIX"),
+        "total": len(findings),
+    }
+    drift = {
+        k: (None if prose[k] is None else prose[k] - table[k])
+        for k in ("closed", "open", "wontfix", "total")
+    }
+    matches = all(
+        (prose[k] is None or prose[k] == table[k])
+        for k in ("closed", "open", "wontfix", "total")
+    )
+    closed_findings = sorted(
+        [{"id": f["id"], "closedIn": f["closedIn"]} for f in findings if f["status"] == "CLOSED"],
+        key=lambda x: x["closedIn"] or "",
+    )
+    return {
+        "meta": meta,
+        "generatedAt": generated_at,
+        "prose": prose,
+        "table": table,
+        "drift": drift,
+        "matches": matches,
+        "closedFindings": closed_findings,
+        "note": (
+            "Prose header matches the parsed table."
+            if matches
+            else "Prose header has drifted from the parsed table — the table is the source of truth (it's what generate_audit_dash.py reads). Update the prose."
+        ),
+    }
+
+
+def write_endpoints(out_dir, meta, findings, closures, audit_md, generated_at):
+    """Write static JSON endpoint files alongside index.html.
+
+    Returns the list of file paths written.
+    """
+    api_dir = os.path.join(out_dir, "api", "findings")
+    os.makedirs(api_dir, exist_ok=True)
+
+    written = []
+
+    # list endpoints — open / closed / wontfix / all
+    for status, slug in [
+        ("OPEN", "open"),
+        ("CLOSED", "closed"),
+        ("WONTFIX", "wontfix"),
+        (None, "findings"),  # all
+    ]:
+        subset = findings if status is None else [f for f in findings if f["status"] == status]
+        payload = _endpoint_envelope(meta, findings, closures, generated_at)
+        payload["filtered"] = len(subset)
+        payload["count"] = len(subset)
+        payload["status"] = slug
+        payload["findings"] = subset
+        path = os.path.join(api_dir, f"{slug}.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+        written.append(path)
+
+    # summary
+    path = os.path.join(api_dir, "summary.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(_summary_payload(meta, findings, closures, generated_at), f, ensure_ascii=False, indent=2)
+    written.append(path)
+
+    # reconcile
+    path = os.path.join(api_dir, "reconcile.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(_reconcile_payload(meta, findings, audit_md, generated_at), f, ensure_ascii=False, indent=2)
+    written.append(path)
+
+    # per-finding detail files (siblings = same category, for navigation)
+    for f in findings:
+        siblings = [
+            {"id": g["id"], "title": g["title"], "status": g["status"]}
+            for g in findings
+            if g["category"] == f["category"] and g["id"] != f["id"]
+        ]
+        payload = {
+            "meta": meta,
+            "generatedAt": generated_at,
+            "finding": f,
+            "siblings": siblings,
+        }
+        path = os.path.join(api_dir, f"{f['id']}.json")
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, ensure_ascii=False, indent=2)
+        written.append(path)
+
+    return written
+
 # ─── main ──────────────────────────────────────────────────────────────────
 
 def main():
@@ -685,6 +901,7 @@ Examples:
   python3 generate_audit_dash.py -o dash.html             # custom output path
   python3 generate_audit_dash.py --audit a.md --brief b.md  # use local files
   python3 generate_audit_dash.py --base-url https://raw.githubusercontent.com/VTSTech/AgentKthx/main/audit
+  python3 generate_audit_dash.py --no-endpoints           # HTML only, skip the JSON API files
         """.strip(),
     )
     ap.add_argument("-o", "--output", default="audit-dash/index.html",
@@ -693,6 +910,8 @@ Examples:
     ap.add_argument("--brief", help="local brief.md path (overrides --base-url)")
     ap.add_argument("--base-url", default=DEFAULT_BASE,
                     help=f"base URL for audit.md + brief.md (default: {DEFAULT_BASE})")
+    ap.add_argument("--no-endpoints", action="store_true",
+                    help="skip writing the JSON API endpoint files (default: write them)")
     args = ap.parse_args()
 
     audit_md, brief_md = get_audit_brief(args)
@@ -718,6 +937,19 @@ Examples:
 
     size = os.path.getsize(args.output)
     print(f"[gen] wrote {args.output} ({size:,} bytes, {len(findings)} findings)", file=sys.stderr)
+
+    # JSON API endpoints — static files written into <out_dir>/api/findings/
+    # so the dashboard host serves them at /audit-dash/api/findings/...
+    if not args.no_endpoints:
+        ep_dir = out_dir if out_dir else "."
+        generated_at = datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
+        written = write_endpoints(ep_dir, meta, findings, closures, audit_md, generated_at)
+        api_root = os.path.join(ep_dir, "api", "findings")
+        print(f"[gen] wrote {len(written)} endpoint JSON files into {api_root}/ "
+              f"(findings.json, open.json, closed.json, wontfix.json, summary.json, "
+              f"reconcile.json, +{len(findings)} per-finding files)", file=sys.stderr)
+    else:
+        print("[gen] --no-endpoints: skipped JSON API files", file=sys.stderr)
 
 if __name__ == "__main__":
     main()
