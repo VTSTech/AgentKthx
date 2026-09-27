@@ -600,6 +600,13 @@ class StreamingMixin:
             delta is printed. Subsequent reasoning deltas append to the panel."""
             nonlocal _reasoning_panel_started
             if not _reasoning_panel_started:
+                # Some models (e.g. glm-5.3-flash-free via OrcaRouter) put
+                # the actual response content inside reasoning_content instead
+                # of content. If no content delta ever arrives, the
+                # "AgentKthx:" prefix would never be emitted. Fix: emit the
+                # prefix before the reasoning panel so the user sees it even
+                # if the model's entire response is in reasoning_content.
+                _emit_prefix_once()
                 sys.stdout.write(f"\033[90m  reasoning:\033[0m\n")
                 sys.stdout.flush()
                 _reasoning_panel_started = True
