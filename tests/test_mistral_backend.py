@@ -12,10 +12,12 @@ Written by VTSTech — https://www.vts-tech.org
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import sys
 import unittest
+import urllib.error
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -710,6 +712,223 @@ class TestParseMistralResponse(unittest.TestCase):
         }
         out = MistralBackend._parse_mistral_response(raw)
         assert out["finish_reason"] == "model_length"
+
+
+# ---------------------------------------------------------------------------
+# _iter_sse_lines — streaming transport (R07.09.1 hotfix)
+# ---------------------------------------------------------------------------
+
+class TestIterSseLines(unittest.TestCase):
+    """The streaming transport hook required by OpenAICompatibleBackend.
+
+    R07.09.0 shipped without this method — the agent loop's streaming
+    path crashed with ``NotImplementedError: MistralBackend must
+    implement _iter_sse_lines()``. These tests pin the contract.
+    """
+
+    def test_method_exists(self):
+        """The abstract hook MUST be implemented (not inherited from base
+        which raises NotImplementedError)."""
+        backend = _make_backend()
+        # Method must be defined on MistralBackend, not just inherited
+        assert "_iter_sse_lines" in MistralBackend.__dict__, (
+            "MistralBackend must define its own _iter_sse_lines — "
+            "the inherited OpenAICompatibleBackend._iter_sse_lines raises "
+            "NotImplementedError"
+        )
+        assert callable(getattr(backend, "_iter_sse_lines"))
+
+    def test_yields_raw_sse_line_bytes(self):
+        """On HTTP 200, _iter_sse_lines yields raw SSE line bytes —
+        the base class's generate_completions_stream() handles JSON
+        parsing + [DONE] detection."""
+        backend = _make_backend()
+
+        # Fake SSE response body — three chunks then [DONE]
+        sse_lines = [
+            b'data: {"choices":[{"delta":{"content":"Hello"}}]}\n',
+            b'data: {"choices":[{"delta":{"content":", world"}}]}\n',
+            b'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n',
+            b'data: [DONE]\n',
+        ]
+        fake_response = MagicMock()
+        fake_response.__iter__ = MagicMock(return_value=iter(sse_lines))
+        fake_response.close = MagicMock()
+
+        with patch("urllib.request.urlopen", return_value=fake_response):
+            result = list(backend._iter_sse_lines(
+                url="https://api.mistral.ai/v1/chat/completions",
+                body={"model": "mistral-small-latest", "messages": []},
+                headers={"Authorization": "Bearer x"},
+            ))
+
+        # Must yield the raw bytes — NOT pre-parsed dicts (the base class
+        # does the parsing)
+        assert result == sse_lines
+        # Response must be closed (ROB-06)
+        fake_response.close.assert_called_once()
+
+    def test_401_raises_authentication_error(self):
+        """HTTP 401 must surface as a clear authentication RuntimeError,
+        not the bare NotImplementedError that broke R07.09.0."""
+        backend = _make_backend()
+        fake_401 = urllib.error.HTTPError(
+            url="https://api.mistral.ai/v1/chat/completions",
+            code=401,
+            msg="Unauthorized",
+            hdrs=MagicMock(),
+            fp=io.BytesIO(b'{"object":"error","message":"Invalid API key"}'),
+        )
+
+        with patch("urllib.request.urlopen", side_effect=fake_401):
+            with pytest.raises(RuntimeError, match="MISTRAL_API_KEY"):
+                list(backend._iter_sse_lines(
+                    url="https://api.mistral.ai/v1/chat/completions",
+                    body={"model": "mistral-small-latest", "messages": []},
+                    headers={"Authorization": "Bearer bad"},
+                ))
+
+    def test_429_retries_with_backoff(self):
+        """429 rate-limit must honor Retry-After (or fall back to
+        exponential backoff) and retry up to max_retries times."""
+        backend = _make_backend()
+        # Set a short backoff so the test doesn't take 60s
+        backend._BACKOFF_BASE = 0.01
+        backend._BACKOFF_CAP = 0.05
+
+        fake_429 = urllib.error.HTTPError(
+            url="https://api.mistral.ai/v1/chat/completions",
+            code=429,
+            msg="Rate limited",
+            hdrs=MagicMock(),
+            fp=io.BytesIO(b'{"object":"error","message":"Rate limit exceeded","code":"1300"}'),
+        )
+        fake_429.headers = {"Retry-After": "0"}  # honor immediately
+
+        fake_response = MagicMock()
+        fake_response.__iter__ = MagicMock(return_value=iter([
+            b'data: {"choices":[{"delta":{"content":"ok"}}]}\n',
+            b'data: [DONE]\n',
+        ]))
+        fake_response.close = MagicMock()
+
+        with patch("urllib.request.urlopen",
+                   side_effect=[fake_429, fake_response]) as m:
+            result = list(backend._iter_sse_lines(
+                url="https://api.mistral.ai/v1/chat/completions",
+                body={"model": "mistral-small-latest", "messages": []},
+                headers={"Authorization": "Bearer x"},
+            ))
+
+        # Retried at least twice (first 429, then success)
+        assert m.call_count == 2
+        # Got the success chunk
+        assert b"Hello" in b"".join(result) or b"ok" in b"".join(result)
+
+    def test_context_length_400_triggers_recovery(self):
+        """HTTP 400 with context-length message must invoke the shared
+        _handle_context_length_400 helper and retry with reduced max_tokens."""
+        backend = _make_backend()
+
+        # First call returns 400 with context-length message
+        ctx_msg = (
+            b'{"object":"error","message":"This model\'s maximum context '
+            b'length is 262144 tokens. However, your messages resulted in '
+            b'300000 tokens of text input."}'
+        )
+        fake_400 = urllib.error.HTTPError(
+            url="https://api.mistral.ai/v1/chat/completions",
+            code=400,
+            msg="Bad Request",
+            hdrs=MagicMock(),
+            fp=io.BytesIO(ctx_msg),
+        )
+
+        # Second call succeeds
+        fake_response = MagicMock()
+        fake_response.__iter__ = MagicMock(return_value=iter([
+            b'data: {"choices":[{"delta":{"content":"ok"}}]}\n',
+            b'data: [DONE]\n',
+        ]))
+        fake_response.close = MagicMock()
+
+        body = {
+            "model": "mistral-small-latest",
+            "messages": [],
+            "max_tokens": 8192,
+        }
+
+        with patch("urllib.request.urlopen",
+                   side_effect=[fake_400, fake_response]):
+            list(backend._iter_sse_lines(
+                url="https://api.mistral.ai/v1/chat/completions",
+                body=body,
+                headers={"Authorization": "Bearer x"},
+            ))
+
+        # The shared _handle_context_length_400 helper should have
+        # reduced the max_tokens in the body
+        assert body["max_tokens"] < 8192, (
+            "ARCH-03 context-length recovery should have reduced max_tokens"
+        )
+
+    def test_4xx_non_retryable_raises_immediately(self):
+        """HTTP 400/401/403/404/422 must NOT retry — surface as RuntimeError
+        immediately so the agent loop's classifier can act on them."""
+        backend = _make_backend()
+        backend._BACKOFF_BASE = 0.01  # in case anything tries to sleep
+
+        fake_422 = urllib.error.HTTPError(
+            url="https://api.mistral.ai/v1/chat/completions",
+            code=422,
+            msg="Unprocessable Entity",
+            hdrs=MagicMock(),
+            fp=io.BytesIO(
+                b'{"object":"error","message":"unknown field: top_k",'
+                b'"type":"invalid_request_error"}'
+            ),
+        )
+
+        with patch("urllib.request.urlopen", side_effect=fake_422) as m:
+            with pytest.raises(RuntimeError, match="unknown field: top_k"):
+                list(backend._iter_sse_lines(
+                    url="https://api.mistral.ai/v1/chat/completions",
+                    body={"model": "mistral-small-latest", "messages": []},
+                    headers={"Authorization": "Bearer x"},
+                ))
+        # Only ONE call — no retry on 422
+        assert m.call_count == 1
+
+    def test_mistral_error_envelope_parsed_for_message(self):
+        """The 429/5xx error message must be extracted from Mistral's
+        {\"object\":\"error\",...} envelope, not just dumped as raw bytes."""
+        backend = _make_backend()
+        backend._BACKOFF_BASE = 0.01
+        backend._BACKOFF_CAP = 0.05
+        backend._MAX_RETRIES = 0  # don't retry — surface immediately
+
+        fake_429 = urllib.error.HTTPError(
+            url="https://api.mistral.ai/v1/chat/completions",
+            code=429,
+            msg="Rate limited",
+            hdrs=MagicMock(),
+            fp=io.BytesIO(
+                b'{"object":"error","message":"Rate limit exceeded",'
+                b'"type":"rate_limited","code":"1300","raw_status_code":429}'
+            ),
+        )
+        fake_429.headers = {}
+
+        with patch("urllib.request.urlopen", side_effect=fake_429):
+            with pytest.raises(RuntimeError) as exc_info:
+                list(backend._iter_sse_lines(
+                    url="https://api.mistral.ai/v1/chat/completions",
+                    body={"model": "mistral-small-latest", "messages": []},
+                    headers={"Authorization": "Bearer x"},
+                ))
+        # Must surface the upstream message, not raw bytes
+        assert "Rate limit exceeded" in str(exc_info.value)
+        assert "1300" in str(exc_info.value) or "429" in str(exc_info.value)
 
 
 # ---------------------------------------------------------------------------
