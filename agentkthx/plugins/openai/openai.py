@@ -109,7 +109,7 @@ from agentkthx.core.types import ApiMode, BackendType, ToolSupportLevel
 # Static model catalog — fallback when /v1/models is unreachable
 # ─────────────────────────────────────────────────────────────────────────────
 # Sept 2026 OpenAI lineup verified via https://platform.openai.com/docs/pricing
-# (captured Sept 26 2026 — see docs/OPENAI_API_TECHNICAL_REFERENCE.md §Model
+# (captured Sept 26 2026 — see docs/api/OPENAI_API_TECHNICAL_REFERENCE.md §Model
 # Family Specifications for the full pricing snapshot).
 #
 # Pricing is USD per 1M tokens, "standard" service tier (long-context
@@ -540,7 +540,7 @@ OPENAI_MODELS: dict[str, dict] = {
 #   - gpt-4o-mini, gpt-4.1-mini: legacy but very cheap
 #   - gpt-realtime-2.1-mini: realtime/voice mini
 #   - gpt-4o-mini-transcribe, gpt-transcribe: transcription
-# See docs/OPENAI_API_TECHNICAL_REFERENCE.md §Free Tier & Trial Credits.
+# See docs/api/OPENAI_API_TECHNICAL_REFERENCE.md §Free Tier & Trial Credits.
 # R07.03: OPENAI_FREE_MODEL_WHITELIST is EMPTY.
 # OpenAI has NO genuinely free ($0/token) models — every model has
 # per-token pricing that consumes the $1 trial credit and $10/mo API

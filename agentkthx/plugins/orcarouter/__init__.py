@@ -7,7 +7,7 @@ ZAI, Kling, BytePlus). 200+ models via OpenAI Chat-Completions API.
 Free tier has 4 genuinely $0/token models; paid tier is the upstream
 provider's per-token rate with no markup.
 
-See docs/ORCAROUTER_API_TECHNICAL_REFERENCE.md for full API details.
+See docs/api/ORCAROUTER_API_TECHNICAL_REFERENCE.md for full API details.
 
 Written by VTSTech — https://www.vts-tech.org
 """

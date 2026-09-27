@@ -82,7 +82,7 @@ from agentkthx.config import (
 # Any other model raises a clear error directing the user to set
 # ORCAROUTER_FREE_ONLY=false.
 #
-# Source: docs/ORCAROUTER_API_TECHNICAL_REFERENCE.md §Free Tier Behavior
+# Source: docs/api/ORCAROUTER_API_TECHNICAL_REFERENCE.md §Free Tier Behavior
 # Last verified: 2026-09-26
 ORCAROUTER_FREE_MODEL_WHITELIST: frozenset[str] = frozenset({
     "deepseek/deepseek-v4-flash-free",
@@ -135,7 +135,7 @@ _ORCA_NAMED_ROUTERS: frozenset[str] = frozenset({
 # ``metadata.buy_credits_url`` clearly and terminate.
 #
 # Sources:
-#   - docs/ORCAROUTER_API_TECHNICAL_REFERENCE.md §Free-tier error reasons
+#   - docs/api/ORCAROUTER_API_TECHNICAL_REFERENCE.md §Free-tier error reasons
 #   - https://docs.orcarouter.ai/routing/free-models (free-tier access requirements)
 _FREE_RATE_RETRYABLE_REASONS = (
     "err_free_rate",  # per-minute or per-UTC-day rate window full

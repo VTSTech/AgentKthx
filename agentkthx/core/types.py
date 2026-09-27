@@ -76,7 +76,7 @@ class BackendType(Enum):
     # R07.05: OrcaRouter — zero-markup gateway to 11 upstream providers
     # (OpenAI, Anthropic, Google, DeepSeek, Grok, Qwen, Kimi, MiniMax,
     # ZAI, Kling, BytePlus). 200+ models via OpenAI Chat-Completions API.
-    # See agentkthx/plugins/orcarouter/ and docs/ORCAROUTER_API_TECHNICAL_REFERENCE.md.
+    # See agentkthx/plugins/orcarouter/ and docs/api/ORCAROUTER_API_TECHNICAL_REFERENCE.md.
     ORCAROUTER = "orcarouter"
 
 

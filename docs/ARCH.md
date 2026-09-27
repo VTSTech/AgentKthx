@@ -180,9 +180,11 @@ agentkthx/
 │   ├── PLUGIN_SPEC.md        # Plugin system specification (R05.0)
 │   ├── TESTS.md              # Benchmark results and testing guide
 │   ├── JEV_API_MODE.md       # JEV (System-One) API mode reference
-│   ├── ZAI_API_TECHNICAL_REFERENCE.md  # ZAI API reference
-│   ├── OPENROUTER_API_TECHNICAL_REFERENCE.md  # OpenRouter API reference
-│   ├── GEMINI_API_TECHNICAL_REFERENCE.md  # Gemini API reference (R06.56)
+│   ├── api/                  # API Technical References (one per provider)
+│   │   ├── ZAI_API_TECHNICAL_REFERENCE.md  # ZAI API reference
+│   │   ├── OPENROUTER_API_TECHNICAL_REFERENCE.md  # OpenRouter API reference
+│   │   ├── GEMINI_API_TECHNICAL_REFERENCE.md  # Gemini API reference (R06.56)
+│   │   └── (plus Hugging Face, OpenAI, Mistral, Pollinations, OrcaRouter)
 │   └── R07.00-MODULARIZATION-PLAN.md     # Modularization plan (executed in R07.00)
 │
 ├── audit/                    # Audit materials (R06.41)
@@ -664,13 +666,13 @@ Key features:
 
 Configuration env vars: `GEMINI_API_KEY` (or `GOOGLE_API_KEY` fallback), `GEMINI_BASE_URL`, `GEMINI_DEFAULT_MODEL`, `GEMINI_FREE_ONLY`, `GEMINI_THINKING_LEVEL`, `GEMINI_SERVICE_TIER`.
 
-See `docs/GEMINI_API_TECHNICAL_REFERENCE.md` for the 1553-line technical reference covering all endpoints, error codes, rate limits, and implementation details.
+See `docs/api/GEMINI_API_TECHNICAL_REFERENCE.md` for the 1553-line technical reference covering all endpoints, error codes, rate limits, and implementation details.
 
 ---
 
 ### Hugging Face Backend (`plugins/huggingface/`) (R07.02)
 
-The Hugging Face backend is a plugin that provides `HuggingFaceBackend`, inheriting from `OpenAICompatibleBackend` (the shared base class extracted in R06.55). It connects to the Hugging Face Inference Router at `https://router.huggingface.co/v1` — a unified proxy that exposes 100+ open-weight models (Llama, Qwen, DeepSeek, Mistral, Gemma, GLM, Phi, Command-R, gpt-oss) served by ~18 partner providers (Together, Groq, Novita, DeepInfra, Fireworks, Cerebras, Replicate, Fal AI, Featherless, Baseten, Cohere, Nscale, OVHcloud, Public AI, Scaleway, WaveSpeedAI, Z.ai, HF Inference) through a single OpenAI-compatible `/chat/completions` endpoint. This is the third cloud-provider backend (after ZAI and OpenRouter) and the first to ship with a dedicated API Technical Reference written **before** the implementation, as the blueprint (see `docs/HUGGINGFACE_API_TECHNICAL_REFERENCE.md` committed in R07.01).
+The Hugging Face backend is a plugin that provides `HuggingFaceBackend`, inheriting from `OpenAICompatibleBackend` (the shared base class extracted in R06.55). It connects to the Hugging Face Inference Router at `https://router.huggingface.co/v1` — a unified proxy that exposes 100+ open-weight models (Llama, Qwen, DeepSeek, Mistral, Gemma, GLM, Phi, Command-R, gpt-oss) served by ~18 partner providers (Together, Groq, Novita, DeepInfra, Fireworks, Cerebras, Replicate, Fal AI, Featherless, Baseten, Cohere, Nscale, OVHcloud, Public AI, Scaleway, WaveSpeedAI, Z.ai, HF Inference) through a single OpenAI-compatible `/chat/completions` endpoint. This is the third cloud-provider backend (after ZAI and OpenRouter) and the first to ship with a dedicated API Technical Reference written **before** the implementation, as the blueprint (see `docs/api/HUGGINGFACE_API_TECHNICAL_REFERENCE.md` committed in R07.01).
 
 Key features:
 - **154-model live catalog** from `/v1/models` (with 31-model static catalog `HF_MODELS` as fallback when the API is unreachable)
@@ -690,7 +692,7 @@ Key features:
 
 Configuration env vars: `HF_TOKEN` (or `HUGGING_FACE_HUB_TOKEN` fallback), `HF_BASE_URL`, `HF_BASE_URL_LEGACY` (documented but not used by v0.1), `HF_DEFAULT_MODEL`, `HF_FREE_ONLY`, `HF_FREE_FALLBACK_MODEL`, `HF_PROVIDER_POLICY`, `HF_MAX_429_RETRIES`.
 
-See `docs/HUGGINGFACE_API_TECHNICAL_REFERENCE.md` for the 1019-line technical reference covering all endpoints, error codes, rate limits, and implementation details. The parallel `docs/OPENAI_API_TECHNICAL_REFERENCE.md` (1677 lines, also committed in R07.01) awaits the planned R07.0x OpenAI plugin — same blueprint pattern.
+See `docs/api/HUGGINGFACE_API_TECHNICAL_REFERENCE.md` for the 1019-line technical reference covering all endpoints, error codes, rate limits, and implementation details. The parallel `docs/api/OPENAI_API_TECHNICAL_REFERENCE.md` (1677 lines, also committed in R07.01) awaits the planned R07.0x OpenAI plugin — same blueprint pattern.
 
 ```bash
 # Default routing (fastest)

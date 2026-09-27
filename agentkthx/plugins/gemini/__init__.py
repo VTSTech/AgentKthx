@@ -7,7 +7,7 @@ Google AI Studio / Gemini API via OpenAI-compatible endpoint
 Provides access to Gemini 3.x and 2.5 family models with native
 function calling, streaming, multimodal input, and the thinking /
 reasoning configuration described in
-docs/GEMINI_API_TECHNICAL_REFERENCE.md.
+docs/api/GEMINI_API_TECHNICAL_REFERENCE.md.
 
 Written by VTSTech — https://www.vts-tech.org
 """

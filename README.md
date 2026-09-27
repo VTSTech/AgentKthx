@@ -38,11 +38,7 @@ Inspired by the architecture of OpenClaw, rebuilt from scratch for local-first o
 | [TESTS.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/TESTS.md) | Benchmark results, model recommendations, and testing guide |
 | [PLUGIN_SPEC_v0.2.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/PLUGIN_SPEC_v0.2.md) | Plugin spec v0.2 — lifecycle hooks, plugin tools API, external plugin roots, dual-form manifests, migration guide from v0.1 |
 | [JEV_API_MODE.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/JEV_API_MODE.md) | JEV API mode — System-One decisions via any free LLM (Jev-compatible shape) |
-| [ZAI_API_TECHNICAL_REFERENCE.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/ZAI_API_TECHNICAL_REFERENCE.md) | ZAI API technical reference (auth, endpoints, parameters, error codes) |
-| [OPENROUTER_API_TECHNICAL_REFERENCE.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/OPENROUTER_API_TECHNICAL_REFERENCE.md) | OpenRouter API technical reference (sampling params, model catalog, provider routing, rate limits) |
-| [GEMINI_API_TECHNICAL_REFERENCE.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/GEMINI_API_TECHNICAL_REFERENCE.md) | Gemini API technical reference (OpenAI-compat endpoint, thinking config, free-tier limits, Gemma `<thought>` tag parser, 71-model catalog) |
-| [HUGGINGFACE_API_TECHNICAL_REFERENCE.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/HUGGINGFACE_API_TECHNICAL_REFERENCE.md) | Hugging Face Inference Router technical reference (router.huggingface.co/v1, 18 partner providers, :fastest/:cheapest/:preferred routing suffixes, 31-model free-tier whitelist, HF_FREE_ONLY enforcement, HTTP 402 credit-exhaustion fallback) |
-| [OPENAI_API_TECHNICAL_REFERENCE.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/OPENAI_API_TECHNICAL_REFERENCE.md) | OpenAI API technical reference (Chat Completions + Responses API, GPT-6/GPT-5.6 Daybreak/gpt-realtime/gpt-image/gpt-transcribe lineup, service tiers, reasoning_effort enum, OPENAI_FREE_MODEL_WHITELIST) — blueprint for the planned R07.0x OpenAI plugin |
+| [docs/api/](https://github.com/VTSTech/AgentKthx/blob/main/docs/api/) | **API Technical References** — one deep-dive per provider, all in one folder: ZAI, OpenRouter, Gemini, Hugging Face Router, OpenAI, Mistral, Pollinations, OrcaRouter (auth & endpoints, request/response schemas, model catalogs, function calling, streaming, error codes & recovery, rate limits, free-tier behavior, AgentKthx `Backend` + `plugin.json` blueprints, troubleshooting matrices) |
 | [CREDITS.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/CREDITS.md) | Acknowledges every project, inspiration, API, model creator, and specification that makes AgentKthx possible |
 
 ## Features
@@ -426,7 +422,7 @@ agentkthx models --backend gemini
 GEMINI_FREE_ONLY=1 agentkthx models --backend gemini
 ```
 
-See [docs/GEMINI_API_TECHNICAL_REFERENCE.md](docs/GEMINI_API_TECHNICAL_REFERENCE.md) for the full 11-section reference (auth, models, function calling, streaming, error codes, rate limits, multimodal, thinking config, integration notes, troubleshooting, 71-model catalog with free-tier data transcribed from Google AI Studio).
+See [docs/api/GEMINI_API_TECHNICAL_REFERENCE.md](docs/api/GEMINI_API_TECHNICAL_REFERENCE.md) for the full 11-section reference (auth, models, function calling, streaming, error codes, rate limits, multimodal, thinking config, integration notes, troubleshooting, 71-model catalog with free-tier data transcribed from Google AI Studio).
 
 ### Hugging Face Configuration
 
@@ -487,7 +483,7 @@ HF_FREE_ONLY=1 agentkthx models --backend hf
 agentkthx chat --backend hf -m "meta-llama/Llama-3.3-70B-Instruct:groq"
 ```
 
-See [docs/HUGGINGFACE_API_TECHNICAL_REFERENCE.md](docs/HUGGINGFACE_API_TECHNICAL_REFERENCE.md) for the full 14-section reference (auth, request/response, sampling params, model catalog, function calling, streaming, provider routing, error codes, rate limits, free-tier behavior, multimodal, implementation notes, proposed plugin.json, troubleshooting matrix).
+See [docs/api/HUGGINGFACE_API_TECHNICAL_REFERENCE.md](docs/api/HUGGINGFACE_API_TECHNICAL_REFERENCE.md) for the full 14-section reference (auth, request/response, sampling params, model catalog, function calling, streaming, provider routing, error codes, rate limits, free-tier behavior, multimodal, implementation notes, proposed plugin.json, troubleshooting matrix).
 
 ### Chat-Completions Streaming
 

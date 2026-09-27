@@ -51,7 +51,7 @@ Thinking configuration notes:
   Multi-turn agent loops will re-derive reasoning from scratch each turn,
   which costs ~2-3x more reasoning tokens. Track this for v0.2.
 
-See docs/GEMINI_API_TECHNICAL_REFERENCE.md for the full spec.
+See docs/api/GEMINI_API_TECHNICAL_REFERENCE.md for the full spec.
 
 Written by VTSTech — https://www.vts-tech.org
 """

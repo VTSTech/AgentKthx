@@ -81,7 +81,7 @@ OPENROUTER_FREE_ONLY = os.environ.get("OPENROUTER_FREE_ONLY", "").lower() in ("1
 # Anthropic, Google, DeepSeek, Grok, Qwen, Kimi, MiniMax, ZAI, Kling,
 # BytePlus). Free tier has 4 genuinely $0/token models; paid tier is
 # the upstream provider's per-token rate with no markup. See
-# docs/ORCAROUTER_API_TECHNICAL_REFERENCE.md for full details.
+# docs/api/ORCAROUTER_API_TECHNICAL_REFERENCE.md for full details.
 ORCAROUTER_BASE_URL = os.environ.get("ORCAROUTER_BASE_URL", "https://api.orcarouter.ai/v1")
 ORCAROUTER_API_KEY = os.environ.get("ORCAROUTER_API_KEY", "")
 # Default to the "auto" named router — picks the cheapest live chat
