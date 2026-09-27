@@ -4,12 +4,12 @@
 
 **Repository:** https://github.com/VTSTech/AgentKthx  
 **Author:** VTSTech | **License:** MIT | **Date:** 2026-09-28  
-**Commit:** (working tree post-R07.10) | **Test Suite:** 1658 passed / 13 skipped  
+**Commit:** (working tree post-R07.10) | **Test Suite:** 1660 passed / 13 skipped  
 56 Open Findings | 7 Categories | SEC, ROB, MAINT, PERF, FEAT, ARCH, TEST  
 Severity: 0 High | 22 Medium | 34 Low  
 56 OPEN (CLOSED + WONTFIX archived in deltas.md — generate_audit_dash.py merges both for the dashboard)
 
-> **R07.10 delta (development release for GitHub):** Three fixes bundled: (1) `web_search` UA fix — DuckDuckGo now blocks non-browser UAs; tool now spoofs Firefox UA + sends Accept headers, also renamed from `web-search` to `web_search` (matching Python convention). (2) OpenRouter `openrouter/free` named router added to free whitelist — was previously filtered out by `:free`-suffix-only check. (3) OrcaRouter `orcarouter/free` confirmed already in whitelist — no change needed. +4 new tests. Suite 1654 → 1658 (+4). No audit findings closed; 6 R07.09 findings remain OPEN (per-finding detail sections still pending).
+> **R07.10 delta (development release for GitHub):** Four fixes bundled: (1) `web_search` UA fix — DuckDuckGo now blocks non-browser UAs; tool now spoofs Firefox UA + sends Accept headers, also renamed from `web-search` to `web_search` (matching Python convention). (2) OpenRouter `openrouter/free` named router added to free whitelist — was previously filtered out by `:free`-suffix-only check. (3) OrcaRouter `orcarouter/free` confirmed already in whitelist — no change needed. (4) **user-reported crash**: `agentkthx chat -m openrouter/free --backend openrouter` failed with `'<' not supported between instances of 'int' and 'NoneType'` — OpenRouter API returns `max_completion_tokens: null` for the router; `dict.get(k, default)` returns None (not the default) when the key exists with value None; the None propagated to `min(None, int)` in `_apply_max_tokens_cap`. Fixed by coercing None → 4096 at parse time. +6 new tests. Suite 1654 → 1660 (+6). No audit findings closed; 6 R07.09 findings remain OPEN (per-finding detail sections still pending).
 
 > **Split:** 42 CLOSED/WONTFIX findings moved to `deltas.md`. `generate_audit_dash.py` reads both `audit.md` (open) and `deltas.md` (closed/wontfix) and merges them into the full register. The dashboard shows all 98 findings (56 open + 42 closed/wontfix).
 

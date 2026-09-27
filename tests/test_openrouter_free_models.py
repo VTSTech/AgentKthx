@@ -348,3 +348,93 @@ class TestOpenRouterFreeRouter:
         # identifies them as paid.
         assert _is_free_model("openai/gpt-4o-mini") is False
         assert _is_free_model("anthropic/claude-3-haiku") is False
+
+
+class TestOpenRouterRouterNullMaxTokens:
+    """R07.10 fix: ``openrouter/free`` (the named Free Models Router) returns
+    ``max_completion_tokens: null`` in the API response — it's a router, not
+    a real model, so there's no fixed output cap.
+
+    Bug: ``dict.get("max_completion_tokens", 4096)`` returns ``None`` (not
+    the default 4096) when the key exists with value ``None``. The None
+    propagated through ``_parse_openrouter_model`` → ``_get_model_defaults``
+    → ``_apply_max_tokens_cap`` where ``min(None, context_length // 32)``
+    raised ``'<' not supported between instances of 'int' and 'NoneType'``.
+    The agent loop's resilience layer caught it but classified as terminal
+    (not retryable), surfacing as "Fatal API error — not retrying" with
+    an empty response.
+
+    Fix: ``_parse_openrouter_model`` now coerces explicit None → 4096 at
+    parse time. ``_get_model_defaults`` and ``_get_model_info`` use
+    ``details.get(k) or default`` instead of ``details.get(k, default)``
+    so a None value is treated the same as an absent key.
+    """
+
+    def test_router_with_null_max_completion_tokens_parses_to_4096(self, monkeypatch):
+        """``max_completion_tokens: null`` in API response must NOT propagate
+        as None — must be coerced to the 4096 default at parse time."""
+        b = _make_backend(monkeypatch)
+
+        # Mimic the actual OpenRouter API response for openrouter/free:
+        # the router has no fixed output cap, so the API returns null.
+        model_data = {
+            "id": "openrouter/free",
+            "context_length": 195000,
+            "top_provider": {
+                "max_completion_tokens": None,  # explicitly null
+            },
+            "pricing": {"prompt": "0", "completion": "0"},
+        }
+        parsed = b._parse_openrouter_model(model_data)
+        # The parsed max_completion_tokens must be 4096, NOT None — otherwise
+        # the downstream _apply_max_tokens_cap() call crashes with
+        # "'<' not supported between instances of 'int' and 'NoneType'"
+        assert parsed["details"]["max_completion_tokens"] == 4096, (
+            "max_completion_tokens must be coerced from None → 4096 at parse "
+            "time to prevent the min(None, int) crash in _apply_max_tokens_cap"
+        )
+
+    def test_get_model_defaults_does_not_crash_on_router(self, monkeypatch):
+        """``_get_model_defaults('openrouter/free')`` must return a valid
+        dict with int max_tokens — must NOT raise the '<' TypeError.
+
+        This is the regression test for the R07.10 user-facing crash:
+        ``agentkthx chat -m openrouter/free --backend openrouter`` failed
+        with ``[Resilience] Fatal API error — not retrying: '<' not
+        supported between instances of 'int' and 'NoneType'`` because
+        ``min(None, context_length // 32)`` was evaluated in
+        ``_apply_max_tokens_cap``.
+        """
+        b = _make_backend(monkeypatch)
+
+        # Populate the cache with a router entry that has null max_completion_tokens
+        # (simulates the live API response shape)
+        from agentkthx.plugins.openrouter.openrouter import OpenRouterBackend
+        OpenRouterBackend._model_cache = [
+            b._parse_openrouter_model({
+                "id": "openrouter/free",
+                "context_length": 195000,
+                "top_provider": {"max_completion_tokens": None},
+                "pricing": {"prompt": "0", "completion": "0"},
+            })
+        ]
+        OpenRouterBackend._cache_time = float("inf")  # never expire
+
+        try:
+            # Must NOT raise "TypeError: '<' not supported between instances
+            # of 'int' and 'NoneType'"
+            defaults = b._get_model_defaults("openrouter/free")
+        finally:
+            # Cleanup class-level cache so other tests aren't affected
+            OpenRouterBackend._model_cache = None
+            OpenRouterBackend._cache_time = 0
+
+        # The critical assertion: max_tokens must be an int, not None.
+        # If this is None, the next call to _apply_max_tokens_cap() will
+        # crash with the TypeError the user saw.
+        assert defaults["max_tokens"] is not None, (
+            "max_tokens must be coerced from None → int at parse time to "
+            "prevent the min(None, int) crash in _apply_max_tokens_cap"
+        )
+        assert isinstance(defaults["max_tokens"], int)
+        assert defaults["max_tokens"] > 0

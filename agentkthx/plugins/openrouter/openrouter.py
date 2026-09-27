@@ -387,7 +387,13 @@ class OpenRouterBackend(OpenAICompatibleBackend):
         
         # Get context length and max tokens from live API data
         context_length = model_data.get("context_length", 128000)
-        max_completion_tokens = model_data.get("top_provider", {}).get("max_completion_tokens", 4096)
+        # R07.10 fix: max_completion_tokens may be explicitly null in the
+        # API response for router models (e.g. ``openrouter/free`` — a
+        # named router that doesn't have a fixed output cap). ``.get(k, default)``
+        # returns None when the key exists with value None, NOT the default —
+        # so we have to coerce None → 4096 explicitly.
+        raw_max = model_data.get("top_provider", {}).get("max_completion_tokens", 4096)
+        max_completion_tokens = raw_max if raw_max is not None else 4096
         
         # Determine family from provider or model name
         provider = model_data.get("top_provider", {}).get("provider", model_data.get("id", "/").split("/")[0])
@@ -560,8 +566,8 @@ class OpenRouterBackend(OpenAICompatibleBackend):
                     # Return a dict compatible with the catalog format
                     details = cached_model["details"]
                     return {
-                        "max_tokens": details.get("max_completion_tokens", 4096),
-                        "context_length": details.get("context_length", 128000),
+                        "max_tokens": details.get("max_completion_tokens") or 4096,
+                        "context_length": details.get("context_length") or 128000,
                     }
         
         # Try to get from API (future enhancement)
@@ -614,8 +620,8 @@ class OpenRouterBackend(OpenAICompatibleBackend):
                     if os.environ.get("AGENTKTHX_DEBUG"):
                         print(f"  [OpenRouter Debug] Found exact match: '{cached_name}'")
                     details = cached_model["details"]
-                    max_tokens = details.get("max_completion_tokens", 4096)
-                    context_length = details.get("context_length", 128000)
+                    max_tokens = details.get("max_completion_tokens") or 4096
+                    context_length = details.get("context_length") or 128000
                     # ARCH-03 (R06.57): cap + persisted-safe-value logic now
                     # inherited from OpenAICompatibleBackend._apply_max_tokens_cap
                     return self._apply_max_tokens_cap(
