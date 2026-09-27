@@ -577,12 +577,11 @@ class StreamingMixin:
             stream_method = 'native'
 
         # PERF-01 readability: print the "AgentKthx: " prefix once, before
-        # the first content delta arrives. Tracked so subsequent iterations
-        # of the agentic loop (after tool calls) don't re-print it — the
-        # loop is one continuous answer from the user's perspective.
-        # Reset at the start of each _run_core_streaming() call (new user
-        # prompt) so the prefix appears on every new reply.
-        _prefix_emitted = getattr(self, "_stream_prefix_emitted", False)
+        # the first content/reasoning delta arrives. Reset per-step so each
+        # model response (including follow-ups after tool calls) gets its
+        # own prefix — the tool-call output visually separates the responses
+        # and the user expects to see "AgentKthx:" before each one.
+        _prefix_emitted = False
 
         # R06.56: reasoning is now displayed as a structured "reasoning:" panel
         # ABOVE the AgentKthx: prompt, not inline in dim-grey under the prefix.
@@ -600,18 +599,11 @@ class StreamingMixin:
             delta is printed. Subsequent reasoning deltas append to the panel."""
             nonlocal _reasoning_panel_started
             if not _reasoning_panel_started:
-                # Some models (e.g. glm-5.3-flash-free via OrcaRouter) put
-                # the actual response content inside reasoning_content instead
-                # of content. If no content delta ever arrives, the
-                # "AgentKthx:" prefix would never be emitted. Fix: emit the
-                # prefix before the reasoning panel so the user sees it even
-                # if the model's entire response is in reasoning_content.
-                #
-                # Layout: "AgentKthx:" on its own line, then "reasoning:"
-                # below it, so they don't run together on the same line.
+                # Emit the "AgentKthx:" prefix before the reasoning panel so
+                # the user sees it even when the model puts everything in
+                # reasoning_content (no content delta ever arrives).
+                # The prefix goes on its own line, then reasoning: below it.
                 _emit_prefix_once()
-                # If the prefix was just emitted (no newline after it),
-                # add a newline so "reasoning:" starts on its own line.
                 sys.stdout.write("\n")
                 sys.stdout.write(f"\033[90m  reasoning:\033[0m\n")
                 sys.stdout.flush()
@@ -649,7 +641,6 @@ class StreamingMixin:
                 sys.stdout.write("\033[92mAgentKthx:\033[0m ")
                 sys.stdout.flush()
                 _prefix_emitted = True
-                self._stream_prefix_emitted = True
 
         if stream_method is None:
             # Backend has no streaming — fall back to non-streaming and
@@ -839,17 +830,13 @@ class StreamingMixin:
         # actual answer in reasoning_content instead of content. If content
         # is empty but reasoning_content exists AND there are no tool calls,
         # the model intended the reasoning as its answer. Move it to content
-        # in the return dict so the agent loop treats it as the answer — but
-        # DON'T re-print it (it was already streamed in the reasoning panel).
-        # Just add a trailing newline after the reasoning panel for spacing.
+        # in the return dict so the agent loop treats it as the answer.
+        # DON'T re-print — it was already streamed in the reasoning panel.
         if not content_str and reasoning_str and not tool_calls_acc:
             content_str = reasoning_str
             reasoning_str = ""
-            # The reasoning was already printed during streaming (in grey).
-            # Add a trailing newline so the next prompt doesn't run together.
-            sys.stdout.write("\n")
-            sys.stdout.flush()
-        elif content_str and not content_str.endswith("\n"):
+
+        if content_str and not content_str.endswith("\n"):
             sys.stdout.write("\n")
             sys.stdout.flush()
 

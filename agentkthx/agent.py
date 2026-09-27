@@ -759,13 +759,9 @@ class Agent(AgentSetupMixin, CompactionMixin, ToolExecutionMixin, StreamingMixin
         implementation note ("intentionally a near-copy of _run_core()")
         is obsolete; see core/agentic_loop.py for the unified loop.
         """
-        # PERF-01 readability: reset the "AgentKthx:" prefix tracker for
-        # each new user prompt. Inside a single run (which may span
-        # multiple agentic-loop iterations due to tool calls), the prefix
-        # is emitted only once — before the first content/reasoning delta
-        # of the first iteration. On the next user prompt we want it to
-        # appear again.
-        self._stream_prefix_emitted = False
+        # PERF-01 readability: the "AgentKthx:" prefix is now reset per-step
+        # inside _generate_stream (each model response gets its own prefix).
+        # No need to reset a shared instance attribute here.
         # Reset running token totals for this run
         self._running_tokens_in = 0
         self._running_tokens_out = 0
