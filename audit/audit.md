@@ -1,14 +1,14 @@
 # Improvement & Enhancement Audit
 
-**AgentKthx v0.7.04 (R07.04 — released)**
+**AgentKthx v0.7.06 (R07.06 — released)**
 
 **Repository:** https://github.com/VTSTech/AgentKthx  
-**Author:** VTSTech | **License:** MIT | **Date:** 2026-09-26  
+**Author:** VTSTech | **License:** MIT | **Date:** 2026-09-27  
 **Auditor:** Super-Z (GLM) via `codebase-audit` v0.2.0  
-**Commit:** `51223c4` (R07.04) | **Test Suite:** 1461 passed / 9 skipped in ~25s  
-63 Findings | 7 Categories | SEC, ROB, MAINT, PERF, FEAT, ARCH, TEST  
-Severity: 1 High | 31 Medium | 31 Low  
-19 CLOSED (4 in R07.04 + 9 in R07.05 + 6 in R07.06) | 1 WONTFIX (ROB-05 — intentional) | 42 OPEN
+**Commit:** `97fa6cc` (R07.06) | **Test Suite:** 1461 passed / 9 skipped in ~25s  
+88 Findings | 7 Categories | SEC, ROB, MAINT, PERF, FEAT, ARCH, TEST  
+Severity: 1 High (closed) + 1 NEW High candidate (MAINT-14) | 33 Medium | 53 Low  
+19 CLOSED (4 in R07.04 + 9 in R07.05 + 6 in R07.06) | 1 WONTFIX (ROB-05 — intentional) | 25 NEW in R07.07 delta | 43 OPEN (was 42; new findings extend the ID sequence)
 
 > **R07.05 delta (in-progress, post-R07.04 release):** Six more findings closed. **SEC-07** (Low): `~/.agentkthx/` directory now created with mode `0o700` and the SQLite DB file chmod'd to `0o600` after connection — previously inherited the umask (typically 0644), leaking conversation history to all local users. **ROB-03** (Medium): `PersistentMemory` writes now wrapped in `threading.Lock` (`_write_lock`) — prevents `sqlite3.OperationalError: database is locked` when multiple threads share a PersistentMemory instance (Orchestrator parallel mode). **ROB-04** (Medium): `Agent.add_tool` split into `register_tool()` (rebuilds system prompt WITHOUT clearing memory — the safe mid-session API) + `rebuild_system_prompt()` (explicit clear+rebuild for soul swaps) + `add_tool()` (deprecated, still clears for backward compat). Third-party code that called `add_tool()` mid-session was silently destroying all conversation history. **MAINT-04** (Medium): deleted `agentkthx/core/args_normal.py` (329 LOC, dead code — the 4 re-exported symbols `normalize_args_full`/`fix_calculator_args`/`synthesize_missing_args`/`generate_helpful_error_message` had zero callers in production code or tests). **MAINT-05** (Medium): deleted the dead-code trio from `agentkthx/cli/utils.py` (`_load_tool_cache`, `_save_tool_cache`, `_get_cloud_model_size` — 88 LOC, R06.0 legacy, no callers). Updated `cli/__init__.py` imports + `__all__` + `test_cli_package_split.py` expected-names list. **MAINT-06** (Low): deleted `agentkthx/core/model_config.py` (30-line deprecated re-export module emitting `DeprecationWarning` on import — no internal imports, only docs/changelog references remained). +20 regression tests in `tests/test_r07_05_audit_fixes.py`. Suite 1290 → **1310 passed / 9 skipped in ~24s** (+20 new tests, 0 regressions).
 >
@@ -42,6 +42,7 @@ Severity: 1 High | 31 Medium | 31 Low
 - [R07.04 Closures (This Release)](#r07.04-closures-this-release)
 - [R07.05 Closures (Released)](#r07.05-closures-released)
 - [R07.06 Closures (In-Progress)](#r07.06-closures-in-progress)
+- [R07.07 New Findings (Re-Audit Delta)](#r07.07-new-findings-re-audit-delta)
 
 ---
 
@@ -1323,5 +1324,131 @@ R07.06 is a robustness batch: five findings closed with +39 regression tests in 
 | ~~ROB-08~~ | Low | ✓ CLOSED R07.06 | `MemoryConfig.max_tokens` is now a real opt-in token-based second pruning tier (audit's `len(content) // 4` estimator, non-system messages only, pairing-safe slide to `max_tokens × summarization_threshold`). **Default 4096 → 0 (disabled)**: enforcing the old default would prune tool-heavy histories to ~2 results (8KB-sanitized results ≈ 2K est. tokens each). `MemoryConfig(max_tokens=100000)` is now genuinely enforced. +8 tests. |
 | ~~ROB-14~~ | Low | ✓ CLOSED R07.06 | In-chat `/model` switch now re-derives the per-model state via `apply_model_switch()` (`cli/agent_factory.py`): `num_ctx` + `num_predict` follow the new model's catalog (`--num-ctx`/`--num-predict`/`/param`-pinned values survive; `/param reset` un-pins), `model_config`/`model_family` re-derived, stale `backend._context_safe_max_tokens` from the old model's 400 recovery cleared. Local backends keep config-derived `num_ctx` (fresh-start semantics). `/model` prints the deltas. +18 tests in `tests/test_model_switch_context.py`. |
 
-42 findings remain open (plus ROB-05 wontfix). The next highest-leverage moves from the near-term list: **MAINT-01** (extract `ChatSession` from the 1,199-line `cmd_chat`), **TEST-01** (add a thin integration test tier), **SEC-09** (warn on non-HTTPS ACP).
+42 findings remained open at the close of R07.06 (plus ROB-05 wontfix). The next highest-leverage moves from the near-term list: **MAINT-01** (extract `ChatSession` from the 1,199-line `cmd_chat`), **TEST-01** (add a thin integration test tier), **SEC-09** (warn on non-HTTPS ACP). The R07.07 re-audit delta below adds 25 new findings extending the ID sequence — see the [R07.07 New Findings (Re-Audit Delta)](#r07.07-new-findings-re-audit-delta) section.
 
+---
+
+## R07.07 New Findings (Re-Audit Delta)
+
+A full re-audit pass was performed against commit `97fa6cc` (R07.06, the released state) on 2026-09-27, after the prior brief (at `45c7613`, R07.04) was found stale: 9 of the 10 Critical Files Index entries had changed, 2 new backends had been added, and 14 audit findings had been closed. The re-audit regenerated `audit/brief.md` from scratch (11,939 est. tokens, under the 16K budget) and surfaced **25 new findings** extending the SEC/ROB/MAINT/PERF/FEAT/ARCH/TEST ID sequence. The brief was generated against R07.06 source; the audit.md banner block above now reflects the new totals (88 findings, 25 new in this delta).
+
+The 25 new findings break down: 7 Security (SEC-11 through SEC-17), 13 Robustness (ROB-15 through ROB-27), 10 Maintainability (MAINT-11 through MAINT-20), 2 Architecture (ARCH-06 + ARCH-05 reaffirmed), 2 Performance (PERF-03 + PERF-04). 1 finding (MAINT-14) is re-classified as a HIGH-severity correctness bug — silent data corruption in tool argument parsing. None of the new findings are CLOSED in R07.07 — this delta only documents them for future release planning. The brief and audit.md are the source of truth; code changes are deferred to R07.07+.
+
+The re-audit also confirmed that the **`codebase-audit` skill ships with the repo** (`agentkthx/skills/codebase-audit/SKILL.md` + `references/{brief,audit}-template.md`) — VTSTech's own audit discipline, used to produce this very delta. The skill was cloned to `/home/z/my-project/skills/codebase-audit/` for skill-system discovery.
+
+### Methodology
+
+1. Re-read the existing `audit/brief.md` (R07.04 baseline) and `audit/audit.md` (R07.06 closure banners).
+2. Identified the diff scope: `git diff 45c7613..HEAD` reported 28 source files changed, +2,881 / −789 LOC.
+3. Delegated a structured per-file diff review (Task ID `6-diff`) to an Explore subagent with read-only access to the 16 most critical changed files. The subagent returned a comprehensive structured report citing line numbers, new public API surface, and observed candidate findings.
+4. Independently verified each candidate finding by direct code inspection (Read + Grep) and by running small Python reproducers to confirm the bug exists.
+5. Struck false positives from the subagent's report (notably: the subagent claimed `apply_model_switch` doesn't preserve `/param` runtime overrides — verification showed `chat.py:900` sets `_num_ctx_explicit = True` on `/param`, so the implementation is correct).
+6. Re-classified one finding upward: the `\bTrue\b` regex substitution was initially classified MAINT-Low; reproducer confirmed silent data corruption, reclassified as HIGH severity (kept as MAINT-14 in the ID sequence per audit-tracked-discipline convention, but flagged as a high-priority fix candidate).
+
+### Verified Reproducer: MAINT-14 (HIGH severity)
+
+The regex pipeline at `agentkthx/core/tool_parse.py:243-256` (R07.05 SEC-02 closure) substitutes Python `True`/`False`/`None` literals to JSON equivalents AFTER single→double quote conversion, but on the WHOLE string without respecting string-literal boundaries. Confirmed by reproducer:
+
+```python
+raw_args = "{'prompt': 'None of the above is True'}"
+# After regex pipeline:
+# {"prompt": "null of the above is true"}   ← "None" and "True" inside string value mangled
+```
+
+This silently corrupts user-supplied data in tool arguments. The model has no way to know its `read_file(file_path="C:\\Users\\True_Believer\\notes.txt")` was mangled to `"C:\\Users\\true_Believer\\notes.txt"`. The fix: use a JSON-aware tokenizer, not a regex on the whole string — or do the True/False/None substitution BEFORE the single→double quote conversion (so the substitutions only match outside string literals, since Python dict keys are typically bare identifiers).
+
+### New Findings (25 total)
+
+| ID | Severity | Category | File(s) | Title |
+|----|----------|----------|---------|-------|
+| SEC-11 | Medium | Security | `core/helpers.py:624` | `_iter_hostname_ips` does unbounded synchronous `getaddrinfo` — DoS amplification + no timeout |
+| SEC-12 | Low | Security | `core/helpers.py:1306` | `sanitize_tool_output` truncates AFTER redaction — secrets just past 8KB cutoff remain unredacted |
+| SEC-13 | Medium | Security | `plugins/_loader.py:226` | `sha256` plugin pins are opt-in — no `AGENTKTHX_REQUIRE_PLUGIN_PINS` enforcement mode for external plugins |
+| SEC-14 | Low | Security | `core/api_resilience.py:120` | `is_transient_api_error` body arg lowercased + substring-matched — user-controlled content in body could force permanent classification |
+| SEC-15 | Low | Security | `backends/cloud_base.py:173` | `CloudBackend.__init__` mutates `os.environ["AGENTKTHX_API_MODE"]` — process-global side effect, last-instance-wins |
+| SEC-16 | Low | Security | `plugins/orcarouter/orcarouter.py:229` | `_extract_buy_credits_url` surfaces attacker-controlled URL in user-facing error message — phishing vector |
+| SEC-17 | Low | Security | `tools/builtins.py:362` | `_SSRFSafeRedirectHandler` triggers DNS resolution per redirect hop — unbounded redirect chain = DoS |
+| ROB-15 | Medium | Robustness | `core/persistent_memory.py:199` | `PersistentMemory.add()` does two separate lock acquisitions (`_write_message` + `_touch_session`) — interleaving risk + 2× commit per message |
+| ROB-16 | Low | Robustness | `plugins/orcarouter/orcarouter.py:848,996` | `time.sleep(retry_after)` unbounded — malicious `Retry-After: 3600` hangs agent for 1 hour |
+| ROB-17 | Low | Robustness | `core/memory.py:329` | Token-tier pruning can leave a single over-budget message (loop exits when `len-1`) — documented gap |
+| ROB-18 | Low | Robustness | `core/persistent_memory.py:158` | `threading.Lock` (not `RLock`) — brittle if future code adds nested locked calls |
+| ROB-19 | Low | Robustness | `agent.py:1083` | `getattr(self, "debug", False)` in `register_tool` masks init-order bugs |
+| ROB-20 | Low | Robustness | `cli/agent_factory.py:319` | `agent.num_ctx` (public) vs `agent._num_predict` (private) naming inconsistency in `apply_model_switch` |
+| ROB-21 | Low | Robustness | `backends/cloud_base.py:195` | API key min length 8 chars — too weak; real keys are 30+ chars |
+| ROB-22 | Low | Robustness | `plugins/orcarouter/orcarouter.py:882` | `_iter_sse_lines` has no exhaustion-raise matching non-streaming path — minor UX inconsistency |
+| ROB-23 | Low | Robustness | `plugins/orcarouter/orcarouter.py:477` | `list_models` fallback list is hardcoded — won't include new free models until code update |
+| ROB-24 | Low | Robustness | `plugins/zai/zai.py:386` | `get_model_info` returns default 128K entry for ANY model string — catalog no longer authoritative |
+| ROB-25 | Low | Robustness | `plugins/orcarouter/orcarouter.py:544,616` | `generate()` vs `_generate_with_auth()` signature defaults mismatch (None vs 0.7/2048) — confusing |
+| ROB-26 | Low | Robustness | `core/helpers.py:1306` | `sanitize_tool_output` REDACT-then-TRUNCATE ordering — secrets past 8KB cutoff not redacted (dup of SEC-12) |
+| ROB-27 | Low | Robustness | `tools/builtins.py:362` | `_SSRFSafeRedirectHandler` DNS lookup happens outside the request timeout — slow DNS = unbounded stall (dup of SEC-17) |
+| MAINT-11 | Medium | Maintainability | `plugins/orcarouter/orcarouter.py:740,905` | ~150 LOC of retry-recovery logic duplicated between `_generate_with_auth` and `_iter_sse_lines` |
+| MAINT-12 | Low | Maintainability | `backends/cloud_base.py:394` | `128000` context fallback is hardcoded — should be class attribute `_DEFAULT_CONTEXT_FALLBACK` |
+| MAINT-13 | Low | Maintainability | `plugins/zai/zai.py:354` | `list_models` hardcodes `"family": "glm"` instead of using `self._catalog_family_name()` — drift risk |
+| **MAINT-14** | **High** | **Maintainability** | `core/tool_parse.py:243-256` | **`\bTrue\b`/`\bFalse\b`/`\bNone\b` regex substitutions do NOT respect string literals — values containing these words get silently mangled (e.g. `"None of the above is True"` → `"null of the above is true"`). Verified by reproducer. Should be re-classified ROB-High (correctness bug, silent data corruption).** |
+| MAINT-15 | Low | Maintainability | `core/persistent_memory.py:158` | `_write_lock` is per-instance, not per-DB-path — multi-instance scenarios still race |
+| MAINT-16 | Low | Maintainability | `agent.py:1131` | `add_tool` deprecated but emits no `DeprecationWarning` — callers have no programmatic signal |
+| MAINT-17 | Low | Maintainability | `core/agent_setup.py:485` | Untrusted-tool-output instruction duplicated verbatim across 3 system-prompt builders |
+| MAINT-18 | Low | Maintainability | `cli/agent_factory.py:319` | `apply_model_switch` return dict — verify caller actually consumes it (currently consumed by chat.py:1007 for delta-printing) |
+| MAINT-19 | Low | Maintainability | `plugins/orcarouter/orcarouter.py:389` | `list_models` cache is per-instance — class-level cache would dedupe across instances |
+| MAINT-20 | Low | Maintainability | `plugins/zai/zai.py:401` | `get_model_info` sets `free_tier` twice for catalog hits (parent + override) — redundant |
+| ARCH-05 | Medium | Architecture | `core/agent_setup.py:54-87` | **REMAINS OPEN** — R07.05/R07.06 diff does NOT touch the `**kwargs` swallowing pattern. 22 explicit params + `**kwargs` for 5 stashed names; typos silently ignored. |
+| ARCH-06 | Medium | Architecture | `backends/cloud_base.py:46` | `CloudBackend` inherits from `OpenAICompatibleBackend` — tight coupling to OpenAI wire shape; non-OpenAI clouds (Anthropic Messages API) can't reuse |
+| PERF-03 | Low | Performance | `core/helpers.py:624` | `_iter_hostname_ips` resolves every hostname synchronously on every `is_safe_url` call — no cache |
+| PERF-04 | Low | Performance | `core/memory.py:99` | `_estimate_tokens` recomputed for every message on every `add()` — cache on `Message` dataclass |
+
+### Notes on deduplication
+
+- **SEC-12 and ROB-26** describe the same `sanitize_tool_output` truncation-after-redaction ordering issue from different angles (security lens vs. robustness lens). The recommended fix (redact AFTER truncating) addresses both — kept as separate IDs per the audit-tracked discipline convention.
+- **SEC-17 and ROB-27** describe the same `_SSRFSafeRedirectHandler` unbounded-DNS issue from different lenses. The recommended fix (bounded `getaddrinfo` + max-redirects cap + timeout on `is_safe_url` itself) addresses both.
+- **MAINT-14 was initially classified as Low by the Explore subagent**, then re-classified as High after the reproducer confirmed silent data corruption. The ID is kept as MAINT-14 to preserve the audit-tracked sequence, but the severity is elevated.
+
+### Items explicitly NOT addressed by R07.05/R07.06 (carry forward, reaffirmed OPEN)
+
+- **ARCH-05** — `Agent.__init__` `**kwargs` swallowing concern. The R07.05/R07.06 diff to `agent_setup.py` only threads `debug=self.debug` through `ToolParser`. The 22-explicit-params + `**kwargs` pattern at `agent_setup.py:54-87` is untouched. **REMAINS OPEN.**
+- **ARCH-01** — backends split across `backends/` (native) and `plugins/` (cloud). The new `cloud_base.py` lives in `backends/` but the OrcaRouter plugin (which uses it) lives in `plugins/`. The split persists; `CloudBackend` doesn't unify the locations. **REMAINS OPEN.**
+- **MAINT-01** — `cmd_chat` is now 1230 LOC (was 1199). Still a single function with 25+ nested closures. **REMAINS OPEN.**
+- **MAINT-08** — `_generate_stream` is 354 lines with 5-level try/except/finally nesting. Unchanged in R07.05/06. **REMAINS OPEN.**
+- **MAINT-03** — `normalize_args` strategy 5 (prefix/substring matching). Unchanged. **REMAINS OPEN.**
+- **MAINT-10** — `_select_agent_with_llm` f-string router prompt. Unchanged. **REMAINS OPEN.**
+- **ROB-09** — `validate_path` uses `os.path.abspath`, doesn't follow symlinks. Unchanged. **REMAINS OPEN.**
+
+### Cumulative closure state (updated)
+
+| Release | Findings Closed | Tests Added |
+|---------|----------------|-------------|
+| R07.00 | 4 (MAINT-01 old, MAINT-04 old, ROB-08 old, PERF-03 old) | — |
+| R07.01 | 4 (ROB-07 old, MAINT-06 old, TEST-02 old, ARCH-02 old) | — |
+| R07.04 | 4 (SEC-02, SEC-10, FEAT-01, MAINT-02) | +158 |
+| R07.05 (released) | 9 (SEC-07, ROB-03, ROB-04, MAINT-04, MAINT-05, MAINT-06, SEC-03, SEC-04, SEC-06) + 1 WONTFIX (ROB-05) | +101 |
+| R07.06 (released) | 6 (ROB-01, ROB-07, ROB-08, ROB-10, ROB-13, ROB-14) | +57 |
+| **R07.07 (re-audit delta)** | **0 closed, 25 new findings documented** | **+0 (audit-only pass)** |
+| **Total** | **27 of 88** (31%) | **+316** |
+
+### Priority Matrix (updated for R07.07)
+
+| Timeline | Findings |
+|----------|----------|
+| **Near term (R07.07–R07.08)** | **MAINT-14 (HIGH — silent tool-arg data corruption, has reproducer)**, SEC-11 (bounded `getaddrinfo` + timeout), SEC-13 (enforce plugin pins via env var), ROB-15 (combine PersistentMemory `_write_message` + `_touch_session` into single transaction), ROB-16 (cap OrcaRouter `time.sleep(retry_after)`), SEC-12/ROB-26 (redact-after-truncate in `sanitize_tool_output`), MAINT-11 (extract OrcaRouter shared retry helper), MAINT-01 (extract `ChatSession`), TEST-01 (integration test tier), SEC-09 (warn on non-HTTPS ACP) |
+| **Short term (R07.09–R07.12)** | SEC-15 (decouple `CloudBackend` from env-var mutation), SEC-16 (validate `buy_credits_url` host before surfacing), SEC-17/ROB-27 (cap redirect chain + DNS timeout), SEC-01 (drop unsafe builtins from sandbox), ROB-02 (join worker threads), ROB-09 (`realpath` for symlinks), MAINT-03 (drop strategy 5 of `normalize_args`), MAINT-08 (extract `StreamAccumulator`), MAINT-10 (escape router prompt), PERF-01/PERF-02 (cache sanitized state), ARCH-01 (unify backend locations), ARCH-05 (replace `**kwargs` with dataclass), ARCH-06 (decouple `CloudBackend` from OpenAI wire shape), TEST-03 (add `FakeStreamingBackend`), TEST-06 (add lint job) |
+| **Medium term (R08.00+)** | SEC-08 (chmod audit log), SEC-05 (strip ANSI), FEAT-02 (per-tool timeouts + concurrent execution), FEAT-03 (tool output schema), FEAT-04 (`--dry-run`), FEAT-05 (plugin sandbox), FEAT-06 (streaming args delta), FEAT-07 (conversation export), MAINT-07/MAINT-09 (consolidate regex patterns), ARCH-02 (extract `SSEEventBuilder`), ARCH-03 (integrate `AgentMode` with OpenResponses), TEST-04 (rollback tests), TEST-05 (rewrite bump-version test), TEST-07 (update_check failure paths), TEST-08 (sandbox adversarial tests), ROB-17/18/19/20/21/22/23/24/25 (low-priority robustness cleanups), MAINT-12/13/15/16/17/18/19/20 (low-priority maintainability cleanups), PERF-03/04 (DNS caching, `_estimate_tokens` caching) |
+
+### Highest-leverage moves (recommended next-release priorities)
+
+1. **MAINT-14 (HIGH)** — fix the `\bTrue\b` regex substitution to respect string-literal boundaries. Smallest fix: do the True/False/None substitution BEFORE the single→double quote conversion, so Python dict keys (bare identifiers outside quotes) are converted but string-literal values are not. Test case: `{"prompt": "None of the above is True"}` should round-trip unchanged. ~10 LOC change + 3 regression tests.
+
+2. **SEC-11 cluster** (SEC-11 + SEC-17 + ROB-27) — bounded `getaddrinfo` (cap to first 8 addresses, `socket.setdefaulttimeout`-bounded), `max_redirs=10` cap on `_SSRFSafeRedirectHandler`, timeout on `is_safe_url` itself. ~30 LOC change + 5 regression tests.
+
+3. **ROB-15 + ROB-18** — combine `PersistentMemory.add()`'s `_write_message` + `_touch_session` into a single locked transaction; switch `threading.Lock` → `threading.RLock` for safety. ~20 LOC change + 3 regression tests.
+
+4. **SEC-13** — add `AGENTKTHX_REQUIRE_PLUGIN_PINS=1` env var that refuses to load unpinned external plugins (built-ins excluded). ~15 LOC change + 4 regression tests.
+
+5. **ROB-16** — cap `time.sleep(retry_after)` to 60s in OrcaRouter; raise `RuntimeError` if exceeded. ~5 LOC change + 2 regression tests.
+
+6. **MAINT-11** — extract `_classify_and_handle_http_error(error_body, body, attempt, headers) -> tuple[Action, Body]` shared helper in OrcaRouter; eliminates ~150 LOC of duplication. ~50 LOC refactor + 0 new tests (existing parametrized tests cover both paths).
+
+### Audit Artifacts Produced
+
+- **`audit/brief.md`** — regenerated from scratch at R07.06 baseline. 11,939 est. tokens (under the 16K budget), 4,841 words, 365 lines. Replaces the R07.04-era brief that had drifted stale on 9 of 10 critical files.
+- **`audit/audit.md`** — this R07.07 delta block appended. Header banner updated to reflect new totals. TOC updated with new section anchor.
+- **`/home/z/my-project/skills/codebase-audit/`** — the `codebase-audit` skill cloned from the repo's `agentkthx/skills/codebase-audit/` so it's discoverable by the skill system.
+- **`/home/z/my-project/worklog.md`** — multi-agent worklog with the Explore subagent's structured per-file diff report (Task ID `6-diff`) and the parent agent's audit summary.
