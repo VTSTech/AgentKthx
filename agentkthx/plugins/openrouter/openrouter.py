@@ -248,6 +248,40 @@ OPENROUTER_MODELS: dict[str, dict] = {
 }
 
 
+# OpenRouter's free-tier model whitelist. When OPENROUTER_FREE_ONLY=true,
+# only models matching this whitelist are listed/accepted. Consists of:
+#   1. ``openrouter/free`` — the named "Free Models Router" that auto-routes
+#      to the cheapest available free model at request time. Documented at
+#      https://openrouter.ai/openrouter/free. Always free.
+#   2. Any model ID ending in ``:free`` — OpenRouter's canonical marker
+#      for genuinely-free models (e.g. ``google/gemini-flash-1.5:free``,
+#      ``qwen/qwen-2.5-7b-instruct:free``). The ``:free`` suffix is the
+#      upstream's per-1M-token rate set to $0 — the most reliable signal.
+#
+# Mirrors the ORCAROUTER_FREE_MODEL_WHITELIST pattern in the OrcaRouter
+# plugin — the two backends now share the same whitelist enforcement shape.
+#
+# Source: docs/api/OPENROUTER_API_TECHNICAL_REFERENCE.md §Free Tier Models
+# Last verified: 2026-09-28
+OPENROUTER_FREE_MODEL_WHITELIST: frozenset[str] = frozenset({
+    # The named free router — always allowed under FREE_ONLY
+    "openrouter/free",
+})
+
+
+def _is_free_model(model_id: str) -> bool:
+    """Check if an OpenRouter model is free (zero pricing).
+
+    Returns True when the model ID is:
+      - ``openrouter/free`` (the named Free Models Router), OR
+      - ends with ``:free`` (OpenRouter's canonical marker for genuinely
+        free models — the upstream's per-token rate is $0)
+    """
+    if model_id == "openrouter/free":
+        return True
+    return model_id.endswith(":free")
+
+
 class OpenRouterBackend(OpenAICompatibleBackend):
     """
     Backend for OpenRouter cloud API.
@@ -464,8 +498,10 @@ class OpenRouterBackend(OpenAICompatibleBackend):
             
             # Filter models if OPENROUTER_FREE_ONLY is enabled
             if OPENROUTER_FREE_ONLY:
-                # OpenRouter free models have :free suffix at the end
-                free_models = [m for m in available_models if m["name"].endswith(":free")]
+                # R07.09 fix: use the shared _is_free_model() helper so the
+                # named ``openrouter/free`` router is also accepted, not
+                # just ``:free``-suffix models.
+                free_models = [m for m in available_models if _is_free_model(m["name"])]
                 self._model_cache = sorted(free_models, key=lambda x: x["name"])
             else:
                 self._model_cache = sorted(available_models, key=lambda x: x["name"])
@@ -494,9 +530,12 @@ class OpenRouterBackend(OpenAICompatibleBackend):
                 catalog_models.append(parsed_model)
             
             if OPENROUTER_FREE_ONLY:
-                free_models = [m for m in catalog_models 
-                             if "free" in m["name"].lower() or 
-                             any(free in m["name"].lower() for free in ["flash", "mini", "haiku", "tiny"])]
+                # R07.09 fix: replaced the prior substring hack ("free" in
+                # name OR flash/mini/haiku/tiny) with the proper
+                # _is_free_model() check. The substring hack incorrectly
+                # included paid flash variants (e.g. glm-4.5-flash is paid
+                # on ZAI) and missed the ``openrouter/free`` router.
+                free_models = [m for m in catalog_models if _is_free_model(m["name"])]
                 self._model_cache = sorted(free_models, key=lambda x: x["name"])
             else:
                 self._model_cache = sorted(catalog_models, key=lambda x: x["name"])

@@ -2,7 +2,7 @@
 name: test-harness
 description: "Diagnostic testing skill for verifying AgentKthx's skill system, tool usage, and instruction following. Use when testing if skills load correctly or for running quick validation prompts."
 license: MIT
-allowed-tools: calculator shell get_time get_date web-search read_file write_file list_directory python_repl parse_json count_words count_chars http_get
+allowed-tools: calculator shell get_time get_date web_search read_file write_file list_directory python_repl parse_json count_words count_chars http_get
 ---
 
 # Test Harness
@@ -80,7 +80,7 @@ What it validates: Utility tool selection and response.
 
 ### T6: Web Search Tool
 Prompt: "Run test T6"
-Expected: Use web-search tool to search for "AgentKthx framework". Return:
+Expected: Use web_search tool to search for "AgentKthx framework". Return:
 ```
 TEST: T6 Web Search
 STATUS: PASS|FAIL

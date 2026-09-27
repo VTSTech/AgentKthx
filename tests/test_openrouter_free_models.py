@@ -296,3 +296,55 @@ class TestRealFreeModelsFromUserReport:
     def test_user_reported_count_matches(self, monkeypatch):
         """Verify we have all 17 models from the user's report."""
         assert len(self.USER_REPORTED_FREE_MODELS) == 17
+
+
+# ---------------------------------------------------------------------------
+# R07.09 fix: openrouter/free router + _is_free_model() helper
+# ---------------------------------------------------------------------------
+
+class TestOpenRouterFreeRouter:
+    """R07.09 fix: ``openrouter/free`` (the named Free Models Router) was
+    missing from the OpenRouter free whitelist.
+
+    Bug: when OPENROUTER_FREE_ONLY=true, the ``list_models()`` filter only
+    accepted models ending in ``:free``. The ``openrouter/free`` router
+    (https://openrouter.ai/openrouter/free) — which auto-routes to the
+    cheapest free model at request time — was filtered out, so users
+    couldn't write ``--model openrouter/free`` with FREE_ONLY mode.
+
+    Fix: added ``OPENROUTER_FREE_MODEL_WHITELIST`` + ``_is_free_model()``
+    helper mirroring the OrcaRouter pattern. Both ``list_models()``
+    filter branches now use the helper instead of the prior substring
+    hack (which incorrectly included paid flash variants and missed
+    the named router).
+    """
+
+    def test_openrouter_free_router_in_whitelist(self):
+        """The named ``openrouter/free`` router must be in the whitelist."""
+        from agentkthx.plugins.openrouter.openrouter import (
+            OPENROUTER_FREE_MODEL_WHITELIST,
+        )
+        assert "openrouter/free" in OPENROUTER_FREE_MODEL_WHITELIST
+
+    def test_is_free_model_openrouter_free_router(self):
+        """The named router is free."""
+        from agentkthx.plugins.openrouter.openrouter import _is_free_model
+        assert _is_free_model("openrouter/free") is True
+
+    def test_is_free_model_free_suffix(self):
+        """Models ending in ``:free`` are free (canonical OpenRouter marker)."""
+        from agentkthx.plugins.openrouter.openrouter import _is_free_model
+        assert _is_free_model("google/gemini-flash-1.5:free") is True
+        assert _is_free_model("qwen/qwen-2.5-7b-instruct:free") is True
+        assert _is_free_model("meta-llama/llama-3.3-70b-instruct:free") is True
+
+    def test_is_free_model_paid_models_not_free(self):
+        """Paid models (no ``:free`` suffix, not the named router) return False."""
+        from agentkthx.plugins.openrouter.openrouter import _is_free_model
+        assert _is_free_model("anthropic/claude-3.5-sonnet") is False
+        assert _is_free_model("openai/gpt-4o") is False
+        # Prior substring hack would have incorrectly flagged these as free
+        # because they contain "flash"/"mini" — the new helper correctly
+        # identifies them as paid.
+        assert _is_free_model("openai/gpt-4o-mini") is False
+        assert _is_free_model("anthropic/claude-3-haiku") is False

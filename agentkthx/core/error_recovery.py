@@ -309,8 +309,8 @@ TOOL_NAME_SUGGESTIONS = {
     "today": "get_date",
     
     # Web
-    "search": "web-search",
-    "web": "web-search or http_get",
+    "search": "web_search",
+    "web": "web_search or http_get",
     "fetch": "http_get",
     "request": "http_get",
     

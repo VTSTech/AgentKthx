@@ -154,7 +154,7 @@ def _extract_tool_from_json(obj: dict, debug: bool = False) -> tuple[str | None,
     # Handle bare argument objects - ONLY if the JSON looks like a tool call
     # CRITICAL: "query" is removed because models often output JSON with "query"
     # as a general key (e.g., {"query": "...", "response": "...", "method": "..."})
-    # which should NOT be interpreted as a web-search tool call.
+    # which should NOT be interpreted as a web_search tool call.
     # Only "expression" and "command" are unambiguous indicators of tool usage.
     if not name:
         arg_to_tool = {

@@ -51,7 +51,7 @@ agentkthx/
 │
 ├── tools/
 │   ├── registry.py           # Tool registry with decorator-based registration
-│   ├── builtins.py           # Built-in tools (calculator, shell, file ops, http, web-search)
+│   ├── builtins.py           # Built-in tools (calculator, shell, file ops, http, web_search)
 │   └── sandboxed_repl.py     # Sandboxed Python REPL execution
 │
 ├── backends/
@@ -1104,7 +1104,7 @@ Check if a skill is compatible with the current environment:
 from agentkthx.skills import Skill
 
 skill = Skill(
-    name="web-search",
+    name="web_search",
     license="MIT",
     compatibility="python>=3.8, ollama"
 )

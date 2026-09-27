@@ -75,7 +75,7 @@ In parallel execution, `nova-helper` participates as an **independent voter**.
 - Tasks requiring tools not in the available tools list
 - Creative writing, summarization, or open-ended generation beyond factual answers
 - Multi-step tasks requiring coordination with other agents (the orchestrator should decompose these)
-- Tasks that require web search when the `web-search` tool is not available
+- Tasks that require web search when the `web_search` tool is not available
 - Ambiguous instructions where the correct interpretation is unclear
 
 ### Timeout Behavior

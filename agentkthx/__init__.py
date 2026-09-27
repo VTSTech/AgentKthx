@@ -1,5 +1,5 @@
 """
-⚛️ AgentKthx R07.09
+⚛️ AgentKthx R07.10
 A minimal, hackable agentic framework engineered for local inference.
 
 Features:
@@ -31,7 +31,7 @@ Example Usage:
     agent = Agent(model="qwen2.5:0.5b", soul="/path/to/soul/package")
 """
 
-__version__ = "0.7.09"  # R07.09
+__version__ = "0.7.10"  # R07.10
 __author__ = "VTSTech"
 __status__ = "Alpha"
 

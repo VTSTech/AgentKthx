@@ -873,7 +873,7 @@ Retry-with-error-feedback, inspired by the [ATLAS-Autonomous](https://github.com
 
 ### AgentSkills Integration, Web Search Tool & Skill Testing
 
-Major update adding full CLI integration for the AgentSkills system, a built-in web search tool, a test-harness skill, a nova-skills soul for skill-guided testing, and comprehensive skill system tests. The datetime and web-search skills were removed in favor of equivalent built-in tools, and the ACP skill was removed since `--acp` covers its functionality.
+Major update adding full CLI integration for the AgentSkills system, a built-in web search tool, a test-harness skill, a nova-skills soul for skill-guided testing, and comprehensive skill system tests. The datetime and web_search skills were removed in favor of equivalent built-in tools, and the ACP skill was removed since `--acp` covers its functionality.
 
 ### Added
 
@@ -892,14 +892,14 @@ Major update adding full CLI integration for the AgentSkills system, a built-in 
 - Configurable: `MAX_SEARCH_RESULTS`, `MAX_SEARCH_SNIPPET` constants
 - Returns formatted results with titles, URLs, and snippets
 - Error handling: HTTP errors, connection errors, and generic exceptions
-- **Registered as `web-search`** in `BUILTIN_REGISTRY` under the `network` category
+- **Registered as `web_search`** in `BUILTIN_REGISTRY` under the `network` category
 
 #### Test Harness Skill (`skills/test-harness/`)
 - **Diagnostic skill** for validating the skill system and tool pipeline
 - 8 individual tests (T1–T8): Skill Loaded, Tool Inventory, Calculator, Shell, DateTime, Web Search, File Roundtrip, Full Suite
 - Structured response format: `TEST: <name>`, `STATUS: PASS|FAIL`, `DETAIL: <result>`
 - Rules: no fabrication, no skipping, use only skill-referenced tools
-- Declares `allowed-tools` for calculator, shell, get_time, get_date, web-search, read_file, write_file, list_directory, python_repl, parse_json, count_words, count_chars, http_get
+- Declares `allowed-tools` for calculator, shell, get_time, get_date, web_search, read_file, write_file, list_directory, python_repl, parse_json, count_words, count_chars, http_get
 
 #### Nova-Skills Soul (`souls/nova-skills/`)
 - **`nova-skills` soul** — lightweight soul designed for skill-guided testing
@@ -925,8 +925,8 @@ Major update adding full CLI integration for the AgentSkills system, a built-in 
 #### Datetime Skill (`skills/datetime/`)
 - Removed `SKILL.md` — replaced by built-in `get_time` and `get_date` tools which provide the same functionality with proper argument handling and timezone support
 
-#### Web Search Skill (`skills/web-search/`)
-- Removed `SKILL.md` — replaced by built-in `web-search` tool which provides DuckDuckGo search without requiring a skill wrapper
+#### Web Search Skill (`skills/web_search/`)
+- Removed `SKILL.md` — replaced by built-in `web_search` tool which provides DuckDuckGo search without requiring a skill wrapper
 
 #### ACP Skill (`skills/acp/`)
 - Removed `SKILL.md` — replaced by `--acp` CLI flag and `ACPPlugin` which handle ACP integration natively with proper bootstrap, activity logging, and session management
@@ -951,7 +951,7 @@ Major update adding full CLI integration for the AgentSkills system, a built-in 
 | Created | `agentkthx/souls/nova-skills/soul.json` | +30 |
 | Created | `tests/test_skills.py` | +530 |
 | Deleted | `agentkthx/skills/datetime/SKILL.md` | −25 |
-| Deleted | `agentkthx/skills/web-search/SKILL.md` | −74 |
+| Deleted | `agentkthx/skills/web_search/SKILL.md` | −74 |
 | Deleted | `agentkthx/skills/acp/SKILL.md` | −328 |
 | **Total** | **12 files** | **+987 −428** |
 
@@ -2864,20 +2864,20 @@ agent = Agent(model="qwen2.5:0.5b")  # Uses default backend
 ### Fixed
 
 #### Web Search Skill Naming and Encoding
-- **Renamed skill folder** from `web_search` to `web-search` (hyphen format)
+- **Renamed skill folder** from `web_search` to `web_search` (hyphen format)
   - Agent Skills spec requires `^[a-z0-9]+(-[a-z0-9]+)*$` format for skill names
   - Previous underscore format would fail SkillLoader validation
 - **Fixed SKILL.md encoding** - Rewrote with clean UTF-8
   - Removed escape artifacts: `\_` → `_`, `&nbsp;` removed
-  - Updated skill name in frontmatter to `web-search`
+  - Updated skill name in frontmatter to `web_search`
 - **Updated code references** across 4 files:
-  - `acp_plugin.py` - action map (`web-search: "SEARCH"`) and skill template
-  - `core/prompts.py` - `TOOL_ARG_ALIASES["web-search"]`
+  - `acp_plugin.py` - action map (`web_search: "SEARCH"`) and skill template
+  - `core/prompts.py` - `TOOL_ARG_ALIASES["web_search"]`
   - `core/tool_parse.py` - `arg_to_tool` mapping and malformed extraction
   - `core/args_normal.py` - example reference
 
 ### Verified
-- Skill loads correctly: `loader.load('web-search')` ✓
+- Skill loads correctly: `loader.load('web_search')` ✓
 - Name validates against Agent Skills spec regex ✓
 
 ---

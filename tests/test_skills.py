@@ -452,7 +452,7 @@ class TestBuiltinSkills:
         assert len(skill.description) > 0
 
     def test_removed_skills_not_present(self):
-        """datetime and web-search skills should NOT be present."""
+        """datetime and web_search skills should NOT be present."""
         from agentkthx.skills.loader import SkillLoader
         skills_dir = Path(__file__).parent.parent / "skills"
         if not skills_dir.exists():
@@ -460,11 +460,11 @@ class TestBuiltinSkills:
         sl = SkillLoader(skills_dir)
         skills = sl.list_skills()
         assert "datetime" not in skills, "datetime skill should be removed"
-        assert "web-search" not in skills, "web-search skill should be removed"
+        assert "web_search" not in skills, "web_search skill should be removed"
 
 
 # ============================================================================
-# web-search Tool Tests
+# web_search Tool Tests
 # ============================================================================
 
 class TestWebSearchTool:
@@ -476,20 +476,20 @@ class TestWebSearchTool:
         assert callable(web_search)
 
     def test_web_search_in_registry(self):
-        """web-search tool should be registered in the builtin registry."""
+        """web_search tool should be registered in the builtin registry."""
         from agentkthx.tools.builtins import BUILTIN_REGISTRY
-        assert BUILTIN_REGISTRY.get("web-search") is not None
+        assert BUILTIN_REGISTRY.get("web_search") is not None
 
     def test_web_search_description(self):
-        """web-search tool should have a meaningful description."""
+        """web_search tool should have a meaningful description."""
         from agentkthx.tools.builtins import BUILTIN_REGISTRY
-        tool = BUILTIN_REGISTRY.get("web-search")
+        tool = BUILTIN_REGISTRY.get("web_search")
         assert "search" in tool.description.lower() or "search" in tool.description.lower()
 
     def test_web_search_params(self):
-        """web-search tool should have query and num_results params."""
+        """web_search tool should have query and num_results params."""
         from agentkthx.tools.builtins import BUILTIN_REGISTRY
-        tool = BUILTIN_REGISTRY.get("web-search")
+        tool = BUILTIN_REGISTRY.get("web_search")
         param_names = [p.name for p in tool.params]
         assert "query" in param_names
         assert "num_results" in param_names

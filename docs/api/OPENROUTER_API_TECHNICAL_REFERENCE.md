@@ -472,7 +472,7 @@ Plugins add capabilities like web search:
 
 When the `web` plugin is enabled, the model can autonomously trigger web searches and return results as tool calls. Results appear in the response as a `tool_calls` entry with name `web_search`.
 
-**AgentKthx does not currently use transforms or plugins** — could be added as opt-in CLI flags (`--web-search`, `--auto-truncate`).
+**AgentKthx does not currently use transforms or plugins** — could be added as opt-in CLI flags (`--web_search`, `--auto-truncate`).
 
 ---
 

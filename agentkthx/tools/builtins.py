@@ -1356,7 +1356,7 @@ def make_builtin_registry() -> ToolRegistry:
 
     # Web Search
     registry.register_tool(Tool(
-        name="web-search",
+        name="web_search",
         description=(
             "Search the web for current information using DuckDuckGo. "
             "Returns titles, URLs, and snippets. Use for news, current events, "

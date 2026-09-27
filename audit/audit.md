@@ -1,15 +1,15 @@
 # Improvement & Enhancement Audit
 
-**AgentKthx v0.7.09 (R07.09)**
+**AgentKthx v0.7.10 (R07.10 — development release)**
 
 **Repository:** https://github.com/VTSTech/AgentKthx  
 **Author:** VTSTech | **License:** MIT | **Date:** 2026-09-28  
-**Commit:** `2e25bfc` (working tree post-R07.09) | **Test Suite:** 1654 passed / 13 skipped  
+**Commit:** (working tree post-R07.10) | **Test Suite:** 1658 passed / 13 skipped  
 56 Open Findings | 7 Categories | SEC, ROB, MAINT, PERF, FEAT, ARCH, TEST  
 Severity: 0 High | 22 Medium | 34 Low  
 56 OPEN (CLOSED + WONTFIX archived in deltas.md — generate_audit_dash.py merges both for the dashboard)
 
-> **R07.09 delta (Mistral plugin add):** R07.09 added the 11th bundled plugin (`mistral` — La Plateforme backend at `https://api.mistral.ai/v1`, 15-model catalog, 6 cloud backends now). A streaming-transport bug in the initial R07.09 draft (missing `_iter_sse_lines()` abstract hook required by `OpenAICompatibleBackend.generate_completions_stream()`) was caught by user testing before release and fixed in the same release — flagging TEST-09 (plugin scaffolds need a "the agent loop's streaming path actually calls through" smoke test, not just "the streaming method exists on the class"). +64 new tests. Suite 1590 → 1654 (+64).
+> **R07.10 delta (development release for GitHub):** Three fixes bundled: (1) `web_search` UA fix — DuckDuckGo now blocks non-browser UAs; tool now spoofs Firefox UA + sends Accept headers, also renamed from `web-search` to `web_search` (matching Python convention). (2) OpenRouter `openrouter/free` named router added to free whitelist — was previously filtered out by `:free`-suffix-only check. (3) OrcaRouter `orcarouter/free` confirmed already in whitelist — no change needed. +4 new tests. Suite 1654 → 1658 (+4). No audit findings closed; 6 R07.09 findings remain OPEN (per-finding detail sections still pending).
 
 > **Split:** 42 CLOSED/WONTFIX findings moved to `deltas.md`. `generate_audit_dash.py` reads both `audit.md` (open) and `deltas.md` (closed/wontfix) and merges them into the full register. The dashboard shows all 98 findings (56 open + 42 closed/wontfix).
 

@@ -119,12 +119,12 @@ def bollinger(closes, period=20, mult=2.0):
     return upper, sma_vals, lower
 ```
 
-### Getting News & Sentiment (use `web-search` tool)
+### Getting News & Sentiment (use `web_search` tool)
 Search for recent news about a stock or sector:
 ```
-web-search(query="SHOP.TO Shopify news earnings 2025")
-web-search(query="TSX market outlook today")
-web-search(query="Bank of Canada interest rate decision")
+web_search(query="SHOP.TO Shopify news earnings 2025")
+web_search(query="TSX market outlook today")
+web_search(query="Bank of Canada interest rate decision")
 ```
 
 ### Portfolio & Trade Logging (use `read_file` and `write_file` tools)
@@ -160,7 +160,7 @@ When asked to analyze a stock, follow this sequence:
 1. **Fetch Data** — Use `http_get` to get OHLCV from Yahoo Finance
 2. **Parse** — Use `parse_json` to extract close/open/high/low/volume arrays
 3. **Calculate Indicators** — Use `python_repl` to compute RSI, MACD, Bollinger, SMA
-4. **Search News** — Use `web-search` for recent relevant news
+4. **Search News** — Use `web_search` for recent relevant news
 5. **Synthesize** — Combine technical data + news into an assessment
 6. **Recommend** — Give a clear BUY/SELL/HOLD signal with confidence level and risk assessment
 

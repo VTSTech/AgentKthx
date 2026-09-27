@@ -69,7 +69,7 @@ TOOL_ARG_ALIASES = {
         "text": "command", "input": "command", "arg": "command",
         "args": "command", "str": "command", "value": "command",
     },
-    "web-search": {
+    "web_search": {
         "query": "query",  # correct
         "search": "query", "q": "query", "term": "query", "search_query": "query",
         "keywords": "query", "text": "query", "input": "query",
@@ -135,7 +135,7 @@ CONTEXTUAL_ALIASES = {
     "shell": {"text", "input", "arg", "args", "str", "value"},
     "write_file": {"value", "string"},
     "read_file": {"input"},
-    "web-search": {"text", "input"},
+    "web_search": {"text", "input"},
     "python_repl": {"input", "expression", "expr"},
     "convert_currency": {"value"},
     "edit_file": {"old", "new", "file", "source", "target"},
