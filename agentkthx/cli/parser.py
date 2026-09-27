@@ -182,9 +182,23 @@ def _make_confirm_callback(args: argparse.Namespace):
 
     from ..colors import yellow, dim, green, red
 
+    # SEC-05 (R07.08): strip ANSI escape sequences from model-controlled
+    # tool names + args before printing them in the confirmation dialog.
+    # A malicious prompt-injected tool call could include terminal escapes
+    # (e.g. \x1b[2J to clear the screen, \x1b]0;evil\x07 to rewrite the
+    # terminal title, \x1b[?1000h to enable mouse tracking). Stripping
+    # ensures the user sees the actual tool name + args, not a manipulated
+    # terminal state.
+    _ANSI_ESCAPE_RE = __import__("re").compile(r'\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07]*\x07|\x1b[@-Z\\-_]')
+
+    def _strip_ansi(s: str) -> str:
+        """Remove CSI, OSC, and other ANSI escape sequences."""
+        return _ANSI_ESCAPE_RE.sub("", s)
+
     def _confirm(tool_name: str, args_dict: dict) -> bool:
-        # Format the args for display
-        arg_str = "  ".join(f"{k}={v}" for k, v in args_dict.items())
+        # Format the args for display — strip ANSI from model-controlled values
+        tool_name = _strip_ansi(tool_name)
+        arg_str = "  ".join(f"{k}={_strip_ansi(str(v))}" for k, v in args_dict.items())
         # Truncate very long values (e.g. file content)
         if len(arg_str) > 200:
             arg_str = arg_str[:200] + "..."

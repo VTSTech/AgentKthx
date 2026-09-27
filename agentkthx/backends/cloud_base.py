@@ -183,9 +183,18 @@ class CloudBackend(OpenAICompatibleBackend):
             api_mode=forced_mode,
         )
 
-        # ARCH-01: persist api_mode so is_openresponses_mode() in core/openresponses.py
-        # works correctly. This mirrors what each cloud plugin used to do inline.
-        os.environ["AGENTKTHX_API_MODE"] = forced_mode.value
+        # SEC-15 (R07.08): previously this unconditionally overwrote
+        # os.environ["AGENTKTHX_API_MODE"] = forced_mode.value, which meant
+        # the LAST CloudBackend instance to be constructed won — creating a
+        # second backend with a different api_mode silently changed the
+        # first backend's debug-output behavior (process-global side effect).
+        # Fix: only set the env var if it's not already set (first-instance-
+        # wins). The env var is read by _should_show_openresponses_debug()
+        # in core/openresponses.py to gate OpenResponses debug output. A
+        # proper fix would pass api_mode through the Response objects, but
+        # that's a larger refactor (ARCH-01/ARCH-06 territory).
+        if "AGENTKTHX_API_MODE" not in os.environ:
+            os.environ["AGENTKTHX_API_MODE"] = forced_mode.value
 
         # API key — priority: explicit > env var > config module singleton
         env_value = os.environ.get(self._api_key_env_var, "")

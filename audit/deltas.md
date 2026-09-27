@@ -3,8 +3,8 @@
 **Project:** AgentKthx  
 **Release:** R07.08  
 **Date:** 2026-09-27  
-**Archived:** 2026-09-27 17:04 UTC+0  
-**Counts:** 33 CLOSED · 5 WONTFIX · 38 total
+**Archived:** 2026-09-27 17:59 UTC+0  
+**Counts:** 37 CLOSED · 5 WONTFIX · 42 total
 
 This file is the archive of CLOSED and WONTFIX findings moved out of
 `audit.md` to keep the active audit focused on OPEN findings.
@@ -34,9 +34,13 @@ This file is the archive of CLOSED and WONTFIX findings moved out of
 | MAINT-05 | Medium | Maintainability | ✓ CLOSED R07.05 | cli/utils.py documents 100+ LOC of dead code (_load_tool_cache, _save_tool_cache, _get_cloud_model_size) |
 | FEAT-01 | Medium | New Features | ✓ CLOSED R07.04 | Structured tool-output wrapping to mitigate prompt injection |
 | ARCH-01 | Medium | Architecture | ⊘ WONTFIX (intentional) | Backends split across backends/ (native) and plugins/ (cloud) — confusing module layout |
+| SEC-05 | Low | Security | ✓ CLOSED R07.08 | input() prompts in dangerous-tool confirmation don't strip ANSI escapes from tool name/args |
 | SEC-07 | Low | Security | ✓ CLOSED R07.05 | Default SQLite DB path created without explicit mode — umask typically 0644, leaks conversation history |
 | SEC-08 | Low | Security | ⊘ WONTFIX (intentional) | Audit log writes tool args (incl. shell commands, file contents) in plaintext with default umask |
 | SEC-12 | Low | Security | ✓ CLOSED R07.07 | sanitize_tool_output truncates AFTER redaction — secrets just past 8KB cutoff remain unredacted |
+| SEC-14 | Low | Security | ✓ CLOSED R07.08 | is_transient_api_error body arg lowercased + substring-matched — user-controlled content in body could force permanent classification |
+| SEC-15 | Low | Security | ✓ CLOSED R07.08 | CloudBackend.__init__ mutates os.environ["AGENTKTHX_API_MODE"] — process-global side effect, last-instance-wins |
+| SEC-16 | Low | Security | ✓ CLOSED R07.08 | _extract_buy_credits_url surfaces attacker-controlled URL in user-facing error message — phishing vector |
 | ROB-01 | Low | Robustness | ✓ CLOSED R07.06 | _execute_single_tool_call "break" return value doesn't distinguish terminated from cancelled |
 | ROB-07 | Low | Robustness | ✓ CLOSED R07.06 | _ERROR_FIRST_LINE_RE misses alternative traceback formats (During handling of the above exception) |
 | ROB-08 | Low | Robustness | ✓ CLOSED R07.06 | MemoryConfig.max_tokens is unused — sliding window only fires on message count |
@@ -118,6 +122,19 @@ This file is the archive of CLOSED and WONTFIX findings moved out of
 
 ---
 
+#### SEC-05: input() prompts in dangerous-tool confirmation don't strip ANSI escapes from tool name/args
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Security |
+
+**Status:** ✓ CLOSED R07.08
+
+**Detail:** input() prompts in dangerous-tool confirmation don't strip ANSI escapes from tool name/args
+
+---
+
 #### SEC-06: External plugin import via spec.loader.exec_module with no path restriction or signature verification
 
 | Property | Value |
@@ -180,6 +197,45 @@ This file is the archive of CLOSED and WONTFIX findings moved out of
 **Status:** ✓ CLOSED R07.07
 
 **Detail:** sanitize_tool_output truncates AFTER redaction — secrets just past 8KB cutoff remain unredacted
+
+---
+
+#### SEC-14: is_transient_api_error body arg lowercased + substring-matched — user-controlled content in body could force permanent classification
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Security |
+
+**Status:** ✓ CLOSED R07.08
+
+**Detail:** is_transient_api_error body arg lowercased + substring-matched — user-controlled content in body could force permanent classification
+
+---
+
+#### SEC-15: CloudBackend.__init__ mutates os.environ["AGENTKTHX_API_MODE"] — process-global side effect, last-instance-wins
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Security |
+
+**Status:** ✓ CLOSED R07.08
+
+**Detail:** CloudBackend.__init__ mutates os.environ["AGENTKTHX_API_MODE"] — process-global side effect, last-instance-wins
+
+---
+
+#### SEC-16: _extract_buy_credits_url surfaces attacker-controlled URL in user-facing error message — phishing vector
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Security |
+
+**Status:** ✓ CLOSED R07.08
+
+**Detail:** _extract_buy_credits_url surfaces attacker-controlled URL in user-facing error message — phishing vector
 
 ---
 
@@ -618,6 +674,9 @@ These are not yet formalized as numbered findings but are noted for the next aud
 
 ---
 
+
+---
+
 ## R07.05 Closures (Released)
 
 R07.05 closed 9 findings across two passes (post-R07.04 release): the first pass (+20 tests, `tests/test_r07_05_audit_fixes.py`, suite 1290 → 1310), the ZAI free/paid catalog fix (+13 tests, `tests/test_zai_free_models.py`, suite → 1336), and the second-pass SEC batch (+68 tests, `tests/test_r07_05_sec_fixes.py` + 1 companion in `test_loop_resilience.py`, suite → **1404 passed / 9 skipped in ~25s**, zero regressions). One finding (ROB-05) was ruled WONTFIX — intentional behavior, not a bug (see below).
@@ -654,6 +713,9 @@ R07.05 closed 9 findings across two passes (post-R07.04 release): the first pass
 
 ---
 
+
+---
+
 ## R07.06 Closures (In-Progress)
 
 R07.06 is a robustness batch: five findings closed with +39 regression tests in a single new test file (`tests/test_r07_06_rob_fixes.py`), then a sixth (ROB-14) found during the owner's smoke test of the packaged zip and closed with +18 more in `tests/test_model_switch_context.py` — suite 1404 → **1461 passed / 9 skipped in ~25s**, zero regressions. Version bumped to R07.06 (0.7.06). Two of the six are Mediums with user-visible impact (ROB-10's ~6-minute doom-retry on permanent 500s; ROB-13's invisible args degradation), four are Lows closing behavior gaps (half-cancelled runs, missed traceback framings, the dead `max_tokens` field, the stale per-model state on `/model` switches). One API-visible default changed: `MemoryConfig.max_tokens` 4096 → 0 (tier now real but opt-in — see ROB-08).
@@ -668,6 +730,9 @@ R07.06 is a robustness batch: five findings closed with +39 regression tests in 
 | ~~ROB-14~~ | Low | ✓ CLOSED R07.06 | In-chat `/model` switch now re-derives the per-model state via `apply_model_switch()` (`cli/agent_factory.py`): `num_ctx` + `num_predict` follow the new model's catalog (`--num-ctx`/`--num-predict`/`/param`-pinned values survive; `/param reset` un-pins), `model_config`/`model_family` re-derived, stale `backend._context_safe_max_tokens` from the old model's 400 recovery cleared. Local backends keep config-derived `num_ctx` (fresh-start semantics). `/model` prints the deltas. +18 tests in `tests/test_model_switch_context.py`. |
 
 42 findings remained open at the close of R07.06 (plus ROB-05 wontfix). The next highest-leverage moves from the near-term list: **MAINT-01** (extract `ChatSession` from the 1,199-line `cmd_chat`), **TEST-01** (add a thin integration test tier), **SEC-09** (warn on non-HTTPS ACP). The R07.07 re-audit delta below adds 25 new findings extending the ID sequence — see the [R07.07 New Findings (Re-Audit Delta)](#r07.07-new-findings-re-audit-delta) section.
+
+---
+
 
 ---
 
@@ -759,6 +824,9 @@ These were identified in the R07.07 re-audit but NOT closed in this batch — th
 3. **SEC-13** — add `AGENTKTHX_REQUIRE_PLUGIN_PINS=1` env var enforcement. ~15 LOC + 4 tests.
 4. **SEC-16** — validate `buy_credits_url` host before surfacing. ~5 LOC + 2 tests.
 5. **MAINT-11** — extract OrcaRouter shared retry helper. ~50 LOC refactor + 0 new tests.
+
+
+---
 
 
 ---

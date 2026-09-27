@@ -53,6 +53,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import time
 from typing import Any, Generator
@@ -224,10 +225,27 @@ def _extract_buy_credits_url(err_str: str) -> str | None:
     OrcaRouter's free-tier rejection errors always include a
     ``buy_credits_url`` field pointing to the billing page. Surface it
     in the user-facing error message so the user knows where to top up.
+
+    SEC-16 (R07.08): the URL is attacker-controlled (a compromised API
+    provider or MITM could inject a phishing URL). Validate the host
+    against the OrcaRouter domain allowlist before returning it. If the
+    URL doesn't point at orcarouter.ai, return None — the caller falls
+    back to the hardcoded safe URL.
     """
-    import re
     m = re.search(r'"buy_credits_url"\s*:\s*"([^"]+)"', err_str)
-    return m.group(1) if m else None
+    if not m:
+        return None
+    url = m.group(1)
+    # SEC-16: only surface URLs pointing at OrcaRouter's own domain.
+    host = re.search(r'https?://([^/]+)', url)
+    if not host:
+        return None
+    hostname = host.group(1).lower()
+    # Allow www.orcarouter.ai + any subdomain of orcarouter.ai
+    if hostname == "www.orcarouter.ai" or hostname.endswith(".orcarouter.ai"):
+        return url
+    # Reject everything else — a phishing URL won't be surfaced
+    return None
 
 
 def _is_free_model(model_id: str) -> bool:

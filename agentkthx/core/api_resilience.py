@@ -124,12 +124,37 @@ def is_transient_api_error(exc: BaseException, body: str | None = None) -> bool:
     transient marker — a 500 carrying a permanent-error body fails fast
     instead of burning the full retry budget. The body is only consulted
     for PERMANENT patterns: a clean-bodied 500 stays transient.
+
+    SEC-14 (R07.08): the ``body`` arg is untrusted (API-provider-controlled).
+    A malicious provider could embed permanent markers in benign fields
+    (e.g. ``{"user_message": "your request was not invalid_request yet"}``)
+    to force permanent classification — a DoS via premature-fail. The fix:
+    for the ``body`` arg, only match structured JSON patterns (``"key":`` or
+    ``"key": "value"`` forms), not raw substrings. The ``str(exc)`` path
+    remains a raw substring match because backends construct the exception
+    message themselves (trusted).
     """
     if body:
         body_text = body.lower()
+        # SEC-14: match permanent markers as JSON values, not raw substrings.
+        # A marker matches if it appears INSIDE a quoted JSON string value:
+        #   "context_length_exceeded" → marker "context_length" matches (substring of a quoted value)
+        #   "invalid_request" → marker "invalid_request" matches (exact quoted token)
+        #   "type":"invalid_request" → marker "invalid_request" matches (value)
+        # but does NOT match if the marker appears in unquoted prose:
+        #   {"message": "error 401 in prose"} → "401" does NOT match (inside prose, not a JSON key/value)
+        # Implementation: for each marker, check if it appears between any
+        # pair of double-quotes in the body. This is a superset of the exact
+        # quoted-token match — it catches substrings within quoted values
+        # (like "context_length" inside "context_length_exceeded") while
+        # still rejecting markers in unquoted prose.
         for marker in _PERMANENT_MARKERS:
-            if marker in body_text:
-                return False
+            # Extract all quoted strings from the body and check if the marker
+            # appears inside any of them
+            import re as _re
+            for quoted in _re.findall(r'"([^"]*)"', body_text):
+                if marker in quoted:
+                    return False
     msg = str(exc).lower()
     if not msg:
         return False
