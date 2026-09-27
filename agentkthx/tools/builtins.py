@@ -398,7 +398,9 @@ def http_get(url: str, headers: dict | None = None) -> str:
 
     try:
         req = urllib.request.Request(url, method="GET")
-        req.add_header("User-Agent", "AgentKthx/1.0")
+        req.add_header("User-Agent", _BROWSER_USER_AGENT)
+        req.add_header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+        req.add_header("Accept-Language", "en-US,en;q=0.9")
 
         if headers:
             for key, value in headers.items():
@@ -525,10 +527,25 @@ MAX_SEARCH_RESULTS = 5
 # Maximum length per result snippet
 MAX_SEARCH_SNIPPET = 300
 
+# Browser User-Agent for HTTP requests. DuckDuckGo (and many other sites)
+# now reject non-browser UAs — the prior "AgentKthx/1.0" UA returned
+# HTTP 400 from html.duckduckgo.com and timed out on lite.duckduckgo.com.
+# Spoofing a real Firefox UA is the documented workaround. Override via
+# the AGENTKTHX_USER_AGENT env var if a future UA block requires rotation.
+_BROWSER_USER_AGENT = os.environ.get(
+    "AGENTKTHX_USER_AGENT",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:156.0) Gecko/20100101 Firefox/156.0",
+)
+
 
 def web_search(query: str, num_results: int | None = None) -> str:
     """
-    Search the web using DuckDuckGo Lite (HTML version, no API key required).
+    Search the web using DuckDuckGo (HTML version, no API key required).
+
+    Tries the ``html.duckduckgo.com`` endpoint first (returns proper HTML
+    results with a browser User-Agent). Falls back to ``lite.duckduckgo.com``
+    if the html endpoint fails (e.g. returns no results or raises a
+    network error).
 
     Args:
         query: Search query string
@@ -549,84 +566,53 @@ def web_search(query: str, num_results: int | None = None) -> str:
     num_results = max(1, min(num_results, 10))
 
     try:
-        # Use DuckDuckGo Lite — the HTML version that works without JavaScript
         encoded_query = urllib.parse.urlencode({"q": query})
-        url = f"https://lite.duckduckgo.com/lite/?{encoded_query}"
+        results: list[dict] = []
 
-        req = urllib.request.Request(url, method="GET")
-        req.add_header("User-Agent", "AgentKthx/1.0")
+        # --- Primary: html.duckduckgo.com (the endpoint that works in 2026) ---
+        # The lite endpoint (lite.duckduckgo.com/lite/) appears retired —
+        # timeouts on every request as of 2026-09-28. The html endpoint
+        # returns proper results with a browser User-Agent + Accept headers.
+        try:
+            html_url = f"https://html.duckduckgo.com/html/?{encoded_query}"
+            req = urllib.request.Request(html_url, method="GET")
+            req.add_header("User-Agent", _BROWSER_USER_AGENT)
+            req.add_header("Accept", "text/html,application/xhtml+xml")
+            req.add_header("Accept-Language", "en-US,en;q=0.9")
 
-        with urllib.request.urlopen(req, timeout=15) as response:
-            html = response.read().decode("utf-8", errors="replace")
+            with urllib.request.urlopen(req, timeout=15) as response:
+                html = response.read().decode("utf-8", errors="replace")
 
-        # DuckDuckGo Lite returns results in <a> tags with class="result-link"
-        # and snippets in regular text near each link.
-        # Parse the HTML to extract results.
-        results = []
-
-        # Pattern 1: DuckDuckGo Lite HTML results
-        # Results are in <a class="result-link" href="URL">TITLE</a>
-        # followed by a <td class="result-snippet">SNIPPET</td>
-        link_pattern = re.compile(
-            r'<a[^>]+class="result-link"[^>]+href="([^"]+)"[^>]*>(.*?)</a>',
-            re.DOTALL | re.IGNORECASE,
-        )
-        snippet_pattern = re.compile(
-            r'<td[^>]+class="result-snippet"[^>]*>(.*?)</td>',
-            re.DOTALL | re.IGNORECASE,
-        )
-
-        links = link_pattern.findall(html)
-
-        for i, (result_url, title_raw) in enumerate(links):
-            if i >= num_results:
-                break
-
-            # Clean HTML from title
-            title = re.sub(r"<[^>]+>", "", title_raw).strip()
-            if not title:
-                title = f"Result {i + 1}"
-
-            # Try to find a snippet near this link
-            snippet = ""
-            # Find the snippet that appears after this link
-            link_end = html.find(result_url) + len(result_url)
-            remaining = html[link_end:link_end + 2000]
-            snippet_match = snippet_pattern.search(remaining)
-            if snippet_match:
-                snippet = re.sub(r"<[^>]+>", "", snippet_match.group(1)).strip()
-                snippet = snippet[:MAX_SEARCH_SNIPPET]
-                # Collapse whitespace
-                snippet = re.sub(r"\s+", " ", snippet)
-
-            # Skip empty/useless results
-            if not snippet and not title:
-                continue
-
-            results.append({
-                "title": title,
-                "url": result_url,
-                "snippet": snippet,
-            })
-
-        # If no results from Lite, try the regular endpoint
-        if not results:
-            ddg_url = f"https://html.duckduckgo.com/html/?{encoded_query}"
-            req2 = urllib.request.Request(ddg_url, method="GET")
-            req2.add_header("User-Agent", "AgentKthx/1.0")
-            with urllib.request.urlopen(req2, timeout=15) as response:
-                html2 = response.read().decode("utf-8", errors="replace")
-
-            # Parse HTML results from regular DDG
-            result_blocks = re.split(r'<div class="result results_links results_links_deep web-result', html2)
+            # Parse HTML results — DuckDuckGo's html endpoint uses
+            # <a class="result__a" href="URL">TITLE</a> +
+            # <a class="result__snippet">SNIPPET</a> structure.
+            result_blocks = re.split(
+                r'<div class="result results_links results_links_deep web-result',
+                html,
+            )
             for block in result_blocks[1:num_results + 1]:
-                title_match = re.search(r'<a[^>]+class="result__a"[^>]*>(.*?)</a>', block, re.DOTALL | re.IGNORECASE)
-                url_match = re.search(r'<a[^>]+class="result__a"[^>]+href="([^"]+)"', block)
-                snippet_match = re.search(r'<a[^>]+class="result__snippet"[^>]*>(.*?)</a>', block, re.DOTALL | re.IGNORECASE)
+                title_match = re.search(
+                    r'<a[^>]+class="result__a"[^>]*>(.*?)</a>',
+                    block, re.DOTALL | re.IGNORECASE,
+                )
+                url_match = re.search(
+                    r'<a[^>]+class="result__a"[^>]+href="([^"]+)"',
+                    block,
+                )
+                snippet_match = re.search(
+                    r'<a[^>]+class="result__snippet"[^>]*>(.*?)</a>',
+                    block, re.DOTALL | re.IGNORECASE,
+                )
 
                 title = re.sub(r"<[^>]+>", "", title_match.group(1)).strip() if title_match else ""
                 result_url = url_match.group(1) if url_match else ""
                 snippet = re.sub(r"<[^>]+>", "", snippet_match.group(1)).strip() if snippet_match else ""
+                # DuckDuckGo wraps URLs in a redirect — unwrap //duckduckgo.com/l/?uddg=URL
+                if result_url.startswith("//duckduckgo.com/l/?uddg="):
+                    from urllib.parse import parse_qs, urlsplit
+                    qs = parse_qs(urlsplit(result_url).query)
+                    if "uddg" in qs:
+                        result_url = qs["uddg"][0]
 
                 if result_url and (title or snippet):
                     results.append({
@@ -634,6 +620,56 @@ def web_search(query: str, num_results: int | None = None) -> str:
                         "url": result_url,
                         "snippet": snippet[:MAX_SEARCH_SNIPPET] if snippet else "",
                     })
+        except (urllib.error.HTTPError, urllib.error.URLError, Exception) as e:
+            # Don't abort — fall through to the lite endpoint below.
+            # Real errors will surface if BOTH endpoints fail.
+            pass
+
+        # --- Fallback: lite.duckduckgo.com (may be retired, but try once) ---
+        if not results:
+            try:
+                lite_url = f"https://lite.duckduckgo.com/lite/?{encoded_query}"
+                req2 = urllib.request.Request(lite_url, method="GET")
+                req2.add_header("User-Agent", _BROWSER_USER_AGENT)
+                req2.add_header("Accept", "text/html,application/xhtml+xml")
+                req2.add_header("Accept-Language", "en-US,en;q=0.9")
+
+                with urllib.request.urlopen(req2, timeout=15) as response:
+                    html2 = response.read().decode("utf-8", errors="replace")
+
+                # Parse lite endpoint results — different HTML structure:
+                # <a class="result-link" href="URL">TITLE</a> +
+                # <td class="result-snippet">SNIPPET</td>
+                link_pattern = re.compile(
+                    r'<a[^>]+class="result-link"[^>]+href="([^"]+)"[^>]*>(.*?)</a>',
+                    re.DOTALL | re.IGNORECASE,
+                )
+                snippet_pattern = re.compile(
+                    r'<td[^>]+class="result-snippet"[^>]*>(.*?)</td>',
+                    re.DOTALL | re.IGNORECASE,
+                )
+
+                links = link_pattern.findall(html2)
+                for i, (result_url, title_raw) in enumerate(links):
+                    if i >= num_results:
+                        break
+                    title = re.sub(r"<[^>]+>", "", title_raw).strip() or f"Result {i + 1}"
+                    snippet = ""
+                    link_end = html2.find(result_url) + len(result_url)
+                    remaining = html2[link_end:link_end + 2000]
+                    snippet_match = snippet_pattern.search(remaining)
+                    if snippet_match:
+                        snippet = re.sub(r"<[^>]+>", "", snippet_match.group(1)).strip()
+                        snippet = re.sub(r"\s+", " ", snippet)[:MAX_SEARCH_SNIPPET]
+                    if result_url and (title or snippet):
+                        results.append({
+                            "title": title,
+                            "url": result_url,
+                            "snippet": snippet,
+                        })
+            except (urllib.error.HTTPError, urllib.error.URLError, Exception) as e:
+                # Both endpoints failed — fall through to the no-results return
+                pass
 
         if not results:
             return f"No results found for: {query}"
