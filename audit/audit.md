@@ -1,15 +1,17 @@
 # Improvement & Enhancement Audit
 
-**AgentKthx v0.7.08 (R07.08 — in progress)**
+**AgentKthx v0.7.09 (R07.09)**
 
 **Repository:** https://github.com/VTSTech/AgentKthx  
-**Author:** VTSTech | **License:** MIT | **Date:** 2026-09-27  
-**Commit:** (working tree) | **Test Suite:** 1590 passed / 9 skipped  
-50 Open Findings | 7 Categories | SEC, ROB, MAINT, PERF, FEAT, ARCH, TEST  
-Severity: 0 High | 20 Medium | 30 Low  
-50 OPEN (CLOSED + WONTFIX archived in deltas.md — generate_audit_dash.py merges both for the dashboard)
+**Author:** VTSTech | **License:** MIT | **Date:** 2026-09-28  
+**Commit:** `2e25bfc` (working tree post-R07.09) | **Test Suite:** 1654 passed / 13 skipped  
+56 Open Findings | 7 Categories | SEC, ROB, MAINT, PERF, FEAT, ARCH, TEST  
+Severity: 0 High | 22 Medium | 34 Low  
+56 OPEN (CLOSED + WONTFIX archived in deltas.md — generate_audit_dash.py merges both for the dashboard)
 
-> **Split:** 42 CLOSED/WONTFIX findings moved to `deltas.md`. `generate_audit_dash.py` reads both `audit.md` (open) and `deltas.md` (closed/wontfix) and merges them into the full register. The dashboard shows all 92 findings.
+> **R07.09 delta (Mistral plugin add):** R07.09 added the 11th bundled plugin (`mistral` — La Plateforme backend at `https://api.mistral.ai/v1`, 15-model catalog, 6 cloud backends now). A streaming-transport bug in the initial R07.09 draft (missing `_iter_sse_lines()` abstract hook required by `OpenAICompatibleBackend.generate_completions_stream()`) was caught by user testing before release and fixed in the same release — flagging TEST-09 (plugin scaffolds need a "the agent loop's streaming path actually calls through" smoke test, not just "the streaming method exists on the class"). +64 new tests. Suite 1590 → 1654 (+64).
+
+> **Split:** 42 CLOSED/WONTFIX findings moved to `deltas.md`. `generate_audit_dash.py` reads both `audit.md` (open) and `deltas.md` (closed/wontfix) and merges them into the full register. The dashboard shows all 98 findings (56 open + 42 closed/wontfix).
 
 ---
 
@@ -24,11 +26,13 @@ Severity: 0 High | 20 Medium | 30 Low
 
 ## Executive Summary
 
-This audit covers AgentKthx at commit `1f647a0` (R07.08, PyPI 0.7.08). The codebase comprises 119 Python source files totaling ~51,000 LOC (including ~20,000 lines of tests across 52 files), and follows the R07.00 modularization that broke the prior 4,079-line `cli.py` monolith into a 23-file `cli/` package and the 3,119-line `agent.py` god-class into a 51-line five-mixin composition. The test suite passes **1581 tests / 9 skipped in ~25s** (was 1506 in R07.07, +75), with CI running on Python 3.12/3.13 plus a parallel coverage job reporting a 42.7% baseline.
+This audit covers AgentKthx at commit `2e25bfc` (R07.09, PyPI 0.7.09). The codebase now comprises 121 Python source files totaling ~52,487 LOC (was 51,000 in R07.08) with ~21,337 lines of tests across 53 test files (was 52). The R07.00 modularization (5-mixin `Agent` composition, 23-file `cli/` package) is stable. The test suite passes **1654 tests / 13 skipped in ~27s** (was 1590 / 9 skipped in R07.08, +64 tests), with CI running on Python 3.12/3.13 plus a parallel coverage job.
 
-R07.08 closed **3 findings** (SEC-01 sandbox escape via attribute traversal, MAINT-11 Path.home Windows impersonation, MAINT-11 OrcaRouter retry-logic duplication) and recorded **4 owner-decision WONTFIX verdicts** (SEC-08 audit log plaintext, PERF-07 web_search no cache, FEAT-04 `--dry-run` superseded by `--confirm`, ARCH-01 backend/plugin split is intentional). Beyond the audit closures, R07.08 also shipped the **audit.md/deltas.md split**: `audit.md` now holds OPEN findings only (the active work items), while `deltas.md` holds the CLOSED + WONTFIX archive. `generate_audit_dash.py` reads both files and merges them — the dashboard shows the full register (92 findings) unchanged. The `codebase-audit` skill's templates + `SKILL.md` were updated to conform to the dashboard parser contract (5-column Status table, header counts, delta blocks, closure prose). +75 regression tests across 4 new test files. The remaining **54 findings** are tracked below; the next highest-leverage moves are SEC-11 (bounded `getaddrinfo`), ROB-15 (PersistentMemory transaction), SEC-13 (plugin pin enforcement), MAINT-01 (extract `ChatSession`), and TEST-01 (integration test tier).
+R07.09 was a **feature release** rather than an audit-closure release: it added the 11th bundled plugin (`mistral` — Mistral La Plateforme backend with a 15-model catalog and full wire-format delta coverage). A streaming-transport bug in the initial R07.09 draft (missing `_iter_sse_lines()` abstract hook) was caught by user testing before release and fixed in the same release — the bug surfaced when running `agentkthx chat --backend mistral --model labs-leanstral-1-5-1` against the live API. **No audit findings were closed in R07.09.** The bug-surfaces-as-finding pattern produced TEST-09: plugin scaffolds need a "the agent loop's streaming path actually calls through to the backend" smoke test, not just "the streaming method exists on the class."
 
-Cumulative closure state: **33 of 92 findings (36%)** closed across R07.00 → R07.08 (4 in R07.04 + 9 in R07.05 + 6 in R07.06 + 11 in R07.07 + 3 in R07.08), plus 5 WONTFIX. The audit-tracked finding discipline (SEC/ROB/MAINT/PERF/FEAT/ARCH/TEST ID system with closure deltas) continues to catch and resolve real issues release-over-release — the R07.07 re-audit added 25 new findings, and the R07.08 Mode 2b re-audit caught 3 findings that were fixed in code but never marked CLOSED in the audit table (SEC-12 + ROB-26 sanitize_tool_output ordering, TEST-08 adversarial sandbox tests).
+This re-audit added **6 new findings** from the Mistral plugin code (MAINT-21 operator-precedence bug in error-envelope check, MAINT-22 streaming path bypasses Mistral-specific body shaping, ROB-28 catch-all `Exception` masks real bugs in `list_models`, ROB-29 ~80 LOC of duplicated retry/backoff between `_iter_sse_lines` and `_make_api_request`, SEC-18 provider-controlled error message surfaces in RuntimeError prose, TEST-09 plugin scaffolds miss agent-loop streaming-path integration test). **The R07.09 release notes' initial claim of "no new audit findings opened by R07.09" was wrong; this re-audit corrects it.** The next highest-leverage closures remain SEC-11 (bounded `getaddrinfo`), ROB-15 (PersistentMemory transaction), SEC-13 (plugin pin enforcement), MAINT-01 (extract `ChatSession`), and TEST-01 (integration test tier). ROB-29 (Mistral retry duplication) is the new MAINT-11 equivalent and should be picked up by the same `_classify_and_handle_http_error` helper extracted in R07.08 — the helper currently lives on `OrcaRouterBackend` and needs lifting to `CloudBackend` so all cloud backends can share it.
+
+Cumulative closure state: **33 of 98 findings (34%)** closed across R07.00 → R07.08 (4 in R07.04 + 9 in R07.05 + 6 in R07.06 + 11 in R07.07 + 3 in R07.08), plus 5 WONTFIX. R07.09 added 6 new OPEN findings (no closures, no WONTFIX). The audit-tracked finding discipline (SEC/ROB/MAINT/PERF/FEAT/ARCH/TEST ID system with closure deltas) continues to catch real issues — the R07.09 streaming bug is itself a finding-of-omission (TEST-09) that the new `TestIterSseLines` class now closes.
 
 ---
 
@@ -92,6 +96,25 @@ Cumulative closure state: **33 of 92 findings (36%)** closed across R07.00 → R
 | TEST-04 | Low | Testing | OPEN | No test coverage for agent_mode.py rollback functionality (822 LOC, key feature) |
 | TEST-05 | Low | Testing | OPEN | test_bump_version_script.py tests shell script via subprocess — fails on Windows/no-bash |
 | TEST-07 | Low | Testing | OPEN | No test for update_check module's network-failure paths (URLError, socket.timeout, malformed JSON) |
+| MAINT-21 | Medium | Maintainability | OPEN | _parse_mistral_response error-envelope check has operator-precedence bug — `(A or (B and C))` misclassifies any response with `message` field and no `choices` as an error |
+| MAINT-22 | Medium | Maintainability | OPEN | Streaming path bypasses _build_mistral_body — random_seed/safe_prompt/prompt_cache_key/OpenAI-only kwarg stripping NOT applied on streaming (only non-streaming) |
+| ROB-28 | Low | Robustness | OPEN | MistralBackend.list_models catches bare Exception on top of HTTPError/URLError — masks KeyError/AttributeError as "discovery failed" with no traceback |
+| ROB-29 | Low | Robustness | OPEN | MistralBackend _iter_sse_lines + _make_api_request have ~80 LOC duplicated retry/backoff logic — mirrors the MAINT-11 OrcaRouter pattern closed in R07.08 |
+| SEC-18 | Low | Security | OPEN | _parse_mistral_response raises RuntimeError carrying provider-controlled message text — false permanent-error markers could be injected (same shape as SEC-14 closed R07.08) |
+| TEST-09 | Low | Testing | OPEN | Plugin scaffolds don't include a "agent loop streaming path actually calls through" smoke test — R07.09.0 streaming bug caught by user testing, not test suite |
+
+---
+
+## R07.09 New Findings
+
+| ID | Severity | Category | File(s) | Title |
+|----|----------|----------|---------|-------|
+| MAINT-21 | Medium | Maintainability | `agentkthx/plugins/mistral/mistral.py:745` | `_parse_mistral_response` operator-precedence bug in error-envelope check |
+| MAINT-22 | Medium | Maintainability | `agentkthx/plugins/mistral/mistral.py:957-1008` (`_iter_sse_lines` docstring) | Streaming path bypasses `_build_mistral_body` — Mistral-specific knobs not sent |
+| ROB-28 | Low | Robustness | `agentkthx/plugins/mistral/mistral.py:500-505` | `list_models()` catch-all `Exception` masks real bugs |
+| ROB-29 | Low | Robustness | `agentkthx/plugins/mistral/mistral.py:981-1139` + `1187-1300` | ~80 LOC duplicated retry/backoff between `_iter_sse_lines` and `_make_api_request` |
+| SEC-18 | Low | Security | `agentkthx/plugins/mistral/mistral.py:749-752` + `761` | Provider-controlled error message surfaces in RuntimeError prose |
+| TEST-09 | Low | Testing | `tests/test_mistral_backend.py` (whole file) | Plugin scaffolds miss agent-loop streaming-path integration test |
 
 ---
 
