@@ -64,7 +64,7 @@ A master table of every finding, sorted by severity (High first), then by catego
 | ID | Severity | Category | Status | Title |
 |----|----------|----------|--------|-------|
 | SEC-02 | **High** | Security | ✓ CLOSED R07.04 | `ast.literal_eval` fallback for Python-dict tool arguments enables type-confusion bypass |
-| SEC-01 | Medium | Security | OPEN | `sandboxed_repl.py` SAFE_BUILTINS includes `getattr`/`setattr`/`super`/`object` — sandbox escape via attribute traversal |
+| SEC-01 | Medium | Security | ✓ CLOSED R07.08 | `sandboxed_repl.py` SAFE_BUILTINS includes `getattr`/`setattr`/`super`/`object` — sandbox escape via attribute traversal |
 | SEC-03 | Medium | Security | ✓ CLOSED R07.05 | `is_safe_url` SSRF check uses substring hostname matching — bypassable via DNS rebinding, decimal/IPv6 IP encoding |
 | SEC-04 | Medium | Security | ✓ CLOSED R07.05 | `sanitize_command` is a regex denylist only — `bash` not blocked, heredocs not blocked |
 | SEC-06 | Medium | Security | ✓ CLOSED R07.05 | External plugin import via `spec.loader.exec_module` with no path restriction or signature verification |
@@ -97,7 +97,7 @@ A master table of every finding, sorted by severity (High first), then by catego
 | MAINT-06 | Low | Maintainability | ✓ CLOSED R07.05 | `core/model_config.py` is a 30-line deprecated module — no removal date set |
 | MAINT-07 | Low | Maintainability | OPEN | `model_family_config.detect_family` uses prefix matching with overlapping families — fragile for new Qwen variants |
 | MAINT-09 | Low | Maintainability | OPEN | `extract_calc_expression` has 12+ overlapping regex patterns — unpredictable which matches |
-| MAINT-11 | Low | Maintainability | OPEN | `Path.home()` in `_default_roots` returns wrong path on Windows under impersonation |
+| MAINT-11 | Low | Maintainability | ✓ CLOSED R07.08 | `Path.home()` in `_default_roots` returns wrong path on Windows under impersonation |
 | MAINT-12 | Low | Maintainability | OPEN | Inconsistent `getattr(args, ..., default)` vs direct `args.X` across `_build_agent` |
 | PERF-01 | Medium | Performance | OPEN | `Memory.sanitize_history` runs on every `get_messages()` call — O(n²) for long histories |
 | PERF-02 | Medium | Performance | OPEN | `_check_compaction` iterates all messages + JSON-serializes tool_calls on every step |
@@ -151,6 +151,8 @@ The sandboxed REPL constructs a runner script (`_generate_runner_script`) that r
 Recommendation: Remove `getattr`/`setattr`/`delattr`/`super`/`object` from `SAFE_BUILTINS`. For production use, run the sandbox inside `seccomp` (Linux), `bubblewrap`, or `gVisor` to restrict syscalls beyond what Python-level allowlists can enforce.
 
 **Impact:** A prompt-injected `python_repl` tool call can fully escape the sandbox and execute arbitrary code with the user's privileges.
+
+**FIXED (R07.08):** Dropped the five attribute-traversal primitives (`getattr`, `setattr`, `delattr`, `super`, `object`) from `SAFE_BUILTINS` in `agentkthx/tools/sandboxed_repl.py`. `hasattr` is retained (returns a bool, doesn't expose `getattr` to user code). `vars`/`dir` retained as a documented residual surface — the classic `object.__subclasses__()` escape chain is now closed at the first step (`object` is no longer reachable as a bare global, so `object.__subclasses__()` raises `NameError` before any traversal begins). +19 regression tests in `tests/test_r07_08_sec01_sandbox.py` pin both the set membership (unit) and the actual subprocess sandbox behaviour (integration): each of the five PoC entry points (`object.__subclasses__()`, `getattr(object, '__subclasses__')`, `super.__self_class__`, `setattr(math, ...)`, `delattr(math, ...)`) now raises `NameError`; the full canonical PoC (subclasses → find os-loader → `import os` → `os.system('echo pwned')`) is blocked; legitimate REPL primitives (`sum`, comprehensions, `import math`, `hasattr`) are unaffected. A pre-existing limitation (unrelated to SEC-01) is also documented: the sandbox never exposed `__build_class__`, so `class` statements have always raised `NameError` — a future fix would add `__build_class__` deliberately.
 
 ---
 
@@ -725,6 +727,10 @@ Recommendation: Wrap agent descriptions in XML tags (`<agent name="X">descriptio
 Recommendation: Use `os.environ.get("APPDATA")` or `os.path.expanduser("~")` with explicit fallback. Document the plugin root resolution algorithm in `PLUGIN_SPEC.md`.
 
 **Impact:** Plugins installed by user don't load when AgentKthx runs as a service — Windows-specific gotcha.
+
+**FIXED (R07.08):** Added `PluginManager._user_home()` static helper in `agentkthx/plugins/_loader.py` and routed both `_default_roots()` and `plugin_data_dir()` through it. Resolution order on Windows: `%APPDATA%` → `%LOCALAPPDATA%` → `%USERPROFILE%` (each guarded against the `system32\config\systemprofile` leak) → `os.path.expanduser("~")` last resort. POSIX unchanged (`$HOME` → `expanduser("~")`). The env-var wins over `Path.home()` because impersonation rarely rewrites the per-user shell env vars (populated by `userenv.dll` at interactive logon, not by the token). +12 regression tests in `tests/test_r07_08_maint11_plugin_roots.py`: POSIX `$HOME` + `expanduser` fallback; Windows `APPDATA`-wins / `LOCALAPPDATA`-fallback / `USERPROFILE`-fallback / systemprofile-rejection (via `USERPROFILE` and via `APPDATA`); `_default_roots` user-root derives from `_user_home()`; `plugin_data_dir` POSIX-`_user_home`-fallback + XDG-still-wins + Windows-`LOCALAPPDATA`-wins. The `PLUGIN_SPEC.md` documentation of the resolution algorithm is left as a follow-up.
+
+> **NOTE — MAINT-11 ID collision:** the R07.07 delta (line ~1385 below) reused the `MAINT-11` ID for a *different* finding — the OrcaRouter retry-logic duplication (Medium, `plugins/orcarouter/orcarouter.py:639,905`). That finding is still OPEN and should be renumbered (e.g. → `MAINT-21`) in the next audit delta to resolve the collision. This closure applies only to the Path.home version (Low).
 
 ---
 
