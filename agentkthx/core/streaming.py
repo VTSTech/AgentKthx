@@ -593,6 +593,8 @@ class StreamingMixin:
         # the 4-space indent on the very first line of the panel (subsequent
         # lines get their indent from the "\n    " replacement below).
         _reasoning_first_line_emitted = False
+        # Track whether we've done the reasoning→content transition newline
+        _content_started = False
 
         def _emit_reasoning_panel_header():
             """Emit the 'reasoning:' header once, before the first reasoning
@@ -707,21 +709,13 @@ class StreamingMixin:
                         usage = chunk_usage
                     # Content delta — print immediately
                     if delta:
-                        # If reasoning was just streamed (grey), add a newline
-                        # so the content (white) starts on its own line under
-                        # the AgentKthx: prefix. The prefix was already emitted
-                        # by _emit_reasoning_panel_header, so _emit_prefix_once
-                        # is a no-op here — but we still need the newline.
-                        if _reasoning_panel_started and not _prefix_emitted:
-                            # Prefix not yet emitted — _emit_prefix_once will
-                            # add the newline + "AgentKthx:" prefix.
-                            pass
-                        elif _reasoning_panel_started and _prefix_emitted:
-                            # Prefix already emitted by reasoning panel header.
-                            # Close the grey reasoning text + add newline so
-                            # content starts fresh on its own line.
+                        # If reasoning was just streamed (grey), add ONE newline
+                        # before the first content delta so content (white) starts
+                        # on its own line. Only do this once — not per-chunk.
+                        if _reasoning_panel_started and _prefix_emitted and not _content_started:
                             sys.stdout.write("\n")
                             sys.stdout.flush()
+                            _content_started = True
                         _emit_prefix_once()
                         content_acc.append(delta)
                         sys.stdout.write(delta)
