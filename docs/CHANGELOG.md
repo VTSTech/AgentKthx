@@ -5,6 +5,77 @@ All notable changes to AgentKthx will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [R07.08] - 2026-09-27
+
+**Security hardening + the audit.md/deltas.md split.** Three findings closed (SEC-01 sandbox escape, MAINT-11 Path.home Windows impersonation, MAINT-11 OrcaRouter retry duplication) and four owner-decision WONTFIX verdicts recorded (SEC-08, PERF-07, FEAT-04, ARCH-01) — trimming the OPEN count from 63 → 57. The headline infrastructure change is the **audit.md / deltas.md split**: `audit.md` now holds OPEN findings only (the active work items, 106 lines vs 1540), `deltas.md` holds the CLOSED + WONTFIX archive (the growing historical tail), and `generate_audit_dash.py` reads BOTH files and merges them into the full register for the dashboard — which continues to show all 92 findings unchanged. The `codebase-audit` skill's templates + `SKILL.md` were updated to conform to the dashboard parser contract (Status column, header counts, delta blocks, closure prose). +75 regression tests across 4 new test files. Suite 1506 → **1581 passed, 9 skipped, 0 failures**.
+
+### ⚠️ Breaking Changes
+
+- **`sandboxed_repl.SAFE_BUILTINS` dropped 5 attribute-traversal primitives** (SEC-01). `getattr`, `setattr`, `delattr`, `super`, and `object` are no longer in the sandbox's allowlist. **Impact on user code:** any `python_repl` tool call that relied on these (e.g. `object.__subclasses__()` traversal, `getattr(obj, attr)`, `setattr(obj, attr, val)`, `super()` MRO walks) will now raise `NameError`. This is the intended security fix — the classic sandbox-escape chain is closed at the first step. `hasattr` is retained (returns a bool, doesn't expose `getattr`). `vars`/`dir` retained as a documented residual surface. Legitimate REPL primitives (`sum`, `range`, `import math`, `hasattr`, comprehensions) are unaffected. A pre-existing limitation is also documented: `__build_class__` was never in `SAFE_BUILTINS`, so `class` statements have always raised `NameError` — unrelated to SEC-01, but now pinned by a test so a future fix is deliberate.
+
+- **`generate_audit_dash.py` now reads `deltas.md` alongside `audit.md`** (the split). **Impact on dashboard hosts:** if you run `generate_audit_dash.py` against a split audit (where CLOSED/WONTFIX findings live in `deltas.md`), it auto-discovers `deltas.md` next to `audit.md` and merges. If `deltas.md` is absent, it falls back to reading all findings from `audit.md` alone (backward-compatible — pre-split audits still work). The reconcile endpoint now reports a new `auditOnly` field and uses split-mode logic when `deltas.md` is present.
+
+- **`codebase-audit` skill templates changed the Findings Summary table from 4 → 5 columns** (added mandatory Status). **Impact on audits produced by the skill:** the Findings Summary table must now have `| ID | Severity | Category | Status | Title |` (was `| ID | Severity | Category | Title |`). The Status column drives the dashboard's closed/open/wontfix counts — omitting it makes every finding default to OPEN. Old audits without the Status column still parse (the regex is permissive), but the dashboard can't tell OPEN from CLOSED without it.
+
+### Bug Fixes
+
+- **SEC-01 (Medium — sandbox escape via attribute traversal)** — `agentkthx/tools/sandboxed_repl.py:60-92` `SAFE_BUILTINS` explicitly included `getattr`, `setattr`, `delattr`, `super`, `object`, `vars`, `dir`. With `getattr` + `object` available, a prompt-injected `python_repl(code="...")` call could traverse to `object.__subclasses__()`, find a class with `__init__.__globals__['__builtins__']['__import__']`, and `import os` to run arbitrary commands. **Fix:** dropped the five attribute-traversal primitives from `SAFE_BUILTINS`. The classic `object.__subclasses__()` escape chain now fails at the first step — `object` isn't reachable as a bare global, so `NameError` fires before any traversal begins. `hasattr` retained (returns bool, doesn't expose `getattr`); `vars`/`dir` retained as documented residual surface. +19 regression tests in `tests/test_r07_08_sec01_sandbox.py`: 5 unit (each unsafe builtin absent), 6 integration PoCs (spawn `python3` — `object.__subclasses__()`, `getattr(object, ...)`, `super.__self_class__`, `setattr(math, ...)`, `delattr(math, ...)`, full canonical PoC — all blocked), 5 regression (legit REPL still works), 1 documented pre-existing `__build_class__` gap, 1 import-block still holds.
+
+- **MAINT-11 (Low — Path.home wrong under Windows impersonation)** — `agentkthx/plugins/_loader.py:_default_roots` + `plugin_data_dir` used `Path.home()`, which on Windows under UAC impersonation or service accounts returns `C:\Windows\System32\config\systemprofile` instead of the user's profile. The user plugin root `~/.agentkthx/plugins/` then landed somewhere the user couldn't find. **Fix:** new `PluginManager._user_home()` static helper. Windows resolution: `%APPDATA%` → `%LOCALAPPDATA%` → `%USERPROFILE%` (each guarded against the `system32\config\systemprofile` leak) → `os.path.expanduser("~")` last resort. POSIX unchanged (`$HOME` → `expanduser("~")`). Both `_default_roots()` and `plugin_data_dir()` route through it. The env-var wins over `Path.home()` because impersonation rarely rewrites the per-user shell env vars (populated by `userenv.dll` at interactive logon, not by the token). +12 regression tests in `tests/test_r07_08_maint11_plugin_roots.py`: POSIX `$HOME` + `expanduser` fallback; Windows `APPDATA`-wins / `LOCALAPPDATA`-fallback / `USERPROFILE`-fallback / systemprofile-rejection (via `USERPROFILE` and via `APPDATA`); `_default_roots` user-root derives from `_user_home()`; `plugin_data_dir` POSIX-`_user_home`-fallback + XDG-still-wins + Windows-`LOCALAPPDATA`-wins.
+
+- **MAINT-11 (Medium — OrcaRouter retry-logic duplication)** — `agentkthx/plugins/orcarouter/orcarouter.py` had ~150 LOC of free-tier + access_denied retry/recovery logic duplicated verbatim between `_generate_with_auth` (non-streaming) and `_iter_sse_lines` (streaming). The only difference was the log prefix (`[OrcaRouter]` vs `[OrcaRouter-Stream]`). Drift risk + double-maintenance. **Fix:** extracted `_HttpErrorAction` action object (`__slots__`-based, `.retry()` / `.raise_(exc)` / `.fallthrough()` factories) + `OrcaRouterBackend._classify_and_handle_http_error(...)` shared classifier. Both call sites now route through it with a 3-line action dispatch; `log_tag` parameterized. A bug caught during dev: the helper referenced `model` (a caller local) in `body.get("model", model)` — `NameError` when called from `_iter_sse_lines` (no `model` local there); fixed to `body.get("model", "")`. +30 regression tests in `tests/test_r07_08_maint11_orcarouter.py`: `_HttpErrorAction` factory + repr + `__slots__`; terminal free-tier (4 reasons) raises, no body mutation, no sleep; retryable free-tier (2 reasons) swaps to fallback, no-swap when already on fallback, sleeps exact Retry-After, sleeps 10s when absent, caps at 60s (ROB-16), fallthrough at attempt ≥ 3; 401/403 access_denied raises; fallthrough for generic 500 / context-length 400 / no-tools 400; `log_tag` parameterization; deduplication contract (remedy prose + `time.sleep` each appear once, both call sites invoke the helper).
+
+### WONTFIX (owner decisions)
+
+- **SEC-08 (Low — audit log plaintext)** — the `audit.log` is intentionally human-readable plaintext for debugging/investigation. Redacting args would defeat its purpose: an operator investigating "what did the agent just do?" needs the actual command, not a redacted placeholder. The file lives in `~/.agentkthx/` (mode `0o700` since SEC-07/R07.05). Not a bug — the plaintext is the feature.
+
+- **PERF-07 (Low — web_search no cache)** — search results are intended to be live. Caching would serve stale data, which is worse than a redundant fetch for a tool whose entire value proposition is "what does the web say right now?". DuckDuckGo results shift, pages get updated, and an agent re-searching the same query often wants the latest. Not a bug — live results are the feature.
+
+- **FEAT-04 (Low — `--dry-run` flag)** — the existing `--confirm` flag already covers this use case (per-tool approval/rejection interactively). A separate `--dry-run` would either duplicate `--confirm`'s logic without the safety, or require a redundant second pass — both worse than the current single-pass `--confirm`. Not a bug — `--confirm` is the feature.
+
+- **ARCH-01 (Medium — backend/plugin split)** — the split is intentional architecture. `backends/` holds the two native local-server backends (Ollama, LlamaServer) — built-in, always-available, part of the core. `plugins/` holds cloud providers (ZAI, OpenRouter, Gemini, OpenAI, HuggingFace, OrcaRouter) — optional, discovered via the plugin system, each ships a manifest + optional tools + lifecycle hooks. `BitNet` is a special case (thin native wrapper, optional plugin). Cloud providers get plugins because they're genuinely plugin-shaped (manifest, auth, catalog, free-tier logic); native local servers don't need that machinery. Not a bug — the split reflects a real architectural distinction.
+
+### Infrastructure — audit.md / deltas.md split
+
+- **`audit/split-audit.py`** (new, ~370 lines) — parses the full audit.md, regenerates two clean files: `audit.md` (OPEN findings only, rebuilt from parsed findings) + `deltas.md` (CLOSED + WONTFIX findings + the closure timeline sections `## Rxx.xx Closures`). Idempotent (re-running on an already-split audit.md is a no-op, rc=2). `--dry-run` previews. Preserves header metadata (release, date, commit, test counts) in both files. On the current audit: 92 findings → 63 open (audit.md, 106 lines — 93% reduction) + 29 archived (deltas.md, 441 lines).
+
+- **`audit/generate_audit_dash.py`** (modified) — `parse_findings(audit_md, deltas_md="")` now accepts deltas_md and merges (parses audit.md for OPEN + deltas.md for CLOSED/WONTFIX via the factored-out `_parse_findings_from_md()`, merges by finding ID). `get_audit_brief()` returns a 3-tuple `(audit_md, brief_md, deltas_md)`; `read_deltas()` auto-discovers deltas.md alongside audit.md (local or URL). `parse_closures()` reads closure sections from both files (merged, deduped by release). `_reconcile_payload()` split-aware: compares audit.md prose OPEN count vs audit.md-only parsed OPEN count; new `auditOnly` field; `matches: True` when they agree. `write_endpoints()` + `main()` pass deltas_md through. New `--deltas` CLI arg. Backward-compatible: no deltas.md → all findings from audit.md alone (pre-split behaviour).
+
+- **`audit/deltas.md`** (new) — the CLOSED + WONTFIX archive for R07.08: 35 findings (30 closed + 5 wontfix) + 4 closure timeline sections (R07.04–R07.07). Generated by running `split-audit.py` against the full audit.md.
+
+- **`audit/audit.md`** (split) — now OPEN-only: 57 open findings, 106 lines (was 1540). Header reflects open-only counts + a note pointing to deltas.md.
+
+### Tests
+
+- **75 new tests across 4 new test files:**
+  - `tests/test_r07_08_sec01_sandbox.py` — 19 tests (SEC-01 sandbox escape closure).
+  - `tests/test_r07_08_maint11_plugin_roots.py` — 12 tests (MAINT-11 Path.home closure).
+  - `tests/test_r07_08_maint11_orcarouter.py` — 30 tests (MAINT-11 OrcaRouter retry-helper closure).
+  - `tests/test_split_audit.py` — 14 tests (split-audit.py + split-aware reconcile).
+
+- Suite: 1506 → **1581 passed, 9 skipped, 0 failures** (+75 new tests, 0 regressions).
+
+### Documentation
+
+- **`agentkthx/skills/codebase-audit/SKILL.md`** — added a "Dashboard Parser Contract" section documenting the 7 rules the audit.md must follow to stay machine-parseable (header counts line, 5-col Status table, New Findings delta table, Closures section, FIXED/WONTFIX closure prose, release delta blockquotes, exact category strings). Rewrote "Mode 2b: Re-audit" for the split design — documents the `split-audit.py` workflow + the deltas.md format + the cross-reference rules for re-audits.
+
+- **`agentkthx/skills/codebase-audit/references/audit-template.md`** — Findings Summary table 4 → 5 columns (Status added) with a callout box documenting the status-cell formats (`OPEN` / `✓ CLOSED R07.04` / `⊘ WONTFIX (intentional)` / strikethrough). New "Release Delta Blocks" section documenting the `## Rxx.xx New Findings` + `## Rxx.xx Closures` formats. Added `**FIXED (Rxx.xx):**` + `**WONTFIX (Rxx.xx, owner decision):**` closure-prose examples.
+
+- **`audit/audit.md`** — R07.08 delta block at the top documenting the 3 closures + 4 WONTFIX verdicts + the split. Header counts updated (30 closed / 57 open / 5 wontfix / 92 total). Then split to open-only.
+
+- **`audit/deltas.md`** — new file, the CLOSED + WONTFIX archive.
+
+### Audit Trail
+
+- **Cumulative closure state: 40 of 92 findings (43%)** across R07.00 → R07.08. +456 tests since R07.04.
+- **R07.08 closures (3):** SEC-01 (sandbox escape), MAINT-11 (Path.home Windows impersonation), MAINT-11 (OrcaRouter retry duplication — the R07.07-delta ID collision, now closed).
+- **R07.08 WONTFIX (4):** SEC-08 (audit log plaintext — intentional), PERF-07 (web_search no cache — live results are the feature), FEAT-04 (`--dry-run` — `--confirm` already covers it), ARCH-01 (backend/plugin split — intentional architecture).
+- **MAINT-11 ID collision resolved:** the R07.07 delta reused MAINT-11 for a different finding (OrcaRouter retry duplication). Both MAINT-11s are now CLOSED in R07.08 — the collision no longer causes ambiguity for open work. A future delta should renumber the OrcaRouter one (e.g. → MAINT-21) for historical clarity.
+- **Reconcile drift resolved:** the audit.md header prose had drifted from the table (prose said "29 CLOSED / 43 OPEN / 88 Findings" while the table had 28/63/92). Updated the prose to match the table; the reconcile endpoint now reports `matches: True` (split mode: audit.md open count matches).
+- **Open count: 63 → 57** (4 moved to WONTFIX, 3 closed). WONTFIX count: 1 → 5.
+
+---
+
 ## [R07.07] - 2026-09-27
 
 **Re-audit + quick-win closures — the prior `audit/brief.md` had drifted stale at R07.04 while 9 of 10 Critical Files changed under it.** A full Mode 2 re-audit pass regenerated the brief against R07.06 (11,939 est. tokens, under the 16K budget) and appended a 25-finding `R07.07 New Findings (Re-Audit Delta)` block to `audit/audit.md`. This release then landed **10 quick-win closures** (1 HIGH + 9 Lows) from that delta, with +45 regression tests in a single new file. The HIGH-severity MAINT-14 was a silent data-corruption bug discovered by reproducer: the `\bTrue\b`/`\bFalse\b`/`\bNone\b` regex substitutions in `core/tool_parse.py` (R07.05 SEC-02 closure) did not respect string-literal boundaries, so a model emitting `Action Input: {"prompt": "None of the above is True"}` had its argument value silently mangled to `"null of the above is true"` — the model had no way to know. Suite 1461 → **1506 passed, 9 skipped, 0 failures** (+45 new tests in `tests/test_r07_07_audit_fixes.py`).
