@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import sys
 import time
+import warnings
 from typing import Callable, Optional
 
 from .core.models import AgentRun, StepResult, Tool, ToolCall
@@ -1129,7 +1130,22 @@ class Agent(AgentSetupMixin, CompactionMixin, ToolExecutionMixin, StreamingMixin
         Kept for backward compatibility — existing code that relied on
         the clear-on-add behavior continues to work. A future release
         will make ``add_tool`` an alias for ``register_tool``.
+
+        MAINT-16 (R07.07): now emits a ``DeprecationWarning`` so callers
+        have a programmatic signal to migrate. Silence via
+        ``warnings.filterwarnings("ignore", category=DeprecationWarning,
+        module="agentkthx.agent")`` if needed.
         """
+        # MAINT-16 (R07.07): emit DeprecationWarning once per call site
+        # (stacklevel=2 points at the caller of add_tool, not add_tool
+        # itself — that's where the migration needs to happen).
+        warnings.warn(
+            "Agent.add_tool() is deprecated and clears conversation memory; "
+            "use Agent.register_tool() (rebuilds prompt without clearing) or "
+            "Agent.rebuild_system_prompt() (explicit clear-and-rebuild) instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self.register_tool(tool)
         # The old behavior cleared memory after registering.
         # We preserve it here for backward compat.

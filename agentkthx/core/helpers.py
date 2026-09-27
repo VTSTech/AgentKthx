@@ -1352,6 +1352,21 @@ def sanitize_tool_output(
     if strip_ansi:
         body = _ANSI_ESCAPE_RE.sub('', body)
 
+    # SEC-12 / ROB-26 (R07.07): truncate BEFORE redacting, not after.
+    # The prior order was redact→truncate, which left a partial-secret edge
+    # case: a secret spanning the truncation boundary (e.g.
+    # ``password=sec`` at byte 8196 with ``ret`` past 8200) would not be
+    # redacted by the line-based regex (which requires ``\S+`` value to
+    # fully match), and the truncated body would end with ``password=sec``
+    # exposed. By truncating first, then redacting, we ensure the redaction
+    # regex sees the EXACT bytes that will be returned to the model — no
+    # off-by-N ambiguity between what was redacted and what was truncated.
+    truncated_marker = ""
+    if len(body) > max_chars:
+        original_len = len(body)
+        body = body[:max_chars]
+        truncated_marker = f"\n[truncated, {original_len - max_chars} more chars]"
+
     if redact_secrets:
         # Replace each secret-bearing match with: <keyname><sep>[REDACTED]
         # Two match forms (mutually exclusive via |):
@@ -1365,12 +1380,6 @@ def sanitize_tool_output(
             return f"{m.group(4)}{m.group(5)}[REDACTED]"
 
         body = _SECRET_LINE_RE.sub(_redact, body)
-
-    truncated_marker = ""
-    if len(body) > max_chars:
-        original_len = len(body)
-        body = body[:max_chars]
-        truncated_marker = f"\n[truncated, {original_len - max_chars} more chars]"
 
     # Build wrapper tag. Use XML-safe attribute values (escape quotes).
     tool_attr = tool_name.replace('"', '&quot;') if tool_name else ""

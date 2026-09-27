@@ -82,7 +82,10 @@ def test_add_tool_registers_and_rebuilds_prompt():
         params=[ToolParam(name="expression", type="string",
                           description="The expression", required=True)],
     )
-    agent.add_tool(calc)
+    # MAINT-16 (R07.07): add_tool is deprecated and emits DeprecationWarning.
+    # Use register_tool instead — this test exercises the OpenResponses API,
+    # not the deprecated add_tool behavior.
+    agent.register_tool(calc)
 
     assert "calculator" in agent.tools.names()
     assert "calculator" in agent._parser.tool_names

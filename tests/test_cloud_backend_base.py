@@ -105,9 +105,14 @@ class _TestCloudBackend(CloudBackend):
 
 @pytest.fixture
 def test_api_key(monkeypatch):
-    """Set a test API key in the env var expected by _TestCloudBackend."""
-    monkeypatch.setenv("TEST_CLOUD_API_KEY", "test-key-1234567890")
-    return "test-key-1234567890"
+    """Set a test API key in the env var expected by _TestCloudBackend.
+
+    ROB-21 (R07.07): key length bumped to 23 chars to clear the new
+    ``_MIN_API_KEY_LEN = 20`` threshold. Real cloud keys are 30+ chars;
+    this is just a test fixture.
+    """
+    monkeypatch.setenv("TEST_CLOUD_API_KEY", "test-key-1234567890123")
+    return "test-key-1234567890123"
 
 
 @pytest.fixture
@@ -243,7 +248,13 @@ class TestCloudBackendInitApiKey:
             _TestCloudBackend()
 
     def test_too_short_api_key_raises(self, monkeypatch):
-        """An API key shorter than 8 chars raises ValueError."""
+        """An API key shorter than the _MIN_API_KEY_LEN threshold raises ValueError.
+
+        ROB-21 (R07.07): the threshold was bumped from 8 to 20 chars to catch
+        more typos. Real cloud API keys are 30+ chars (OpenAI ``sk-...`` is
+        51 chars, ZAI is similar). Subclasses can override ``_MIN_API_KEY_LEN``
+        for dev sandboxes that use shorter test keys.
+        """
         monkeypatch.setenv("TEST_CLOUD_API_KEY", "short")
         with pytest.raises(ValueError, match=r"appears invalid"):
             _TestCloudBackend()
@@ -506,7 +517,7 @@ class TestZaiBackendMigration:
     def test_zai_backend_catalog_family_name_override(self, monkeypatch):
         """ZaiBackend overrides _catalog_family_name to return 'glm'
         (preserving historical catalog entry shape)."""
-        monkeypatch.setenv("ZAI_API_KEY", "test-key-1234567890")
+        monkeypatch.setenv("ZAI_API_KEY", "test-key-1234567890123")
         from agentkthx.plugins.zai.zai import ZaiBackend
         b = ZaiBackend()
         assert b._catalog_family_name() == "glm"
@@ -523,7 +534,7 @@ class TestZaiBackendMigration:
     def test_zai_backend_get_model_defaults_uses_inherited_logic(self, monkeypatch):
         """ZaiBackend._get_model_defaults is inherited from CloudBackend
         (not overridden in ZaiBackend) and returns catalog-based defaults."""
-        monkeypatch.setenv("ZAI_API_KEY", "test-key-1234567890")
+        monkeypatch.setenv("ZAI_API_KEY", "test-key-1234567890123")
         from agentkthx.plugins.zai.zai import ZaiBackend
         b = ZaiBackend()
         defaults = b._get_model_defaults("glm-5.1")

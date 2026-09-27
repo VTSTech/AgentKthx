@@ -291,6 +291,14 @@ def _validate_sha256_pin(value: Any, plugin_name: str) -> str | dict[str, str]:
                 or not fname
                 or Path(fname).is_absolute()
                 or ".." in Path(fname).parts
+                # MAINT-09 (R07.07): also reject "." path parts (current-dir
+                # entries). ``Path("./foo.py").parts == ('foo.py')`` on POSIX
+                # because Path collapses leading ``./``, but ``Path("foo/./bar")
+                # .parts == ('foo', '.', 'bar')`` — the ``.`` slips through
+                # the validate-time check and is only collapsed at the
+                # verify-time ``target.resolve()`` call. Reject it here for
+                # consistency so the error surfaces at parse time, not later.
+                or "." in Path(fname).parts
                 or "\\" in fname
             ):
                 raise ValueError(

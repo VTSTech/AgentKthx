@@ -220,6 +220,10 @@ class TestRob04RegisterToolPreservesMemory:
 
         Existing code that relied on the clear-on-add behavior continues
         to work. A future release will make add_tool an alias for register_tool.
+
+        MAINT-16 (R07.07): add_tool now emits a DeprecationWarning. This
+        test explicitly exercises the deprecated behavior, so it catches
+        the warning with ``pytest.warns`` rather than letting it surface.
         """
         from unittest.mock import MagicMock
         from agentkthx.agent import Agent
@@ -248,8 +252,12 @@ class TestRob04RegisterToolPreservesMemory:
             handler=lambda text="": text,
         )
 
-        # add_tool (deprecated) — should clear memory (backward compat)
-        agent.add_tool(new_tool)
+        # add_tool (deprecated) — should clear memory (backward compat).
+        # MAINT-16 (R07.07): now also emits DeprecationWarning; catch it.
+        import warnings as _w
+        with _w.catch_warnings():
+            _w.simplefilter("ignore", DeprecationWarning)
+            agent.add_tool(new_tool)
 
         # Memory should have been cleared + system prompt re-added
         # So only 1 message (the system prompt) should remain

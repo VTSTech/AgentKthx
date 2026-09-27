@@ -36,12 +36,57 @@ _PYTHON_CODE_RE = re.compile(r"```(?:python)?\s*\n(.*?)```", re.DOTALL | re.IGNO
 #  JSON sanitization and extraction                                    #
 # ------------------------------------------------------------------ #
 
+# MAINT-14 (R07.07): Match either a quoted string literal (double or
+# single, with escape support) OR a Python True/False/None keyword.
+# Python's ``re`` tries alternatives left-to-right at each position, so
+# the string-literal alternative consumes the entire quoted span first,
+# preventing the keyword alternative from matching inside string values.
+# This is the fix for the silent-data-corruption bug where
+# ``{"prompt": "None of the above is True"}`` was mangled to
+# ``{"prompt": "null of the above is true"}``.
+#
+# CRITICAL: the string-literal alternatives MUST require a closing
+# quote (``"|'`` at the end). Without it, ``"(?:[^"\\]|\\.)*`` would
+# greedily match ``"flag": True, "`` (everything between the opening
+# ``"`` and the NEXT ``"``), swallowing the ``True`` keyword that
+# should have been substituted.
+_PY_LITERAL_OR_STR_RE = re.compile(
+    r'"(?:[^"\\]|\\.)*"'       # double-quoted string (with closing quote)
+    r"|'(?:[^'\\]|\\.)*'"      # single-quoted string (with closing quote)
+    r'|\b(True|False|None)\b'  # Python literal keywords (outside strings)
+)
+
+
+def _substitute_python_literals(text: str) -> str:
+    """
+    Replace Python ``True``/``False``/``None`` with JSON ``true``/``false``/``null``,
+    but ONLY when they appear outside string literals.
+
+    MAINT-14 (R07.07): the prior ``\\bTrue\\b`` / ``\\bFalse\\b`` / ``\\bNone\\b``
+    substitutions ran on the whole string without respecting string-literal
+    boundaries, silently corrupting values like ``"None of the above is True"``
+    into ``"null of the above is true"``. This helper uses a single-pass regex
+    that matches string literals first (and passes them through unchanged) so
+    keywords inside string values are never substituted.
+    """
+    _map = {"True": "true", "False": "false", "None": "null"}
+
+    def _repl(m: re.Match) -> str:
+        kw = m.group(1)
+        if kw is not None:
+            return _map[kw]
+        return m.group(0)  # string literal: pass through unchanged
+
+    return _PY_LITERAL_OR_STR_RE.sub(_repl, text)
+
+
 def _sanitize_model_json(text: str) -> str:
     """
     Fix common JSON mistakes made by small (0.5b-3b) models before parsing.
 
-    1. Python bool/None literals to JSON equivalents:
+    1. Python bool/None literals to JSON equivalents (outside strings):
        True -> true,  False -> false,  None -> null
+       (MAINT-14 R07.07: string-literal-aware via _substitute_python_literals)
 
     2. Python string concatenation in values - keep only the string literal:
        "Today: " + datetime.now().strftime(...)  becomes  "Today: "
@@ -50,12 +95,10 @@ def _sanitize_model_json(text: str) -> str:
 
     4. Over-escaped backslashes (Windows paths): \\\\ -> \\
     """
-    text = re.sub(r':\s*True\b', ': true', text)
-    text = re.sub(r':\s*False\b', ': false', text)
-    text = re.sub(r':\s*None\b', ': null', text)
-    text = re.sub(r'\[\s*True\b', '[true', text)
-    text = re.sub(r'\[\s*False\b', '[false', text)
-    text = re.sub(r'\[\s*None\b', '[null', text)
+    # MAINT-14 (R07.07): use string-literal-aware substitution. The prior
+    # ``:\s*True\b`` / ``\[\s*True\b`` context-aware regexes were safer than
+    # bare ``\bTrue\b`` but still mangled values like ``"Result: True"``.
+    text = _substitute_python_literals(text)
     text = re.sub(r'("(?:[^"\\]|\\.)*")\s*\+\s*[^,\'"}\]\n]+', r'\1', text)
     text = re.sub(r',\s*([}\]])', r'\1', text)
     
@@ -248,10 +291,16 @@ def _parse_react(text: str, tool_names: list[str] | None = None, debug: bool = F
                         r'"\1"',
                         py_to_json,
                     )
-                    # Python bool/None → JSON equivalents
-                    py_to_json = re.sub(r'\bTrue\b', 'true', py_to_json)
-                    py_to_json = re.sub(r'\bFalse\b', 'false', py_to_json)
-                    py_to_json = re.sub(r'\bNone\b', 'null', py_to_json)
+                    # Python bool/None → JSON equivalents.
+                    # MAINT-14 (R07.07): use string-literal-aware substitution.
+                    # The prior ``\bTrue\b`` / ``\bFalse\b`` / ``\bNone\b``
+                    # regexes ran on the whole string AFTER single→double quote
+                    # conversion, mangling values like
+                    # ``"None of the above is True"`` → ``"null of the above is true"``.
+                    # The shared helper matches string literals first (passing
+                    # them through unchanged) so keywords inside string values
+                    # are never substituted.
+                    py_to_json = _substitute_python_literals(py_to_json)
                     try:
                         tool_args = json.loads(py_to_json)
                         if not isinstance(tool_args, dict):

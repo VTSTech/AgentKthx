@@ -67,7 +67,7 @@ class CloudBackend(OpenAICompatibleBackend):
 
       Optional overrides (behavior):
         - ``_validate_api_key(key)`` — extra validation beyond
-          "non-empty and 8+ chars" (default: no extra validation).
+          "non-empty and ``_MIN_API_KEY_LEN``+ chars" (default: no extra validation).
         - ``_extra_auth_headers()`` — additional auth headers
           (e.g. OpenRouter's ``HTTP-Referer`` and ``X-Title``).
         - ``list_models()`` — if the provider has a discovery endpoint,
@@ -107,6 +107,21 @@ class CloudBackend(OpenAICompatibleBackend):
 
     _provider_label: str = "Cloud"
     """Short label for debug messages (e.g. ``"ZAI"``)."""
+
+    # ROB-21 (R07.07): minimum API key length enforced by ``__init__``.
+    # 8 chars (the prior default) only catches the most egregious typos;
+    # real cloud API keys are 30+ chars (OpenAI ``sk-...`` is 51 chars,
+    # ZAI is similar). 20 is a conservative floor that catches obvious
+    # mistakes without breaking legitimate test setups. Subclasses can
+    # override (e.g. ``_MIN_API_KEY_LEN = 4`` for a dev sandbox).
+    _MIN_API_KEY_LEN: int = 20
+
+    # MAINT-12 (R07.07): default context-length fallback used when neither
+    # the static catalog nor the live model cache has an entry. Was a
+    # hardcoded ``128000`` literal repeated at 4 sites in this file; now a
+    # single class attribute so backends with smaller models (e.g. a
+    # hypothetical cloud serving Llama-2-7B at 4K context) can override.
+    _DEFAULT_CONTEXT_FALLBACK: int = 128000
 
     # ─────────────────────────────────────────────────────────────────────
     # __init__ — shared cloud-backend initialization
@@ -182,10 +197,11 @@ class CloudBackend(OpenAICompatibleBackend):
                 f"{self._api_key_env_var} is required for the {self._provider_label} backend. "
                 f"Set it via --api-key, {self._api_key_env_var} env var, or Config."
             )
-        if len(self._api_key.strip()) < 8:
+        if len(self._api_key.strip()) < self._MIN_API_KEY_LEN:
             raise ValueError(
                 f"{self._api_key_env_var} appears invalid (too short: "
-                f"{len(self._api_key.strip())} chars). Check your "
+                f"{len(self._api_key.strip())} chars, need at least "
+                f"{self._MIN_API_KEY_LEN}). Check your "
                 f"{self._api_key_env_var} environment variable."
             )
 
@@ -284,7 +300,7 @@ class CloudBackend(OpenAICompatibleBackend):
             "details": {
                 "family": self._catalog_family_name(),
                 "backend": self._catalog_backend_name(),
-                "context_length": meta.get("context_length", 128000),
+                "context_length": meta.get("context_length", self._DEFAULT_CONTEXT_FALLBACK),
                 # free_tier from catalog pricing so /models labels match
                 # the catalog (default False = paid when pricing unknown).
                 "free_tier": self._is_free_model(model_key),
@@ -315,7 +331,7 @@ class CloudBackend(OpenAICompatibleBackend):
         meta = self.MODELS.get(model_key, {})
 
         max_tokens = meta.get("default_max_tokens", 8192)
-        context_length = meta.get("context_length", 128000)
+        context_length = meta.get("context_length", self._DEFAULT_CONTEXT_FALLBACK)
         temperature = meta.get("default_temperature", 0.7)
 
         if os.environ.get("AGENTKTHX_DEBUG"):
@@ -391,7 +407,8 @@ class CloudBackend(OpenAICompatibleBackend):
         # (GPT-4o-mini, Claude Haiku, Gemini Flash, GLM-4-Flash all support
         # at least 128K). Older models that support less will trigger the
         # _handle_context_length_400 recovery on first request.
-        return 128000
+        # MAINT-12 (R07.07): use class attribute so subclasses can override.
+        return self._DEFAULT_CONTEXT_FALLBACK
 
     def get_model_runtime_context(self, model: str) -> int:
         """Return the runtime context window size for a model.
@@ -459,7 +476,7 @@ class CloudBackend(OpenAICompatibleBackend):
                 "details": {
                     "family": self._catalog_family_name(),
                     "backend": self._catalog_backend_name(),
-                    "context_length": meta.get("context_length", 128000),
+                    "context_length": meta.get("context_length", self._DEFAULT_CONTEXT_FALLBACK),
                     # free_tier from catalog pricing so /models free works
                     # for catalog-driven backends too.
                     "free_tier": self._is_free_model(name),

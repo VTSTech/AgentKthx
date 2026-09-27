@@ -350,9 +350,12 @@ class ZaiBackend(CloudBackend):
                 "name": model_key,
                 "size": 0,
                 "details": {
-                    "family": "glm",
-                    "backend": "zai",
-                    "context_length": meta.get("context_length", 128000),
+                    # MAINT-13 (R07.07): use self._catalog_family_name()
+                    # instead of hardcoded "glm" so a future override of
+                    # _catalog_family_name stays consistent with list_models.
+                    "family": self._catalog_family_name(),
+                    "backend": self._catalog_backend_name(),
+                    "context_length": meta.get("context_length", self._DEFAULT_CONTEXT_FALLBACK),
                     "free_tier": self._is_free_model(model_key),
                     "is_chat_model": True,
                     "pricing": meta.get("pricing", {}),
@@ -368,9 +371,10 @@ class ZaiBackend(CloudBackend):
                     "name": name,
                     "size": 0,
                     "details": {
-                        "family": "glm",
-                        "backend": "zai",
-                        "context_length": meta.get("context_length", 128000),
+                        # MAINT-13 (R07.07): use self._catalog_family_name()
+                        "family": self._catalog_family_name(),
+                        "backend": self._catalog_backend_name(),
+                        "context_length": meta.get("context_length", self._DEFAULT_CONTEXT_FALLBACK),
                         "free_tier": self._is_free_model(name),
                         "is_chat_model": True,
                         "pricing": meta.get("pricing", {}),
@@ -397,7 +401,10 @@ class ZaiBackend(CloudBackend):
         """
         info = super().get_model_info(model)
         if info is not None:
-            info["details"]["free_tier"] = self._is_free_model(model)
+            # MAINT-20 (R07.07): free_tier is already set by the parent
+            # CloudBackend.get_model_info (it calls self._is_free_model
+            # internally). Don't re-set it here — only enrich with the
+            # ZAI-specific fields the parent doesn't know about.
             info["details"]["is_chat_model"] = True
             info["details"]["pricing"] = ZAI_MODELS.get(
                 model.split("/")[-1] if "/" in model else model, {}
@@ -411,9 +418,10 @@ class ZaiBackend(CloudBackend):
             "name": model_key,
             "size": 0,
             "details": {
-                "family": "glm",
-                "backend": "zai",
-                "context_length": 128000,
+                # MAINT-13 (R07.07): use self._catalog_family_name()
+                "family": self._catalog_family_name(),
+                "backend": self._catalog_backend_name(),
+                "context_length": self._DEFAULT_CONTEXT_FALLBACK,
                 "free_tier": False,
                 "is_chat_model": True,
             },

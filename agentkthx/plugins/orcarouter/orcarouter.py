@@ -254,15 +254,38 @@ def _parse_retry_after_seconds(err_str: str, retry_after_header: str | None) -> 
     429s with ``metadata.reason == err_free_rate``, the ``Retry-After``
     value is the seconds remaining in the rate window.
 
+    ROB-16 (R07.07): the returned value is capped at
+    ``_MAX_RETRY_AFTER_SECONDS`` (60s). A malicious or buggy upstream
+    returning ``Retry-After: 3600`` would otherwise hang the agent for
+    an hour. When the cap fires, the caller still waits — but no longer
+    than 60s, after which the retry either succeeds or the next error
+    surfaces. Callers that need to surface the original header value to
+    the user should read it directly rather than via this helper.
+
     Returns:
-        Wait time in seconds (float), or None if no Retry-After header.
+        Wait time in seconds (float, capped at 60), or None if no
+        Retry-After header.
     """
     if not retry_after_header:
         return None
     try:
-        return float(retry_after_header)
+        value = float(retry_after_header)
     except (ValueError, TypeError):
         return None
+    # ROB-16 (R07.07): cap to prevent malicious Retry-After from hanging the agent.
+    if value > _MAX_RETRY_AFTER_SECONDS:
+        return _MAX_RETRY_AFTER_SECONDS
+    if value < 0:
+        return 0.0
+    return value
+
+
+# ROB-16 (R07.07): maximum seconds to honor from a Retry-After header.
+# Caps the agent's exposure to a malicious or buggy upstream that returns
+# an absurd value (e.g. ``Retry-After: 3600``). 60s matches common
+# rate-limit windows; longer waits should surface as terminal errors,
+# not silent sleeps.
+_MAX_RETRY_AFTER_SECONDS = 60.0
 
 
 # ---------------------------------------------------------------------------
