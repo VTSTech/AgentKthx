@@ -117,21 +117,32 @@ there. The dashboard's closure-timeline cards continue to render.
 
 With CLOSED/WONTFIX findings safely in `deltas.md`, re-audit the current code:
 
-1. **Re-evaluate OPEN findings** (still in `audit.md`): does the issue still
+1. **Regenerate the Executive Summary** — the narrative paragraph(s) under
+   `## Executive Summary` must be rewritten to reflect the CURRENT release,
+   not the release the audit was originally generated against. The
+   `split-audit.py` preserves the old Executive Summary verbatim (it
+   shouldn't rewrite prose), so the agent must regenerate it manually
+   during the re-audit. Update: the commit hash, test count, codebase
+   stats (Python files, LOC, test LOC), what the current release closed,
+   and what the next-priority OPEN findings are. Reference `deltas.md` for
+   the full closure history (releases + counts). The Executive Summary
+   is the first thing a reader sees — it must be current.
+
+2. **Re-evaluate OPEN findings** (still in `audit.md`): does the issue still
    exist in the current code? If yes, keep it OPEN. If the code was refactored
    and the issue no longer applies, note it in a delta block and omit it from
    the Findings Summary table.
 
-2. **Close resolved findings**: if an OPEN finding has been fixed in the
+3. **Close resolved findings**: if an OPEN finding has been fixed in the
    current code, mark it `✓ CLOSED Rxx.xx` in `audit.md`'s Findings Summary,
    add the `**FIXED (Rxx.xx):**` closure prose to its detail section, then
    re-run `split-audit.py` to move it to `deltas.md`.
 
-3. **Add new findings**: assign new IDs (continue the numbering — if
+4. **Add new findings**: assign new IDs (continue the numbering — if
    `deltas.md` + `audit.md` together have SEC-01 through SEC-11, the first
    new security finding is SEC-12) and mark them OPEN in `audit.md`.
 
-4. **Add a delta block** at the top of `audit.md` documenting the re-audit:
+5. **Add a delta block** at the top of `audit.md` documenting the re-audit:
    which findings were re-confirmed, which were closed, which no longer apply,
    and which are new.
 
