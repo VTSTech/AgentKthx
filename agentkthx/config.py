@@ -202,6 +202,39 @@ OPENAI_SERVICE_TIER = os.environ.get("OPENAI_SERVICE_TIER", "")
 OPENAI_REASONING_EFFORT = os.environ.get("OPENAI_REASONING_EFFORT", "")
 
 
+# Mistral plugin (agentkthx/plugins/mistral/)
+# La Plateforme public API — OpenAI Chat-Completions wire format with
+# deliberate deltas (random_seed instead of seed, finish_reason
+# "model_length" for context overflow, reasoning_effort ladder includes
+# the extra "xhigh" rung, optional safe_prompt + AssistantMessage.prefix
+# prefill). See docs/api/MISTRAL_API_TECHNICAL_REFERENCE.md.
+MISTRAL_BASE_URL = os.environ.get("MISTRAL_BASE_URL", "https://api.mistral.ai/v1")
+# Single bearer-token scheme. Created in Studio → API keys; shown only
+# once. Canonical env var matches the official Python and TypeScript SDKs.
+MISTRAL_API_KEY = os.environ.get("MISTRAL_API_KEY", "")
+# Default to mistral-small-latest (Apache 2.0, hybrid instruct+reasoning,
+# 256K context) — cost-efficient choice for the framework default. Use
+# mistral-medium-latest for frontier-class agentic + coding workloads.
+MISTRAL_DEFAULT_MODEL = os.environ.get("MISTRAL_DEFAULT_MODEL", "mistral-small-latest")
+# Strict free-tier enforcement: when true, only the Labs models
+# (labs-* prefix, free of charge) are accepted. Mistral's free surface
+# is narrower than OpenRouter's, so this is more of a guardrail than
+# a daily driver. Default false.
+MISTRAL_FREE_ONLY = os.environ.get("MISTRAL_FREE_ONLY", "").lower() in ("1", "true", "yes")
+# When MISTRAL_FREE_ONLY=false and the model 404s as unknown_model or
+# the org is rate-limited past the daily quota, swap to this model and
+# retry. Labs models are the safest fallback since they're free.
+MISTRAL_FREE_FALLBACK_MODEL = os.environ.get("MISTRAL_FREE_FALLBACK_MODEL", "labs-mistral-small-creative")
+# Mistral-specific: inject the safety system prompt before all
+# conversations (slightly changes tone + costs a few prompt tokens).
+# Default false — the agent's soul/system prompt owns behavior.
+MISTRAL_SAFE_PROMPT = os.environ.get("MISTRAL_SAFE_PROMPT", "").lower() in ("1", "true", "yes")
+# Service tier: "auto" (default — allows Priority routing if entitled)
+# or "standard_only". Empty (default) means don't send the parameter
+# (Mistral's server default is "auto").
+MISTRAL_SERVICE_TIER = os.environ.get("MISTRAL_SERVICE_TIER", "")
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # BACKEND SELECTION
 # ═══════════════════════════════════════════════════════════════════════════════

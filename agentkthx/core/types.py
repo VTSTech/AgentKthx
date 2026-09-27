@@ -79,6 +79,13 @@ class BackendType(Enum):
     # See agentkthx/plugins/orcarouter/ and docs/api/ORCAROUTER_API_TECHNICAL_REFERENCE.md.
     ORCAROUTER = "orcarouter"
 
+    # R07.09: Mistral — La Plateforme public API at https://api.mistral.ai/v1.
+    # OpenAI Chat-Completions wire format with deliberate deltas (random_seed
+    # instead of seed, finish_reason "model_length" for context overflow,
+    # reasoning_effort ladder includes xhigh, optional safe_prompt / prefill).
+    # See agentkthx/plugins/mistral/ and docs/api/MISTRAL_API_TECHNICAL_REFERENCE.md.
+    MISTRAL = "mistral"
+
 
 class ApiMode(Enum):
     """API mode for backend communication.

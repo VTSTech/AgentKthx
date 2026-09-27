@@ -5,6 +5,69 @@ All notable changes to AgentKthx will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [R07.09] - 2026-09-28
+
+**Mistral La Plateforme plugin added — 11th bundled backend.** Adds the `mistral` plugin (native `/v1/chat/completions` surface at `https://api.mistral.ai/v1`) with a 15-model catalog spanning Mistral Medium / Small / Large, Ministral 3B/8B/14B, Magistral, Codestral, Devstral, and a Labs free tier. The backend inherits the shared cloud-backend boilerplate from `CloudBackend` (MAINT-02) and implements every documented Mistral wire-format delta over the OpenAI shape: `seed` → `random_seed` aliasing, `tool_choice: "required"` → `"any"` mapping (legacy gateway safety), `reasoning_effort` pass-through including the Mistral-only `xhigh` rung, `finish_reason: "model_length"` recognition (distinct from `"length"`), the `{"object": "error", ...}` envelope (parsed alongside the OpenAI `{"error": {...}}` shape), tool-call ID fallbacks (schema default is the literal `"null"`), `arguments` as JSON string OR object, `safe_prompt` opt-in, `prompt_cache_key` auto-set from `session_id`, `service_tier` forwarding, `ThinkChunk` reasoning extraction, OpenAI-only kwarg stripping (`user`, `logprobs`, `top_k`, `max_completion_tokens` would 422), and 429/5xx `Retry-After`-aware backoff mirroring the official SDK recipe. Plugin ships with a v0.2 manifest, the `mst` CLI alias, and 57 unit tests + 4 live-API tests (gated on `MISTRAL_API_KEY`). Suite 1590 → **1647 passed, 13 skipped, 0 failures** (+57 new tests, 0 regressions). The 4 skipped tests auto-run in CI when the secret is configured.
+
+### Features
+
+- **`mistral` plugin (new, 11th bundled backend)** — `agentkthx/plugins/mistral/` ships `plugin.json` (v0.2 manifest with `mistral` + `mst` CLI alias), `__init__.py` (`register()` / `unregister()` entrypoint registering both names — `mst` is `alias_of="mistral"`), and `mistral.py` (`MistralBackend(CloudBackend)` + `MISTRAL_MODELS` 15-entry catalog). The backend is the 6th cloud backend and inherits the MAINT-02 shared `CloudBackend` pattern (base-URL resolution, API-key validation, auth headers, catalog-driven `_get_model_defaults`, `is_running()`, `test_tool_support()`). Catalog sourced from `docs/api/MISTRAL_API_TECHNICAL_REFERENCE.md` §Model Family Specifications (Sep 2026 snapshot): `mistral-medium-latest` / `-3-5` / `-3`, `mistral-small-latest` / `-4`, `mistral-large-latest` / `-3`, `ministral-14b/8b/3b-latest`, `devstral-latest`, `magistral-medium-latest` / `-small-latest`, `codestral-latest`, and `labs-mistral-small-creative` (the Labs free tier — zero pricing, silent updates, non-production). Default model is `mistral-small-latest` (Apache 2.0, hybrid instruct+reasoning, 256K context, $0.20/$0.50 per 1M — cost-efficient default). Each catalog entry carries `context_length`, `default_temperature`, `default_max_tokens`, and `pricing {input, output}` so the inherited `CloudBackend._is_free_model` correctly recognises Labs models for `MISTRAL_FREE_ONLY` enforcement.
+
+- **Mistral wire-format deltas implemented** — every documented delta from the technical reference is handled in `_build_mistral_body()` + `_parse_mistral_response()`:
+  - `seed` kwarg → `random_seed` request field (also accepts `random_seed` directly)
+  - `tool_choice="required"` → `"any"` (Mistral's forced-call value; `"required"` is an accepted alias on the live API but older self-hosted gateways reject it)
+  - `reasoning_effort` passes through unchanged (superset enum — `none/minimal/low/medium/high/xhigh` — `xhigh` is Mistral-only, accepted when caller explicitly requests it)
+  - `safe_prompt` injected when `MISTRAL_SAFE_PROMPT=true` (read live from env so `/param` changes take effect without restart)
+  - `service_tier` forwarded when `MISTRAL_SERVICE_TIER` is set (read live from env)
+  - `prompt_cache_key` auto-set to `agentkthx-{session_id}` when caller passes `session_id` kwarg (cached input tokens billed at 10% of standard price)
+  - `stream_options.include_usage: true` set on streaming (PERF-02 — final SSE chunk carries usage stats)
+  - OpenAI-only kwargs (`logprobs`, `top_logprobs`, `top_k`, `user`, `max_completion_tokens`) stripped via `_OPENAI_ONLY_FIELDS` frozenset — these would 422 on Mistral
+  - `finish_reason: "model_length"` (Mistral's distinct value for context-window overflow) recognised via overridden `_CONTEXT_LENGTH_MAX_PATTERN` regex (`maximum context length (is|of) N tokens` — permissive form covering both phrasings); parser surfaces `model_length` verbatim so the shared `_handle_context_length_400` recovery (ARCH-03) kicks in
+  - Error envelope `{"object": "error", "message": ..., "type": ..., "code": ...}` (Mistral-specific marker) parsed by `_parse_mistral_response`; the OpenAI `{"error": {...}}` shape is also handled for gateway compatibility
+  - Tool-call IDs: Mistral's schema default for `tool_call.id` is the literal string `"null"` — `_parse_mistral_response` synthesises `mistral_tc_{i}` fallback IDs when missing, never assumes a `call_` prefix
+  - Tool args type: spec allows `arguments` as a JSON string OR a parsed object — parser tolerates both, surfaces `_raw_arguments` fallback for malformed JSON
+  - `ThinkChunk` reasoning content: reasoning models return `content` as an array of `{"type": "thinking"|"text"}` chunks; parser routes text chunks to `content` and thinking chunks to `reasoning_content` (rendered in collapsible panel by agent mode)
+
+- **429 / 5xx retry with `Retry-After` honoring** — `_make_api_request()` mirrors the official Mistral SDK recipe: exponential backoff with full jitter, max 5 attempts (override via `MISTRAL_MAX_RETRIES`), `Retry-After` header honored when present (capped at 60s). HTTP 401 / 404 / 422 surface as distinct `RuntimeError` shapes so the agent loop can pattern-match for actionable user messages. Streaming path (`generate_stream`) reads incrementally and splits on `\n\n` event boundaries with `data: [DONE]` terminator — ROB-06 deterministic close on generator abandonment.
+
+- **`MISTRAL_*` env-var config** — 7 env vars added to `agentkthx/config.py`: `MISTRAL_BASE_URL` (default `https://api.mistral.ai/v1`), `MISTRAL_API_KEY` (canonical — matches the official Python and TypeScript SDKs), `MISTRAL_DEFAULT_MODEL` (`mistral-small-latest`), `MISTRAL_FREE_ONLY` (false — restricts to Labs models when true), `MISTRAL_FREE_FALLBACK_MODEL` (`labs-mistral-small-creative` — safest fallback since Labs is free), `MISTRAL_SAFE_PROMPT` (false — agent's soul/system prompt owns behavior), `MISTRAL_SERVICE_TIER` (empty — `auto` is the server default).
+
+- **`BackendType.MISTRAL`** — new enum value in `agentkthx/core/types.py` (10th backend type — joins OLLAMA, LLAMA_SERVER, BITNET, ZAI, OPENROUTER, GEMINI, HUGGINGFACE, OPENAI, ORCAROUTER).
+
+### Tests
+
+- **61 new tests in `tests/test_mistral_backend.py`:**
+  - `TestManifestCompliance` (7 tests) — v0.2 manifest form, name/dir match, extension namespace, provides backend, no legacy top-level fields, no `agentnova` compat key, `mst` alias in CLI flags.
+  - `TestCatalog` (5 tests) — required default models present, every entry has required fields (`context_length`, `default_max_tokens`, `default_temperature`, `pricing`), every pricing entry has `input` + `output`, Labs models are priced at $0, context lengths are in `[32K, 1M]` band.
+  - `TestIsFreeModel` (4 tests) — Labs prefix is free, paid models are not free, unknown models default to paid (safe), provider prefix stripped.
+  - `TestBackendIdentity` (11 tests) — `backend_type == MISTRAL`, `_provider_label == "Mistral"`, default base URL, default model, `is_running()` true/false logic, short-key rejection, chat-completions URL, models URL, Bearer auth header, `Accept: application/json` header.
+  - `TestBuildMistralBody` (16 tests) — `seed`→`random_seed` aliasing, `random_seed` direct pass-through, `tool_choice="required"`→`"any"` mapping, `tool_choice="any"`/`"auto"` pass-through, `parallel_tool_calls=False` forwarding, OpenAI-only fields stripped (`logprobs`, `top_logprobs`, `top_k`, `user`, `max_completion_tokens`), `reasoning_effort` pass-through including `xhigh`, `safe_prompt` added when env var set / omitted by default, `service_tier` added when env var set, `prompt_cache_key` set from `session_id`, no `prompt_cache_key` without `session_id`, `stream_options.include_usage` on streaming, `response_format` pass-through, `stop` normalised to list.
+  - `TestParseMistralResponse` (9 tests) — text-only response, tool_calls with string args, tool_calls with object args, fallback ID synthesised when missing, malformed args surface `_raw_arguments` fallback, Mistral `{"object": "error"}` envelope raises, OpenAI `{"error": {...}}` envelope also raises, no-choices raises, `ThinkChunk` reasoning extraction, `finish_reason: "model_length"` pass-through.
+  - `TestPluginRegistration` (2 tests) — `register()` calls `manager.register_backend("mistral", MistralBackend)` + `("mst", MistralBackend, alias_of="mistral")`; `unregister()` calls both `unregister_backend` invocations.
+  - `TestPluginLoaderIntegration` (2 tests) — direct manifest parse via `_parse_manifest` succeeds; manifest is v0.2 form (`$schema` set, no legacy top-level fields, no `agentnova` compat key).
+  - `TestLiveAPI` (4 tests, gated on `MISTRAL_API_KEY`) — basic chat (`"What is 15 * 8?"` → `"120"`), `GET /v1/models` returns known models, streaming yields content, `random_seed` determinism. Auto-skip in CI without the secret.
+
+- Suite: 1590 → **1647 passed, 13 skipped, 0 failures** (+57 new tests, 0 regressions).
+
+### Documentation
+
+- **`agentkthx/plugins/mistral/plugin.json`** — v0.2 manifest with `$schema` set, all extension data under `org.vts-tech.agentkthx`, `provides.backends: {"mistral": "mistral.MistralBackend"}`, `cli_flags: {"--backend": ["mistral", "mst"]}`, `compatibility: {"agentkthx": ">=0.5.0"}`. No legacy top-level fields. Passes `test_builtin_manifests_are_v02_form` alongside the other 10 bundled plugins.
+
+- **`agentkthx/plugins/mistral/mistral.py`** module docstring documents the full Mistral wire-format delta list (12 deltas vs OpenAI), the endpoints used, the env-var configuration surface, and the CLI + Python API usage examples. Catalog comments cite `docs/api/MISTRAL_API_TECHNICAL_REFERENCE.md` as the source.
+
+- **`agentkthx/core/types.py`** — `BackendType.MISTRAL` enum entry with a comment pointing at the plugin directory and the technical reference doc.
+
+- **`agentkthx/config.py`** — `MISTRAL_*` env-var block (7 vars) with inline comments explaining each one's purpose, default value, and any cross-references (e.g. `MISTRAL_SAFE_PROMPT` notes that the agent's soul/system prompt owns behavior by default).
+
+### Audit Trail
+
+- **Cumulative closure state: 40 of 92 findings (43%)** across R07.00 → R07.08 (unchanged — R07.09 is a feature add, not an audit closure release).
+- **No new audit findings opened by R07.09.** The plugin was scaffolded following the existing patterns (`CloudBackend` base, v0.2 manifest, catalog-driven model defaults, shared `_apply_max_tokens_cap` recovery) and inherits all the audit-hardened machinery (SEC-06 sha256 pinning support, MAINT-11 retry-helper deduplication, ARCH-03 context-length 400 recovery, ROB-06 deterministic resource close, SEC-10 sanitized tool output).
+- **Open count: 50** (unchanged from R07.08).
+- **Plugin count: 10 → 11.** Cloud backends: 5 → 6 (ZAI, OpenRouter, Gemini, OpenAI, HuggingFace, Mistral). Total backend types: 9 → 10 (adds `BackendType.MISTRAL`).
+
+---
+
 ## [R07.08] - 2026-09-27
 
 **Security hardening + the audit.md/deltas.md split + streaming prefix fix.** Seven findings closed (SEC-01 sandbox escape, SEC-05 ANSI stripping, SEC-14 body matching, SEC-15 env-var mutation, SEC-16 URL allowlist, MAINT-11 Path.home Windows impersonation, MAINT-11 OrcaRouter retry duplication) and four owner-decision WONTFIX verdicts recorded (SEC-08, PERF-07, FEAT-04, ARCH-01) — trimming the OPEN count from 63 → 50. Three findings also caught by the Mode 2b re-audit as fixed-in-code-but-not-marked (SEC-12, ROB-26, TEST-08). The headline infrastructure change is the **audit.md / deltas.md split**: `audit.md` now holds OPEN findings only (the active work items), `deltas.md` holds the CLOSED + WONTFIX archive (the growing historical tail), and `generate_audit_dash.py` reads BOTH files and merges them into the full register for the dashboard. The `codebase-audit` skill's templates + `SKILL.md` were updated to conform to the dashboard parser contract + Mode 2b re-audit workflow (including Executive Summary regeneration). The `split-audit.py` script supports APPEND mode (merges with existing deltas.md instead of overwriting). Streaming display fix: the `AgentKthx:` prefix now appears on every model response (including follow-ups after tool calls), the reasoning panel gets its own line, and the reasoning→content transition gets a one-shot newline so grey reasoning text doesn't run into white content. +97 regression tests across 5 new test files. Suite 1506 → **1590 passed, 9 skipped, 0 failures**.

@@ -1,0 +1,47 @@
+{
+  "$schema": "https://raw.githubusercontent.com/VTSTech/AgentKthx/main/schemas/v0.2/plugin.schema.json",
+  "name": "mistral",
+  "version": "0.1.0",
+  "description": "Mistral La Plateforme backend via native /v1 Chat-Completions API (Mistral Medium / Small / Large + Ministral + Magistral + Codestral + Devstral families, with random_seed aliasing, safe_prompt, reasoning_effort through xhigh, and 429-aware Retry-After backoff)",
+  "author": {
+    "name": "VTSTech",
+    "url": "https://www.vts-tech.org"
+  },
+  "license": "MIT",
+  "extensions": {
+    "org.vts-tech.agentkthx": {
+      "display_name": "Mistral Cloud Backend",
+      "type": "backend",
+      "entrypoint": "__init__",
+      "depends": [],
+      "optional_depends": [],
+      "config": {
+        "env_prefix": "MISTRAL",
+        "defaults": {
+          "MISTRAL_BASE_URL": "https://api.mistral.ai/v1",
+          "MISTRAL_API_KEY": "",
+          "MISTRAL_DEFAULT_MODEL": "mistral-small-latest",
+          "MISTRAL_FREE_ONLY": "false",
+          "MISTRAL_FREE_FALLBACK_MODEL": "labs-mistral-small-creative",
+          "MISTRAL_SAFE_PROMPT": "false",
+          "MISTRAL_SERVICE_TIER": ""
+        }
+      },
+      "provides": {
+        "backends": {
+          "mistral": "mistral.MistralBackend"
+        },
+        "cli_commands": [],
+        "cli_flags": {
+          "--backend": [
+            "mistral",
+            "mst"
+          ]
+        }
+      },
+      "compatibility": {
+        "agentkthx": ">=0.5.0"
+      }
+    }
+  }
+}
