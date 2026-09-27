@@ -84,8 +84,19 @@ SAFE_BUILTINS = {
     # Iteration
     'iter', 'next', 'staticmethod', 'classmethod', 'property',
 
-    # Object
-    'object', 'super', 'vars', 'dir', 'getattr', 'setattr', 'delattr',
+    # NOTE (SEC-01, closed R07.08): the attribute-traversal primitives
+    # `object`, `super`, `getattr`, `setattr`, `delattr` were previously
+    # in this set. With `getattr` + `object` available, prompt-injected
+    # `python_repl` code could walk `object.__subclasses__()` → find a
+    # class whose `__init__.__globals__['__builtins__']['__import__']`
+    # is reachable → `import os` → arbitrary code execution with the
+    # user's privileges. `super` enables MRO traversal to the same
+    # dunder attributes; `setattr`/`delattr` mutate class internals.
+    # All five are now dropped. `hasattr` stays (it only returns a bool
+    # and does not expose `getattr` to user code). Residual surface
+    # (`vars`/`dir` on instances) is documented in audit SEC-01; the
+    # classic `object.__subclasses__()` escape is closed.
+    'vars', 'dir',
 
     # Import (we'll override this with a safe version)
     '__import__',

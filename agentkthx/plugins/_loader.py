@@ -629,10 +629,51 @@ class PluginManager:
         ]
 
     @staticmethod
+    def _user_home() -> Path:
+        """Resolve the *actual* user home directory, robust to Windows
+        UAC impersonation / service accounts.
+
+        ``Path.home()`` reads ``$HOME`` on POSIX (correct) but on Windows
+        it reads ``%USERPROFILE%`` — which under UAC impersonation or a
+        service account points at ``C:\\Windows\\System32\\config\\systemprofile``
+        rather than the real user's profile. That made the user plugin root
+        ``~/.agentkthx/plugins/`` land somewhere the user can't easily find
+        (MAINT-11).
+
+        Resolution order (Windows):
+          1. ``%APPDATA%``      (roaming — set per-user by the shell)
+          2. ``%LOCALAPPDATA%`` (local — set per-user by the shell)
+          3. ``%USERPROFILE%``  (only if it doesn't look like a systemprofile)
+          4. ``os.path.expanduser("~")`` (last-resort stdlib behaviour)
+        POSIX: ``$HOME`` if set, else ``expanduser("~")``.
+
+        The env-var wins over ``Path.home()`` because impersonation rarely
+        rewrites the per-user shell env vars — they're populated by
+        ``userenv.dll`` at interactive logon, not by the token.
+        """
+        if os.name == "nt" or sys.platform == "win32":
+            for var in ("APPDATA", "LOCALAPPDATA"):
+                val = os.environ.get(var)
+                if val:
+                    candidate = Path(val)
+                    # Guard against a systemprofile leak via env var too.
+                    if "system32\\config\\systemprofile" not in str(candidate).lower():
+                        return candidate
+            # USERPROFILE — only trust it if it's not the systemprofile path.
+            up = os.environ.get("USERPROFILE")
+            if up and "system32\\config\\systemprofile" not in up.lower():
+                return Path(up)
+            # Last resort: stdlib expanduser (may still be wrong under
+            # impersonation, but we've exhausted the env-var options).
+            return Path(os.path.expanduser("~"))
+        # POSIX: prefer $HOME (matches Path.home()), fall back to expanduser.
+        return Path(os.environ.get("HOME") or os.path.expanduser("~"))
+
+    @staticmethod
     def _default_roots() -> list[tuple[Path, str]]:
         """Built-in root, user root, then $AGENTKTHX_PLUGIN_PATH entries."""
         roots: list[tuple[Path, str]] = [(Path(__file__).parent, "builtin")]
-        roots.append((Path.home() / ".agentkthx" / "plugins", "user"))
+        roots.append((PluginManager._user_home() / ".agentkthx" / "plugins", "user"))
         for extra in PluginManager.parse_plugin_path_env(
             os.environ.get("AGENTKTHX_PLUGIN_PATH", "")
         ):
@@ -645,11 +686,12 @@ class PluginManager:
         (spec §Environment). Created on demand.
         """
         if os.name == "nt" or sys.platform == "win32":
-            base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+            base = Path(os.environ.get("LOCALAPPDATA") or
+                        (PluginManager._user_home() / "AppData" / "Local"))
             data_dir = base / "agentkthx" / "plugins" / name
         else:
             xdg = os.environ.get("XDG_STATE_HOME")
-            base = Path(xdg) if xdg else Path.home() / ".local" / "state"
+            base = Path(xdg) if xdg else PluginManager._user_home() / ".local" / "state"
             data_dir = base / "agentkthx" / "plugins" / name
         return data_dir
 
