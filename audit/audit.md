@@ -5,10 +5,10 @@
 **Repository:** https://github.com/VTSTech/AgentKthx  
 **Author:** VTSTech | **License:** MIT | **Date:** 2026-09-27  
 **Auditor:** Super-Z (GLM) via `codebase-audit` v0.2.0  
-**Commit:** `97fa6cc` (R07.06) | **Test Suite:** 1461 passed / 9 skipped in ~25s  
+**Commit:** post-R07.07 fixes (working tree) | **Test Suite:** 1506 passed / 9 skipped in ~25s  
 88 Findings | 7 Categories | SEC, ROB, MAINT, PERF, FEAT, ARCH, TEST  
-Severity: 1 High (closed) + 1 NEW High candidate (MAINT-14) | 33 Medium | 53 Low  
-19 CLOSED (4 in R07.04 + 9 in R07.05 + 6 in R07.06) | 1 WONTFIX (ROB-05 — intentional) | 25 NEW in R07.07 delta | 43 OPEN (was 42; new findings extend the ID sequence)
+Severity: 1 High (closed) + 1 NEW High (MAINT-14, closed R07.07) | 33 Medium | 53 Low  
+29 CLOSED (4 in R07.04 + 9 in R07.05 + 6 in R07.06 + 10 in R07.07) | 1 WONTFIX (ROB-05 — intentional) | 15 NEW remain OPEN from R07.07 delta | 43 OPEN (was 42; +15 new still-open after R07.07 closures, +10 new closed)
 
 > **R07.05 delta (in-progress, post-R07.04 release):** Six more findings closed. **SEC-07** (Low): `~/.agentkthx/` directory now created with mode `0o700` and the SQLite DB file chmod'd to `0o600` after connection — previously inherited the umask (typically 0644), leaking conversation history to all local users. **ROB-03** (Medium): `PersistentMemory` writes now wrapped in `threading.Lock` (`_write_lock`) — prevents `sqlite3.OperationalError: database is locked` when multiple threads share a PersistentMemory instance (Orchestrator parallel mode). **ROB-04** (Medium): `Agent.add_tool` split into `register_tool()` (rebuilds system prompt WITHOUT clearing memory — the safe mid-session API) + `rebuild_system_prompt()` (explicit clear+rebuild for soul swaps) + `add_tool()` (deprecated, still clears for backward compat). Third-party code that called `add_tool()` mid-session was silently destroying all conversation history. **MAINT-04** (Medium): deleted `agentkthx/core/args_normal.py` (329 LOC, dead code — the 4 re-exported symbols `normalize_args_full`/`fix_calculator_args`/`synthesize_missing_args`/`generate_helpful_error_message` had zero callers in production code or tests). **MAINT-05** (Medium): deleted the dead-code trio from `agentkthx/cli/utils.py` (`_load_tool_cache`, `_save_tool_cache`, `_get_cloud_model_size` — 88 LOC, R06.0 legacy, no callers). Updated `cli/__init__.py` imports + `__all__` + `test_cli_package_split.py` expected-names list. **MAINT-06** (Low): deleted `agentkthx/core/model_config.py` (30-line deprecated re-export module emitting `DeprecationWarning` on import — no internal imports, only docs/changelog references remained). +20 regression tests in `tests/test_r07_05_audit_fixes.py`. Suite 1290 → **1310 passed / 9 skipped in ~24s** (+20 new tests, 0 regressions).
 >
@@ -43,6 +43,7 @@ Severity: 1 High (closed) + 1 NEW High candidate (MAINT-14) | 33 Medium | 53 Low
 - [R07.05 Closures (Released)](#r07.05-closures-released)
 - [R07.06 Closures (In-Progress)](#r07.06-closures-in-progress)
 - [R07.07 New Findings (Re-Audit Delta)](#r07.07-new-findings-re-audit-delta)
+- [R07.07 Closures (Re-Audit Fix Batch)](#r07.07-closures-re-audit-fix-batch)
 
 ---
 
@@ -1452,3 +1453,88 @@ This silently corrupts user-supplied data in tool arguments. The model has no wa
 - **`audit/audit.md`** — this R07.07 delta block appended. Header banner updated to reflect new totals. TOC updated with new section anchor.
 - **`/home/z/my-project/skills/codebase-audit/`** — the `codebase-audit` skill cloned from the repo's `agentkthx/skills/codebase-audit/` so it's discoverable by the skill system.
 - **`/home/z/my-project/worklog.md`** — multi-agent worklog with the Explore subagent's structured per-file diff report (Task ID `6-diff`) and the parent agent's audit summary.
+
+---
+
+## R07.07 Closures (Re-Audit Fix Batch)
+
+The R07.07 re-audit delta documented 25 new findings. This block records the **10 quick-win closures** landed in the same audit cycle, with +45 regression tests in a single new test file (`tests/test_r07_07_audit_fixes.py`). Suite 1461 → **1506 passed / 9 skipped in ~25s**, zero regressions. The remaining 15 R07.07 findings (SEC-11, SEC-13, SEC-14, SEC-15, SEC-16, SEC-17, ROB-15, ROB-17, ROB-18, ROB-19, ROB-20, ROB-22, ROB-23, ROB-24, ROB-25, MAINT-11, MAINT-18, MAINT-19, ARCH-05, ARCH-06, PERF-03, PERF-04) remain OPEN — they require either larger refactors (MAINT-11, ARCH-05, ARCH-06), new env-var enforcement modes (SEC-13), or coordinated multi-site changes (SEC-11 cluster) that exceed the "quick win, unlikely to break anything" scope.
+
+| ID | Severity | Status | Notes |
+|----|----------|--------|-------|
+| ~~MAINT-14~~ | **High** | ✓ CLOSED R07.07 | **The headline fix.** The `\bTrue\b` / `\bFalse\b` / `\bNone\b` regex substitutions in `core/tool_parse.py:243-256` (R07.05 SEC-02 closure) silently mangled string values containing these words as prose. Verified reproducer: `{"prompt": "None of the above is True"}` → `{"prompt": "null of the above is true"}`. Fix: extracted shared `_substitute_python_literals()` helper using a single-pass regex `_PY_LITERAL_OR_STR_RE` that matches string literals first (and passes them through unchanged) so keywords inside string values are never substituted. Applied to BOTH the inline `_parse_react` python-dict→JSON conversion AND `_sanitize_model_json` (which had a milder form of the same bug via `:\s*True\b`). The string-literal alternatives REQUIRE a closing quote — without it, `"(?:[^"\\]|\\.)*` would greedily match `": True, "` (everything between opening and next quote), swallowing the `True` keyword. +10 regression tests covering the reproducer, array context, comp-mode, full ReAct pipeline, and the `_sanitize_model_json` variant. |
+| ~~SEC-12~~ / ~~ROB-26~~ | Low | ✓ CLOSED R07.07 | `sanitize_tool_output` (`core/helpers.py`) now truncates BEFORE redacting, not after. The prior redact→truncate order left an edge case where a secret spanning the truncation boundary (e.g. `password=sec` at byte 8196 with `ret` past 8200) would not be redacted by the line-based `_SECRET_LINE_RE` regex (which requires `\S+` value to fully match), and the truncated body would end with `password=sec` exposed. By truncating first, then redacting, the redaction regex sees the EXACT bytes that will be returned to the model — no off-by-N ambiguity between what was redacted and what was truncated. +5 regression tests covering secret-on-own-line, secret-past-truncation, secret-at-boundary, no-truncation, and Bearer-token cases. |
+| ~~ROB-16~~ | Low | ✓ CLOSED R07.07 | `_parse_retry_after_seconds` (`plugins/orcarouter/orcarouter.py`) now caps the returned value at `_MAX_RETRY_AFTER_SECONDS = 60.0`. The prior `float(retry_after_header)` with no cap meant a malicious or buggy upstream returning `Retry-After: 3600` would hang the agent for an hour via `time.sleep(retry_after)`. Negative values clamped to 0.0 (nonsensical — don't sleep negatively). Values just under cap (59.9) pass through; values at cap (60.0) pass through; values just over cap (60.001) are capped. +8 regression tests. |
+| ~~ROB-21~~ | Low | ✓ CLOSED R07.07 | `CloudBackend._MIN_API_KEY_LEN` (new class attribute, `backends/cloud_base.py`) bumped from 8 → 20 chars. The prior 8-char minimum only caught the most egregious typos; real cloud API keys are 30+ chars (OpenAI `sk-...` is 51 chars, ZAI is similar). Made it a class attribute so subclasses can override for dev sandboxes. Updated docstring + 2 existing test fixtures that used 19-char test keys (bumped to 23-char). +4 regression tests covering the threshold, subclass override, 19-char rejection, and 20-char acceptance. |
+| ~~MAINT-12~~ | Low | ✓ CLOSED R07.07 | `CloudBackend._DEFAULT_CONTEXT_FALLBACK` (new class attribute, `backends/cloud_base.py`) replaces the hardcoded `128000` literal that was repeated at 4 sites in the file (`get_model_info`, `_get_model_defaults`, `get_model_max_context`, `list_models` fallback). Backends with smaller models (e.g. a hypothetical cloud serving Llama-2-7B at 4K context) can now override `_DEFAULT_CONTEXT_FALLBACK = 4096` instead of monkeypatching. +3 regression tests covering the default, subclass override, and the fallback path in `get_model_max_context`. |
+| ~~MAINT-16~~ | Low | ✓ CLOSED R07.07 | `Agent.add_tool` (`agent.py`) now emits `DeprecationWarning` with `stacklevel=2` so the warning points at the caller, not at `add_tool` itself. The prior R07.05 ROB-04 split deprecated `add_tool` (kept for backward compat, still clears memory) but emitted no programmatic signal — third-party callers had no way to discover the deprecation without reading docs. Updated 2 existing tests: `test_r07_05_audit_fixes.py:test_add_tool_still_clears_for_backward_compat` (wraps in `warnings.catch_warnings` since it explicitly tests the deprecated behavior); `test_agent_openresponses_api.py` (migrated from `add_tool` to `register_tool` since the test isn't about deprecation). +2 regression tests verifying the warning fires for `add_tool` and does NOT fire for `register_tool`. |
+| ~~MAINT-17~~ | Low | ✓ CLOSED R07.07 | `_UNTRUSTED_TOOL_OUTPUT_INSTRUCTION` (new module-level constant, `core/agent_setup.py`) deduplicates the untrusted-tool-output instruction that was duplicated verbatim across the comp-mode and full-ReAct system-prompt builders. The BitNet lean variant uses a shorter one-liner (kept inline at its single call site because BitNet's tiny context budget can't afford the longer form). Any future edit to the wording now lands in ONE place. +2 regression tests verifying the constant exists and the default prompt contains the instruction. |
+| ~~MAINT-13~~ | Low | ✓ CLOSED R07.07 | `ZaiBackend.list_models` and `get_model_info` (`plugins/zai/zai.py`) now use `self._catalog_family_name()` and `self._catalog_backend_name()` instead of hardcoded `"glm"` / `"zai"` literals. The prior hardcoding meant a subclass that overrode `_catalog_family_name` would still produce the old value in `list_models` output — a silent drift risk. Also replaced 2 hardcoded `128000` literals with `self._DEFAULT_CONTEXT_FALLBACK` (pairs with MAINT-12). +3 regression tests covering list_models output, subclass override propagation, and get_model_info for unknown models. |
+| ~~MAINT-20~~ | Low | ✓ CLOSED R07.07 | `ZaiBackend.get_model_info` (`plugins/zai/zai.py`) no longer redundantly re-sets `free_tier` for catalog-known models. The parent `CloudBackend.get_model_info` already sets `free_tier = self._is_free_model(model_key)` at line 306; the override was setting it again at line 400 (harmless but redundant). The override now only enriches with the ZAI-specific fields the parent doesn't know about (`is_chat_model`, `pricing`). +2 regression tests verifying `free_tier` is present and matches `_is_free_model` for known models. |
+| ~~MAINT-09~~ | Low | ✓ CLOSED R07.07 | `_validate_sha256_pin` (`plugins/_loader.py`) now also rejects `.` in `Path(fname).parts` at validate-time, in addition to the existing `..` rejection. Note: Python's `Path` already collapses `.` parts (so `Path("foo/./bar").parts == ('foo', 'bar')`), making this check defensive (belt-and-braces) rather than load-bearing. The primary path-traversal defense remains the verify-time `target.resolve().is_relative_to(root)` check in `_verify_sha256_pins`. +5 regression tests covering `..`, absolute paths, backslash paths, clean relative paths, and nested relative paths. |
+
+### Cumulative closure state (updated)
+
+| Release | Findings Closed | Tests Added |
+|---------|----------------|-------------|
+| R07.00 | 4 (MAINT-01 old, MAINT-04 old, ROB-08 old, PERF-03 old) | — |
+| R07.01 | 4 (ROB-07 old, MAINT-06 old, TEST-02 old, ARCH-02 old) | — |
+| R07.04 | 4 (SEC-02, SEC-10, FEAT-01, MAINT-02) | +158 |
+| R07.05 (released) | 9 (SEC-07, ROB-03, ROB-04, MAINT-04, MAINT-05, MAINT-06, SEC-03, SEC-04, SEC-06) + 1 WONTFIX (ROB-05) | +101 |
+| R07.06 (released) | 6 (ROB-01, ROB-07, ROB-08, ROB-10, ROB-13, ROB-14) | +57 |
+| **R07.07 (re-audit + closures)** | **10 (MAINT-14 HIGH, SEC-12, ROB-16, ROB-21, MAINT-12, MAINT-16, MAINT-17, MAINT-13, MAINT-20, MAINT-09)** | **+45** |
+| **Total** | **37 of 88** (42%) | **+361** |
+
+### Files changed in R07.07 closure batch
+
+| File | Change |
+|------|--------|
+| `agentkthx/core/tool_parse.py` | MAINT-14: extracted `_substitute_python_literals()` + `_PY_LITERAL_OR_STR_RE`; replaced 6 inline regex substitutions in `_sanitize_model_json` and 3 in `_parse_react` with the shared helper. |
+| `agentkthx/core/helpers.py` | SEC-12/ROB-26: reordered `sanitize_tool_output` to truncate-then-redact (was redact-then-truncate). |
+| `agentkthx/plugins/orcarouter/orcarouter.py` | ROB-16: added `_MAX_RETRY_AFTER_SECONDS = 60.0` cap + negative-clamp in `_parse_retry_after_seconds`. |
+| `agentkthx/backends/cloud_base.py` | ROB-21 + MAINT-12: added `_MIN_API_KEY_LEN = 20` and `_DEFAULT_CONTEXT_FALLBACK = 128000` class attributes; replaced 4 hardcoded `128000` literals + the `8`-char minimum with the attributes; updated docstring. |
+| `agentkthx/agent.py` | MAINT-16: added `import warnings` and `warnings.warn(..., DeprecationWarning, stacklevel=2)` to `add_tool`. |
+| `agentkthx/core/agent_setup.py` | MAINT-17: extracted `_UNTRUSTED_TOOL_OUTPUT_INSTRUCTION` constant; replaced duplicated text in comp-mode + full-ReAct prompt builders with concatenation. |
+| `agentkthx/plugins/zai/zai.py` | MAINT-13 + MAINT-20 + MAINT-12: replaced 3 hardcoded `"glm"` / `"zai"` / `128000` literals with `self._catalog_family_name()` / `self._catalog_backend_name()` / `self._DEFAULT_CONTEXT_FALLBACK`; removed redundant `free_tier` re-set in `get_model_info` override. |
+| `agentkthx/plugins/_loader.py` | MAINT-09: added `or "." in Path(fname).parts` to `_validate_sha256_pin` path-traversal check (defensive — Path already collapses `.`). |
+| `tests/test_cloud_backend_base.py` | ROB-21: bumped 2 test fixtures from 19-char to 23-char keys; updated `test_too_short_api_key_raises` docstring. |
+| `tests/test_r07_05_audit_fixes.py` | MAINT-16: wrapped deprecated `add_tool` call in `warnings.catch_warnings` for the backward-compat test. |
+| `tests/test_agent_openresponses_api.py` | MAINT-16: migrated from `add_tool` to `register_tool` (test isn't about deprecation). |
+| `tests/test_r07_07_audit_fixes.py` | NEW: +45 regression tests covering all 10 closures. |
+
+### Remaining OPEN findings from R07.07 delta (15)
+
+These were identified in the R07.07 re-audit but NOT closed in this batch — they require either larger refactors, new env-var enforcement modes, or coordinated multi-site changes:
+
+| ID | Severity | Why deferred |
+|----|----------|-------------|
+| SEC-11 | Medium | Requires bounded `getaddrinfo` (cap to N addresses + timeout) — touches `core/helpers.py:_iter_hostname_ips` and is coupled with SEC-17 + ROB-27 |
+| SEC-13 | Medium | Requires new `AGENTKTHX_REQUIRE_PLUGIN_PINS=1` env var enforcement mode in `plugins/_loader.py` |
+| SEC-14 | Low | Forward-looking — `is_transient_api_error` body arg is unused today; no caller passes it |
+| SEC-15 | Low | Requires decoupling `CloudBackend.__init__` from `os.environ["AGENTKTHX_API_MODE"]` mutation — touches the ARCH-01 pattern inherited from pre-R07.05 plugins |
+| SEC-16 | Low | Requires URL host validation in `_extract_buy_credits_url` — need to decide on allowlist (e.g. `https://www.orcarouter.ai/` only) |
+| SEC-17 | Low | Paired with SEC-11 — requires max-redirects cap on `_SSRFSafeRedirectHandler` + DNS timeout |
+| ROB-15 | Medium | Requires combining `PersistentMemory._write_message` + `_touch_session` into a single locked transaction — touches the ROB-03 closure pattern |
+| ROB-17 | Low | Documented gap in token-tier pruning — no fix needed, just docstring update |
+| ROB-18 | Low | Requires `threading.Lock` → `threading.RLock` in `PersistentMemory` — backward-compatible but needs careful audit of all lock-holding paths |
+| ROB-19 | Low | Requires removing `getattr(self, "debug", False)` defensive fallback in `register_tool` — risks breaking test harnesses that rely on the fallback |
+| ROB-20 | Low | Naming inconsistency (`num_ctx` vs `_num_predict`) — pre-existing, not introduced by R07.06 |
+| ROB-22 | Low | OrcaRouter `_iter_sse_lines` exhaustion-raise inconsistency — minor UX, no correctness impact |
+| ROB-23 | Low | OrcaRouter `list_models` fallback list hardcoded — needs a config-driven fallback mechanism |
+| ROB-24 | Low | ZAI `get_model_info` returns default 128K for unknown models — intentional (ZAI accepts any model ID), documented |
+| ROB-25 | Low | OrcaRouter signature mismatch between `generate()` and `_generate_with_auth()` — cosmetic |
+| MAINT-11 | Medium | ~150 LOC of retry-logic duplication in OrcaRouter — requires extracting shared `_classify_and_handle_http_error` helper, larger refactor |
+| MAINT-18 | Low | `apply_model_switch` return dict — already consumed by chat.py:1007, no fix needed |
+| MAINT-19 | Low | OrcaRouter `list_models` cache per-instance — needs class-level cache, minor refactor |
+| ARCH-05 | Medium | `Agent.__init__` `**kwargs` swallowing — requires dataclass-based `AgentConfig` rewrite, larger refactor |
+| ARCH-06 | Medium | `CloudBackend` inherits from `OpenAICompatibleBackend` — requires protocol-based abstraction, larger refactor |
+| PERF-03 | Low | `_iter_hostname_ips` no DNS cache — paired with SEC-11 |
+| PERF-04 | Low | `_estimate_tokens` recomputed per `add()` — needs `Message` dataclass field, touches `core/models.py` |
+
+### Next-release priorities (R07.08)
+
+1. **SEC-11 cluster** (SEC-11 + SEC-17 + ROB-27 + PERF-03) — single coordinated fix: bounded `getaddrinfo` + max-redirects cap + DNS timeout + DNS cache. ~30 LOC change + 5 regression tests.
+2. **ROB-15 + ROB-18** — combine PersistentMemory `_write_message` + `_touch_session` into single transaction; switch `Lock` → `RLock`. ~20 LOC + 3 tests.
+3. **SEC-13** — add `AGENTKTHX_REQUIRE_PLUGIN_PINS=1` env var enforcement. ~15 LOC + 4 tests.
+4. **SEC-16** — validate `buy_credits_url` host before surfacing. ~5 LOC + 2 tests.
+5. **MAINT-11** — extract OrcaRouter shared retry helper. ~50 LOC refactor + 0 new tests.
