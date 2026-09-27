@@ -5,11 +5,11 @@
 **Repository:** https://github.com/VTSTech/AgentKthx  
 **Author:** VTSTech | **License:** MIT | **Date:** 2026-09-27  
 **Commit:** (working tree) | **Test Suite:** 1567 passed / 9 skipped  
-57 Open Findings | 7 Categories | SEC, ROB, MAINT, PERF, FEAT, ARCH, TEST  
-Severity: 0 High | 20 Medium | 37 Low  
-57 OPEN (CLOSED + WONTFIX archived in deltas.md — generate_audit_dash.py merges both for the dashboard)
+54 Open Findings | 7 Categories | SEC, ROB, MAINT, PERF, FEAT, ARCH, TEST  
+Severity: 0 High | 20 Medium | 34 Low  
+54 OPEN (CLOSED + WONTFIX archived in deltas.md — generate_audit_dash.py merges both for the dashboard)
 
-> **Split:** 35 CLOSED/WONTFIX findings moved to `deltas.md`. `generate_audit_dash.py` reads both `audit.md` (open) and `deltas.md` (closed/wontfix) and merges them into the full register. The dashboard shows all 92 findings.
+> **Split:** 38 CLOSED/WONTFIX findings moved to `deltas.md`. `generate_audit_dash.py` reads both `audit.md` (open) and `deltas.md` (closed/wontfix) and merges them into the full register. The dashboard shows all 92 findings.
 
 ---
 
@@ -29,6 +29,8 @@ This audit covers AgentKthx at commit `51223c4` (R07.04, published to PyPI as 0.
 The R07.04 release closed 4 of the 9 near-term findings identified by the prior audit pass (at commit `45c7613`, pre-R07.04): **SEC-02** (High — `ast.literal_eval` type-confusion bypass), **SEC-10 + FEAT-01** (Medium — paired; tool-output wrapping via `sanitize_tool_output()`), **MAINT-02** (Medium — `CloudBackend` base class extraction). Beyond the audit closures, R07.04 also shipped the OrcaRouter plugin (10th backend, first scaffolded on top of `CloudBackend`), the `BackendType.ORCAROUTER` enum value (fixes wrong-footer-display bug), the `get_model_max_context` crash fix on cloud backends, and the terminal-free-tier-error retry-loop fix. The remaining 58 findings are tracked below; the next highest-leverage moves are MAINT-01 (extract `ChatSession` from the 1,199-line `cmd_chat`), ROB-05 (background-thread the 3-HTTPS-request update check), TEST-01 (add a thin integration test tier), SEC-03 (SSRF check via `ipaddress`), and SEC-04 (block `bash`/heredocs in `sanitize_command`).
 
 A recurring positive pattern: the codebase's audit-tracked finding discipline (SEC/ROB/MAINT/PERF/FEAT/ARCH/TEST ID system with closure deltas) is itself working and should continue — the prior audit's three near-term findings (MAINT-06 BOM strip, TEST-02 CI workflow, ARCH-02 coverage configuration) were all closed in R07.01, and R07.04 closes four more (SEC-02, SEC-10/FEAT-01, MAINT-02), demonstrating the discipline catches and resolves real issues release-over-release.
+
+---
 
 ---
 
@@ -59,7 +61,6 @@ A recurring positive pattern: the codebase's audit-tracked finding discipline (S
 | TEST-03 | Medium | Testing | OPEN | FakeBackend in test_agentic_loop_subsystem.py omits generate_completions_stream — streaming callbacks unexercised |
 | TEST-06 | Medium | Testing | OPEN | CI doesn't run black --check or ruff check — code style drift undetected |
 | SEC-05 | Low | Security | OPEN | input() prompts in dangerous-tool confirmation don't strip ANSI escapes from tool name/args |
-| SEC-12 | Low | Security | OPEN | sanitize_tool_output truncates AFTER redaction — secrets just past 8KB cutoff remain unredacted |
 | SEC-14 | Low | Security | OPEN | is_transient_api_error body arg lowercased + substring-matched — user-controlled content in body could force permanent classification |
 | SEC-15 | Low | Security | OPEN | CloudBackend.__init__ mutates os.environ["AGENTKTHX_API_MODE"] — process-global side effect, last-instance-wins |
 | SEC-16 | Low | Security | OPEN | _extract_buy_credits_url surfaces attacker-controlled URL in user-facing error message — phishing vector |
@@ -75,7 +76,6 @@ A recurring positive pattern: the codebase's audit-tracked finding discipline (S
 | ROB-23 | Low | Robustness | OPEN | list_models fallback list is hardcoded — won't include new free models until code update |
 | ROB-24 | Low | Robustness | OPEN | get_model_info returns default 128K entry for ANY model string — catalog no longer authoritative |
 | ROB-25 | Low | Robustness | OPEN | generate() vs _generate_with_auth() signature defaults mismatch (None vs 0.7/2048) — confusing |
-| ROB-26 | Low | Robustness | OPEN | sanitize_tool_output REDACT-then-TRUNCATE ordering — secrets past 8KB cutoff not redacted (dup of SEC-12) |
 | ROB-27 | Low | Robustness | OPEN | _SSRFSafeRedirectHandler DNS lookup happens outside the request timeout — slow DNS = unbounded stall (dup of SEC-17) |
 | MAINT-07 | Low | Maintainability | OPEN | model_family_config.detect_family uses prefix matching with overlapping families — fragile for new Qwen variants |
 | MAINT-15 | Low | Maintainability | OPEN | _write_lock is per-instance, not per-DB-path — multi-instance scenarios still race |
@@ -94,7 +94,6 @@ A recurring positive pattern: the codebase's audit-tracked finding discipline (S
 | TEST-04 | Low | Testing | OPEN | No test coverage for agent_mode.py rollback functionality (822 LOC, key feature) |
 | TEST-05 | Low | Testing | OPEN | test_bump_version_script.py tests shell script via subprocess — fails on Windows/no-bash |
 | TEST-07 | Low | Testing | OPEN | No test for update_check module's network-failure paths (URLError, socket.timeout, malformed JSON) |
-| TEST-08 | Low | Testing | OPEN | No adversarial test coverage for sandboxed_repl.py — sandbox escape regressions go undetected |
 
 ---
 
@@ -122,6 +121,8 @@ Recommendation: Strip ANSI escapes via `re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', too
 
 ---
 
+---
+
 #### SEC-09: ACP credentials sent as Basic Auth over HTTP by default
 
 | Property | Value |
@@ -135,6 +136,8 @@ Recommendation: Strip ANSI escapes via `re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', too
 Recommendation: Warn loudly when `ACP_BASE_URL` doesn't start with `https://` and isn't `localhost`/`127.0.0.1`/`::1`. Refuse to send credentials over non-HTTPS unless `ACP_ALLOW_INSECURE_HTTP=1` is set.
 
 **Impact:** Credentials sent in cleartext over the network if ACP server is remote; users may not realize the implication of changing `ACP_BASE_URL`.
+
+---
 
 ---
 
@@ -161,6 +164,8 @@ Recommendation: Use `concurrent.futures.FIRST_COMPLETED` and explicitly close th
 
 ---
 
+---
+
 #### ROB-06: KeyboardInterrupt during SSE streaming may not deterministically release HTTP connection on Windows
 
 | Property | Value |
@@ -174,6 +179,8 @@ The KeyboardInterrupt handler calls `stream_gen.close()` to release the underlyi
 Recommendation: Explicitly call `response.fp.close()` and `response.release_conn()` if available. For urllib, use `response.close()` directly and catch `AttributeError` for older Python versions. Consider using `http.client.HTTPConnection` directly for finer-grained control.
 
 **Impact:** Connection exhaustion on Windows under heavy Ctrl+C usage — Linux/macOS unaffected but the cross-platform promise is broken.
+
+---
 
 ---
 
@@ -197,6 +204,8 @@ Recommendation: Use `os.path.realpath(path)` instead of `os.path.abspath(path)` 
 
 ---
 
+---
+
 #### ROB-11: Plugin load-failure path calls `unregister()` which may itself fail — leaves partial registrations
 
 | Property | Value |
@@ -215,6 +224,8 @@ Recommendation: Track all `register_*` calls during `register()` execution in a 
 
 ---
 
+---
+
 #### ROB-12: `agent._on_step_callback = lambda ...` in `cmd_chat` cannot be unregistered
 
 | Property | Value |
@@ -228,6 +239,8 @@ Recommendation: Track all `register_*` calls during `register()` execution in a 
 Recommendation: Set `agent._on_step_callback = None` in the `finally:` block of `cmd_chat`. Better: replace the closure-based callback with a method on a `ChatSession` class (see MAINT-01) so the lifetime is explicit.
 
 **Impact:** Stale closures fire after chat exits; benign in production (just writes ANSI escapes to stdout), but causes `AttributeError` in test environments.
+
+---
 
 ---
 
@@ -254,6 +267,8 @@ Recommendation: Extract `ChatSession` class with `handle_command(text) -> bool` 
 
 ---
 
+---
+
 #### MAINT-03: `normalize_args` strategy 5 (prefix/substring matching) is dangerously permissive
 
 | Property | Value |
@@ -267,6 +282,8 @@ The function tries 5 strategies: (1) tool-specific alias lookup, (2) direct matc
 Recommendation: Drop strategy 5 entirely. If fuzzy matching is needed, require the match to be at least 3 characters AND not be a prefix of multiple params. Add `--strict-args` flag to disable fuzzy matching entirely for production use.
 
 **Impact:** Argument misattribution when models use single-letter keys — silent wrong behavior rather than a clear "missing argument" error.
+
+---
 
 ---
 
@@ -290,6 +307,8 @@ Recommendation: Add explicit entries for `qwen2.5`, `qwen35`, `qwen3` in `FAMILY
 
 ---
 
+---
+
 #### MAINT-08: `_generate_stream` is 354 lines with 5-level try/except/finally nesting and inline closures
 
 | Property | Value |
@@ -308,6 +327,8 @@ Recommendation: Extract `StreamAccumulator` class with `add_content_delta(text)`
 
 ---
 
+---
+
 #### MAINT-10: `_select_agent_with_llm` builds router prompt via f-string with no escaping of agent descriptions or user task
 
 | Property | Value |
@@ -321,6 +342,8 @@ The router prompt (line 297-304) is `f"""You are an agent router. ... Available 
 Recommendation: Wrap agent descriptions in XML tags (`<agent name="X">description</agent>`), and add a system message reminder to ignore instructions in the user request. Validate the LLM's response against the actual agent names and re-prompt if invalid.
 
 **Impact:** Prompt injection via agent description or user task can hijack the router — picking the wrong agent for a task.
+
+---
 
 ---
 
@@ -347,6 +370,8 @@ Recommendation: Cache the sanitized state and only re-run when `_messages` is mu
 
 ---
 
+---
+
 #### PERF-02: `_check_compaction` iterates all messages + JSON-serializes tool_calls on every step
 
 | Property | Value |
@@ -360,6 +385,8 @@ Recommendation: Cache the sanitized state and only re-run when `_messages` is mu
 Recommendation: Cache `total_chars` on the Memory object, invalidate on add/compact. Or use a cheaper estimate (`len(content) + 50 * len(tool_calls)`).
 
 **Impact:** Each step pays O(n × tool_calls) for token estimation — measurable on long-running chat sessions.
+
+---
 
 ---
 
@@ -383,6 +410,8 @@ Recommendation: Use a JSON API (DuckDuckGo has `https://api.duckduckgo.com/?q=..
 
 ---
 
+---
+
 #### PERF-04: `discover(force=True)` re-scans all plugin roots — no mtime check
 
 | Property | Value |
@@ -396,6 +425,8 @@ Recommendation: Use a JSON API (DuckDuckGo has `https://api.duckduckgo.com/?q=..
 Recommendation: Track mtime per `plugin.json` and only re-parse changed files. Maintain a `dict[path, mtime]` and compare on `discover(force=True)`.
 
 **Impact:** Slow plugin reload during development — minor but noticeable.
+
+---
 
 ---
 
@@ -419,6 +450,8 @@ Recommendation: Return early if `_parse_native_json` returns results, only fall 
 
 ---
 
+---
+
 #### PERF-06: `_fetch_json` reads entire PyPI response (~100KB) before JSON parsing
 
 | Property | Value |
@@ -432,6 +465,8 @@ Recommendation: Return early if `_parse_native_json` returns results, only fall 
 Recommendation: Use `json.load(resp)` to stream-parse, or only fetch the `info.version` field via a more targeted API (e.g., `https://pypi.org/pypi/agentkthx/json` → just read the first 4KB which contains `info.version`).
 
 **Impact:** 100KB+ memory spike per CLI invocation — minor but wasteful for a version check.
+
+---
 
 ---
 
@@ -458,6 +493,8 @@ Proposal: Add `timeout` to `ToolParam` schema so the model can specify per-call 
 
 ---
 
+---
+
 #### FEAT-03: Tool output schema validation via JSON Schema
 
 | Property | Value |
@@ -471,6 +508,8 @@ Grounded in observation: `core/tool_execution.py:84` `result = tool.execute(**no
 Proposal: Add an optional `output_schema: dict | None` field to `Tool` (JSON Schema). When set, `tool.execute()`'s return value is validated against the schema; mismatches trigger a `ToolOutputError` that the error recovery tracker records. This enables: (a) structured tool results that the model can parse reliably, (b) automatic JSON-serialization for the `function_call_output` item, (c) contract testing for tool implementations.
 
 **Impact:** Makes tool outputs predictable and machine-parseable; enables type-safe tool composition.
+
+---
 
 ---
 
@@ -494,6 +533,8 @@ Proposal: Add a `PluginSandbox` wrapper that exposes only a restricted API to `r
 
 ---
 
+---
+
 #### FEAT-06: Streaming tool-call argument deltas (`function_call_arguments.delta` SSE events)
 
 | Property | Value |
@@ -512,6 +553,8 @@ Proposal: In `_generate_stream` (streaming.py:731-748), when a `tool_calls` delt
 
 ---
 
+---
+
 #### FEAT-07: Conversation export/import to OpenResponses-format JSON
 
 | Property | Value |
@@ -525,6 +568,8 @@ Grounded in observation: `core/persistent_memory.py` stores messages in SQLite w
 Proposal: Add `agent.export_session(session_id) -> dict` that returns the conversation as an OpenResponses-compatible JSON (`{responses: [...], items: [...], usage: {...}}`). Add `agent.import_session(data: dict)` that reconstructs the Memory. CLI: `agentkthx sessions export <id> > conv.json` and `agentkthx sessions import < conv.json`.
 
 **Impact:** Enables conversation portability, bug reproduction, and audit logging; aligns with OpenResponses spec.
+
+---
 
 ---
 
@@ -551,6 +596,8 @@ Recommendation: Extract an `SSEEventBuilder` class with methods like `emit_queue
 
 ---
 
+---
+
 #### ARCH-03: `agent_mode.py` and `orchestrator.py` are only loosely coupled to the Agent class
 
 | Property | Value |
@@ -564,6 +611,8 @@ Recommendation: Extract an `SSEEventBuilder` class with methods like `emit_queue
 Recommendation: Either deprecate `AgentMode` (the chat command's `--agent` flag uses it, but the regular `chat` doesn't) or integrate it with the OpenResponses event stream by making `AgentMode` emit `Response`/`Item` events. Same for `Orchestrator`.
 
 **Impact:** Two parallel abstractions for "multi-step agent execution" — the `Agent._run_loop_iteration` path and the `AgentMode` path; new contributors may not know which to use.
+
+---
 
 ---
 
@@ -587,6 +636,8 @@ Recommendation: Consolidate into a single `importlib.resources.files('agentkthx.
 
 ---
 
+---
+
 #### ARCH-05: `Agent.__init__` accepts 22 explicit params + `**kwargs` for 5 more
 
 | Property | Value |
@@ -600,6 +651,8 @@ The constructor signature has 22 explicit parameters (`model`, `tools`, `backend
 Recommendation: Replace `**kwargs` with explicit parameters, or use a typed `AgentConfig` dataclass with `dataclasses.field(default=...)`. The dataclass approach makes the config serializable and version-controllable.
 
 **Impact:** Hard to add new parameters without breaking backward compat; easy to misspell a kwarg and have it silently do nothing.
+
+---
 
 ---
 
@@ -626,6 +679,8 @@ Recommendation: Add `test_chat_commands.py` that feeds simulated user input to a
 
 ---
 
+---
+
 #### TEST-02: `test_security.py:test_percent2e` always passes — no-op test
 
 | Property | Value |
@@ -639,6 +694,8 @@ The test `test_percent2e` (line 103) asserts `assert not is_valid or True` — w
 Recommendation: Make the test deterministic by asserting the specific expected behavior (validate_path should reject `%2e%2e` patterns after URL-decoding). Either `assert not is_valid` or `assert is_valid and "expected_reason" in reason`.
 
 **Impact:** Path traversal via URL-encoded `..` is not actually tested; the test gives false confidence.
+
+---
 
 ---
 
@@ -662,6 +719,8 @@ Recommendation: Add a `FakeStreamingBackend` that yields chunks via `generate_co
 
 ---
 
+---
+
 #### TEST-04: No test coverage for `agent_mode.py` rollback functionality
 
 | Property | Value |
@@ -675,6 +734,8 @@ Recommendation: Add a `FakeStreamingBackend` that yields chunks via `generate_co
 Recommendation: Add tests that create a file via `create_file_write_action`, roll back, and verify the original content is restored. Test rollback chains where Step N's rollback depends on Step N-1.
 
 **Impact:** The rollback feature (a key selling point of "agent mode") is untested; regressions would go undetected.
+
+---
 
 ---
 
@@ -698,6 +759,8 @@ Recommendation: Extract the version-bump logic into a Python function (`scripts/
 
 ---
 
+---
+
 #### TEST-06: CI doesn't run `black --check` or `ruff check` — code style drift undetected
 
 | Property | Value |
@@ -711,6 +774,8 @@ The CI workflow (line 66-69) runs only `python -m pytest tests/ -q`. The `pyproj
 Recommendation: Add a `lint` job that runs `ruff check agentkthx/ tests/` and `black --check agentkthx/ tests/`. Make it a non-blocking job initially (continue-on-error: true) to surface issues without blocking PRs.
 
 **Impact:** Code style drift goes undetected; reviewers waste time on style nits that the linter should catch.
+
+---
 
 ---
 
@@ -734,22 +799,6 @@ Recommendation: Add tests that inject `URLError`, `socket.timeout`, and malforme
 
 ---
 
-#### TEST-08: No adversarial test coverage for `sandboxed_repl.py` — sandbox escape regressions go undetected
-
-| Property | Value |
-|----------|-------|
-| **Severity** | Low |
-| **Category** | Testing |
-| **File(s)** | `agentkthx/tools/sandboxed_repl.py` (521 LOC untested), `tests/test_sandboxed_repl.py` (does not exist) |
-
-The `sandboxed_repl.py` module has a `test_sandbox()` function (line 464-518) that's only run via `if __name__ == "__main__"`. There's no pytest test file that verifies the sandbox blocks `import os; os.system(...)`, `import subprocess; subprocess.run(...)`, `while True: pass` (timeout), or memory-exhaustion attacks. Given SEC-01 (sandbox escape via `getattr` traversal), adversarial test coverage is critical.
-
-Recommendation: Add `test_sandboxed_repl.py` with adversarial test cases: (a) `import os; os.system("echo pwned")` — must fail; (b) `getattr(getattr(object, "__subclasses__"), "__call__")(...)` — must fail; (c) `[0] * 10**9` (memory exhaustion) — must timeout; (d) `while True: pass` — must timeout.
-
-**Impact:** Sandbox regressions go undetected; the sandbox's actual security guarantees are unknown.
-
----
-
 ---
 
 ## Priority Matrix
@@ -764,6 +813,8 @@ Guidelines for timeline assignment:
 - **Near term** — High severity findings and the most impactful Medium severity findings; should be fixed in the next 1-2 releases
 - **Short term** — Medium severity findings addressable within 2-4 releases
 - **Medium term** — Low severity findings and larger architectural changes that can be picked up during other work
+
+---
 
 ---
 
