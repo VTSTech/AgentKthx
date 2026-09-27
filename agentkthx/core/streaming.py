@@ -707,6 +707,21 @@ class StreamingMixin:
                         usage = chunk_usage
                     # Content delta — print immediately
                     if delta:
+                        # If reasoning was just streamed (grey), add a newline
+                        # so the content (white) starts on its own line under
+                        # the AgentKthx: prefix. The prefix was already emitted
+                        # by _emit_reasoning_panel_header, so _emit_prefix_once
+                        # is a no-op here — but we still need the newline.
+                        if _reasoning_panel_started and not _prefix_emitted:
+                            # Prefix not yet emitted — _emit_prefix_once will
+                            # add the newline + "AgentKthx:" prefix.
+                            pass
+                        elif _reasoning_panel_started and _prefix_emitted:
+                            # Prefix already emitted by reasoning panel header.
+                            # Close the grey reasoning text + add newline so
+                            # content starts fresh on its own line.
+                            sys.stdout.write("\n")
+                            sys.stdout.flush()
                         _emit_prefix_once()
                         content_acc.append(delta)
                         sys.stdout.write(delta)
