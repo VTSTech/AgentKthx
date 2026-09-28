@@ -37,6 +37,7 @@ if str(REPO_ROOT) not in sys.path:
 from agentkthx.plugins.pollinations.pollinations import (
     PollinationsBackend,
     POLLINATIONS_MODELS,
+    POLLINATIONS_FALLBACK_MODEL,
     _expand_safe_flag,
     _pollen_to_per_million,
     _card_is_free,
@@ -228,6 +229,9 @@ class TestManifestCompliance(unittest.TestCase):
         assert defaults["POLLINATIONS_BASE_URL"] == "https://gen.pollinations.ai/v1"
         assert defaults["POLLINATIONS_DEFAULT_MODEL"] == "openai/gpt-5.4-nano"
         assert defaults["POLLINATIONS_API_KEY"] == ""
+        assert defaults["POLLINATIONS_ANON_CATALOG"] == "false", (
+            "v0.1.1 browse-public toggle must be declared in the manifest"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -865,6 +869,115 @@ class TestListModels(unittest.TestCase):
         names = [m["name"] for m in models]
         assert "community/someone/free-model" in names
         assert "openai/gpt-5.4-nano" not in names
+
+
+class TestAnonCatalog(unittest.TestCase):
+    """POLLINATIONS_ANON_CATALOG — browse the public 307-card catalog
+    while staying keyed for generation. The gateway scopes GET /v1/models
+    to the key's entitlements (observed: 307 anon vs 134 keyed cards), so
+    the toggle strips the Bearer header from catalog discovery only."""
+
+    def _captured_request(self, backend: PollinationsBackend, env: dict):
+        with patch.dict(os.environ, env):
+            with patch(
+                "urllib.request.urlopen",
+                return_value=_ok_response({"data": []}),
+            ) as m:
+                backend._fetch_model_cards()
+        return m.call_args[0][0]
+
+    def test_flag_strips_authorization_header(self):
+        backend = _make_backend(api_key="sk_" + "z" * 32)
+        req = self._captured_request(
+            backend, {"POLLINATIONS_ANON_CATALOG": "true"}
+        )
+        assert "Authorization" not in req.headers, (
+            "ANON_CATALOG must fetch the public catalog without the key"
+        )
+
+    def test_default_sends_authorization_header(self):
+        key = "sk_" + "z" * 32
+        backend = _make_backend(api_key=key)
+        req = self._captured_request(
+            backend, {"POLLINATIONS_ANON_CATALOG": ""}
+        )
+        assert req.headers.get("Authorization") == f"Bearer {key}", (
+            "default (flag off) keeps the entitlement-scoped keyed catalog"
+        )
+
+    def test_keyless_fetch_never_has_auth(self):
+        backend = _make_keyless_backend()
+        req = self._captured_request(
+            backend, {"POLLINATIONS_ANON_CATALOG": ""}
+        )
+        assert "Authorization" not in req.headers
+
+
+class TestFreeOnlyGenerate(unittest.TestCase):
+    """FREE_ONLY generate-time redirect (v0.1.1): a priced model must be
+    swapped for the healthiest zero-priced card in the cache — NOT the
+    priced POLLINATIONS_FALLBACK_MODEL, which would burn pollen anyway."""
+
+    def _generate_body(self, backend: PollinationsBackend, model: str) -> dict:
+        with patch.dict(os.environ, {"POLLINATIONS_FREE_ONLY": "true"}):
+            with patch.object(backend, "_maybe_jev_dispatch", return_value=None):
+                with patch.object(
+                    backend, "_make_api_request", return_value={"content": "ok"}
+                ) as m:
+                    backend.generate(model, [{"role": "user", "content": "hi"}])
+        return m.call_args[0][0]
+
+    def test_redirect_prefers_free_card_over_priced_fallback(self):
+        backend = _make_backend()
+        backend._model_cards = _fake_cards()
+        body = self._generate_body(backend, "openai/gpt-5.4-nano")
+        assert body["model"] == "community/someone/free-model", (
+            "FREE_ONLY must land on a zero-priced card, not the priced fallback"
+        )
+
+    def test_no_free_cards_uses_configured_fallback(self):
+        """Keyed catalog shape (0 zero-priced cards): degrade to the cheap
+        configured fallback rather than failing the call."""
+        backend = _make_backend()
+        backend._model_cards = {
+            "openai/gpt-5.4-nano": _fake_cards()["openai/gpt-5.4-nano"]
+        }
+        body = self._generate_body(backend, "openai/gpt-5.4-nano")
+        assert body["model"] == POLLINATIONS_FALLBACK_MODEL
+
+    def test_free_model_not_redirected(self):
+        backend = _make_backend()
+        backend._model_cards = _fake_cards()
+        body = self._generate_body(backend, "community/someone/free-model")
+        assert body["model"] == "community/someone/free-model"
+
+    def test_first_free_model_health_ordered_and_text_only(self):
+        """Ordering: success_rate desc; image-category cards excluded."""
+        backend = _make_backend()
+        cards = _fake_cards()
+        cards["community/aaa/free-aaa"] = {
+            "id": "community/aaa/free-aaa",
+            "category": "text",
+            "pricing": {"promptTextTokens": "0", "completionTextTokens": "0"},
+            "health": {"status": "healthy", "success_rate": 90.0, "requests": 5},
+        }
+        # free image card — must NOT be picked even though zero-priced
+        cards["community/bbb/free-image"] = {
+            "id": "community/bbb/free-image",
+            "category": "image",
+            "pricing": {"promptTextTokens": "0", "completionTextTokens": "0"},
+            "health": {"status": "healthy", "success_rate": 100.0, "requests": 5},
+        }
+        backend._model_cards = cards
+        assert backend._first_free_model() == "community/someone/free-model", (
+            "free-model (success_rate 100) must outrank free-aaa (90); "
+            "image-category cards must be excluded"
+        )
+
+    def test_first_free_model_empty_cache(self):
+        backend = _make_backend()
+        backend._model_cards = {}
+        assert backend._first_free_model() is None
 
 
 # ---------------------------------------------------------------------------

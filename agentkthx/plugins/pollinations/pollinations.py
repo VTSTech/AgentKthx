@@ -77,6 +77,14 @@ Configuration:
   POLLINATIONS_FALLBACK_MODEL — Offline fallback chain anchor (z-ai/glm-5.3-flash)
   POLLINATIONS_SAFE          — Safety filters ("" | true | nsfw | comma list)
   POLLINATIONS_FREE_ONLY     — Only zero-priced models (default: false)
+  POLLINATIONS_ANON_CATALOG  — Browse the PUBLIC catalog without the Bearer
+                               key even when keyed (default: false). The
+                               gateway scopes GET /v1/models to the key's
+                               entitlements (observed 2026-09-28: 307 cards
+                               anonymous vs 134 keyed, keyed has ZERO
+                               zero-priced models) — set this to keep the
+                               full browsing surface + FREE_ONLY working
+                               while generation stays authenticated.
   POLLINATIONS_MAX_RETRIES   — Retry budget override (default: 5)
 
 Usage:
@@ -655,17 +663,21 @@ class PollinationsBackend(CloudBackend):
     # ───────────────────────────────────────────────────────────────────
 
     def _fetch_model_cards(self) -> dict[str, dict]:
-        """Fetch live model cards from the public ``GET /v1/models``.
+        """Fetch live model cards from ``GET /v1/models``.
 
-        The catalog endpoint requires NO auth (sending a bearer key
-        returns the same data, some endpoints add per-account fields) —
-        so this works in keyless anonymous mode too. Returns a dict of
+        Anonymous by default (no auth needed), BUT the gateway scopes the
+        catalog to the key's entitlements when a Bearer key is sent
+        (observed 2026-09-28: 307 cards anonymous vs 134 keyed — the keyed
+        feed drops premium vendors and every zero-priced community card,
+        despite the reference doc claiming identical payloads). Set
+        ``POLLINATIONS_ANON_CATALOG=1`` to always fetch the public catalog
+        while keeping generation authenticated. Returns a dict of
         ``{id: card}``; empty dict on any failure (caller falls back to
         the static catalog).
         """
         url = self._get_models_url()
         headers = {"Accept": "application/json"}
-        if self._api_key:
+        if self._api_key and not _env_flag("POLLINATIONS_ANON_CATALOG"):
             headers["Authorization"] = f"Bearer {self._api_key}"
         req = urllib.request.Request(url, headers=headers, method="GET")
         try:
@@ -1126,6 +1138,35 @@ class PollinationsBackend(CloudBackend):
         }
 
     # ───────────────────────────────────────────────────────────────────
+    # FREE_ONLY support — zero-priced model discovery
+    # ───────────────────────────────────────────────────────────────────
+
+    def _first_free_model(self) -> str | None:
+        """Best zero-priced text model from the live card cache.
+
+        Ordered by health ``success_rate`` descending (ties broken by id
+        ascending for determinism). Returns ``None`` when the cache has no
+        zero-priced text card — e.g. the entitlement-scoped keyed catalog
+        (observed: 134 cards, 0 free) — in which case FREE_ONLY falls back
+        to ``POLLINATIONS_FALLBACK_MODEL`` with a debug warning, because
+        redirecting between two priced models would burn pollen either way.
+        """
+        free: list[tuple[str, dict]] = [
+            (cid, card)
+            for cid, card in self._model_cards.items()
+            if card.get("category") in (None, "text") and _card_is_free(card)
+        ]
+        if not free:
+            return None
+        free.sort(
+            key=lambda kv: (
+                -float((kv[1].get("health") or {}).get("success_rate") or 0.0),
+                kv[0],
+            )
+        )
+        return free[0][0]
+
+    # ───────────────────────────────────────────────────────────────────
     # Generation — non-streaming POST with retry
     # ───────────────────────────────────────────────────────────────────
 
@@ -1175,17 +1216,29 @@ class PollinationsBackend(CloudBackend):
                 "use 'reasoning_effort' to control thinking depth"
             )
 
-        # FREE_ONLY: reject priced models upfront (live flag read)
+        # FREE_ONLY: reject priced models upfront (live flag read).
+        # Redirect target: healthiest zero-priced card from the live cache
+        # (works with POLLINATIONS_ANON_CATALOG, where the public feed still
+        # lists free community models); only when NO free card exists — the
+        # entitlement-scoped keyed catalog — fall back to the configured
+        # FALLBACK_MODEL, which is priced but cheap.
         if _env_flag("POLLINATIONS_FREE_ONLY"):
             card = self._model_cards.get(model)
             meta = self._catalog_lookup(model)
             is_free = _card_is_free(card) if card else (_card_is_free(meta) if meta else False)
             if not is_free:
-                fallback = POLLINATIONS_FALLBACK_MODEL
+                free_pick = self._first_free_model()
+                fallback = free_pick or POLLINATIONS_FALLBACK_MODEL
                 if os.environ.get("AGENTKTHX_DEBUG"):
+                    suffix = (
+                        " (no zero-priced model in catalog — fallback is "
+                        "priced, pollen will be spent)"
+                        if free_pick is None
+                        else ""
+                    )
                     print(
                         f"  [Pollinations] FREE_ONLY mode — '{model}' is a "
-                        f"priced model, switching to '{fallback}'"
+                        f"priced model, switching to '{fallback}'{suffix}"
                     )
                 model = fallback
 

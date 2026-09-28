@@ -263,6 +263,13 @@ POLLINATIONS_SAFE = os.environ.get("POLLINATIONS_SAFE", "")
 # (community publishers listing at price 0) are listed/accepted.
 # Default false.
 POLLINATIONS_FREE_ONLY = os.environ.get("POLLINATIONS_FREE_ONLY", "").lower() in ("1", "true", "yes")
+# Browse the PUBLIC 307-card catalog anonymously even when a key is set.
+# The gateway scopes GET /v1/models to the key's entitlements (observed
+# 2026-09-28: 307 cards anonymous vs 134 keyed — the keyed feed drops
+# premium vendors AND every zero-priced community model, which starves
+# FREE_ONLY). Catalog-only toggle: generation POSTs still authenticate.
+# Default false (keyed catalog when a key is present).
+POLLINATIONS_ANON_CATALOG = os.environ.get("POLLINATIONS_ANON_CATALOG", "").lower() in ("1", "true", "yes")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

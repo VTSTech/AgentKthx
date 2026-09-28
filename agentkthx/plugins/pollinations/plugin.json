@@ -1,8 +1,8 @@
 {
   "$schema": "https://raw.githubusercontent.com/VTSTech/AgentKthx/main/schemas/v0.2/plugin.schema.json",
   "name": "pollinations",
-  "version": "0.1.0",
-  "description": "Pollinations unified gateway backend at https://gen.pollinations.ai/v1 (OpenAI-compatible aggregator: one key for openai/ anthropic/ google/ z-ai/ deepseek/ qwen/ mistralai/ meta/ community/ text families plus images, video, TTS and embeddings; optional key with legacy anonymous text surface, provider/model ids with alias resolution, health-telemetry fallback ordering, 402 pollen-budget error mapping, and Retry-After-capped 429/5xx backoff)",
+  "version": "0.1.1",
+  "description": "Pollinations unified gateway backend at https://gen.pollinations.ai/v1 (OpenAI-compatible aggregator: one key for openai/ anthropic/ google/ z-ai/ deepseek/ qwen/ mistralai/ meta/ community/ text families plus images, video, TTS and embeddings; optional key with legacy anonymous text surface, provider/model ids with alias resolution, health-telemetry fallback ordering, 402 pollen-budget error mapping, and Retry-After-capped 429/5xx backoff; v0.1.1: POLLINATIONS_ANON_CATALOG browse-public toggle — the gateway scopes GET /v1/models to key entitlements, starving FREE_ONLY with zero free cards when keyed — and health-ordered zero-priced FREE_ONLY redirect)",
   "author": {
     "name": "VTSTech",
     "url": "https://www.vts-tech.org"
@@ -24,6 +24,7 @@
           "POLLINATIONS_FALLBACK_MODEL": "z-ai/glm-5.3-flash",
           "POLLINATIONS_SAFE": "",
           "POLLINATIONS_FREE_ONLY": "false",
+          "POLLINATIONS_ANON_CATALOG": "false",
           "POLLINATIONS_MAX_RETRIES": "5"
         }
       },
