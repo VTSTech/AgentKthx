@@ -723,8 +723,6 @@ function render(){const list=filtered();document.getElementById("shown").textCon
 document.getElementById("q").addEventListener("input",e=>{state.q=e.target.value;render();});
 document.getElementById("clear-q").addEventListener("click",()=>{state.q="";render();});
 document.getElementById("reset").addEventListener("click",()=>{state.q="";state.cat="All";state.status="All";state.sev="All";render();});
-function renderTimeline(){document.getElementById("timeline").innerHTML=CLOSURES.map(c=>'<div class="tl-card"><div style="display:flex;align-items:baseline;justify-content:space-between"><span class="tl-rel">'+c.release+'</span><span class="tl-date">'+(c.date||'')+'</span></div><div class="tl-tests">'+(c.testsBefore||'?')+' → <b>'+(c.testsAfter||'?')+'</b> tests</div><ul class="tl-ul">'+c.highlights.map(h=>'<li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg><span>'+esc(h)+'</span></li>').join("")+'</ul></div>').join("");}
-renderTimeline();
 render();
 window.addEventListener("scroll",()=>{document.getElementById("nav").classList.toggle("scrolled",window.scrollY>8);document.getElementById("btt").classList.toggle("show",window.scrollY>600);},{passive:true});
 document.getElementById("btt").addEventListener("click",()=>window.scrollTo({top:0,behavior:"smooth"}));
@@ -732,7 +730,7 @@ document.getElementById("btt").addEventListener("click",()=>window.scrollTo({top
 </body>
 </html>'''
 
-def generate_html(findings, closures, meta):
+def generate_html(findings, meta):
     """Fill the HTML template with parsed data."""
     closed_count = sum(1 for f in findings if f["status"] == "CLOSED")
     html = HTML_TEMPLATE
@@ -746,7 +744,6 @@ def generate_html(findings, closures, meta):
     html = html.replace("__PYPI__", meta["pypiUrl"])
     html = html.replace("__GENTIME__", datetime.now().strftime("%Y-%m-%d %H:%M"))
     html = html.replace("__FINDINGS__", json.dumps(findings, ensure_ascii=False))
-    html = html.replace("__CLOSURES__", json.dumps(closures, ensure_ascii=False))
     return html
 
 # ─── API endpoints (static JSON) ──────────────────────────────────────────
@@ -762,14 +759,14 @@ def generate_html(findings, closures, meta):
 #   api/findings/open.json        open findings only
 #   api/findings/closed.json      closed findings only
 #   api/findings/wontfix.json     wontfix findings only
-#   api/findings/summary.json     counts rollup + closures timeline
+#   api/findings/summary.json     counts rollup (closures: [] — schema compat)
 #   api/findings/reconcile.json   prose-vs-table drift check
 #   api/findings/<ID>.json        per-finding detail (one per finding)
 #
 # Each list endpoint shares one envelope shape: callers can switch between
 # /open, /closed, /wontfix, /all with a single client implementation.
 
-def _endpoint_envelope(meta, findings, closures, generated_at):
+def _endpoint_envelope(meta, findings, generated_at):
     """Common envelope for list endpoints — counts across the FULL register."""
     by_status = {"OPEN": 0, "CLOSED": 0, "WONTFIX": 0}
     by_severity = {}
@@ -795,8 +792,13 @@ def _endpoint_envelope(meta, findings, closures, generated_at):
     }
 
 
-def _summary_payload(meta, findings, closures, generated_at):
-    """Counts-only rollup with per-category / per-severity breakdowns + closures timeline."""
+def _summary_payload(meta, findings, generated_at):
+    """Counts-only rollup with per-category / per-severity breakdowns.
+
+    ``closures`` stays in the payload as an empty list for schema
+    compatibility with existing clients — the Closure Timeline is retired
+    and the Findings Summary + Detailed Findings are the historical record.
+    """
     by_category = {}
     by_severity = {}
     by_status = {"OPEN": 0, "CLOSED": 0, "WONTFIX": 0}
@@ -827,7 +829,7 @@ def _summary_payload(meta, findings, closures, generated_at):
         "byCategory": by_category,
         "bySeverity": by_severity,
         "byStatus": by_status,
-        "closures": closures,
+        "closures": [],
     }
 
 
@@ -939,7 +941,7 @@ def _reconcile_payload(meta, findings, audit_md, generated_at, deltas_md=""):
     }
 
 
-def write_endpoints(out_dir, meta, findings, closures, audit_md, generated_at, deltas_md=""):
+def write_endpoints(out_dir, meta, findings, audit_md, generated_at, deltas_md=""):
     """Write static JSON endpoint files alongside index.html.
 
     Returns the list of file paths written.
@@ -957,7 +959,7 @@ def write_endpoints(out_dir, meta, findings, closures, audit_md, generated_at, d
         (None, "findings"),  # all
     ]:
         subset = findings if status is None else [f for f in findings if f["status"] == status]
-        payload = _endpoint_envelope(meta, findings, closures, generated_at)
+        payload = _endpoint_envelope(meta, findings, generated_at)
         payload["filtered"] = len(subset)
         payload["count"] = len(subset)
         payload["status"] = slug
@@ -970,7 +972,7 @@ def write_endpoints(out_dir, meta, findings, closures, audit_md, generated_at, d
     # summary
     path = os.path.join(api_dir, "summary.json")
     with open(path, "w", encoding="utf-8") as f:
-        json.dump(_summary_payload(meta, findings, closures, generated_at), f, ensure_ascii=False, indent=2)
+        json.dump(_summary_payload(meta, findings, generated_at), f, ensure_ascii=False, indent=2)
     written.append(path)
 
     # reconcile
