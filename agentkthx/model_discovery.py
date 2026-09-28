@@ -328,7 +328,6 @@ __all__ = [
     "pick_models_for_benchmark",
     "model_exists",
     "match_models",
-    "resolve_model",
 ]
 
 # Alias for convenience
@@ -417,57 +416,5 @@ def match_models(
         result = sorted(tag_matches)
     else:
         result = sorted(starts_with) + sorted(contains)
-    
+
     return result
-
-
-def resolve_model(
-    model_spec: str,
-    backend: Optional[BaseBackend] = None,
-    allow_multiple: bool = False,
-) -> str | list[str]:
-    """
-    Resolve a model specification to actual model name(s).
-
-    This is the main entry point for CLI model resolution.
-    Returns a single model name or list if multiple matches.
-
-    Parameters
-    ----------
-    model_spec : str
-        Model name or pattern to resolve
-    backend : BaseBackend, optional
-        Backend to use for model discovery
-    allow_multiple : bool
-        If True, return list of all matches; if False, return first match
-
-    Returns
-    -------
-    str or list[str]
-        Resolved model name(s)
-
-    Raises
-    ------
-    ValueError
-        If no models match the pattern
-
-    Examples
-    --------
-    >>> resolve_model("qwen2.5:0.5b")  # Exact match
-    'qwen2.5:0.5b'
-
-    >>> resolve_model("qwen", allow_multiple=True)  # Multiple matches
-    ['qwen2.5:0.5b', 'qwen2.5-coder:0.5b', 'qwen3:0.6b', 'qwen:0.5b']
-
-    >>> resolve_model("qwen")  # First match
-    'qwen:0.5b'
-    """
-    matches = match_models(model_spec, backend=backend)
-    
-    if not matches:
-        raise ValueError(f"No models found matching '{model_spec}'")
-    
-    if allow_multiple:
-        return matches
-    
-    return matches[0]

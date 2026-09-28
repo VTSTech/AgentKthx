@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import os
 import random
-import time
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -181,14 +180,6 @@ def backoff_delay(attempt: int, base: float = DEFAULT_API_BACKOFF_BASE,
     return max(0.5, delay + random.uniform(-jitter, jitter))
 
 
-def sleep_backoff(attempt: int, base: float = DEFAULT_API_BACKOFF_BASE,
-                  cap: float = DEFAULT_API_BACKOFF_CAP) -> float:
-    """Sleep the back-off for this attempt and return the duration slept."""
-    delay = backoff_delay(attempt, base, cap)
-    time.sleep(delay)
-    return delay
-
-
 def max_api_retries_from_env() -> int:
     """Read AGENTKTHX_MAX_API_RETRIES (default: DEFAULT_MAX_API_RETRIES)."""
     raw = os.environ.get("AGENTKTHX_MAX_API_RETRIES", "")
@@ -252,7 +243,6 @@ __all__ = [
     "DEFAULT_API_BACKOFF_CAP",
     "is_transient_api_error",
     "backoff_delay",
-    "sleep_backoff",
     "max_api_retries_from_env",
     "classify_error_kind",
     "describe_wait",

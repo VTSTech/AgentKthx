@@ -163,10 +163,6 @@ REASONING_TESTS = [
 ]
 
 
-def normalize_answer(text: str) -> str:
-    """Normalize answer for comparison."""
-    return text.lower().strip()
-
 
 def extract_number(text: str) -> str:
     """Extract number from text."""

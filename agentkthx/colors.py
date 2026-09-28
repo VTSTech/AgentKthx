@@ -280,11 +280,6 @@ def magenta(text: str) -> str:
     return c(text, Color.MAGENTA)
 
 
-def blue(text: str) -> str:
-    """Blue text."""
-    return c(text, Color.BLUE)
-
-
 def bright_cyan(text: str) -> str:
     """Bright cyan text."""
     return c(text, Color.BRIGHT_CYAN)
@@ -366,7 +361,6 @@ __all__ = [
     "yellow",
     "red",
     "magenta",
-    "blue",
     "bright_cyan",
     "bright_green",
     "bright_yellow",

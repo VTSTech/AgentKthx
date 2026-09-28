@@ -220,10 +220,6 @@ TESTS = [
 ]
 
 
-def normalize_answer(text: str) -> str:
-    """Normalize answer for comparison."""
-    return text.lower().strip()
-
 
 def check_answer(response: str, expected: str, check_type: str) -> bool:
     """Check if response matches expected answer with flexible matching."""

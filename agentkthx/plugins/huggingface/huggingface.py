@@ -1930,11 +1930,3 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
             f"HuggingFaceBackend(base_url={self._base_url!r}, "
             f"api_mode={self._api_mode}, free_only={HF_FREE_ONLY})"
         )
-
-
-# Module-level alias used inside list_models()'s fallback path. Defined
-# here at the bottom (after HF_FREE_MODEL_WHITELIST is available) to keep
-# the helper close to its sole caller.
-def _is_free(model_id: str) -> bool:
-    """Backwards-compat wrapper for the catalog fallback path."""
-    return _is_free_model(model_id)
