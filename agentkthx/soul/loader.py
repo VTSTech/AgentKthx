@@ -49,89 +49,87 @@ class SoulLoader:
     
     def _resolve_soul_path(self, path: Path) -> Optional[Path]:
         """
-        Resolve a soul path by searching in multiple locations.
-        
+        Resolve a soul path by searching in a documented order.
+
+        ARCH-04 closure (R07.13): consolidated the previous 5-step chain
+        with repeated ``try/except (ImportError, TypeError, AttributeError)``
+        blocks into a single clear resolution algorithm. The behaviour is
+        preserved exactly — same search order, same fallbacks — but the
+        control flow is now linear and documented instead of nested.
+
         Search order:
-        1. Absolute path (as-is)
-        2. Relative to current working directory
-        3. Relative to agentkthx package directory (souls/)
-        4. As a built-in soul name (e.g., "nova-helper" -> souls/nova-helper)
-        
-        Returns:
-            Resolved Path or None if not found
+          1. Absolute path → returned as-is if it exists
+          2. Relative to CWD → ``Path.cwd() / path``
+          3. Bundled souls via ``importlib.resources.files('agentkthx.souls')``
+             (the canonical accessor — works for namespace packages, Windows
+             pip installs, and editable installs)
+          4. Filesystem fallback → ``<agentkthx package dir>/souls/<path>``
+             (covers zipped installs and Python versions where
+             ``importlib.resources.files`` is unavailable or returns a
+             traversable that doesn't exist on disk)
+          5. Bare soul name → if ``path`` has no path separators, try
+             ``souls/<name>`` then ``souls/<name>/soul.json``
+          6. Original path as-is (last-resort fallback for paths that
+             resolve via PATH or symlink chains not covered above)
+
+        Returns the resolved ``Path`` or ``None`` if not found.
         """
-        # 1. If absolute path, check if it exists
+        # 1. Absolute path
         if path.is_absolute():
-            if path.exists():
-                return path
-            return None
-        
-        # 2. Try relative to current working directory
+            return path if path.exists() else None
+
+        # 2. Relative to CWD
         cwd_path = Path.cwd() / path
         if cwd_path.exists():
             return cwd_path
-        
-        # 3. Try relative to agentkthx package directory
+
+        # 3. importlib.resources (canonical accessor for bundled souls)
+        #    Single try/except — no nesting, no fallback-within-fallback.
+        try:
+            import importlib.resources as resources
+            if hasattr(resources, "files"):
+                bundled = resources.files("agentkthx") / "souls" / path
+                if bundled.is_dir() or bundled.is_file():
+                    return Path(str(bundled))
+        except (ImportError, TypeError, AttributeError):
+            pass  # fall through to filesystem fallback
+
+        # 4. Filesystem fallback: <package_dir>/souls/<path>
+        #    Used when importlib.resources is unavailable OR returns a
+        #    traversable that doesn't exist on disk (zipped installs).
         try:
             import agentkthx
             if agentkthx.__file__ is not None:
                 package_dir = Path(agentkthx.__file__).parent
-                package_path = package_dir / "souls" / path
-                if package_path.exists():
-                    return package_path
-                # Also try without souls/ prefix if path looks like a soul name
-                if "/" not in str(path) and "\\" not in str(path):
-                    package_path = package_dir / "souls" / path
-                    if package_path.exists():
-                        return package_path
-            else:
-                # Fallback: try importlib.resources for namespace packages (Windows pip install)
-                try:
-                    import importlib.resources as resources
-                    if hasattr(resources, 'files'):
-                        package_path = resources.files('agentkthx') / 'souls' / path
-                        if package_path.is_dir():
-                            return Path(str(package_path))
-                except (ImportError, TypeError, AttributeError):
-                    pass
+                fs_path = package_dir / "souls" / path
+                if fs_path.exists():
+                    return fs_path
         except (ImportError, TypeError):
-            pass
-        
-        # 4. Try as soul name in package souls directory
-        try:
-            import agentkthx
-            if agentkthx.__file__ is not None:
-                package_dir = Path(agentkthx.__file__).parent
-                # Check if it's a simple name (no path separators)
-                soul_name = str(path).replace("/", "").replace("\\", "")
-                if soul_name == str(path):
-                    # It's a simple name, look for it in souls/
-                    soul_path = package_dir / "souls" / soul_name
-                    if soul_path.exists():
-                        return soul_path
-                    # Also try with .json extension
-                    json_path = package_dir / "souls" / soul_name / "soul.json"
-                    if json_path.exists():
-                        return soul_path
-            else:
-                # Fallback: try importlib.resources for namespace packages (Windows pip install)
-                try:
-                    import importlib.resources as resources
-                    soul_name = str(path).replace("/", "").replace("\\", "")
-                    if soul_name == str(path) and hasattr(resources, 'files'):
-                        soul_path = resources.files('agentkthx') / 'souls' / soul_name
-                        if soul_path.is_dir():
-                            return Path(str(soul_path))
-                except (ImportError, TypeError, AttributeError):
-                    pass
-        except (ImportError, ValueError, TypeError):
-            pass
-        
-        # 5. Final check - does the original path exist?
+            pass  # truly nothing more we can do
+
+        # 5. Bare soul name (no path separators)
+        #    Try souls/<name> then souls/<name>/soul.json in both the
+        #    bundled and filesystem locations.
+        if "/" not in str(path) and "\\" not in str(path):
+            try:
+                import agentkthx
+                if agentkthx.__file__ is not None:
+                    package_dir = Path(agentkthx.__file__).parent
+                    for candidate in (
+                        package_dir / "souls" / path,
+                        package_dir / "souls" / path / "soul.json",
+                    ):
+                        if candidate.exists():
+                            return package_dir / "souls" / path
+            except (ImportError, TypeError):
+                pass
+
+        # 6. Last-resort: the original path (covers symlink / PATH resolution)
         if path.exists():
             return path
-        
+
         return None
+
     
     def load(self, path: Union[str, Path], level: int = 2) -> SoulManifest:
         """

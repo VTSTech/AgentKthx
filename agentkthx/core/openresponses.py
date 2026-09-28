@@ -764,6 +764,180 @@ create_function_call_output_item = create_function_call_output
 from typing import Generator as TypingGenerator
 
 
+class SSEEventBuilder:
+    """Emit OpenResponses-compliant SSE events with state mutation.
+
+    ARCH-02 closure (R07.13): extracted from the 163-line
+    ``stream_response_events`` generator. Each method handles the
+    protocol details AND the response state mutation for one event
+    type, so the generator is now a thin orchestration loop and
+    individual event transitions are testable in isolation.
+
+    Usage::
+
+        builder = SSEEventBuilder(response, debug=False)
+        yield from builder.emit_queued()
+        yield from builder.emit_in_progress()
+        yield from builder.emit_output_item_added()
+        yield from builder.emit_content_part_added()
+        for chunk in text_chunks:
+            yield from builder.emit_delta(chunk)
+        yield from builder.emit_text_done()
+        yield from builder.emit_content_part_done()
+        yield from builder.emit_output_item_done()
+        yield from builder.emit_completed()
+
+    Each ``emit_*`` method returns a list of SSE-formatted strings
+    (one per event emitted — currently always 1, but the list shape
+    future-proofs against multi-event transitions). The builder
+    owns the sequence counter and the output item / content part
+    it creates during setup.
+    """
+
+    def __init__(self, response: "Response", debug: bool = False):
+        self.response = response
+        self.debug = debug
+        self._sequence = 0
+        # Created by emit_output_item_added / emit_content_part_added
+        self.msg_item: "MessageItem | None" = None
+        self.output_text: "OutputText | None" = None
+        self.output_index: int = 0
+        self.content_index: int = 0
+        self._full_text: str = ""
+
+    def _next_seq(self) -> int:
+        s = self._sequence
+        self._sequence += 1
+        return s
+
+    def emit_queued(self) -> list[str]:
+        """1. response.queued — mark response QUEUED and emit event."""
+        self.response.status = ResponseStatus.QUEUED
+        event = ResponseEvent(
+            type=EventType.RESPONSE_QUEUED,
+            sequence_number=self._next_seq(),
+            response=self.response,
+        )
+        return [event.to_sse()]
+
+    def emit_in_progress(self) -> list[str]:
+        """2. response.in_progress — mark response IN_PROGRESS and emit."""
+        self.response.mark_in_progress(debug=self.debug)
+        event = ResponseEvent(
+            type=EventType.RESPONSE_IN_PROGRESS,
+            sequence_number=self._next_seq(),
+            response=self.response,
+        )
+        return [event.to_sse()]
+
+    def emit_output_item_added(self) -> list[str]:
+        """3. response.output_item.added — create MessageItem, append to response.output."""
+        self.msg_item = MessageItem(
+            role="assistant",
+            status=ItemStatus.IN_PROGRESS,
+            content=[],
+        )
+        self.output_index = len(self.response.output)
+        self.response.output.append(self.msg_item)
+        event = OutputItemEvent(
+            type=EventType.OUTPUT_ITEM_ADDED,
+            sequence_number=self._next_seq(),
+            item=self.msg_item,
+            output_index=self.output_index,
+        )
+        return [event.to_sse()]
+
+    def emit_content_part_added(self) -> list[str]:
+        """4. response.content_part.added — create OutputText, append to msg_item.content."""
+        self.output_text = OutputText(text="")
+        self.content_index = 0
+        self.msg_item.content.append(self.output_text)
+        event = ContentPartEvent(
+            type=EventType.CONTENT_PART_ADDED,
+            sequence_number=self._next_seq(),
+            item_id=self.msg_item.id,
+            output_index=self.output_index,
+            content_index=self.content_index,
+            part=self.output_text,
+        )
+        return [event.to_sse()]
+
+    def emit_delta(self, chunk: str) -> list[str]:
+        """5. response.output_text.delta — accumulate text and emit delta."""
+        if not chunk:
+            return []
+        self._full_text += chunk
+        self.output_text.text = self._full_text
+        event = TextDeltaEvent(
+            type=EventType.OUTPUT_TEXT_DELTA,
+            sequence_number=self._next_seq(),
+            item_id=self.msg_item.id,
+            output_index=self.output_index,
+            content_index=self.content_index,
+            delta=chunk,
+        )
+        return [event.to_sse()]
+
+    def emit_text_done(self) -> list[str]:
+        """6. response.output_text.done — finalize text and emit done event."""
+        self.output_text.text = self._full_text
+        event = TextDeltaEvent(
+            type=EventType.OUTPUT_TEXT_DONE,
+            sequence_number=self._next_seq(),
+            item_id=self.msg_item.id,
+            output_index=self.output_index,
+            content_index=self.content_index,
+            text=self._full_text,
+        )
+        return [event.to_sse()]
+
+    def emit_content_part_done(self) -> list[str]:
+        """7. response.content_part.done — emit content part completion."""
+        event = ContentPartEvent(
+            type=EventType.CONTENT_PART_DONE,
+            sequence_number=self._next_seq(),
+            item_id=self.msg_item.id,
+            output_index=self.output_index,
+            content_index=self.content_index,
+            part=self.output_text,
+        )
+        return [event.to_sse()]
+
+    def emit_output_item_done(self) -> list[str]:
+        """8. response.output_item.done — mark item COMPLETED and emit."""
+        self.msg_item.status = ItemStatus.COMPLETED
+        event = OutputItemEvent(
+            type=EventType.OUTPUT_ITEM_DONE,
+            sequence_number=self._next_seq(),
+            item=self.msg_item,
+            output_index=self.output_index,
+        )
+        return [event.to_sse()]
+
+    def emit_completed(self) -> list[str]:
+        """9. response.completed — mark response COMPLETED and emit."""
+        self.response.mark_completed(debug=self.debug)
+        event = ResponseEvent(
+            type=EventType.RESPONSE_COMPLETED,
+            sequence_number=self._next_seq(),
+            response=self.response,
+        )
+        return [event.to_sse()]
+
+    def emit_failed(self, error: Exception) -> list[str]:
+        """Error path — mark response FAILED and emit response.failed event."""
+        self.response.mark_failed(
+            {"message": str(error), "type": "stream_error"},
+            debug=self.debug,
+        )
+        event = ResponseEvent(
+            type=EventType.RESPONSE_FAILED,
+            sequence_number=self._next_seq(),
+            response=self.response,
+        )
+        return [event.to_sse()]
+
+
 def stream_response_events(
     response: Response,
     text_chunks: TypingGenerator[str, None, None],
@@ -771,162 +945,56 @@ def stream_response_events(
 ) -> TypingGenerator[str, None, None]:
     """
     Generate OpenResponses-compliant SSE events from text chunks.
-    
-    This generator wraps a text stream and emits proper OpenResponses
-    streaming events following the specification:
-    
-    1. response.queued - Response is queued
-    2. response.in_progress - Response started
-    3. response.output_item.added - New output item added
-    4. response.content_part.added - New content part added
-    5. response.output_text.delta - Text deltas (multiple)
-    6. response.output_text.done - Text completed
-    7. response.content_part.done - Content part completed
-    8. response.output_item.done - Output item completed
-    9. response.completed - Response finished
-    
+
+    ARCH-02 closure (R07.13): the 163-line generator is now a thin
+    orchestration loop over :class:`SSEEventBuilder`. Each event
+    transition is delegated to a builder method, making individual
+    event types testable in isolation. The generator retains the
+    same external contract — same SSE event sequence, same response
+    state mutations, same error-path handling.
+
+    Emits 9 SSE events in sequence:
+      1. response.queued
+      2. response.in_progress
+      3. response.output_item.added
+      4. response.content_part.added
+      5. response.output_text.delta (loop, one per chunk)
+      6. response.output_text.done
+      7. response.content_part.done
+      8. response.output_item.done
+      9. response.completed
+
     Args:
         response: The Response object to stream
         text_chunks: Generator yielding text chunks
         debug: Enable debug output
-    
+
     Yields:
         SSE-formatted strings (event: ...\\ndata: ...\\n\\n)
     """
-    sequence = 0
-    
-    # 1. Emit response.queued event
-    response.status = ResponseStatus.QUEUED
-    event = ResponseEvent(
-        type=EventType.RESPONSE_QUEUED,
-        sequence_number=sequence,
-        response=response,
-    )
-    yield event.to_sse()
-    sequence += 1
-    
-    # 2. Emit response.in_progress event
-    response.mark_in_progress(debug=debug)
-    event = ResponseEvent(
-        type=EventType.RESPONSE_IN_PROGRESS,
-        sequence_number=sequence,
-        response=response,
-    )
-    yield event.to_sse()
-    sequence += 1
-    
-    # Create output message item
-    msg_item = MessageItem(
-        role="assistant",
-        status=ItemStatus.IN_PROGRESS,
-        content=[],
-    )
-    output_index = len(response.output)
-    response.output.append(msg_item)
-    
-    # 3. Emit output_item.added event
-    event = OutputItemEvent(
-        type=EventType.OUTPUT_ITEM_ADDED,
-        sequence_number=sequence,
-        item=msg_item,
-        output_index=output_index,
-    )
-    yield event.to_sse()
-    sequence += 1
-    
-    # Create output text content
-    output_text = OutputText(text="")
-    content_index = 0
-    msg_item.content.append(output_text)
-    
-    # 4. Emit content_part.added event
-    event = ContentPartEvent(
-        type=EventType.CONTENT_PART_ADDED,
-        sequence_number=sequence,
-        item_id=msg_item.id,
-        output_index=output_index,
-        content_index=content_index,
-        part=output_text,
-    )
-    yield event.to_sse()
-    sequence += 1
-    
-    # 5. Stream text deltas
-    full_text = ""
+    builder = SSEEventBuilder(response, debug=debug)
+
+    # 1-2: queued → in_progress
+    yield from builder.emit_queued()
+    yield from builder.emit_in_progress()
+
+    # 3-4: output_item.added → content_part.added
+    yield from builder.emit_output_item_added()
+    yield from builder.emit_content_part_added()
+
+    # 5: stream text deltas (error path emits response.failed and returns)
     try:
         for chunk in text_chunks:
-            if chunk:
-                full_text += chunk
-                output_text.text = full_text
-                
-                # Emit output_text.delta event
-                event = TextDeltaEvent(
-                    type=EventType.OUTPUT_TEXT_DELTA,
-                    sequence_number=sequence,
-                    item_id=msg_item.id,
-                    output_index=output_index,
-                    content_index=content_index,
-                    delta=chunk,
-                )
-                yield event.to_sse()
-                sequence += 1
+            yield from builder.emit_delta(chunk)
     except Exception as e:
-        # Handle streaming error
-        response.mark_failed({"message": str(e), "type": "stream_error"}, debug=debug)
-        event = ResponseEvent(
-            type=EventType.RESPONSE_FAILED,
-            sequence_number=sequence,
-            response=response,
-        )
-        yield event.to_sse()
+        yield from builder.emit_failed(e)
         return
-    
-    # 6. Emit output_text.done event
-    output_text.text = full_text
-    event = TextDeltaEvent(
-        type=EventType.OUTPUT_TEXT_DONE,
-        sequence_number=sequence,
-        item_id=msg_item.id,
-        output_index=output_index,
-        content_index=content_index,
-        text=full_text,
-    )
-    yield event.to_sse()
-    sequence += 1
-    
-    # 7. Emit content_part.done event
-    event = ContentPartEvent(
-        type=EventType.CONTENT_PART_DONE,
-        sequence_number=sequence,
-        item_id=msg_item.id,
-        output_index=output_index,
-        content_index=content_index,
-        part=output_text,
-    )
-    yield event.to_sse()
-    sequence += 1
-    
-    # Mark item as completed
-    msg_item.status = ItemStatus.COMPLETED
-    
-    # 8. Emit output_item.done event
-    event = OutputItemEvent(
-        type=EventType.OUTPUT_ITEM_DONE,
-        sequence_number=sequence,
-        item=msg_item,
-        output_index=output_index,
-    )
-    yield event.to_sse()
-    sequence += 1
-    
-    # 9. Emit response.completed event
-    response.mark_completed(debug=debug)
-    event = ResponseEvent(
-        type=EventType.RESPONSE_COMPLETED,
-        sequence_number=sequence,
-        response=response,
-    )
-    yield event.to_sse()
+
+    # 6-9: text.done → content_part.done → output_item.done → response.completed
+    yield from builder.emit_text_done()
+    yield from builder.emit_content_part_done()
+    yield from builder.emit_output_item_done()
+    yield from builder.emit_completed()
 
 
 def stream_function_call_events(

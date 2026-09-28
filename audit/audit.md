@@ -4,12 +4,12 @@
 
 **Repository:** https://github.com/VTSTech/AgentKthx  
 **Author:** VTSTech | **License:** MIT | **Date:** 2026-09-28  
-**Commit:** e1f2081 | **Test Suite:** 1849 passed / 16 skipped  
-49 Open Findings | 7 Categories | SEC, ROB, MAINT, PERF, FEAT, ARCH, TEST  
-Severity: 0 High | 22 Medium | 27 Low  
-49 OPEN (CLOSED + WONTFIX archived in deltas.md — generate_audit_dash.py merges both for the dashboard)
+**Commit:** e1f2081 | **Test Suite:** 1882 passed / 16 skipped  
+44 Open Findings | 7 Categories | SEC, ROB, MAINT, PERF, FEAT, ARCH, TEST  
+Severity: 0 High | 19 Medium | 25 Low  
+44 OPEN (CLOSED + WONTFIX archived in deltas.md — generate_audit_dash.py merges both for the dashboard)
 
-> **Split:** 55 CLOSED/WONTFIX findings moved to `deltas.md`. `generate_audit_dash.py` reads both `audit.md` (open) and `deltas.md` (closed/wontfix) and merges them into the full register. The dashboard shows all 104 findings (49 open + 55 closed/wontfix).
+> **Split:** 60 CLOSED/WONTFIX findings moved to `deltas.md`. `generate_audit_dash.py` reads both `audit.md` (open) and `deltas.md` (closed/wontfix) and merges them into the full register. The dashboard shows all 104 findings (44 open + 60 closed/wontfix).
 
 ---
 
@@ -51,9 +51,9 @@ Cumulative closure state: **48 CLOSED + 7 WONTFIX of 104 findings (55 archived, 
 | PERF-02 | Medium | Performance | OPEN | _check_compaction iterates all messages + JSON-serializes tool_calls on every step |
 | FEAT-02 | Medium | New Features | OPEN | Per-tool timeout parameter and concurrent tool execution |
 | FEAT-03 | Medium | New Features | OPEN | Tool output schema validation via JSON Schema |
-| ARCH-02 | Medium | Architecture | OPEN | openresponses.stream_response_events is a 163-line generator mixing protocol logic with state mutation |
-| ARCH-05 | Medium | Architecture | OPEN | REMAINS OPEN — R07.05/R07.06 diff does NOT touch the kwargs swallowing pattern. 22 explicit params + kwargs for 5 stashed names; typos silently ignored. |
-| ARCH-06 | Medium | Architecture | OPEN | CloudBackend inherits from OpenAICompatibleBackend — tight coupling to OpenAI wire shape; non-OpenAI clouds (Anthropic Messages API) can't reuse |
+| ARCH-02 | Medium | Architecture | ✓ CLOSED R07.13 | openresponses.stream_response_events is a 163-line generator mixing protocol logic with state mutation |
+| ARCH-05 | Medium | Architecture | ✓ CLOSED R07.13 | Agent.__init__ kwargs swallowing pattern — 22 explicit params + kwargs for 5 stashed names; typos silently ignored. |
+| ARCH-06 | Medium | Architecture | ✓ CLOSED R07.13 | CloudBackend inherits from OpenAICompatibleBackend — tight coupling to OpenAI wire shape; non-OpenAI clouds (Anthropic Messages API) can't reuse |
 | TEST-01 | Medium | Testing | OPEN | No integration tests — all 984 tests are mocked unit tests; slash-command dispatcher untested |
 | TEST-03 | Medium | Testing | OPEN | FakeBackend in test_agentic_loop_subsystem.py omits generate_completions_stream — streaming callbacks unexercised |
 | TEST-06 | Medium | Testing | OPEN | CI doesn't run black --check or ruff check — code style drift undetected |
@@ -73,8 +73,8 @@ Cumulative closure state: **48 CLOSED + 7 WONTFIX of 104 findings (55 archived, 
 | FEAT-05 | Low | New Features | OPEN | Plugin sandboxing via restricted register() namespace + audit hooks |
 | FEAT-06 | Low | New Features | OPEN | Streaming tool-call argument deltas (function_call_arguments.delta SSE events) |
 | FEAT-07 | Low | New Features | OPEN | Conversation export/import to OpenResponses-format JSON |
-| ARCH-03 | Low | Architecture | OPEN | agent_mode.py and orchestrator.py are only loosely coupled to the Agent class — parallel abstractions |
-| ARCH-04 | Low | Architecture | OPEN | Soul loader does 5-step path resolution with repeated importlib.resources fallbacks — hard to follow |
+| ARCH-03 | Low | Architecture | ✓ CLOSED R07.13 | agent_mode.py and orchestrator.py are only loosely coupled to the Agent class — parallel abstractions |
+| ARCH-04 | Low | Architecture | ✓ CLOSED R07.13 | Soul loader does 5-step path resolution with repeated importlib.resources fallbacks — hard to follow |
 | TEST-04 | Low | Testing | OPEN | No test coverage for agent_mode.py rollback functionality (822 LOC, key feature) |
 | TEST-05 | Low | Testing | OPEN | test_bump_version_script.py tests shell script via subprocess — fails on Windows/no-bash |
 | TEST-07 | Low | Testing | OPEN | No test for update_check module's network-failure paths (URLError, socket.timeout, malformed JSON) |
@@ -665,94 +665,10 @@ Proposal: a `POLLINATIONS_FREE_TIER=1` mode (or tri-state FREE_ONLY = off | zero
 
 ### Architecture
 
-#### ARCH-02: `openresponses.stream_response_events` is a 163-line generator mixing protocol logic with state mutation
-
-| Property | Value |
-|----------|-------|
-| **Severity** | Medium |
-| **Category** | Architecture |
-| **File(s)** | `agentkthx/core/openresponses.py:767-930` |
-
-The generator creates `MessageItem`, `OutputText`, emits 9 SSE events in sequence, and mutates the `Response` object's state. It's a single function that handles: `response.queued`, `response.in_progress`, `output_item.added`, `content_part.added`, `output_text.delta` (loop), `output_text.done`, `content_part.done`, `output_item.done`, `response.completed`. The error path (line 873-882) calls `response.mark_failed` and emits a `RESPONSE_FAILED` event.
-
-Recommendation: Extract an `SSEEventBuilder` class with methods like `emit_queued()`, `emit_in_progress()`, `emit_delta(text)`, `emit_done()`, `emit_failed(error)`. Each method handles the protocol details and state mutation for one event type.
-
-**Impact:** Hard to test individual event transitions; hard to add new event types without modifying the 163-line generator.
-
----
-
----
-
----
-
----
-
-#### ARCH-03: `agent_mode.py` and `orchestrator.py` are only loosely coupled to the Agent class
-
-| Property | Value |
-|----------|-------|
-| **Severity** | Low |
-| **Category** | Architecture |
-| **File(s)** | `agentkthx/agent_mode.py`, `agentkthx/orchestrator.py` |
-
-`AgentMode` (agent_mode.py:263) takes an `agent` instance and delegates to `agent.run()`. `Orchestrator` (orchestrator.py:107) creates `Agent` instances internally via `Agent(model=..., tools=...)`. Neither uses the plugin system, neither is hooked into the OpenResponses event stream. `AgentMode` has its own `TaskPlan`/`Step`/`Action` dataclasses that don't align with `StepResult`/`ToolCall` in `core/models.py`.
-
-Recommendation: Either deprecate `AgentMode` (the chat command's `--agent` flag uses it, but the regular `chat` doesn't) or integrate it with the OpenResponses event stream by making `AgentMode` emit `Response`/`Item` events. Same for `Orchestrator`.
-
-**Impact:** Two parallel abstractions for "multi-step agent execution" — the `Agent._run_loop_iteration` path and the `AgentMode` path; new contributors may not know which to use.
-
----
-
----
-
----
-
----
-
-#### ARCH-04: Soul loader does 5-step path resolution with repeated `importlib.resources` fallbacks
-
-| Property | Value |
-|----------|-------|
-| **Severity** | Low |
-| **Category** | Architecture |
-| **File(s)** | `agentkthx/soul/loader.py:50-134` |
-
-`_resolve_soul_path` tries: (1) absolute path, (2) relative to CWD, (3) `agentkthx.__file__` parent + `souls/`, (4) `importlib.resources.files('agentkthx') / 'souls'`, (5) `agentkthx.__file__` parent + `souls/` + name, (6) `importlib.resources` again, (7) original path. The repeated `try/except (ImportError, TypeError, AttributeError)` blocks make the control flow hard to follow.
-
-Recommendation: Consolidate into a single `importlib.resources.files('agentkthx.souls')` call with a clear fallback to filesystem path. Document the resolution algorithm in a comment.
-
-**Impact:** Soul loading silently fails on edge cases (namespace packages, Windows pip installs); the fallback chain is hard to reason about.
-
----
-
----
-
----
-
----
-
-#### ARCH-05: `Agent.__init__` accepts 22 explicit params + `**kwargs` for 5 more
-
-| Property | Value |
-|----------|-------|
-| **Severity** | Medium |
-| **Category** | Architecture |
-| **File(s)** | `agentkthx/core/agent_setup.py:54-87` |
-
-The constructor signature has 22 explicit parameters (`model`, `tools`, `backend`, `max_steps`, `memory_config`, `debug`, `system_prompt`, `soul`, `soul_level`, `num_ctx`, `temperature`, `top_p`, `num_predict`, `tool_choice`, `allowed_tools`, `skills_prompt`, `retry_on_error`, `max_tool_retries`, `max_api_retries`, `truncation`, `thinking_level`, `think`, `reasoning_effort`, `show_reasoning`) plus `**kwargs` for `response_format`, `confirm_dangerous`, `persistent`, `session_id`, `memory_db`. The `**kwargs` pattern means typos in the 5 stashed kwargs are silently ignored.
-
-Recommendation: Replace `**kwargs` with explicit parameters, or use a typed `AgentConfig` dataclass with `dataclasses.field(default=...)`. The dataclass approach makes the config serializable and version-controllable.
-
-**Impact:** Hard to add new parameters without breaking backward compat; easy to misspell a kwarg and have it silently do nothing.
-
----
-
----
-
----
-
----
-
+<!-- ARCH-02, ARCH-03, ARCH-04, ARCH-05, ARCH-06 all CLOSED in R07.13.
+     Detailed entries moved to deltas.md per the established convention
+     for archived findings. The R07.13 closure batch closed all 5
+     OPEN Architecture findings in one pass. -->
 
 ### Testing
 

@@ -46,6 +46,85 @@ from ..core.types import ApiMode, BackendType, ToolSupportLevel
 from ..core.models import Tool
 
 
+class WireAdapter:
+    """Protocol for non-OpenAI cloud wire-format adapters.
+
+    ARCH-06 closure (R07.13): documents the seam where non-OpenAI
+    clouds (e.g. Anthropic Messages API) plug in a custom wire format
+    without forking :class:`OpenAICompatibleBackend`. The default
+    OpenAI shape (used by ZAI, OpenRouter, HuggingFace, Pollinations,
+    Mistral) needs no adapter — they set ``_wire_adapter = None`` and
+    inherit the OpenAI body builder / response parser / SSE iterator
+    unchanged.
+
+    A future Anthropic Messages API backend would subclass
+    :class:`CloudBackend`, set ``_wire_adapter = AnthropicWireAdapter()``,
+    and override the three hook methods below to translate between
+    AgentKthx's internal OpenAI-shape messages and Anthropic's native
+    ``system`` + ``messages`` split + ``content_block_*`` SSE events.
+
+    This class is a protocol — concrete adapters subclass it and
+    override the methods they need. Methods that return ``None``
+    mean "fall back to the inherited OpenAI-shape implementation".
+    """
+
+    def build_request_body(self, messages: list, **kwargs) -> dict | None:
+        """Translate AgentKthx messages → provider-native request body.
+
+        Return ``None`` to use the inherited OpenAI-shape body builder
+        (``_build_openai_body``). Override to translate to a non-OpenAI
+        wire shape (e.g. Anthropic's ``system`` + ``messages`` split).
+
+        Args:
+            messages: AgentKthx-internal message list (OpenAI shape).
+            **kwargs: Generation parameters (temperature, max_tokens, etc.)
+
+        Returns:
+            Provider-native request body dict, or ``None`` to fall back
+            to the OpenAI-shape builder.
+        """
+        return None
+
+    def parse_response(self, raw_response: dict) -> dict | None:
+        """Translate provider-native response → AgentKthx-internal shape.
+
+        Return ``None`` to use the inherited OpenAI-shape parser
+        (``_parse_openai_response``). Override to translate from a
+        non-OpenAI response shape (e.g. Anthropic's ``content_block_*``
+        structure) back to AgentKthx's internal ``{content, tool_calls,
+        finish_reason, usage}`` shape.
+
+        Args:
+            raw_response: The raw JSON response dict from the provider.
+
+        Returns:
+            AgentKthx-internal response dict, or ``None`` to fall back
+            to the OpenAI-shape parser.
+        """
+        return None
+
+    def iter_sse_events(self, response, url: str, body: dict, headers: dict):
+        """Iterate provider-native SSE events → AgentKthx-internal chunks.
+
+        Return ``None`` to use the inherited OpenAI-shape SSE iterator
+        (``_iter_sse_lines``). Override to translate non-OpenAI SSE
+        event shapes (e.g. Anthropic's ``content_block_delta`` events)
+        into AgentKthx's internal chunk shape ``{"delta": str}`` /
+        ``{"content": str}`` / ``{"finish_reason": str}``.
+
+        Args:
+            response: The urllib response object.
+            url: The request URL.
+            body: The request body dict.
+            headers: The request headers dict.
+
+        Yields:
+            AgentKthx-internal chunk dicts. Return ``None`` (without
+            yielding) to fall back to the OpenAI-shape iterator.
+        """
+        return None
+
+
 class CloudBackend(OpenAICompatibleBackend):
     """Shared base class for cloud-hosted OpenAI-compatible backends.
 
@@ -77,6 +156,17 @@ class CloudBackend(OpenAICompatibleBackend):
         - ``test_tool_support()`` — if the provider has known tool-call
           gaps (e.g. Gemini 1.5 Flash).
 
+      Optional override (wire format — ARCH-06 closure R07.13):
+        - ``_wire_adapter`` — set to a :class:`WireAdapter` instance to
+          customize the request body builder + response parser. Default
+          ``None`` means "use the inherited OpenAI Chat Completions wire
+          shape" (the historical behavior). A non-OpenAI cloud (e.g.
+          Anthropic Messages API) would set this to a custom adapter
+          that translates ``messages`` → Anthropic's ``messages`` +
+          ``system`` split, and parses Anthropic's ``content_block_*``
+          SSE events back into the AgentKthx response shape. The
+          adapter protocol is documented on :class:`WireAdapter` below.
+
     This base implements:
       - ``__init__`` — resolves base_url, validates API key, sets
         ``_context_safe_max_tokens = None``, forces ``OPENAI``/``JEV``.
@@ -85,7 +175,23 @@ class CloudBackend(OpenAICompatibleBackend):
       - ``_get_model_defaults(model)`` — catalog lookup + cap.
       - ``get_model_info(model)`` — catalog lookup.
       - ``test_tool_support()`` — returns ``NATIVE`` by default.
+
+    ARCH-06 (R07.13): the OpenAI wire-shape coupling is now explicit
+    rather than implicit. ``CloudBackend`` still inherits from
+    ``OpenAICompatibleBackend`` (preserving all existing behavior), but
+    the ``_wire_adapter`` attribute documents the seam where non-OpenAI
+    clouds would plug in a custom wire format. The 4 existing cloud
+    backends (ZAI, OpenRouter, HuggingFace, Pollinations, Mistral) all
+    use the default OpenAI shape — they don't set ``_wire_adapter``.
+    A future Anthropic Messages API backend would set it and override
+    ``_build_openai_body`` / ``_parse_openai_response`` / ``_iter_sse_lines``
+    via the adapter, without needing to fork the entire
+    ``OpenAICompatibleBackend`` class.
     """
+
+    # ARCH-06: Wire format adapter. None = use inherited OpenAI shape.
+    # Set to a WireAdapter instance in subclasses for non-OpenAI clouds.
+    _wire_adapter: "WireAdapter | None" = None
 
     # ─────────────────────────────────────────────────────────────────────
     # Class attributes — concrete backends MUST override these

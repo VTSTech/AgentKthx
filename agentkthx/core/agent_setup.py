@@ -102,6 +102,15 @@ class AgentSetupMixin:
         think: bool | None = None,
         reasoning_effort: str | None = None,
         show_reasoning: bool = False,
+        # ARCH-05 closure (R07.13): the 5 kwargs previously stashed via
+        # **kwargs are now explicit named parameters. Typos now raise
+        # TypeError instead of being silently swallowed. Backward compat
+        # is preserved — all existing call sites pass these as kwargs.
+        response_format: dict | str | None = None,
+        confirm_dangerous=None,  # Callable[[str, dict], bool] | None
+        persistent: bool = False,
+        session_id: str | None = None,
+        memory_db: str | None = None,
         **kwargs,
     ):
         """
@@ -130,8 +139,39 @@ class AgentSetupMixin:
                 before the run terminates (default: AGENTKTHX_MAX_API_RETRIES env or 5).
                 R06.54: rate limits / empty responses / connection blips retry with
                 exponential back-off instead of killing the run.
-            **kwargs: Additional configuration (persistent, session_id, memory_db, confirm_dangerous, response_format)
+            response_format: Structured output / JSON mode. Dict (e.g.
+                {"type": "json_object"}) or the convenience string "json" which
+                is expanded automatically. When set, tools are disabled and
+                tool_choice forced to "none" (JSON mode and tool calling are
+                mutually exclusive — the parser misinterprets JSON as a tool call).
+            confirm_dangerous: Optional callback invoked before executing any
+                tool with dangerous=True. Signature: (tool_name, args) -> bool.
+                If not set, dangerous tools execute without confirmation.
+            persistent: If True (or session_id is set), use PersistentMemory
+                instead of the in-memory Memory class — conversation survives
+                across Agent instances.
+            session_id: Optional session id for persistent memory restoration.
+                When set, the agent's self.session_id is overridden to this
+                value (used for todo isolation + persistent memory).
+            memory_db: Optional SQLite path for PersistentMemory. Defaults
+                to the in-package sessions/ directory.
+            **kwargs: Reserved for future parameters (currently unused — any
+                unknown kwarg now raises TypeError, surfacing typos).
         """
+        # ARCH-05: fail-fast on unknown kwargs instead of silently swallowing.
+        # The 5 stashed kwargs are now explicit named parameters above; any
+        # remaining kwargs are typos or future parameters we haven't promoted.
+        if kwargs:
+            unknown = ", ".join(sorted(kwargs.keys()))
+            raise TypeError(
+                f"Agent.__init__ got unexpected keyword argument(s): {unknown}. "
+                f"Valid kwargs are: model, tools, backend, max_steps, memory_config, "
+                f"debug, system_prompt, soul, soul_level, num_ctx, temperature, top_p, "
+                f"num_predict, tool_choice, allowed_tools, skills_prompt, retry_on_error, "
+                f"max_tool_retries, max_api_retries, truncation, thinking_level, think, "
+                f"reasoning_effort, show_reasoning, response_format, confirm_dangerous, "
+                f"persistent, session_id, memory_db. (ARCH-05: kwargs swallowing closed R07.13)"
+            )
         # Ensure max_steps is never None (defensive fix)
         if max_steps is None:
             max_steps = 25  # Default value
@@ -149,8 +189,12 @@ class AgentSetupMixin:
 
         # Generate a unique session ID for this agent instance.
         # Used for per-session todo isolation and logging.
+        # ARCH-05: if session_id is explicitly provided (for persistent memory
+        # restoration), use it instead of generating a new one. This preserves
+        # the historical behavior where the stashed session_id overrode the
+        # generated one.
         import uuid as _uuid
-        self.session_id = _uuid.uuid4().hex[:12]
+        self.session_id = session_id if session_id is not None else _uuid.uuid4().hex[:12]
         # Get num_ctx from: explicit param > config/env > default 8192
         if num_ctx is not None:
             self.num_ctx = num_ctx
@@ -192,12 +236,12 @@ class AgentSetupMixin:
         # When set, the backend will be instructed to return JSON.
         # Accepts a dict (e.g. {"type": "json_object"}) or the
         # convenience string "json" which is expanded automatically.
-        raw_rf = kwargs.pop("response_format", None)
-        if raw_rf is not None:
-            if isinstance(raw_rf, str):
+        # ARCH-05: response_format is now an explicit named parameter.
+        if response_format is not None:
+            if isinstance(response_format, str):
                 self._response_format = {"type": "json_object"}
-            elif isinstance(raw_rf, dict):
-                self._response_format = raw_rf
+            elif isinstance(response_format, dict):
+                self._response_format = response_format
             else:
                 self._response_format = None
         else:
@@ -208,7 +252,8 @@ class AgentSetupMixin:
         # this callback before execution. The callback receives
         # (tool_name, args) and returns True (allow) or False (deny).
         # If not set, dangerous tools execute without confirmation.
-        self._confirm_dangerous = kwargs.pop("confirm_dangerous", None)
+        # ARCH-05: confirm_dangerous is now an explicit named parameter.
+        self._confirm_dangerous = confirm_dangerous
 
         # Truncation behavior for context overflow
         self.truncation = truncation
@@ -354,23 +399,20 @@ class AgentSetupMixin:
         if self._is_bitnet and memory_config is None:
             memory_config = MemoryConfig(max_messages=6, keep_recent=4)
 
-        # Persistent memory: use PersistentMemory if session_id or persistent=True
-        _persistent = kwargs.pop("persistent", False)
-        _session_id = kwargs.pop("session_id", None)
-        _memory_db = kwargs.pop("memory_db", None)
-
-        if _persistent or _session_id:
+        # ARCH-05: persistent, session_id, memory_db are now explicit named
+        # parameters. The session_id above was already overridden if provided.
+        if persistent or session_id:
             from .persistent_memory import PersistentMemory
             self.memory = PersistentMemory(
-                session_id=_session_id,
-                db_path=_memory_db,
+                session_id=session_id,
+                db_path=memory_db,
                 config=memory_config or MemoryConfig(),
             )
             self._is_persistent = True
-            if _session_id:
+            if session_id:
                 loaded = self.memory.load()
                 if self.debug and loaded > 0:
-                    print(f"[Memory] Restored {loaded} messages from session '{_session_id}'")
+                    print(f"[Memory] Restored {loaded} messages from session '{session_id}'")
         else:
             self.memory = Memory(memory_config or MemoryConfig())
             self._is_persistent = False

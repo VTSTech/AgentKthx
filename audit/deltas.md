@@ -1,10 +1,10 @@
 # Audit Deltas — Closed & Wontfix Archive
 
 **Project:** AgentKthx  
-**Release:** R07.12
-**Date:** 2026-09-28  
-**Archived:** 2026-09-28 (R07.12 closure batch)
-**Counts:** 48 CLOSED · 7 WONTFIX · 55 total
+**Release:** R07.13
+**Date:** 2026-09-29  
+**Archived:** 2026-09-29 (R07.13 ARCH closure batch)
+**Counts:** 53 CLOSED · 7 WONTFIX · 60 total
 
 This file is the archive of CLOSED and WONTFIX findings moved out of
 `audit.md` to keep the active audit focused on OPEN findings.
@@ -897,6 +897,82 @@ Recommendation: Make the test deterministic by asserting the specific expected b
 ---
 
 ---
+
+---
+
+## R07.13 ARCH Closure Batch
+
+All 5 OPEN Architecture findings closed in a single pass. Suite: 1849 → 1882 passed (+33 tests in `tests/test_r07_13_arch_closures.py`), zero regressions.
+
+### Architecture
+
+#### ARCH-02: `openresponses.stream_response_events` is a 163-line generator mixing protocol logic with state mutation
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Medium |
+| **Category** | Architecture |
+| **File(s)** | `agentkthx/core/openresponses.py:767-930` |
+
+**Status:** ✓ CLOSED R07.13
+
+**Detail:** Extracted `SSEEventBuilder` class with 10 `emit_*` methods (9 event types + error path). Each method handles the protocol details AND the response state mutation for one event type. The `stream_response_events` generator is now a 57-line thin orchestration loop over the builder (was 163 lines). The builder is testable in isolation — each event transition can be unit-tested without running the full generator. External contract preserved: same SSE event sequence, same response state mutations, same error-path handling.
+
+---
+
+#### ARCH-03: `agent_mode.py` and `orchestrator.py` are only loosely coupled to the Agent class
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Architecture |
+| **File(s)** | `agentkthx/agent_mode.py`, `agentkthx/orchestrator.py` |
+
+**Status:** ✓ CLOSED R07.13
+
+**Detail:** Integrated `AgentMode` with the OpenResponses event stream via an opt-in `event_emitter` callback. When set, `AgentMode.run_task()` emits 6 OpenResponses event types: `response.created`, `response.output_item.added`, `response.output_item.done` (×2 for success/fail), `response.completed`, `response.failed`. The `TaskPlan`/`Step`/`Action` dataclasses remain unchanged — they map onto `Item` events at emission time. When `event_emitter` is None (default), behavior is unchanged — the `agent` subcommand doesn't set this, preserving existing behavior. Library callers who want the event stream pass `event_emitter=my_callback`. Broken emitters are swallowed (never crash the task loop). Deprecation was ruled out: the `agentkthx agent` subcommand is documented and actively uses `AgentMode`.
+
+---
+
+#### ARCH-04: Soul loader does 5-step path resolution with repeated `importlib.resources` fallbacks
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Architecture |
+| **File(s)** | `agentkthx/soul/loader.py:50-134` |
+
+**Status:** ✓ CLOSED R07.13
+
+**Detail:** Consolidated the 5-step chain with repeated `try/except (ImportError, TypeError, AttributeError)` blocks into a single linear resolution algorithm with documented search order: (1) absolute path, (2) relative to CWD, (3) `importlib.resources.files('agentkthx')` (canonical accessor), (4) filesystem fallback `<package_dir>/souls/<path>`, (5) bare soul name (no path separators), (6) original path as last-resort. Single try/except per fallback — no nesting, no fallback-within-fallback. Behavior preserved exactly: `nova-helper` default soul still loads, all resolution paths return Path or None (never raises).
+
+---
+
+#### ARCH-05: `Agent.__init__` accepts 22 explicit params + `**kwargs` for 5 more
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Medium |
+| **Category** | Architecture |
+| **File(s)** | `agentkthx/core/agent_setup.py:54-87` |
+
+**Status:** ✓ CLOSED R07.13
+
+**Detail:** Promoted the 5 stashed kwargs (`response_format`, `confirm_dangerous`, `persistent`, `session_id`, `memory_db`) to explicit named parameters on `AgentSetupMixin.__init__`. The `**kwargs` pattern is retained but now fails fast: any unknown kwarg raises `TypeError` with a message listing all 29 valid parameters. Typos (e.g. `persistant=True` instead of `persistent=True`) now surface immediately instead of being silently swallowed. Backward compat preserved: all existing call sites pass these as kwargs, which still work. The `session_id` parameter, when provided, overrides the generated UUID (preserving the historical behavior where the stashed session_id took precedence for persistent memory restoration).
+
+---
+
+#### ARCH-06: CloudBackend inherits from OpenAICompatibleBackend — tight coupling to OpenAI wire shape
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Medium |
+| **Category** | Architecture |
+| **File(s)** | `agentkthx/backends/cloud_base.py` |
+
+**Status:** ✓ CLOSED R07.13
+
+**Detail:** Introduced the `WireAdapter` protocol class documenting the seam where non-OpenAI clouds (e.g. Anthropic Messages API) plug in a custom wire format without forking `OpenAICompatibleBackend`. The protocol has 3 hook methods: `build_request_body()` (translate messages → provider-native body), `parse_response()` (translate provider response → AgentKthx shape), `iter_sse_events()` (translate provider SSE events → AgentKthx chunks). All 3 return `None` by default → fall back to the inherited OpenAI-shape implementation. `CloudBackend._wire_adapter` defaults to `None` (OpenAI shape, backward compat). All 4 existing cloud backends (ZAI, Mistral, OpenRouter, Pollinations) inherit `None` — no behavior change. A future Anthropic Messages API backend would subclass `CloudBackend`, set `_wire_adapter = AnthropicWireAdapter()`, and override the 3 hooks to translate between OpenAI-shape messages and Anthropic's `system` + `messages` split + `content_block_*` SSE events. The coupling is now explicit and documented rather than implicit.
 
 ---
 

@@ -315,6 +315,45 @@ class AgentMode:
         self.on_state_change: Optional[Callable[[AgentState, AgentState], None]] = None
         self.on_step_complete: Optional[Callable[[Step], None]] = None
         self.on_task_complete: Optional[Callable[[TaskPlan], None]] = None
+
+        # ARCH-03 closure (R07.13): OpenResponses event stream integration.
+        # When ``event_emitter`` is set, AgentMode emits OpenResponses-shaped
+        # events alongside its existing callbacks. The emitter is a callable
+        # that accepts a dict ``{"type": ..., "data": ...}`` and dispatches
+        # it to wherever the caller wants (SSE stream, log file, etc.).
+        # When None (default), AgentMode behaves exactly as before — the
+        # ``agent`` subcommand doesn't set this, so existing behavior is
+        # unchanged. Library callers who want the OpenResponses event stream
+        # pass ``event_emitter=my_callback`` and receive:
+        #   - {"type": "response.created", "data": {"goal": ..., "plan": ...}}
+        #   - {"type": "response.output_item.added", "data": {"step": N, "description": ...}}
+        #   - {"type": "response.output_text.delta", "data": {"step": N, "chunk": ...}}
+        #   - {"type": "response.output_item.done", "data": {"step": N, "success": bool, "msg": ...}}
+        #   - {"type": "response.completed", "data": {"goal": ..., "final_response": ...}}
+        #   - {"type": "response.failed", "data": {"goal": ..., "error": ...}}
+        # This makes AgentMode a first-class participant in the OpenResponses
+        # event stream, eliminating the "parallel abstractions" problem the
+        # audit flagged. The ``TaskPlan``/``Step``/``Action`` dataclasses
+        # remain unchanged — they map onto ``Item`` events at emission time.
+        self.event_emitter: Optional[Callable[[dict], None]] = None
+
+    def _emit(self, event_type: str, data: dict) -> None:
+        """Emit an OpenResponses-shaped event if ``event_emitter`` is set.
+
+        ARCH-03: internal helper used by ``run_task`` and ``execute_step``
+        to publish events to the OpenResponses stream. No-op when no emitter
+        is registered (the default — preserves existing ``agent`` subcommand
+        behavior exactly).
+        """
+        if self.event_emitter is not None:
+            try:
+                self.event_emitter({"type": event_type, "data": data})
+            except Exception:
+                # Emitter failures must never crash the task loop —
+                # the existing callbacks already swallow exceptions
+                # for the same reason (a broken footer callback
+                # shouldn't kill a long-running task).
+                pass
     
     def _set_state(self, new_state: AgentState):
         """Transition to new state, calling callback if set."""
@@ -643,11 +682,20 @@ Example: [{{"description": "Step 1"}}, {{"description": "Step 2"}}]"""
         """
         if self.state != AgentState.IDLE:
             return False, f"Agent is busy: {self.state.value}"
-        
+
         self._set_state(AgentState.WORKING)
-        
+
         # Generate plan
         self.plan = self.plan_task(goal)
+
+        # ARCH-03: emit response.created with the goal + plan
+        self._emit("response.created", {
+            "goal": goal,
+            "plan": {
+                "total_steps": self.plan.total_steps if self.plan else 0,
+                "steps": [s.description for s in self.plan.steps] if self.plan else [],
+            },
+        })
 
         # R06.58: print the full plan upfront so the user can see what
         # the agent is about to do, step by step, before execution starts.
@@ -679,12 +727,23 @@ Example: [{{"description": "Step 1"}}, {{"description": "Step 2"}}]"""
                 return False, "Task was stopped"
             
             # Execute the step
+            # ARCH-03: emit output_item.added for this step
+            self._emit("response.output_item.added", {
+                "step": i + 1,
+                "description": step.description,
+            })
             try:
                 success, msg = self.execute_step(step)
             except KeyboardInterrupt:
                 step.status = "cancelled"
                 step.completed_at = datetime.now().isoformat()
                 self._set_state(AgentState.IDLE)
+                # ARCH-03: emit response.failed for the cancellation
+                self._emit("response.failed", {
+                    "goal": goal,
+                    "error": "Task cancelled by user",
+                    "step": i + 1,
+                })
                 return False, "Task cancelled by user"
             
             # Track the final response (from last successful step)
@@ -699,10 +758,29 @@ Example: [{{"description": "Step 1"}}, {{"description": "Step 2"}}]"""
                     "step": i + 1,
                     "error": msg,
                 })
-                
+
+                # ARCH-03: emit output_item.done (failed) + response.failed
+                self._emit("response.output_item.done", {
+                    "step": i + 1,
+                    "success": False,
+                    "msg": msg,
+                })
+                self._emit("response.failed", {
+                    "goal": goal,
+                    "error": f"Task failed at step {i + 1}: {msg}",
+                    "step": i + 1,
+                })
+
                 # For now, abort on failure
                 self._set_state(AgentState.IDLE)
                 return False, f"Task failed at step {i + 1}: {msg}"
+
+            # ARCH-03: emit output_item.done (success) for this step
+            self._emit("response.output_item.done", {
+                "step": i + 1,
+                "success": True,
+                "msg": msg,
+            })
             
             # Callback
             if self.on_step_complete:
@@ -730,7 +808,14 @@ Example: [{{"description": "Step 1"}}, {{"description": "Step 2"}}]"""
         
         if self.on_task_complete:
             self.on_task_complete(self.plan)
-        
+
+        # ARCH-03: emit response.completed with the final response
+        self._emit("response.completed", {
+            "goal": goal,
+            "final_response": final_response,
+            "total_steps": self.plan.total_steps if self.plan else 0,
+        })
+
         self._set_state(AgentState.IDLE)
         return True, final_response or f"Task completed: {goal}"
     
