@@ -1,7 +1,6 @@
 ---
 name: codebase-audit
-description: >
-  Audit, analyze, and produce a condensed intelligence brief for any codebase.
+description: Audit, analyze, and produce a condensed intelligence brief for any codebase.
   Use this skill whenever you need to understand, review, audit, or get oriented on a codebase or project.
   Triggers on phrases like "audit this repo", "review the codebase", "what does this project do",
   "get me up to speed", "brief me on", "understand this code", "code review", or when starting work

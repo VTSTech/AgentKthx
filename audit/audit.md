@@ -51,9 +51,6 @@ Cumulative closure state: **48 CLOSED + 7 WONTFIX of 104 findings (55 archived, 
 | PERF-02 | Medium | Performance | OPEN | _check_compaction iterates all messages + JSON-serializes tool_calls on every step |
 | FEAT-02 | Medium | New Features | OPEN | Per-tool timeout parameter and concurrent tool execution |
 | FEAT-03 | Medium | New Features | OPEN | Tool output schema validation via JSON Schema |
-| ARCH-02 | Medium | Architecture | ✓ CLOSED R07.13 | openresponses.stream_response_events is a 163-line generator mixing protocol logic with state mutation |
-| ARCH-05 | Medium | Architecture | ✓ CLOSED R07.13 | Agent.__init__ kwargs swallowing pattern — 22 explicit params + kwargs for 5 stashed names; typos silently ignored. |
-| ARCH-06 | Medium | Architecture | ✓ CLOSED R07.13 | CloudBackend inherits from OpenAICompatibleBackend — tight coupling to OpenAI wire shape; non-OpenAI clouds (Anthropic Messages API) can't reuse |
 | TEST-01 | Medium | Testing | OPEN | No integration tests — all 984 tests are mocked unit tests; slash-command dispatcher untested |
 | TEST-03 | Medium | Testing | OPEN | FakeBackend in test_agentic_loop_subsystem.py omits generate_completions_stream — streaming callbacks unexercised |
 | TEST-06 | Medium | Testing | OPEN | CI doesn't run black --check or ruff check — code style drift undetected |
@@ -73,8 +70,6 @@ Cumulative closure state: **48 CLOSED + 7 WONTFIX of 104 findings (55 archived, 
 | FEAT-05 | Low | New Features | OPEN | Plugin sandboxing via restricted register() namespace + audit hooks |
 | FEAT-06 | Low | New Features | OPEN | Streaming tool-call argument deltas (function_call_arguments.delta SSE events) |
 | FEAT-07 | Low | New Features | OPEN | Conversation export/import to OpenResponses-format JSON |
-| ARCH-03 | Low | Architecture | ✓ CLOSED R07.13 | agent_mode.py and orchestrator.py are only loosely coupled to the Agent class — parallel abstractions |
-| ARCH-04 | Low | Architecture | ✓ CLOSED R07.13 | Soul loader does 5-step path resolution with repeated importlib.resources fallbacks — hard to follow |
 | TEST-04 | Low | Testing | OPEN | No test coverage for agent_mode.py rollback functionality (822 LOC, key feature) |
 | TEST-05 | Low | Testing | OPEN | test_bump_version_script.py tests shell script via subprocess — fails on Windows/no-bash |
 | TEST-07 | Low | Testing | OPEN | No test for update_check module's network-failure paths (URLError, socket.timeout, malformed JSON) |

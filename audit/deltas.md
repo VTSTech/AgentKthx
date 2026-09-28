@@ -3,7 +3,7 @@
 **Project:** AgentKthx  
 **Release:** R07.13
 **Date:** 2026-09-29  
-**Archived:** 2026-09-29 (R07.13 ARCH closure batch)
+**Archived:** 2026-09-28 (R07.13 closure batch)
 **Counts:** 53 CLOSED · 7 WONTFIX · 60 total
 
 This file is the archive of CLOSED and WONTFIX findings moved out of
@@ -36,6 +36,9 @@ This file is the archive of CLOSED and WONTFIX findings moved out of
 | MAINT-21 | Medium | Maintainability | ✓ CLOSED R07.12 (intra) | _parse_mistral_response error-envelope check has operator-precedence bug — `(A or (B and C))` misclassifies any response with `message` field and no `choices` as an error |
 | FEAT-01 | Medium | New Features | ✓ CLOSED R07.04 | Structured tool-output wrapping to mitigate prompt injection |
 | ARCH-01 | Medium | Architecture | ⊘ WONTFIX (intentional) | Backends split across backends/ (native) and plugins/ (cloud) — confusing module layout |
+| ARCH-02 | Medium | Architecture | ✓ CLOSED R07.13 | openresponses.stream_response_events is a 163-line generator mixing protocol logic with state mutation |
+| ARCH-05 | Medium | Architecture | ✓ CLOSED R07.13 | Agent.__init__ kwargs swallowing pattern — 22 explicit params + kwargs for 5 stashed names; typos silently ignored. |
+| ARCH-06 | Medium | Architecture | ✓ CLOSED R07.13 | CloudBackend inherits from OpenAICompatibleBackend — tight coupling to OpenAI wire shape; non-OpenAI clouds (Anthropic Messages API) can't reuse |
 | SEC-05 | Low | Security | ✓ CLOSED R07.08 | input() prompts in dangerous-tool confirmation don't strip ANSI escapes from tool name/args |
 | SEC-07 | Low | Security | ✓ CLOSED R07.05 | Default SQLite DB path created without explicit mode — umask typically 0644, leaks conversation history |
 | SEC-08 | Low | Security | ⊘ WONTFIX (intentional) | Audit log writes tool args (incl. shell commands, file contents) in plaintext with default umask |
@@ -70,6 +73,8 @@ This file is the archive of CLOSED and WONTFIX findings moved out of
 | PERF-05 | Low | Performance | ✓ CLOSED R07.12 (intra) | ToolParser.parse runs all 3 parsing strategies even if first succeeds — may produce duplicate tool calls |
 | PERF-07 | Low | Performance | ⊘ WONTFIX (intentional) | web_search has no result cache — same query re-fetches |
 | FEAT-04 | Low | New Features | ⊘ WONTFIX (intentional) | --dry-run flag for agentkthx run that previews planned tool calls |
+| ARCH-03 | Low | Architecture | ✓ CLOSED R07.13 | agent_mode.py and orchestrator.py are only loosely coupled to the Agent class — parallel abstractions |
+| ARCH-04 | Low | Architecture | ✓ CLOSED R07.13 | Soul loader does 5-step path resolution with repeated importlib.resources fallbacks — hard to follow |
 | TEST-02 | Low | Testing | ✓ CLOSED R07.12 (intra) | test_security.py:test_percent2e always passes (assert not is_valid or True) — no-op test |
 | TEST-08 | Low | Testing | ✓ CLOSED R07.08 | No adversarial test coverage for sandboxed_repl.py — sandbox escape regressions go undetected |
 
