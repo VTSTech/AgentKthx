@@ -76,7 +76,12 @@ Configuration:
   POLLINATIONS_DEFAULT_MODEL — Default model (default: openai/gpt-5.4-nano)
   POLLINATIONS_FALLBACK_MODEL — Offline fallback chain anchor (z-ai/glm-5.3-flash)
   POLLINATIONS_SAFE          — Safety filters ("" | true | nsfw | comma list)
-  POLLINATIONS_FREE_ONLY     — Only zero-priced models (default: false)
+  POLLINATIONS_FREE_ONLY     — Only zero-cost models (default: false). The
+                               gateway encodes zero-cost as a currency-only
+                               pricing dict (no price fields) — the
+                               ':free'/'-free' community variants; see
+                               probe_pollinations.sh for the broader
+                               paid_only free-TIER surface
   POLLINATIONS_ANON_CATALOG  — Browse the PUBLIC catalog without the Bearer
                                key even when keyed (default: false). The
                                gateway scopes GET /v1/models to the key's
@@ -344,8 +349,21 @@ def _card_is_free(card_or_meta: dict) -> bool:
     Works on both live card shape (``pricing.promptTextTokens`` /
     ``completionTextTokens`` per-token strings) and static catalog shape
     (``pricing.input`` / ``pricing.output`` per-1M floats).
+
+    The gateway encodes TRUE zero-cost models as a **currency-only**
+    pricing dict — ``{"currency": "pollen"}`` with NO price fields at
+    all (the ':free'/'-free' community variants; verified 2026-09-28:
+    7 text cards, zero-valued price fields never appear on the live
+    feed). Additionally, the free-tier boundary itself lives on the
+    bare ``GET /models`` endpoint as ``paid_only`` (True=173 / not-True=134,
+    the 134 exactly matching the keyed /v1/models entitlement feed) —
+    Quest-Pollen-eligible but NOT zero-cost; that tier is surfaced by
+    probe_pollinations.sh, not by this predicate.
     """
     pricing = card_or_meta.get("pricing") or {}
+    # Currency-only pricing (price fields absent) = zero-cost tier.
+    if pricing and set(pricing.keys()) <= {"currency"}:
+        return True
     if "promptTextTokens" in pricing or "completionTextTokens" in pricing:
         prompt = _pollen_to_per_million(pricing.get("promptTextTokens"))
         completion = _pollen_to_per_million(pricing.get("completionTextTokens"))

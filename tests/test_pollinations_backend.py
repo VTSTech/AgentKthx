@@ -980,6 +980,97 @@ class TestFreeOnlyGenerate(unittest.TestCase):
         assert backend._first_free_model() is None
 
 
+class TestZeroCostEncoding(unittest.TestCase):
+    """v0.1.2: the gateway encodes TRUE zero-cost models as a currency-only
+    pricing dict — {"currency": "pollen"} with NO price fields at all
+    (the ':free'/'-free' community variants, verified live 2026-09-28).
+    The old zero-VALUED-field check could never match this shape, so
+    FREE_ONLY found 0 free models on any live feed."""
+
+    def test_currency_only_pricing_is_free(self):
+        """The live encoding: {"currency": "pollen"} → free."""
+        assert _card_is_free({"pricing": {"currency": "pollen"}}) is True
+
+    def test_currency_only_card_wrapper_is_free(self):
+        card = {
+            "id": "community/scriptsnsenses-sys/glm-5.3-flash-free",
+            "category": "text",
+            "pricing": {"currency": "pollen"},
+        }
+        assert _card_is_free(card) is True
+
+    def test_zero_valued_string_prices_still_free(self):
+        """Regression: explicit "0" prices (test-fixture shape)."""
+        assert _card_is_free({
+            "pricing": {"promptTextTokens": "0", "completionTextTokens": "0"}
+        }) is True
+
+    def test_priced_card_not_free(self):
+        assert _card_is_free({
+            "pricing": {
+                "currency": "pollen",
+                "promptTextTokens": "0.00000015",
+                "completionTextTokens": "0.0000009375",
+            }
+        }) is False
+
+    def test_partial_zero_not_free(self):
+        """prompt=0 but completion missing → conservative not-free."""
+        assert _card_is_free({
+            "pricing": {"currency": "pollen", "promptTextTokens": "0"}
+        }) is False
+
+    def test_empty_pricing_not_free(self):
+        assert _card_is_free({"pricing": {}}) is False
+        assert _card_is_free({}) is False
+
+    def test_static_zero_per_million_still_free(self):
+        """Regression: static catalog shape input/output == 0.0."""
+        assert _card_is_free({"pricing": {"input": 0.0, "output": 0.0}}) is True
+        assert _card_is_free({"pricing": {"input": 0.15, "output": 0.9375}}) is False
+
+    def test_free_only_live_shaped_catalog(self):
+        """End-to-end: FREE_ONLY over live-shaped cards finds the
+        currency-only models (the encoding the live feed actually uses)."""
+        backend = _make_backend()
+        cards = {
+            "community/scriptsnsenses-sys/glm-5.3-flash-free": {
+                "id": "community/scriptsnsenses-sys/glm-5.3-flash-free",
+                "category": "text",
+                "aliases": [],
+                "pricing": {"currency": "pollen"},
+                "health": {"status": "healthy", "success_rate": 92.0, "requests": 25},
+            },
+            "community/YoannDev90/muse-glimmer-30b:free": {
+                "id": "community/YoannDev90/muse-glimmer-30b:free",
+                "category": "text",
+                "aliases": [],
+                "pricing": {"currency": "pollen"},
+                "health": {"status": "healthy", "success_rate": 96.0, "requests": 50},
+            },
+            "openai/gpt-5.4-nano": {
+                "id": "openai/gpt-5.4-nano",
+                "category": "text",
+                "aliases": ["openai"],
+                "pricing": {
+                    "currency": "pollen",
+                    "promptTextTokens": "0.00000015",
+                    "completionTextTokens": "0.0000009375",
+                },
+                "health": {"status": "healthy", "success_rate": 99.9, "requests": 65000},
+            },
+        }
+        with patch.dict(os.environ, {"POLLINATIONS_FREE_ONLY": "true"}):
+            with patch.object(backend, "_fetch_model_cards", return_value=cards):
+                models = backend.list_models()
+        names = {m["name"] for m in models}
+        assert "community/YoannDev90/muse-glimmer-30b:free" in names
+        assert "community/scriptsnsenses-sys/glm-5.3-flash-free" in names
+        assert "openai/gpt-5.4-nano" not in names
+        # health-ordered redirect picks the best zero-cost card
+        assert backend._first_free_model() == "community/YoannDev90/muse-glimmer-30b:free"
+
+
 # ---------------------------------------------------------------------------
 # Model defaults & info
 # ---------------------------------------------------------------------------

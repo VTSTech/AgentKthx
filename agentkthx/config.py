@@ -259,9 +259,12 @@ POLLINATIONS_FALLBACK_MODEL = os.environ.get("POLLINATIONS_FALLBACK_MODEL", "z-a
 # violence,shield). Empty (default) = off — upstream moderation still
 # blocks as 422 content_policy_violation regardless of this flag.
 POLLINATIONS_SAFE = os.environ.get("POLLINATIONS_SAFE", "")
-# Strict free-tier enforcement: when true, only zero-priced models
-# (community publishers listing at price 0) are listed/accepted.
-# Default false.
+# Strict free-tier enforcement: when true, only zero-cost models are
+# listed/accepted. The gateway encodes zero-cost as a currency-only
+# pricing dict ({"currency": "pollen"}, no price fields) — the ':free'/
+# '-free' community variants. (The broader paid_only free TIER —
+# Quest-Pollen-eligible models — is visible via scripts/probe_pollinations.sh
+# on the bare GET /models endpoint.) Default false.
 POLLINATIONS_FREE_ONLY = os.environ.get("POLLINATIONS_FREE_ONLY", "").lower() in ("1", "true", "yes")
 # Browse the PUBLIC 307-card catalog anonymously even when a key is set.
 # The gateway scopes GET /v1/models to the key's entitlements (observed

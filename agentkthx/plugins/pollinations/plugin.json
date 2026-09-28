@@ -1,8 +1,8 @@
 {
   "$schema": "https://raw.githubusercontent.com/VTSTech/AgentKthx/main/schemas/v0.2/plugin.schema.json",
   "name": "pollinations",
-  "version": "0.1.1",
-  "description": "Pollinations unified gateway backend at https://gen.pollinations.ai/v1 (OpenAI-compatible aggregator: one key for openai/ anthropic/ google/ z-ai/ deepseek/ qwen/ mistralai/ meta/ community/ text families plus images, video, TTS and embeddings; optional key with legacy anonymous text surface, provider/model ids with alias resolution, health-telemetry fallback ordering, 402 pollen-budget error mapping, and Retry-After-capped 429/5xx backoff; v0.1.1: POLLINATIONS_ANON_CATALOG browse-public toggle — the gateway scopes GET /v1/models to key entitlements, starving FREE_ONLY with zero free cards when keyed — and health-ordered zero-priced FREE_ONLY redirect)",
+  "version": "0.1.2",
+  "description": "Pollinations unified gateway backend at https://gen.pollinations.ai/v1 (OpenAI-compatible aggregator: one key for openai/ anthropic/ google/ z-ai/ deepseek/ qwen/ mistralai/ meta/ community/ text families plus images, video, TTS and embeddings; optional key with legacy anonymous text surface, provider/model ids with alias resolution, health-telemetry fallback ordering, 402 pollen-budget error mapping, and Retry-After-capped 429/5xx backoff; v0.1.1: POLLINATIONS_ANON_CATALOG browse-public toggle + health-ordered FREE_ONLY redirect; v0.1.2: zero-cost detection — the gateway encodes free models as currency-only pricing dicts with NO price fields, which the zero-valued-field check could never match)",
   "author": {
     "name": "VTSTech",
     "url": "https://www.vts-tech.org"
