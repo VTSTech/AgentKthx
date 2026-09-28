@@ -380,16 +380,8 @@ OPENAI_MODELS: dict[str, dict] = {
         "family": "gpt-5",
         "tier": "pro",
     },
-    "gpt-5-codex": {
-        "context_length": 200_000,
-        "max_completion_tokens": 100_000,
-        "supports_thinking": True,
-        "supports_reasoning_effort": True,
-        "supports_function_calling": True,
-        "supports_code_interpreter_tool": True,
-        "family": "gpt-5",
-        "tier": "codex",
-    },
+    # R07.13: gpt-5-codex retired — shutdown_date 2026-07-23 (68 days past at cleanup time)
+    # R07.13: gpt-5.1-codex retired — shutdown_date 2026-07-23 (68 days past at cleanup time)
 
     # === GPT-5.1 family (discovered via live API) ===
     "gpt-5.1": {
@@ -400,14 +392,6 @@ OPENAI_MODELS: dict[str, dict] = {
         "supports_function_calling": True,
         "family": "gpt-5",
         "tier": "standard",
-    },
-    "gpt-5.1-codex": {
-        "context_length": 200_000,
-        "max_completion_tokens": 100_000,
-        "supports_thinking": True,
-        "supports_function_calling": True,
-        "family": "gpt-5",
-        "tier": "codex",
     },
 
     # === GPT-5.2 family (discovered via live API) ===

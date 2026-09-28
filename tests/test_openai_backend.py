@@ -995,7 +995,7 @@ class TestExpandedCatalog(unittest.TestCase):
 
     def test_catalog_includes_gpt5_family(self):
         from agentkthx.plugins.openai.openai import OPENAI_MODELS
-        for m in ("gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-5-pro", "gpt-5-codex"):
+        for m in ("gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-5-pro"):
             assert m in OPENAI_MODELS, f"{m} should be in expanded catalog"
 
     def test_catalog_includes_gpt56_daybreak_expanded(self):

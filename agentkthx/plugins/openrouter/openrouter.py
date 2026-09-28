@@ -50,50 +50,8 @@ from agentkthx.config import OPENROUTER_BASE_URL, OPENROUTER_API_KEY, OPENROUTER
 # Context lengths sourced from https://openrouter.ai/docs#models
 # The /models endpoint returns dynamic data, but this catalog ensures
 # common models are always available with proper defaults.
-# Updated: 2026-04-15
+# Updated: 2026-09-29 (R07.13: retired 9 models confirmed absent from live /models API)
 OPENROUTER_MODELS: dict[str, dict] = {
-    # Anthropic
-    "anthropic/claude-3.5-sonnet": {
-        "max_tokens": 131072,
-        "pricing": {
-            "prompt": 15.00,  # $ per 1M tokens
-            "completion": 75.00
-        },
-        "context_length": 131072,
-        "provider": "anthropic",
-        "description": "Claude 3.5 Sonnet - Fast, intelligent, and accurate"
-    },
-    "anthropic/claude-3.5-haiku": {
-        "max_tokens": 131072,
-        "pricing": {
-            "prompt": 1.00,
-            "completion": 5.00
-        },
-        "context_length": 131072,
-        "provider": "anthropic",
-        "description": "Claude 3.5 Haiku - Fast and cost-effective"
-    },
-    "anthropic/claude-3-opus": {
-        "max_tokens": 131072,
-        "pricing": {
-            "prompt": 15.00,
-            "completion": 75.00
-        },
-        "context_length": 131072,
-        "provider": "anthropic",
-        "description": "Claude 3 Opus - Most powerful model"
-    },
-    "anthropic/claude-3-haiku": {
-        "max_tokens": 131072,
-        "pricing": {
-            "prompt": 0.25,
-            "completion": 1.25
-        },
-        "context_length": 131072,
-        "provider": "anthropic",
-        "description": "Claude 3 Haiku - Fast and lightweight"
-    },
-    
     # OpenAI
     "openai/gpt-4o": {
         "max_tokens": 128000,
@@ -169,49 +127,6 @@ OPENROUTER_MODELS: dict[str, dict] = {
         "provider": "google",
         "description": "Gemini 2.0 Flash Experimental"
     },
-    "google/gemini-1.5-flash": {
-        "max_tokens": 2097152,
-        "pricing": {
-            "prompt": 0.075,
-            "completion": 0.30
-        },
-        "context_length": 2097152,
-        "provider": "google",
-        "description": "Gemini 1.5 Flash - long context"
-    },
-    "google/gemini-1.5-pro": {
-        "max_tokens": 2097152,
-        "pricing": {
-            "prompt": 12.50,
-            "completion": 50.00
-        },
-        "context_length": 2097152,
-        "provider": "google",
-        "description": "Gemini 1.5 Pro - flagship model"
-    },
-    
-    # Cohere
-    "cohere/command-r-plus": {
-        "max_tokens": 131072,
-        "pricing": {
-            "prompt": 3.00,
-            "completion": 15.00
-        },
-        "context_length": 131072,
-        "provider": "cohere",
-        "description": "Command R Plus - powerful assistant"
-    },
-    "cohere/command-r": {
-        "max_tokens": 131072,
-        "pricing": {
-            "prompt": 0.50,
-            "completion": 1.50
-        },
-        "context_length": 131072,
-        "provider": "cohere",
-        "description": "Command R - balanced performance"
-    },
-    
     # Local models (via OpenRouter)
     "meta-llama/llama-3.1-70b-instruct": {
         "max_tokens": 131072,
@@ -222,16 +137,6 @@ OPENROUTER_MODELS: dict[str, dict] = {
         "context_length": 131072,
         "provider": "meta",
         "description": "Llama 3.1 70B Instruct"
-    },
-    "mistralai/mixtral-8x7b-instruct": {
-        "max_tokens": 32768,
-        "pricing": {
-            "prompt": 0.50,
-            "completion": 0.50
-        },
-        "context_length": 32768,
-        "provider": "mistral",
-        "description": "Mixtral 8x7B Instruct"
     },
     "qwen/qwen-2.5-72b-instruct": {
         "max_tokens": 131072,
