@@ -3,8 +3,14 @@
 generate_audit_dash.py — Generate a self-contained AgentKthx audit dashboard.
 
 Fetches audit.md + brief.md from the AgentKthx GitHub repo (main branch),
-parses the findings register + closure timeline, and writes a single
-self-contained index.html (no CDN, no build step, no external deps).
+parses the findings register, and writes a single self-contained index.html
+(no CDN, no build step, no external deps).
+
+Finding detail prose comes from the `#### ID:` detail sections — FULL text,
+never truncated: audit.md carries the open findings' analysis, deltas.md
+(the CLOSED + WONTFIX archive) carries each finding's closure/WONTFIX
+`**Detail:**` prose. The Findings Summary + Detailed Findings sections are
+the historical record (the old Closure Timeline is retired).
 
 Since the dashboard is a static site, it also emits a small set of static JSON
 "API endpoint" files into <output-dir>/api/findings/ so external clients (the
@@ -15,7 +21,7 @@ page:
     api/findings/open.json        open findings only
     api/findings/closed.json      closed findings only
     api/findings/wontfix.json     wontfix findings only
-    api/findings/summary.json     counts rollup + closures timeline
+    api/findings/summary.json     counts rollup (closures: [] for schema compat)
     api/findings/reconcile.json   prose-vs-table drift check
     api/findings/<ID>.json        per-finding detail (one per finding)
 
@@ -173,8 +179,10 @@ def parse_findings(audit_md, deltas_md=""):
     """
     Parse findings from:
       1. The Findings Summary table (| ID | Severity | Category | Status | Title |)
-      2. The R07.07 delta table (| ID | Severity | Category | File(s) | Title |)
-      3. All Closure section tables (to mark CLOSED findings + their release)
+      2. The Rxx.xx delta tables (| ID | Severity | Category | File(s) | Title |)
+      3. Closure section tables (pre-split audit.md — to mark CLOSED findings)
+      4. The `#### ID:` detail sections — FULL detail prose + File(s) row
+         (never truncated; the sections are the historical record)
 
     If deltas_md is provided, also parse findings from it (the CLOSED + WONTFIX
     archive) and merge. audit.md holds OPEN findings; deltas.md holds CLOSED +
@@ -207,6 +215,11 @@ def _parse_findings_from_md(md_text):
     merge. Returns a dict {id: finding} (not a list) for easy merge.
     """
     findings = {}  # id → finding dict
+
+    # detail-section patterns (used by step 4 below)
+    detail_heading_pat = re.compile(r"^####\s+([A-Z]+-\d+):\s*(.*)$")
+    detail_line_pat = re.compile(r"^\*\*Detail:\*\*\s*(.*)$")
+    file_row_pat = re.compile(r"^\|\s*\*\*File\(s\)\*\*\s*\|\s*(.+?)\s*\|\s*$")
 
     # 1. Findings Summary table
     # | SEC-02 | **High** | Security | ✓ CLOSED R07.04 | title |
@@ -325,15 +338,82 @@ def _parse_findings_from_md(md_text):
             if fid in findings:
                 findings[fid]["status"] = "CLOSED"
                 findings[fid]["closedIn"] = current_release
-                findings[fid]["detail"] = strip_md(notes)[:300]
+                # FULL closure note — never truncated
+                if len(strip_md(notes)) > len(findings[fid].get("detail", "")):
+                    findings[fid]["detail"] = strip_md(notes)
             else:
                 # finding not in summary/delta — add it
                 findings[fid] = {
                     "id": fid, "severity": strip_md(_sev), "category": "",
                     "status": "CLOSED", "closedIn": current_release,
-                    "title": strip_md(notes)[:120], "detail": strip_md(notes)[:300],
+                    "title": strip_md(notes), "detail": strip_md(notes),
                     "file": None,
                 }
+
+    # 4. `#### ID:` detail sections — the authoritative detail prose.
+    # audit.md: open findings' analysis; deltas.md: closure/WONTFIX prose
+    # (**Detail:** …). File(s) Property rows populate the file field.
+    # Sections never truncate: the whole body is the finding's detail.
+    cur = None
+    body = []  # (kind, text) paragraphs for the current section
+    section_files = None
+
+    def _flush_section():
+        if cur is None or cur not in findings:
+            return
+        f = findings[cur]
+        detail_text = None
+        prose = []
+        for kind, text in body:
+            if kind == "detail":
+                detail_text = text
+            elif kind == "prose":
+                prose.append(text)
+        if detail_text:
+            # archive closure prose (**Detail:** …) — always wins for
+            # CLOSED/WONTFIX; for OPEN findings prefer non-echo prose
+            if f["status"] != "OPEN" or detail_text.strip() != f["title"].strip():
+                f["detail"] = detail_text
+        elif prose:
+            joined = "\n\n".join(prose)
+            # don't downgrade a real closure note to a title echo
+            if joined.strip() != f["title"].strip():
+                f["detail"] = joined
+        if section_files and not f.get("file"):
+            f["file"] = section_files
+
+    for line in md_text.split("\n"):
+        hm = detail_heading_pat.match(line)
+        if hm:
+            _flush_section()
+            cur = hm.group(1)
+            body = []
+            section_files = None
+            # capture the heading title as a fallback detail for OPEN rows
+            continue
+        if line.startswith(("## ", "### ")):
+            _flush_section()
+            cur = None
+            continue
+        if cur is None:
+            continue
+        if line.startswith("|"):
+            if line.startswith("|---") or line.startswith("| Property"):
+                continue
+            fm = file_row_pat.match(line)
+            if fm:
+                section_files = strip_md(fm.group(1))
+            continue
+        dm = detail_line_pat.match(line)
+        if dm:
+            body.append(("detail", dm.group(1).strip()))
+            continue
+        if line.strip().startswith("**Status:**"):
+            continue
+        if line.strip() in ("", "---"):
+            continue
+        body.append(("prose", line.rstrip()))
+    _flush_section()
 
     # Fill empty details with the title for findings that have no closure notes
     for f in findings.values():
@@ -348,70 +428,6 @@ def _parse_findings_from_md(md_text):
             f["category"] = cat_map.get(prefix, "Maintainability")
 
     return findings
-
-# ─── parsing: closures timeline ────────────────────────────────────────────
-
-def parse_closures(audit_md, findings):
-    """Parse closure sections into timeline cards."""
-    closures = []
-    closure_section_pat = re.compile(r"## (R[\d.]+)\s+Closures")
-    # test delta in prose: "1132 → **1290 passed" or "suite 1404 → **1461 passed"
-    test_pat = re.compile(r"(\d+)\s*→\s*\**(\d+)\s+passed")
-
-    sections = []
-    current = None
-    for line in audit_md.split("\n"):
-        m = closure_section_pat.match(line)
-        if m:
-            if current:
-                sections.append(current)
-            current = {"release": m.group(1), "lines": []}
-        elif current is not None:
-            if line.startswith("## "):
-                sections.append(current)
-                current = None
-            else:
-                current["lines"].append(line)
-    if current:
-        sections.append(current)
-
-    # build a lookup: id → title
-    title_by_id = {f["id"]: f["title"] for f in findings}
-
-    for sec in sections:
-        release = sec["release"]
-        text = "\n".join(sec["lines"])
-        # test counts
-        tests_before = 0
-        tests_after = 0
-        tm = test_pat.search(text)
-        if tm:
-            tests_before = int(tm.group(1))
-            tests_after = int(tm.group(2))
-        # date
-        dm = re.search(r"(\d{4}-\d{2}-\d{2})", text)
-        date = dm.group(1) if dm else ""
-        # closed finding IDs in this section
-        closed_ids = []
-        for line in sec["lines"]:
-            m = re.match(r"^\|\s*(`?~~)?([A-Z]+-\d+)", line)
-            if m and ("CLOSED" in line or "✓" in line):
-                closed_ids.append(m.group(2))
-        # highlights = closed finding titles (up to 6)
-        highlights = []
-        for fid in closed_ids[:6]:
-            t = title_by_id.get(fid, fid)
-            highlights.append(f"{fid}: {t}")
-        if not highlights and closed_ids:
-            highlights.append(f"{len(closed_ids)} findings closed in {release}")
-        closures.append({
-            "release": release,
-            "date": date,
-            "testsBefore": tests_before,
-            "testsAfter": tests_after,
-            "highlights": highlights,
-        })
-    return closures
 
 # ─── HTML generation ───────────────────────────────────────────────────────
 
@@ -543,24 +559,10 @@ td.file{display:none}
 .st-WONTFIX{border-color:oklch(.6 .01 260 / .3);background:oklch(.6 .01 260 / .1);color:oklch(.6 .01 260)}
 .cat-short{font-family:ui-monospace,monospace;font-size:.625rem;color:var(--muted-fg)}
 .finding-title{font-weight:500;color:oklch(.965 .006 155 / .9);line-height:1.3}
-.finding-detail{margin-top:.125rem;font-size:.75rem;color:var(--muted-fg);line-height:1.4}
-.finding-detail.expanded{margin-top:.375rem}
+.finding-detail{margin-top:.125rem;font-size:.75rem;color:var(--muted-fg);line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.finding-detail.expanded{margin-top:.375rem;display:block;-webkit-line-clamp:unset;overflow:visible;white-space:pre-line}
 .finding-file{font-family:ui-monospace,monospace;font-size:.625rem;color:oklch(.8 .16 158 / .8);margin-top:.25rem}
 .empty{padding:3rem 1rem;text-align:center;color:var(--muted-fg);font-size:.875rem}
-.timeline-head{font-size:.875rem;font-weight:600;margin-bottom:.25rem}
-.timeline-sub{font-size:.75rem;color:var(--muted-fg);margin-bottom:1.25rem}
-.timeline{display:grid;grid-template-columns:1fr;gap:1rem}
-@media(min-width:768px){.timeline{grid-template-columns:repeat(2,1fr)}}
-@media(min-width:1280px){.timeline{grid-template-columns:repeat(4,1fr)}}
-.tl-card{position:relative;overflow:hidden;border:1px solid var(--border);background:oklch(.215 .014 165 / .4);border-radius:var(--radius);padding:1.25rem}
-.tl-card::before{content:"";position:absolute;right:0;top:0;width:5rem;height:5rem;transform:translate(1.5rem,-1.5rem);border-radius:9999px;background:oklch(.8 .16 158 / .1);filter:blur(1rem)}
-.tl-rel{font-family:ui-monospace,monospace;font-size:1.125rem;font-weight:700;color:var(--primary)}
-.tl-date{font-size:.625rem;color:var(--muted-fg)}
-.tl-tests{font-family:ui-monospace,monospace;font-size:.6875rem;color:var(--muted-fg);margin:.75rem 0}
-.tl-tests b{color:var(--fg)}
-.tl-ul{list-style:none;display:flex;flex-direction:column;gap:.5rem}
-.tl-ul li{display:flex;gap:.5rem;font-size:.75rem;line-height:1.4;color:oklch(.965 .006 155 / .8)}
-.tl-ul svg{flex-shrink:0;margin-top:.125rem;width:.75rem;height:.75rem;color:var(--primary)}
 footer{margin-top:auto;border-top:1px solid var(--border);background:oklch(.215 .014 165 / .3);padding:3rem 0}
 .footer-grid{display:grid;grid-template-columns:1fr;gap:2.5rem}
 @media(min-width:768px){.footer-grid{grid-template-columns:1.4fr 1fr 1fr}}
@@ -661,11 +663,6 @@ footer{margin-top:auto;border-top:1px solid var(--border);background:oklch(.215 
       </table>
     </div>
   </div>
-  <div style="margin-top:3rem">
-    <div class="timeline-head">Closure timeline</div>
-    <p class="timeline-sub">Release-over-release deltas — <span id="hd-closed2">__CLOSED__</span> findings closed, suite tracked across releases.</p>
-    <div class="timeline" id="timeline"></div>
-  </div>
   <div class="gen-note">
     Generated by <code>generate_audit_dash.py</code> from <code>audit/audit.md</code> + <code>audit/brief.md</code> on the <code>main</code> branch. Re-run to regenerate with the latest audit.
   </div>
@@ -704,7 +701,6 @@ footer{margin-top:auto;border-top:1px solid var(--border);background:oklch(.215 
 </button>
 <script>
 const FINDINGS = __FINDINGS__;
-const CLOSURES = __CLOSURES__;
 const CAT_META = {Security:{short:"SEC",color:"#f87171"},Robustness:{short:"ROB",color:"#fbbf24"},Maintainability:{short:"MAINT",color:"#a78bfa"},Performance:{short:"PERF",color:"#38bdf8"},"New Features":{short:"FEAT",color:"#34d399"},Architecture:{short:"ARCH",color:"#22d3ee"},Testing:{short:"TEST",color:"#e879f9"}};
 const STATUS_META = {CLOSED:{label:"Closed",color:"var(--primary)"},OPEN:{label:"Open",color:"var(--amber)"},WONTFIX:{label:"Won't fix",color:"var(--zinc)"}};
 const CATS = Object.keys(CAT_META);

@@ -30,13 +30,18 @@ surgery instead:
       (established convention — generate_audit_dash.py parses those tables
       as OPEN, so an archived member left in audit.md double-counts and
       breaks reconcile). Still-open members ride along with the table.
-    - `## Rxx.xx Closures` sections when present in audit.md (rare; they
-      normally land in deltas.md directly at release time)
+      They land before deltas.md's `## Release Delta Log` when present,
+      else at EOF.
     - `> **Rxx.xx delta (...):**` header blockquotes — the per-release
       delta notes move verbatim into deltas.md's `## Release Delta Log`
-      (release order, matching the Closure Timeline convention; releases
-      already logged are skipped). audit.md's header keeps only the
-      metadata block and the `> **Split:**` note.
+      (release order; releases already logged are skipped). audit.md's
+      header keeps only the metadata block and the `> **Split:**` note.
+  DROPS (the Closure Timeline is retired — the Findings Summary +
+  Detailed Findings archive is the historical record):
+    - `## Rxx.xx Closures` sections still present in audit.md. The closure
+      narrative should live in the archived findings' `**Detail:**` prose
+      — author it BEFORE splitting; the section itself is deleted with a
+      warning listing what was discarded.
   UPDATES (mechanical counts only):
     - audit.md: "N Open Findings", "Severity: X High | Y Medium | Z Low",
       "N OPEN (CLOSED + WONTFIX archived …)", and the "> **Split:**" line
@@ -44,7 +49,6 @@ surgery instead:
   DOES NOT TOUCH (regenerate manually after a split):
     - Executive Summary, Priority Matrix (a fresh Rxx.xx delta blockquote
       is authored in audit.md at the next release)
-    - closure-timeline prose / "## Rxx.xx Closures" sections in deltas.md
     - brief.md, CHANGELOG.md, version files
 
 Insertion positions are canonical: summary rows land before the first
@@ -423,9 +427,9 @@ def plan_delta_log_insertions(de, deltas_lines, delta_blocks):
     """Insert delta blockquotes into deltas.md's '## Release Delta Log'
     section, creating the section at the end of the file when absent.
 
-    Blocks land in release order (oldest first, matching the Closure
-    Timeline convention). Releases already logged are skipped, so the
-    move is idempotent and never duplicates hand-curated notes.
+    Blocks land in release order (oldest first). Releases already logged
+    are skipped, so the move is idempotent and never duplicates
+    hand-curated notes.
     """
     if not delta_blocks:
         return []
@@ -538,10 +542,6 @@ def nf_table_block(lines, nf):
             end -= 1
     block = list(lines[nf["heading_idx"]:end + 1])
     return block + ["", "---", ""]
-
-
-def closure_block(lines, cs):
-    return list(lines[cs["heading_idx"]:cs["content_end"] + 1]) + ["", "---", ""]
 
 
 # ─── meta (for the from-scratch deltas.md case) ────────────────────────────
@@ -678,7 +678,7 @@ def plan_row_insertions(edit, existing_rows, new_rows, table):
 
 
 def build_deltas_from_scratch(meta, moved_rows, blocks_by_cat, nf_blocks,
-                              closure_blocks, delta_blocks, batch, today):
+                              delta_blocks, batch, today):
     closed = sum(1 for r in moved_rows if r.status == "CLOSED")
     wontfix = sum(1 for r in moved_rows if r.status == "WONTFIX")
     lines = [
@@ -705,17 +705,13 @@ def build_deltas_from_scratch(meta, moved_rows, blocks_by_cat, nf_blocks,
     for r in sorted(moved_rows, key=lambda r: row_sort_key(r.severity, r.category, r.id)):
         lines.append(r.raw)
     lines += ["", "---", "", "## Detailed Findings (Archived)", "",
-              "<!-- Closed + WONTFIX detail sections. -->", ""]
+              "<!-- Closed + WONTFIX detail sections. Each finding's closure/WONTFIX\n"
+              "     prose (**Detail:** …) is the historical record — the Closure\n"
+              "     Timeline is retired. -->", ""]
     for cat in sorted(blocks_by_cat, key=lambda c: CAT_RANK.get(c, 9)):
         lines.append(f"### {cat}")
         lines.append("")
         for block in blocks_by_cat[cat]:
-            lines.extend(block)
-            lines.append("")
-    if closure_blocks:
-        lines += ["## Closure Timeline", "",
-                  "<!-- The dashboard's closure-timeline cards parse these sections. -->", ""]
-        for block in closure_blocks:
             lines.extend(block)
             lines.append("")
     if nf_blocks:
@@ -827,7 +823,9 @@ def split(audit_path, deltas_path, dry_run=False):
         _log(f"  New Findings tables moving to deltas.md: "
              f"{', '.join(s['release'] for s in nf_to_move)}")
     if closure_secs:
-        _log(f"  Closures sections moving to deltas.md: "
+        _log(f"  Closures sections DROPPED from audit.md (Closure Timeline "
+             f"retired — author closure prose into the archived detail "
+             f"sections first): "
              f"{', '.join(s['release'] for s in closure_secs)}")
     if delta_blocks:
         _log(f"  delta blockquotes moving to deltas.md Release Delta Log: "
@@ -847,8 +845,6 @@ def split(audit_path, deltas_path, dry_run=False):
         _log("  - author closure/WONTFIX detail prose for the sections flagged above")
         _log("  - regenerate the Executive Summary + Priority Matrix markers "
              "(a fresh Rxx.xx delta blockquote is authored at the next release)")
-        _log("  - add the '## Rxx.xx Closures' timeline section in deltas.md "
-             "(drives the dashboard closure card)")
         _log("  - refresh brief.md / CHANGELOG at release time")
         return 0
 
@@ -898,12 +894,11 @@ def split(audit_path, deltas_path, dry_run=False):
         ]
     nf_blocks = [nf_table_block(audit_lines, s)
                  for s in sorted(nf_to_move, key=lambda s: version_tuple(s["release"]))]
-    closure_blocks = [closure_block(audit_lines, s) for s in closure_secs]
 
     if not deltas_exists:
         meta = extract_meta(audit_content)
         deltas_out = build_deltas_from_scratch(
-            meta, archived_rows, blocks_by_cat, nf_blocks, closure_blocks,
+            meta, archived_rows, blocks_by_cat, nf_blocks,
             delta_blocks, batch, today)
     else:
         de = FileEdit(deltas_lines)
@@ -928,7 +923,9 @@ def split(audit_path, deltas_path, dry_run=False):
                 anchor = _new_group_anchor(deltas_groups, cat, deltas_lines)
                 de.insert_before(anchor, [f"### {cat}", ""] + payload)
         if nf_blocks:
-            anchor = find_heading_idx(deltas_lines, r"^##\s+Closure Timeline")
+            # New Findings tables land before the Release Delta Log when it
+            # exists, else at EOF (the Closure Timeline is retired)
+            anchor = find_heading_idx(deltas_lines, r"^##\s+Release Delta Log")
             payload = []
             for block in nf_blocks:
                 payload.extend(block)
@@ -936,15 +933,6 @@ def split(audit_path, deltas_path, dry_run=False):
                 de.insert_before(anchor, payload)
             else:
                 de.insert_after(last_non_blank_idx(deltas_lines), payload)
-        if closure_blocks:
-            payload = []
-            if find_heading_idx(deltas_lines, r"^##\s+Closure Timeline") is None:
-                payload += ["## Closure Timeline", "",
-                            "<!-- The dashboard's closure-timeline cards parse "
-                            "these sections. -->", ""]
-            for block in closure_blocks:
-                payload.extend(block)
-            de.insert_after(last_non_blank_idx(deltas_lines), payload)
         plan_delta_log_insertions(de, deltas_lines, delta_blocks)
         apply_deltas_header_updates(de, total_closed, total_wontfix,
                                     total_archived, batch, today)
@@ -969,8 +957,6 @@ def split(audit_path, deltas_path, dry_run=False):
     _log("  - author closure/WONTFIX detail prose for the sections flagged above")
     _log("  - regenerate the Executive Summary + Priority Matrix markers "
          "(a fresh Rxx.xx delta blockquote is authored at the next release)")
-    _log("  - add the '## Rxx.xx Closures' timeline section in deltas.md "
-         "(drives the dashboard closure card)")
     _log("  - refresh brief.md / CHANGELOG at release time")
     return 0
 
