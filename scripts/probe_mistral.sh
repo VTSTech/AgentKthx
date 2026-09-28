@@ -238,12 +238,27 @@ def catalog_key(live_id: str) -> str:
     lid = lid.replace("open-mistral-", "mistral-").replace("open-mixtral-", "mistral-")
     return lid
 
+def catalog_lookup(live_id: str):
+    """Try the catalog with progressively looser key matches:
+       1. catalog_key(live_id) as-is
+       2. catalog_key(live_id) + '-latest' fallback
+       Returns (catalog_key_or_None, catalog_meta_or_None)."""
+    k = catalog_key(live_id)
+    if k in CATALOG:
+        return k, CATALOG[k]
+    # Try +'-latest' fallback so 'magistral-small-2411' (-> 'magistral-small')
+    # matches catalog key 'magistral-small-latest'.
+    k2 = k + "-latest"
+    if k2 in CATALOG:
+        return k2, CATALOG[k2]
+    return None, None
+
 def is_free(model_id: str) -> bool:
     """Mirror of _is_free_model() in mistral.py."""
     key = catalog_key(model_id)
     if key.startswith("labs-"):
         return True
-    meta = CATALOG.get(key)
+    _, meta = catalog_lookup(model_id)
     if not meta:
         return False
     return meta["in"] == 0.0 and meta["out"] == 0.0
@@ -264,28 +279,28 @@ def family_of(model_id: str) -> str:
     return "other"
 
 def get_ctx(model_id: str, m_card: dict) -> str:
-    key = catalog_key(model_id)
     live = m_card.get("max_context_length")
-    cat = CATALOG.get(key, {}).get("ctx")
     if live:  return str(live)
-    if cat:   return f"{cat}(cat)"  # from catalog
+    _, meta = catalog_lookup(model_id)
+    if meta and meta.get("ctx"):
+        return f"{meta['ctx']}(cat)"  # from catalog
     return "—"
 
 def get_max_tok(model_id: str) -> str:
-    key = catalog_key(model_id)
-    cat = CATALOG.get(key, {}).get("max_tok")
-    return f"{cat}(cat)" if cat else "—"
+    _, meta = catalog_lookup(model_id)
+    if meta and meta.get("max_tok"):
+        return f"{meta['max_tok']}(cat)"
+    return "—"
 
 def get_size(m_card: dict) -> str:
     s = m_card.get("size")
     return str(s) if s else "—"
 
 def get_pricing(model_id: str) -> str:
-    key = catalog_key(model_id)
-    cat = CATALOG.get(key)
-    if not cat:  return "—"
-    if cat["in"] == 0.0 and cat["out"] == 0.0:  return "$0/$0(cat)"
-    return f"${cat['in']}/${cat['out']}(cat)"
+    _, meta = catalog_lookup(model_id)
+    if not meta:  return "—"
+    if meta["in"] == 0.0 and meta["out"] == 0.0:  return "$0/$0(cat)"
+    return f"${meta['in']}/${meta['out']}(cat)"
 
 print(f"\n{CYAN}── 5. Per-model detail ──{NC}")
 print(f"  (Free rule: labs- prefix OR catalog pricing.input==0 AND pricing.output==0)")
@@ -328,9 +343,22 @@ if paid_models:
         print(f"    ... + {len(paid_models) - 5} more")
 
 # Catalog drift (with date-version stripping so aliases don't mask drift)
-live_keys = {catalog_key(m.get("id", "")) for m in models if m.get("id")}
-in_live_not_catalog = sorted(live_keys - set(CATALOG.keys()))
-in_catalog_not_live = sorted(set(CATALOG.keys()) - live_keys)
+# For drift detection: a live id 'matches' the catalog if catalog_lookup()
+# resolves it (either direct, date-stripped, or +'-latest' fallback).
+matched_keys = set()
+for m in models:
+    if not m.get("id"):
+        continue
+    k, _ = catalog_lookup(m["id"])
+    if k:
+        matched_keys.add(k)
+# unmatched live ids (drift candidates) — for reporting only
+unmatched_live_ids = sorted({
+    m.get("id", "") for m in models
+    if m.get("id") and not catalog_lookup(m["id"])[0]
+})
+in_live_not_catalog = unmatched_live_ids
+in_catalog_not_live = sorted(set(CATALOG.keys()) - matched_keys)
 
 print(f"\n  Static MISTRAL_MODELS catalog size:  {len(CATALOG)}")
 print(f"  In live API but NOT in catalog:      {len(in_live_not_catalog)}")
