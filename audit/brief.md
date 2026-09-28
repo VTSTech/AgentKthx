@@ -1,7 +1,7 @@
 # Codebase Intelligence Brief: AgentKthx
 
-> Generated: 2026-09-27 | Auditor: Super-Z (GLM) via `codebase-audit` v0.2.0 | Commit: `97fa6cc` (R07.06, PyPI 0.7.06)
-> Supersedes: R07.04 brief (2026-09-26) — regenerated because R07.05 + R07.06 touched 9 of the 10 Critical Files Index entries, added 2 new backends, and closed 14 audit findings (9 in R07.05 + 6 in R07.06, plus 1 WONTFIX). Test suite 984 → 1461 (+477). 28 source files, +2,881 / −789 LOC delta.
+> Generated: 2026-09-28 | Auditor: Super-Z (GLM) via `codebase-audit` v0.2.0 | Commit: `1033b6b` (R07.11, PyPI 0.7.11)
+> Supersedes: R07.06 brief (2026-09-27) — updated in the R07.11 re-audit pass: +2 plugins since (mistral R07.09, pollinations R07.11 → 12 plugins / 7 cloud backends / 11 backend types), suite 1461 → 1751 passed (+290), register 98 → 104 findings (62 open). Full regeneration still due — this pass refreshed the header, suite counts, and the audit-findings sections.
 
 ---
 
@@ -13,7 +13,7 @@
 | **Tech Stack** | Python >= 3.12, **zero runtime dependencies** (`dependencies = []` — stdlib `urllib`/`json`/`sqlite3`/`ast`/`subprocess`/`socket`/`ipaddress`/`threading` only); dev: pytest/black/ruff |
 | **Entry Point** | Console script `agentkthx` → `agentkthx.cli:main` → `cli/main.py:main()` → `cli/parser.py` dispatch → `cli/commands/<cmd>.py` |
 | **Build/Run** | `pip install agentkthx` (PyPI 0.7.06) or `pip install -e .` from source; `agentkthx chat`, `agentkthx version`, `agentkthx models`, etc. (84+ CLI flags across 15 subcommands) |
-| **Test Command** | `python -m pytest tests/ -q` → **1461 passed / 9 skipped in ~25s** (was 984 in R07.04, +477); CI matrix Python 3.12 / 3.13 in `.github/workflows/ci.yml`, parallel `coverage` job uploads 30-day `coverage.xml` artifact |
+| **Test Command** | `python -m pytest tests/ -q` → **1751 passed / 16 skipped in ~25s** (was 1461 / 9 at R07.06; +290 across R07.07–R07.11, incl. +94 for the pollinations plugin); CI matrix Python 3.12 / 3.13 in `.github/workflows/ci.yml`, parallel `coverage` job uploads 30-day `coverage.xml` artifact |
 
 ---
 
@@ -246,7 +246,7 @@ Key coupling points:
 | **Security** | Defense-in-depth: `validate_path` (allowed-prefix; **still uses abspath not realpath — ROB-09 open**), `sanitize_command` (regex denylist + R07.05 shell block + heredoc detection), `is_safe_url` (R07.05 `ipaddress`-based with DNS resolution; **NEW SEC-11 unbounded getaddrinfo**), `safe_eval` (AST walker), `sanitize_tool_output` (R07.05 tool-output wrapping), plugin `sha256` pin verification (R07.05, opt-in) |
 | **Optional features** | 3 try/except ImportError blocks in `__init__.py` (PersistentMemory, ACPPlugin, Soul) — silent `None` on failure, no warning |
 | **Plugin manifest** | Dual-form: legacy top-level fields + `extensions["org.vts-tech.agentkthx"]` namespace. `compatibility` constraints warn-only. **R07.05 NEW**: optional `sha256` field for content verification (string=package `__init__.py`; dict=relative file paths) |
-| **Backend abstraction** | `is_cloud: bool` attribute on `BaseBackend`. R07.05 NEW `CloudBackend` base class in `backends/cloud_base.py` consolidates ~5K LOC of duplicated cloud-backend boilerplate. New cloud backend = ~100 LOC instead of ~1500 LOC |
+| **Backend abstraction** | `is_cloud: bool` attribute on `BaseBackend`. R07.05 NEW `CloudBackend` base class in `backends/cloud_base.py` consolidates ~5K LOC of duplicated cloud-backend boilerplate. New cloud backend = ~100 LOC instead of ~1500 LOC. Cloud backends as of R07.11 (7): zai, openrouter, gemini, openai, huggingface, mistral (R07.09), pollinations (R07.11 — the ONLY keyless/anonymous-tier backend; `poll` alias) |
 | **Memory** | Sliding window on message count (`max_messages`); R07.06 NEW token-based second pruning tier (`MemoryConfig.max_tokens`, default `0` = disabled, opt-in via `MemoryConfig(max_tokens=100000)`). Long agentic runs rely on `CompactionMixin` at 85% num_ctx |
 | **Soul loading** | 5-step path resolution: absolute → CWD-relative → `agentkthx.__file__` parent → `importlib.resources` → repeat with name suffix |
 | **File naming** | `snake_case.py` for modules, `PascalCase` for classes, `SCREAMING_SNAKE` for module constants |
@@ -323,7 +323,7 @@ Key coupling points:
 
 ## What's Missing / Incomplete
 
-1. **No integration tests** — All 1461 tests are mocked unit tests. TEST-01 still open. Coverage baseline: 42.7% line coverage (R07.01).
+1. **No integration tests** — All 1751 tests are mocked unit tests. TEST-01 still open. Coverage baseline: 42.7% line coverage (R07.01).
 2. **No `black --check` or `ruff check` in CI** — TEST-06 still open.
 3. **No `mypy` / type checking** — `pyproject.toml` has no `[tool.mypy]` section.
 4. **No `CONTRIBUTING.md`** — `docs/CREDITS.md` lists contributors but no guide.
@@ -340,6 +340,8 @@ Key coupling points:
 15. **ARCH-01 still open** — Backends split across `backends/` (native) and `plugins/` (cloud). New `CloudBackend` lives in `backends/` but OrcaRouter plugin that uses it lives in `plugins/`.
 16. **`PersistentMemory.add()` does two lock acquisitions** (`_write_message` + `_touch_session`) — interleaving risk + 2× commit per message. **NEW finding ROB-15.**
 17. **`_write_lock` is `threading.Lock`, not `RLock`** — brittle if future code adds nested locked calls. **NEW finding ROB-18.**
+18. **Pollinations catalog is key-scoped** — keyed `GET /v1/models` silently drops every `paid_only` model (307 anon vs 134 keyed cards, verified 2026-09-28); `POLLINATIONS_ANON_CATALOG=1` fetches the public catalog while keeping generation keyed. Zero-cost models are encoded as currency-only pricing dicts (NOT zero-valued fields). **NEW findings ROB-31, FEAT-08, TEST-10 (R07.11 re-audit).**
+19. **Cloud-backend retry skeleton copy-paste family** — third consecutive backend carries ~80 duplicated LOC (MAINT-11 closed → ROB-29 → **NEW MAINT-23**); provider error prose injection reopened twice (SEC-14 closed → SEC-18 → **NEW SEC-19**). Lifting the retry primitive + a shared `sanitize_provider_message()` to `CloudBackend` closes four findings at once.
 
 ---
 

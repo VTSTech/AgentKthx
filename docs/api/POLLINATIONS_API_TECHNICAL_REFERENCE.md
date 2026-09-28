@@ -2,8 +2,9 @@
 
 > **Technical Implementation Guide**
 > **Generated from**: https://gen.pollinations.ai/docs (API docs v0.3.0, OpenAPI 3.1.0) and https://github.com/pollinations/pollinations/blob/master/APIDOCS.md, verified against the live `/v1/models` catalog on 2026-09-27
+> **Live-behavior corrections**: 2026-09-28 — catalog entitlement scoping, zero-cost pricing encoding, rolling health telemetry (marked ⚠️ throughout)
 > **Primary focus**: Unified gateway `https://gen.pollinations.ai` (OpenAI-compatible) with legacy `text.pollinations.ai` / `image.pollinations.ai` surfaces
-> **Last Updated**: 2026-09-27
+> **Last Updated**: 2026-09-28
 > **Target Audience**: AgentKthx Developers
 
 ## Table of Contents
@@ -89,7 +90,7 @@ custom headers (image/audio `GET` endpoints and WebSocket realtime sessions).
 | Endpoint group | Auth |
 |---|---|
 | `GET /{id}`, `GET /{id}/metadata`, `HEAD /{id}` | None — media URLs are public reads |
-| `GET /models`, `GET /v1/models`, `GET /image/models`, `GET /text/models`, `GET /audio/models`, `GET /embeddings/models` | None — model catalog is public. Sending a bearer key returns the same data; some endpoints add per-account fields when authenticated |
+| `GET /models`, `GET /v1/models`, `GET /image/models`, `GET /text/models`, `GET /audio/models`, `GET /embeddings/models` | None — model catalog endpoints are public. ⚠️ **Keyed ≠ anonymous** (verified 2026-09-28): sending a Bearer key to `GET /v1/models` scopes the catalog to the key's entitlements — every `paid_only` model silently drops out (observed: 307 cards anonymous vs 134 cards with a test key). Fetch catalogs with NO Authorization header unless you intentionally want the entitlement view; the `?key=` query form scopes identically |
 | Everything else | Bearer key required (unless the endpoint documents `?key=` support) |
 
 ### API Endpoints (AgentKthx-relevant)
@@ -117,7 +118,10 @@ REALTIME_WS_V1   = "/v1/realtime"        #      Realtime protocol events
 EMBEDDINGS       = "/embeddings"         # POST — OpenAI compatible
 
 # ─── Discovery & account ─────────────────────────────────────────
-MODELS           = "/models"             # GET — OpenAI-shaped catalog (311 entries)
+MODELS           = "/models"             # GET — bare catalog: RAW name-keyed JSON array
+                                         #        (NOT the /v1 envelope) with a richer
+                                         #        schema — the ONLY feed carrying
+                                         #        paid_only (the tier boundary)
 ACCOUNT_BALANCE  = "/account/balance"    # GET — pollen balance
 ACCOUNT_QUESTS   = "/account/quests"     # GET — quest catalog + status
 ACCOUNT_USAGE    = "/account/usage"      # GET — per-request history (JSON/CSV)
@@ -270,8 +274,9 @@ adapter); Chat-only registrations accept Chat Completions only.
 
 ### Catalog Shape
 
-`GET /v1/models` returns the OpenAI list envelope with **311 model cards**
-(verified 2026-09-27):
+`GET /v1/models` returns the OpenAI list envelope (**311 cards at the 2026-09-27
+snapshot; live count drifts with real-time community churn — 307–308 observed
+2026-09-28, with publisher paths renaming between requests**):
 
 ```json
 {
@@ -279,6 +284,26 @@ adapter); Chat-only registrations accept Chat Completions only.
   "data": [ /* model cards */ ]
 }
 ```
+
+⚠️ **Catalog entitlement scoping (verified 2026-09-28).** The envelope is
+OpenAI-shaped, but the CONTENT is key-scoped: send `Authorization: Bearer`
+and the gateway filters `data` down to the key's entitlements. Observed with
+a test key: **307 cards anonymous vs 134 keyed** — the keyed feed is EXACTLY
+the `paid_only != True` subset of the bare `GET /models` feed (the free
+TIER: Quest-Pollen-eligible models — still metered pollen per token, but
+runnable on the free grant). The `paid_only` boundary field itself appears
+ONLY on the bare `GET /models` feed (name-keyed, richer schema: `paid_only`,
+`pricing_default_label`, `pricing_variants`, `publisher`, `is_specialized`)
+— `/v1/models` cards never carry it. Consequences:
+
+- Catalog clients that want the full public view must send NO Authorization
+  header even when they hold a key (AgentKthx: `POLLINATIONS_ANON_CATALOG=1`
+  does exactly this — catalog GET anonymous, generation POST keyed).
+- The keyed feed still carries every zero-cost model (verified: all 16
+  `:free` community cards on 2026-09-28), so zero-cost model discovery
+  works in either view.
+- Community cards churn between requests (adds/removes/renames); treat ±1–2
+  card count deltas between runs as normal live drift, not client bugs.
 
 ### Model Card Schema
 
@@ -324,11 +349,11 @@ logic:
 | `community` | `true` = user-published model with `community/owner/model` id |
 | `input_modalities` / `output_modalities` | Vision/audio/video support sniffing |
 | `supported_endpoints` | Which API surfaces the model accepts |
-| `pricing` | Pollen per **single token** (dashboard displays per 1M) |
+| `pricing` | Pollen per **single token** (dashboard displays per 1M). ⚠️ Zero-cost models are encoded as a currency-only dict `{"currency": "pollen"}` with NO price fields — price fields are never zero-valued on the live feed |
 | `capabilities` / `tools` / `reasoning` | Capability sniffing for `test_tool_support()` |
 | `supported_parameters` | Per-model request-param allowlist |
 | `context_length` | Feed the context-recovery divisor in the backend |
-| `health.status` / `health.success_rate` | **Fallback ordering** — prefer healthy, high-success models |
+| `health.status` / `health.success_rate` | **Fallback ordering** — prefer healthy, high-success models. ⚠️ Telemetry is a ROLLING window (request counts observed DECREASING across runs: 64642 → 64511 → 64446 for the same card); weigh `success_rate` by `requests` volume — `sr=100` off 1 request is weak evidence |
 
 Specialized catalogs expose the same cards through category endpoints:
 `GET /text/models`, `GET /image/models`, `GET /video/models`,
@@ -936,13 +961,22 @@ is genuinely free:
 2. **Quest Pollen** — free credits earned through the quest catalog; enough
    for meaningful personal use of cheap text models (e.g. `gpt-5.4-nano` at
    0.15 pollen/1M prompt tokens is very cheap per request).
-3. **Free community models** — community publishers can list models at price
-   0 (`GET /v1/models` filter `pricing` + `community: true`).
+3. **Zero-cost community models** — community publishers can list models at
+   zero cost (16 live on 2026-09-28). ⚠️ They are NOT marked with price `0`:
+   the encoding is a currency-only `pricing` dict (`{"currency": "pollen"}`
+   with NO price fields — the `:free`/`-free` id variants). Detect them on
+   `GET /v1/models` with `set(pricing.keys()) <= {"currency"}` plus
+   `community: true` — filtering for zero-valued price fields matches
+   NOTHING on the live feed.
 4. **Public model catalogs and media reads** — zero-cost metadata.
 
 ⚠️ Models can be marked `paidOnly`, which restricts them to Paid Pollen —
 Quest Pollen is rejected even when its balance is positive. Community
-publishers set this flag when upstream bills per use.
+publishers set this flag when upstream bills per use. The flag surfaces as
+`paid_only` on the bare `GET /models` feed (`True` = paid tier;
+absent/`False` = free TIER), and it also SCOPES the keyed `/v1/models`
+catalog: a Bearer key's model list silently excludes every `paid_only`
+model (see [Catalog entitlement scoping](#catalog-shape) above).
 
 ### Balance & Usage Inspection
 

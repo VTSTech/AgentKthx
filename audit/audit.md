@@ -1,13 +1,15 @@
 # Improvement & Enhancement Audit
 
-**AgentKthx v0.7.10 (R07.10 — development release)**
+**AgentKthx v0.7.11 (R07.11 — feature release)**
 
 **Repository:** https://github.com/VTSTech/AgentKthx  
 **Author:** VTSTech | **License:** MIT | **Date:** 2026-09-28  
-**Commit:** (working tree post-R07.10) | **Test Suite:** 1660 passed / 13 skipped  
-56 Open Findings | 7 Categories | SEC, ROB, MAINT, PERF, FEAT, ARCH, TEST  
-Severity: 0 High | 22 Medium | 34 Low  
-56 OPEN (CLOSED + WONTFIX archived in deltas.md — generate_audit_dash.py merges both for the dashboard)
+**Commit:** 1033b6b | **Test Suite:** 1751 passed / 16 skipped  
+62 Open Findings | 7 Categories | SEC, ROB, MAINT, PERF, FEAT, ARCH, TEST  
+Severity: 0 High | 24 Medium | 38 Low  
+62 OPEN (CLOSED + WONTFIX archived in deltas.md — generate_audit_dash.py merges both for the dashboard)
+
+> **R07.11 delta (feature release):** 12th plugin added (`pollinations` — unified-gateway cloud backend at gen.pollinations.ai/v1, keyless-tolerant, 94 tests, plugin v0.1.2 after two live-gateway discoveries were fixed intra-release: catalog entitlement scoping → `POLLINATIONS_ANON_CATALOG`; currency-only zero-cost pricing encoding → `_card_is_free` rewrite). Post-release audit pass opened **6 new findings** from the pollinations plugin code (SEC-19, ROB-30, ROB-31, MAINT-23, FEAT-08, TEST-10) and wrote the 6 pending R07.09 per-finding detail sections (MAINT-21/22, ROB-28/29, SEC-18, TEST-09 were table-only since R07.09). Technical reference doc corrected against verified live-gateway behavior (entitlement scoping, zero-cost encoding, rolling health telemetry). Suite 1660 → 1751 (+91). Register 98 → 104 findings. No closures this release.
 
 > **R07.10 delta (development release for GitHub):** Four fixes bundled: (1) `web_search` UA fix — DuckDuckGo now blocks non-browser UAs; tool now spoofs Firefox UA + sends Accept headers, also renamed from `web-search` to `web_search` (matching Python convention). (2) OpenRouter `openrouter/free` named router added to free whitelist — was previously filtered out by `:free`-suffix-only check. (3) OrcaRouter `orcarouter/free` confirmed already in whitelist — no change needed. (4) **user-reported crash**: `agentkthx chat -m openrouter/free --backend openrouter` failed with `'<' not supported between instances of 'int' and 'NoneType'` — OpenRouter API returns `max_completion_tokens: null` for the router; `dict.get(k, default)` returns None (not the default) when the key exists with value None; the None propagated to `min(None, int)` in `_apply_max_tokens_cap`. Fixed by coercing None → 4096 at parse time. +6 new tests. Suite 1654 → 1660 (+6). No audit findings closed; 6 R07.09 findings remain OPEN (per-finding detail sections still pending).
 
@@ -26,13 +28,13 @@ Severity: 0 High | 22 Medium | 34 Low
 
 ## Executive Summary
 
-This audit covers AgentKthx at commit `2e25bfc` (R07.09, PyPI 0.7.09). The codebase now comprises 121 Python source files totaling ~52,487 LOC (was 51,000 in R07.08) with ~21,337 lines of tests across 53 test files (was 52). The R07.00 modularization (5-mixin `Agent` composition, 23-file `cli/` package) is stable. The test suite passes **1654 tests / 13 skipped in ~27s** (was 1590 / 9 skipped in R07.08, +64 tests), with CI running on Python 3.12/3.13 plus a parallel coverage job.
+This audit covers AgentKthx at commit `1033b6b` (R07.11, PyPI 0.7.11). The codebase now comprises 123 Python source files totaling ~54,464 LOC (was ~52,487 at the R07.09 audit) with ~22,718 lines of tests across 55 test files (was 53). The R07.00 modularization (5-mixin `Agent` composition, 23-file `cli/` package) remains stable. The test suite passes **1751 tests / 16 skipped in ~25s** (was 1660 / 13 at R07.10, +91 tests — 88 unit + 3 new live-gated), with CI running on Python 3.12/3.13 plus a parallel coverage job.
 
-R07.09 was a **feature release** rather than an audit-closure release: it added the 11th bundled plugin (`mistral` — Mistral La Plateforme backend with a 15-model catalog and full wire-format delta coverage). A streaming-transport bug in the initial R07.09 draft (missing `_iter_sse_lines()` abstract hook) was caught by user testing before release and fixed in the same release — the bug surfaced when running `agentkthx chat --backend mistral --model labs-leanstral-1-5-1` against the live API. **No audit findings were closed in R07.09.** The bug-surfaces-as-finding pattern produced TEST-09: plugin scaffolds need a "the agent loop's streaming path actually calls through to the backend" smoke test, not just "the streaming method exists on the class."
+R07.11 was a **feature release**: it added the 12th bundled plugin (`pollinations` — the unified-gateway cloud backend at `gen.pollinations.ai/v1`, the 7th cloud backend and 11th `BackendType`, and the ONLY backend that runs keyless on the anonymous tier). Two live-gateway behaviors that contradict the technical reference were caught by user VM testing and fixed intra-release (plugin v0.1.0 → v0.1.2): catalog entitlement scoping (keyed `GET /v1/models` silently drops every `paid_only` model — 307 anonymous vs 134 keyed cards; contradicts the doc's "bearer key returns the same data" claim) and currency-only zero-cost pricing encoding (free models carry `pricing == {"currency": "pollen"}` with NO price fields — never zero-valued fields; the zero-valued-field predicate made FREE_ONLY list 0 models on every live feed). Both behaviors are now documented in the corrected technical reference and encoded in the probe script's free-model discovery section. **No audit findings were closed in R07.11.**
 
-This re-audit added **6 new findings** from the Mistral plugin code (MAINT-21 operator-precedence bug in error-envelope check, MAINT-22 streaming path bypasses Mistral-specific body shaping, ROB-28 catch-all `Exception` masks real bugs in `list_models`, ROB-29 ~80 LOC of duplicated retry/backoff between `_iter_sse_lines` and `_make_api_request`, SEC-18 provider-controlled error message surfaces in RuntimeError prose, TEST-09 plugin scaffolds miss agent-loop streaming-path integration test). **The R07.09 release notes' initial claim of "no new audit findings opened by R07.09" was wrong; this re-audit corrects it.** The next highest-leverage closures remain SEC-11 (bounded `getaddrinfo`), ROB-15 (PersistentMemory transaction), SEC-13 (plugin pin enforcement), MAINT-01 (extract `ChatSession`), and TEST-01 (integration test tier). ROB-29 (Mistral retry duplication) is the new MAINT-11 equivalent and should be picked up by the same `_classify_and_handle_http_error` helper extracted in R07.08 — the helper currently lives on `OrcaRouterBackend` and needs lifting to `CloudBackend` so all cloud backends can share it.
+This re-audit added **6 new findings** from the pollinations plugin code (SEC-19 provider-controlled error prose in RuntimeError messages — aggravated by user-published community routers, ROB-30 catch-all `Exception` in `_fetch_model_cards` silently degrading to the static catalog, ROB-31 `healthy_fallbacks()` under `ANON_CATALOG` ranking out-of-entitlement models — 8 of the anonymous top-10 are `paid_only`, MAINT-23 the third consecutive ~80-LOC retry-loop duplication, FEAT-08 the `paid_only` free TIER unreachable as a filter mode, TEST-10 zero live-shape coverage for free-model detection — the exact gap that let v0.1.2's bug ship). The 6 pending R07.09 detail sections are now written (they had been table-only since the R07.09 audit). The cloud-backend finding FAMILY is now the clearest consolidation target: MAINT-11 (OrcaRouter, closed R07.08) → ROB-29 (Mistral) → MAINT-23 (Pollinations) is the same ~80-LOC retry-skeleton copy-paste three times over, and SEC-14 (closed) → SEC-18 → SEC-19 is the same provider-prose injection twice reopened — lifting the R07.08 `_classify_and_handle_http_error` helper to `CloudBackend` plus one shared `sanitize_provider_message()` closes four findings in two moves. The next highest-leverage closures otherwise remain SEC-11 (bounded `getaddrinfo`), ROB-15 (PersistentMemory transaction), SEC-13 (plugin pin enforcement), MAINT-01 (extract `ChatSession`), and TEST-01 (integration test tier).
 
-Cumulative closure state: **33 of 98 findings (34%)** closed across R07.00 → R07.08 (4 in R07.04 + 9 in R07.05 + 6 in R07.06 + 11 in R07.07 + 3 in R07.08), plus 5 WONTFIX. R07.09 added 6 new OPEN findings (no closures, no WONTFIX). The audit-tracked finding discipline (SEC/ROB/MAINT/PERF/FEAT/ARCH/TEST ID system with closure deltas) continues to catch real issues — the R07.09 streaming bug is itself a finding-of-omission (TEST-09) that the new `TestIterSseLines` class now closes.
+Cumulative closure state: **37 CLOSED + 5 WONTFIX of 104 findings (36%)** by mechanical table count (the pre-R07.11 Executive Summary's "33 of 98" prose was stale — the R07.10 entry already noted the prose-vs-table discrepancy; this re-audit adopts the mechanical count the dashboard reconciles against). Closures span R07.00 → R07.08 (4 + 9 + 6 + 11 + 3). R07.09 added 6 and R07.11 added 6 new OPEN findings (no closures in either). The audit-tracked finding discipline (SEC/ROB/MAINT/PERF/FEAT/ARCH/TEST ID system with closure deltas) continues to catch real issues — R07.11's TEST-10 is the third finding-of-omission born from a bug the suite couldn't see but the user could (R07.09 streaming hook, R07.10 null-max-tokens crash, R07.11 zero-cost encoding).
 
 ---
 
@@ -102,6 +104,25 @@ Cumulative closure state: **33 of 98 findings (34%)** closed across R07.00 → R
 | ROB-29 | Low | Robustness | OPEN | MistralBackend _iter_sse_lines + _make_api_request have ~80 LOC duplicated retry/backoff logic — mirrors the MAINT-11 OrcaRouter pattern closed in R07.08 |
 | SEC-18 | Low | Security | OPEN | _parse_mistral_response raises RuntimeError carrying provider-controlled message text — false permanent-error markers could be injected (same shape as SEC-14 closed R07.08) |
 | TEST-09 | Low | Testing | OPEN | Plugin scaffolds don't include a "agent loop streaming path actually calls through" smoke test — R07.09.0 streaming bug caught by user testing, not test suite |
+| SEC-19 | Low | Security | OPEN | PollinationsBackend surfaces provider-controlled error prose in every RuntimeError (_raise_for_status + Provider-error raise) — community routers are user-published upstreams, aggravating the SEC-14/SEC-18 injection shape |
+| ROB-30 | Low | Robustness | OPEN | _fetch_model_cards catch-all Exception silently degrades to the 13-model static catalog — card-parse bugs masquerade as "network down" (ROB-28 pattern, third backend) |
+| ROB-31 | Medium | Robustness | OPEN | healthy_fallbacks() under POLLINATIONS_ANON_CATALOG=1 ranks paid_only models the key cannot generate against — 8 of the anonymous top-10 are out-of-entitlement; fallback redirect 403s |
+| MAINT-23 | Medium | Maintainability | OPEN | _make_api_request + _iter_sse_lines duplicate ~80 LOC of retry-loop skeleton (third consecutive cloud backend — ROB-29/MAINT-11 pattern); helpers are shared but the loop itself is copy-paste |
+| FEAT-08 | Low | New Features | OPEN | Free TIER (paid_only boundary on bare GET /models) unreachable — FREE_ONLY exposes only the 16 zero-cost models, not the ~102 Quest-Pollen-eligible text models the key can run |
+| TEST-10 | Low | Testing | OPEN | Zero live-shape coverage for free-model detection — v0.1.2 shipped with _card_is_free blind to the live currency-only encoding while all 83 fixture tests stayed green |
+
+---
+
+## R07.11 New Findings
+
+| ID | Severity | Category | File(s) | Title |
+|----|----------|----------|---------|-------|
+| SEC-19 | Low | Security | `agentkthx/plugins/pollinations/pollinations.py:1094-1103` + `:1363-1408` | Provider-controlled error prose surfaces in RuntimeError messages (community routers = user-published upstreams) |
+| ROB-30 | Low | Robustness | `agentkthx/plugins/pollinations/pollinations.py:704-711` | `_fetch_model_cards` catch-all `Exception` masks card-parse bugs as catalog outage |
+| ROB-31 | Medium | Robustness | `agentkthx/plugins/pollinations/pollinations.py` (`healthy_fallbacks` + `_fetch_model_cards`) | `healthy_fallbacks()` + ANON_CATALOG ranks out-of-entitlement (`paid_only`) models |
+| MAINT-23 | Medium | Maintainability | `agentkthx/plugins/pollinations/pollinations.py:1414-1512` + `:1540-1638` | ~80 LOC duplicated retry-loop skeleton between `_make_api_request` and `_iter_sse_lines` |
+| FEAT-08 | Low | New Features | `agentkthx/plugins/pollinations/pollinations.py` (`_card_is_free`, `list_models`) | `paid_only` free-TIER filter mode unreachable — bare `/models` boundary never fetched |
+| TEST-10 | Low | Testing | `tests/test_pollinations_backend.py` | No live-shape contract test for free-model detection encoding |
 
 ---
 
@@ -146,6 +167,40 @@ Recommendation: Warn loudly when `ACP_BASE_URL` doesn't start with `https://` an
 
 ---
 
+
+#### SEC-18: Provider-controlled error message surfaces in RuntimeError prose
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Security |
+| **File(s)** | `agentkthx/plugins/mistral/mistral.py:749-752` + `:761` |
+
+`_parse_mistral_response` extracts `message` from the Mistral `{"object": "error"}` (or OpenAI `{"error": {...}}`) envelope and interpolates it directly into `RuntimeError` prose; `_iter_sse_lines`' HTTP-error path repeats the pattern. A malicious or misbehaving upstream (or a gateway in the middle) controls that text — it can carry fake `[Resilience]`-style markers, false permanent-error classification hints, or prompt-injection payloads that later reach logs, the terminal, or LLM context.
+
+This is the same shape as SEC-14 (closed R07.08) — that closure sanitized one path for one backend; the Mistral envelope path reintroduced the pattern. SEC-19 documents the same issue in the Pollinations plugin, where the threat is sharper: `community/*` models are user-published routers, so the upstream producing the error prose is arbitrary user-controlled infrastructure rather than a vetted vendor.
+
+Recommendation: extract a shared `sanitize_provider_message()` helper (truncate to ~200 chars, strip control/escape sequences, drop bracketed markers that resemble harness classification) and route every provider-message interpolation through it. One helper closes SEC-18 + SEC-19 together.
+
+**Impact:** Provider-controlled text flows into error strings consumed by the resilience classifier, logs, and the terminal — false classification markers or injected instructions become possible.
+
+---
+
+#### SEC-19: Pollinations error prose surfaces provider-controlled text in every RuntimeError
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Security |
+| **File(s)** | `agentkthx/plugins/pollinations/pollinations.py:1094-1103` (`_parse_pollinations_response`), `:1363-1408` (`_raise_for_status`) |
+
+`_raise_for_status` interpolates `err_msg` (parsed from the provider's error envelope) into all six error-class messages, and `_parse_pollinations_response` raises `RuntimeError(f"Provider error: {err_msg}...")` on HTTP-200 error wrappers. Same shape as SEC-14/SEC-18 — but the Pollinations threat model aggravates it: `community/*` cards are user-published routers, so the upstream generating the error prose is arbitrary user-controlled infrastructure, not a vetted vendor. The `requestId` interpolation is provider-controlled too.
+
+Recommendation: the shared `sanitize_provider_message()` helper proposed under SEC-18 — one fix closes both findings and pre-empts the pattern in the next cloud backend.
+
+**Impact:** Arbitrary community-upstream text reaches the resilience classifier, logs, the terminal, and potentially LLM context via error-retry paths.
+
+---
 
 ### Robustness
 
@@ -260,6 +315,70 @@ Recommendation: Set `agent._on_step_callback = None` in the `finally:` block of 
 ---
 
 
+#### ROB-28: MistralBackend.list_models catch-all Exception masks real bugs
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Robustness |
+| **File(s)** | `agentkthx/plugins/mistral/mistral.py:500-505` |
+
+`list_models()` wraps catalog fetch + parse in `except Exception` on top of the specific `HTTPError`/`URLError` handlers, returning the static catalog with only a debug-mode print. A `KeyError`/`AttributeError` introduced by a gateway schema change (or by future code edits) is indistinguishable from "network down" — no traceback, no telemetry, silent degradation to the static list.
+
+Recommendation: catch only `(urllib.error.HTTPError, urllib.error.URLError, json.JSONDecodeError, ValueError)` at the boundary; let unexpected exceptions crash loudly (the agent loop's resilience layer already handles backend exceptions).
+
+**Impact:** Catalog-shape regressions look like outages; users browse a stale static list with no signal that live discovery is broken.
+
+---
+
+#### ROB-29: ~80 LOC duplicated retry/backoff between _iter_sse_lines and _make_api_request
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Robustness |
+| **File(s)** | `agentkthx/plugins/mistral/mistral.py:981-1139` + `:1187-1300` |
+
+The streaming and non-streaming paths each hand-roll the full attempt loop: HTTPError status classification, Retry-After parsing, backoff computation, retry-vs-raise decisions, and exhaustion messages — duplicated with small drifts (the ROB-22 exhaustion-message inconsistency came from exactly this kind of drift). This is the MAINT-11 (OrcaRouter) pattern's second occurrence; MAINT-23 (Pollinations) is the third.
+
+Recommendation: lift the R07.08 `_classify_and_handle_http_error` helper from `OrcaRouterBackend` to `CloudBackend` and shape it so both paths consume it; close the whole family in one move (ROB-29 + MAINT-23).
+
+**Impact:** Every new cloud backend re-copies ~80 LOC; drift between the copies produces inconsistent retry behavior (observed once already as ROB-22).
+
+---
+
+#### ROB-30: _fetch_model_cards catch-all Exception silently degrades to the static catalog
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Robustness |
+| **File(s)** | `agentkthx/plugins/pollinations/pollinations.py:704-711` |
+
+Same pattern as ROB-28 (Mistral), third occurrence: `_fetch_model_cards` catches bare `Exception` after the specific HTTP/URL handlers and returns `{}` — the caller falls back to the 13-model static `POLLINATIONS_MODELS` catalog with only an `AGENTKTHX_DEBUG` print. Card-shape bugs (a renamed field, a `None` where a dict is expected) present as "catalog unreachable". The blast radius is larger than Mistral's: the live-card cache also feeds `_first_free_model()` and `healthy_fallbacks()`, so FREE_ONLY redirect quality silently degrades too.
+
+Recommendation: narrow the catch to `(urllib.error.HTTPError, urllib.error.URLError, json.JSONDecodeError)` — the documented failure modes — and let card-shape bugs surface with tracebacks.
+
+**Impact:** Live-catalog regressions masquerade as outages; FREE_ONLY and fallback ordering quietly degrade to a 13-model stale view.
+
+---
+
+#### ROB-31: healthy_fallbacks() under ANON_CATALOG ranks models outside the key's entitlement
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Medium |
+| **Category** | Robustness |
+| **File(s)** | `agentkthx/plugins/pollinations/pollinations.py` (`healthy_fallbacks` + `_fetch_model_cards`) |
+
+With `POLLINATIONS_ANON_CATALOG=1` (the recommended browse configuration for keyed users), `self._model_cards` holds the full 307-card public feed — including all 173 `paid_only` models the key cannot generate against. `healthy_fallbacks()` sorts that cache with no entitlement awareness: at audit time, 8 of the anonymous top-10 were `paid_only`, two of them holding `success_rate=100` off a single request (the rolling-window weakness). A fallback redirect landing on one of these fails at generation time with 403 — the resilience layer then burns retries and provider-failover on a model that could never have succeeded.
+
+Recommendation: when a key is set, either intersect the fallback candidate set with the entitlement feed (fetch both once), or mark cached cards with the bare `/models` `paid_only` boundary before ordering. Also weigh `success_rate` by `requests` volume (the corrected reference doc's guidance) so 1-request `sr=100` entries stop outranking proven models.
+
+**Impact:** The health-ordered fallback chain — the plugin's flagship feature — can consist mostly of models the key can't use, converting a graceful-degradation path into a guaranteed 403 detour.
+
+---
+
 ### Maintainability
 
 #### MAINT-01: `cmd_chat` is a 1,199-line single function with 25+ nested closures and no slash-command dispatcher
@@ -372,6 +491,54 @@ Recommendation: Wrap agent descriptions in XML tags (`<agent name="X">descriptio
 
 ---
 
+
+#### MAINT-21: _parse_mistral_response error-envelope check has operator-precedence bug
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Medium |
+| **Category** | Maintainability |
+| **File(s)** | `agentkthx/plugins/mistral/mistral.py:745` |
+
+`if raw_response.get("object") == "error" or "message" in raw_response and not raw_response.get("choices"):` — Python binds `and` tighter than `or`, so this parses as `(object == "error") or ("message" in raw and no choices)`. Any response carrying a top-level `message` field with no `choices` is classified as an error envelope and raises, even when the gateway meant it as a notice/annotation. Mistral's documented envelope is `{"object": "error", ...}`; the second clause was meant as a fallback heuristic but mis-fires on legitimate shapes.
+
+Recommendation: parenthesize explicitly or drop the heuristic clause and key on the `object` marker the doc specifies; add a regression test with a `{"message": ..., "data": ...}` success shape.
+
+**Impact:** Gateway-side shape drift turns successful responses into raised errors — a correctness landmine one field away from firing.
+
+---
+
+#### MAINT-22: Streaming path bypasses _build_mistral_body — Mistral knobs not sent
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Medium |
+| **Category** | Maintainability |
+| **File(s)** | `agentkthx/plugins/mistral/mistral.py:957-1008` (`_iter_sse_lines`), inherited `generate_completions_stream` |
+
+The inherited `generate_completions_stream()` builds its request body via the generic `_build_openai_body()`; `_build_mistral_body()`'s wire-format deltas (`random_seed` aliasing, `safe_prompt` injection, `prompt_cache_key` from `session_id`, OpenAI-only kwarg stripping) apply to non-streaming only. Streaming works — it just silently drops every Mistral-specific knob. The same gap exists in Pollinations (safe-flag injection is non-streaming-only there too).
+
+Recommendation: route streaming body construction through a backend-owned `_build_body()` virtual the base class calls — one indirection closes both plugins' variant of this.
+
+**Impact:** Users setting MISTRAL_SAFE_PROMPT/POLLINATIONS_SAFE or relying on seed determinism get silently different behavior between streaming and non-streaming turns.
+
+---
+
+#### MAINT-23: Retry-loop skeleton duplicated between _make_api_request and _iter_sse_lines (third backend)
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Medium |
+| **Category** | Maintainability |
+| **File(s)** | `agentkthx/plugins/pollinations/pollinations.py:1414-1512` + `:1540-1638` |
+
+The Pollinations plugin extracted genuinely shared pieces (`_sleep_for_retry`, `_raise_for_status`, `_parse_error_envelope` — better than Mistral's ROB-29 state), but the attempt-loop skeleton is still copy-paste ×2: `for attempt in range(max_retries + 1)` → build request → HTTPError parse → ARCH-03 first-attempt-400 branch → retryable classification → Retry-After sleep → URLError backoff → exhaustion raise. The streaming copy differs only in yielding lines plus the ROB-06 close-guard. Third consecutive cloud backend carrying the pattern (OrcaRouter → Mistral → Pollinations); the family grows ~80 LOC per plugin.
+
+Recommendation: generalize the ROB-29 fix — lift a `CloudBackend` retry-loop primitive (`_request_with_retry(url, body, headers, *, stream=False)`) that returns parsed JSON or yields SSE lines; each backend contributes only body building, response parsing, and error-class prose. Closes the ROB-29 + MAINT-23 family and prevents the fourth occurrence.
+
+**Impact:** ~160 LOC of near-duplicate control flow in one plugin; every retry-policy fix must be applied in both loops (the Retry-After cap already had to be, twice).
+
+---
 
 ### Performance
 
@@ -621,6 +788,22 @@ Proposal: Add `agent.export_session(session_id) -> dict` that returns the conver
 ---
 
 
+#### FEAT-08: paid_only free-TIER filter mode unreachable — bare /models boundary never fetched
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | New Feature |
+| **File(s)** | `agentkthx/plugins/pollinations/pollinations.py` (`_card_is_free`, `list_models`) |
+
+`POLLINATIONS_FREE_ONLY` filters on `_card_is_free()` — the zero-cost tier (currency-only pricing, 16 models live). But Pollinations' practical "free" surface is the free TIER: every `paid_only != True` model (102 text cards, Quest-Pollen-eligible — exactly what the keyed entitlement feed returns and what enter.pollinations.ai labels "free"). That boundary lives only on the bare `GET /models` feed (`paid_only` field), which the plugin never fetches. Result: FREE_ONLY hides ~86 Quest-Pollen-runnable models from users whose key can actually use them.
+
+Proposal: a `POLLINATIONS_FREE_TIER=1` mode (or tri-state FREE_ONLY = off | zero-cost | tier) that fetches the bare feed once, marks cached cards with the tier boundary, and filters/redirects on it. `scripts/probe_pollinations.sh` already demonstrates the full discovery logic to port.
+
+**Impact:** Users who want "everything my key can run without paying cash" get a 16-model subset of the ~102-model tier they're entitled to browse.
+
+---
+
 ### Architecture
 
 #### ARCH-02: `openresponses.stream_response_events` is a 163-line generator mixing protocol logic with state mutation
@@ -868,13 +1051,45 @@ Recommendation: Add tests that inject `URLError`, `socket.timeout`, and malforme
 
 ---
 
+#### TEST-09: Plugin scaffolds miss agent-loop streaming-path integration test
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Testing |
+| **File(s)** | `tests/test_mistral_backend.py` (whole file) |
+
+The R07.09 streaming bug (missing `_iter_sse_lines` abstract hook — first shipped as `NotImplementedError` at chat invocation) was caught by the user's live `agentkthx chat --backend mistral` run, not by the 64-test suite: tests asserted the method existed and unit-tested its pieces, but nothing exercised the agent loop → `generate_completions_stream` → `_iter_sse_lines` call-through. TEST-10 is the same lesson recurring one release later (live feed shape vs fixtures).
+
+Recommendation: a `tests/test_plugin_streaming_integration.py` that instantiates each bundled cloud backend over a mocked HTTP layer and drives one streaming turn through `Agent`-level machinery — one parameterized test, all 7 cloud backends, permanently closes the finding class.
+
+**Impact:** Every new cloud backend can ship the same abstract-hook omission; the suite gives false confidence until a user hits it live.
+
+---
+
+#### TEST-10: No live-shape contract test for free-model detection
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Testing |
+| **File(s)** | `tests/test_pollinations_backend.py` |
+
+The v0.1.2 bug is the evidence: `_card_is_free()` required zero-valued price fields, the live gateway encodes zero-cost as currency-only dicts, and the entire 83-test suite stayed green while FREE_ONLY listed 0 models on every real feed — the fixtures encoded a price-0 shape that never occurs live. The user's "website shows 30 free models, the API shows none" report surfaced it. TEST-09's pattern (user testing catching what fixtures mask), one release later.
+
+Recommendation: a live-gated contract test (skips without `POLLINATIONS_API_KEY`): fetch the real `/v1/models`; if any card carries currency-only pricing, assert `_card_is_free()` is True for it and FREE_ONLY listing is non-empty. Cheap, runs in CI when the secret is configured, and fails the moment the gateway re-encodes the boundary.
+
+**Impact:** Gateway encoding drift is invisible to the suite until a user reports it — the exact class of bug v0.1.2 shipped with.
+
+---
+
 ## Priority Matrix
 
 | Timeline | Findings |
 |----------|----------|
 | **Near term (R07.05–R07.06)** | ~~SEC-02~~ ✓R07.04, ~~SEC-10/FEAT-01~~ ✓R07.04, ~~MAINT-02~~ ✓R07.04, ~~SEC-07~~ ✓R07.05, ~~ROB-03~~ ✓R07.05, ~~ROB-04~~ ✓R07.05, ~~MAINT-04~~ ✓R07.05, ~~MAINT-05~~ ✓R07.05, ~~MAINT-06~~ ✓R07.05, ~~SEC-03~~ ✓R07.05 (ipaddress address-level checks + redirect re-validation), ~~SEC-04~~ ✓R07.05 (shells blocked + heredoc detection), SEC-09 (warn on non-HTTPS ACP), MAINT-01 (extract `ChatSession`), ~~ROB-05~~ ⊘WONTFIX (intentional per owner), TEST-01 (integration test tier) |
-| **Short term (R07.07–R07.10)** | SEC-01 (drop unsafe builtins from sandbox), ~~SEC-06~~ ✓R07.05 (sha256 pinning + perms advisory + trust-boundary docs), ROB-02 (join worker threads), ROB-09 (`realpath` for symlinks), ~~ROB-10~~ ✓R07.06 (permanent-body patterns + optional body arg), MAINT-03 (drop strategy 5 of `normalize_args`), MAINT-08 (extract `StreamAccumulator`), MAINT-10 (escape router prompt), PERF-01/PERF-02 (cache sanitized state), ARCH-01 (unify backend locations), ARCH-05 (replace `**kwargs` with dataclass), TEST-03 (add `FakeStreamingBackend`), TEST-06 (add lint job) |
-| **Medium term (R08.00+)** | SEC-08 (chmod audit log), SEC-05 (strip ANSI), FEAT-02 (per-tool timeouts + concurrent execution), FEAT-03 (tool output schema), FEAT-04 (`--dry-run`), FEAT-05 (plugin sandbox), FEAT-06 (streaming args delta), FEAT-07 (conversation export), MAINT-07/MAINT-09 (consolidate regex patterns), ARCH-02 (extract `SSEEventBuilder`), ARCH-03 (integrate `AgentMode` with OpenResponses), TEST-04 (rollback tests), TEST-05 (rewrite bump-version test), TEST-07 (update_check failure paths), TEST-08 (sandbox adversarial tests) |
+| **Short term (R07.07–R07.10)** | SEC-01 (drop unsafe builtins from sandbox), ~~SEC-06~~ ✓R07.05 (sha256 pinning + perms advisory + trust-boundary docs), ROB-02 (join worker threads), ROB-09 (`realpath` for symlinks), ~~ROB-10~~ ✓R07.06 (permanent-body patterns + optional body arg), MAINT-03 (drop strategy 5 of `normalize_args`), MAINT-08 (extract `StreamAccumulator`), MAINT-10 (escape router prompt), PERF-01/PERF-02 (cache sanitized state), ARCH-01 (unify backend locations), ARCH-05 (replace `**kwargs` with dataclass), TEST-03 (add `FakeStreamingBackend`), TEST-06 (add lint job), ROB-31 (entitlement-aware fallback filter), MAINT-23 (lift retry-loop skeleton to CloudBackend — closes ROB-29 family) |
+| **Medium term (R08.00+)** | SEC-08 (chmod audit log), SEC-05 (strip ANSI), FEAT-02 (per-tool timeouts + concurrent execution), FEAT-03 (tool output schema), FEAT-04 (`--dry-run`), FEAT-05 (plugin sandbox), FEAT-06 (streaming args delta), FEAT-07 (conversation export), MAINT-07/MAINT-09 (consolidate regex patterns), ARCH-02 (extract `SSEEventBuilder`), ARCH-03 (integrate `AgentMode` with OpenResponses), TEST-04 (rollback tests), TEST-05 (rewrite bump-version test), TEST-07 (update_check failure paths), TEST-08 (sandbox adversarial tests), SEC-19 (sanitize provider error prose — closes with SEC-18), ROB-30 (narrow catalog catch-all), FEAT-08 (paid_only tier filter mode), TEST-10 (live-shape contract test) |
 
 Guidelines for timeline assignment:
 - **Near term** — High severity findings and the most impactful Medium severity findings; should be fixed in the next 1-2 releases
