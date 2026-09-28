@@ -86,6 +86,19 @@ class BackendType(Enum):
     # See agentkthx/plugins/mistral/ and docs/api/MISTRAL_API_TECHNICAL_REFERENCE.md.
     MISTRAL = "mistral"
 
+    # Pollinations — unified gateway at https://gen.pollinations.ai/v1.
+    # OpenAI-compatible aggregator (one key -> dozens of vendor families)
+    # covering text, vision, images, video, TTS, embeddings behind a single
+    # credential. Unique traits vs every other cloud backend: the API key is
+    # OPTIONAL (legacy anonymous text surface works keyless — the natural
+    # zero-config bootstrap backend), payment failure is 402 PAYMENT_REQUIRED
+    # (pollen budget exhausted — must trigger fallback, never retry), and
+    # model cards carry live health telemetry (success_rate) that enables
+    # health-aware fallback ordering no other provider offers.
+    # See agentkthx/plugins/pollinations/ and
+    # docs/api/POLLINATIONS_API_TECHNICAL_REFERENCE.md.
+    POLLINATIONS = "pollinations"
+
 
 class ApiMode(Enum):
     """API mode for backend communication.

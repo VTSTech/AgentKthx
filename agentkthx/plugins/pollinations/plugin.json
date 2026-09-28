@@ -1,0 +1,47 @@
+{
+  "$schema": "https://raw.githubusercontent.com/VTSTech/AgentKthx/main/schemas/v0.2/plugin.schema.json",
+  "name": "pollinations",
+  "version": "0.1.0",
+  "description": "Pollinations unified gateway backend at https://gen.pollinations.ai/v1 (OpenAI-compatible aggregator: one key for openai/ anthropic/ google/ z-ai/ deepseek/ qwen/ mistralai/ meta/ community/ text families plus images, video, TTS and embeddings; optional key with legacy anonymous text surface, provider/model ids with alias resolution, health-telemetry fallback ordering, 402 pollen-budget error mapping, and Retry-After-capped 429/5xx backoff)",
+  "author": {
+    "name": "VTSTech",
+    "url": "https://www.vts-tech.org"
+  },
+  "license": "MIT",
+  "extensions": {
+    "org.vts-tech.agentkthx": {
+      "display_name": "Pollinations Cloud Backend",
+      "type": "backend",
+      "entrypoint": "__init__",
+      "depends": [],
+      "optional_depends": [],
+      "config": {
+        "env_prefix": "POLLINATIONS",
+        "defaults": {
+          "POLLINATIONS_BASE_URL": "https://gen.pollinations.ai/v1",
+          "POLLINATIONS_API_KEY": "",
+          "POLLINATIONS_DEFAULT_MODEL": "openai/gpt-5.4-nano",
+          "POLLINATIONS_FALLBACK_MODEL": "z-ai/glm-5.3-flash",
+          "POLLINATIONS_SAFE": "",
+          "POLLINATIONS_FREE_ONLY": "false",
+          "POLLINATIONS_MAX_RETRIES": "5"
+        }
+      },
+      "provides": {
+        "backends": {
+          "pollinations": "pollinations.PollinationsBackend"
+        },
+        "cli_commands": [],
+        "cli_flags": {
+          "--backend": [
+            "pollinations",
+            "poll"
+          ]
+        }
+      },
+      "compatibility": {
+        "agentkthx": ">=0.5.0"
+      }
+    }
+  }
+}

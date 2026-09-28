@@ -234,6 +234,36 @@ MISTRAL_SAFE_PROMPT = os.environ.get("MISTRAL_SAFE_PROMPT", "").lower() in ("1",
 # (Mistral's server default is "auto").
 MISTRAL_SERVICE_TIER = os.environ.get("MISTRAL_SERVICE_TIER", "")
 
+# Pollinations plugin (agentkthx/plugins/pollinations/)
+# Unified gateway https://gen.pollinations.ai/v1 — OpenAI-compatible
+# aggregator: one key -> dozens of vendor families (openai/, anthropic/,
+# google/, z-ai/, deepseek/, qwen/, mistralai/, meta/, community/...),
+# plus media generation (images / video / TTS / embeddings) under the
+# same credential. See docs/api/POLLINATIONS_API_TECHNICAL_REFERENCE.md.
+POLLINATIONS_BASE_URL = os.environ.get("POLLINATIONS_BASE_URL", "https://gen.pollinations.ai/v1")
+# OPTIONAL — the only backend in AgentKthx that runs with no key at all.
+# Empty (default) = legacy anonymous text surface (IP-rate-limited, the
+# openai-fast GPT-OSS-20B tier) — fine for smoke tests, not agent loops.
+# With a key: sk_ secret keys (full account access, server-side only) are
+# the canonical choice; raw pk_ keys are legacy (1 pollen/IP/hour) but
+# tolerated. Create keys at https://enter.pollinations.ai/keys.
+POLLINATIONS_API_KEY = os.environ.get("POLLINATIONS_API_KEY", "")
+# Platform default — cheapest workhorse tier (0.15 pollen / 1M prompt
+# tokens, 400K context, tools + reasoning capable).
+POLLINATIONS_DEFAULT_MODEL = os.environ.get("POLLINATIONS_DEFAULT_MODEL", "openai/gpt-5.4-nano")
+# Cheap alternate family for the offline fallback chain (used when the
+# live /v1/models catalog is unreachable and no health telemetry exists).
+POLLINATIONS_FALLBACK_MODEL = os.environ.get("POLLINATIONS_FALLBACK_MODEL", "z-ai/glm-5.3-flash")
+# Comma-separated safety filters or a shorthand: true = privacy,secrets;
+# nsfw = sexual,violence; or an explicit list (privacy,secrets,sexual,
+# violence,shield). Empty (default) = off — upstream moderation still
+# blocks as 422 content_policy_violation regardless of this flag.
+POLLINATIONS_SAFE = os.environ.get("POLLINATIONS_SAFE", "")
+# Strict free-tier enforcement: when true, only zero-priced models
+# (community publishers listing at price 0) are listed/accepted.
+# Default false.
+POLLINATIONS_FREE_ONLY = os.environ.get("POLLINATIONS_FREE_ONLY", "").lower() in ("1", "true", "yes")
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # BACKEND SELECTION
