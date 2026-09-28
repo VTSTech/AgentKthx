@@ -13,8 +13,12 @@ line-level surgery instead. These tests pin the v2 contract:
 - ``## Rxx.xx New Findings`` tables move to deltas.md when their first
   member archives (generate_audit_dash.py parses them as OPEN, so an
   archived member left behind double-counts and breaks reconcile)
+- ``> **Rxx.xx delta (...):**`` header blockquotes move verbatim into
+  deltas.md's ``## Release Delta Log`` (release order, deduped, multi-line
+  blockquote runs kept together) — including on delta-only runs where the
+  findings register is already open-only
 - mechanical counts update in both headers; everything else is preserved
-  byte-for-byte
+  byte-for-byte (including the trailing-newline count)
 - exit codes: 0 split, 1 error (duplicate IDs / missing file), 2 no-op
 - idempotence: re-running on split files changes nothing
 
@@ -56,10 +60,21 @@ def _detail(heading, sev, cat, files, prose, impact, status=None):
     return "\n".join(lines)
 
 
-def make_audit_md():
+def make_audit_md(with_deltas=False):
     """A pre-split audit.md: 4 findings, 2 about to archive (SEC-02 closed,
     ROB-01 wontfix), 1 archiving without a detail section (SEC-03), 1 open
-    (SEC-01). Carries an R07.13 New Findings table and a Closures section."""
+    (SEC-01). Carries an R07.13 New Findings table and a Closures section.
+    with_deltas=True adds per-release delta blockquotes to the header
+    (newest first, one of them a multi-line blockquote run) — the format
+    that accumulated in the real audit.md through R07.12."""
+    delta_lines = ([
+        "> **R07.13 delta (unit-test fixture release):** DELTA-PROSE-R07.13 "
+        "first line with **bold** and `code` — must move verbatim.",
+        "> continued delta prose for R07.13 (multi-line blockquote run).",
+        "",
+        "> **R07.12 delta (feature release):** DELTA-PROSE-R07.12 single-line note.",
+        "",
+    ] if with_deltas else [])
     return "\n".join([
         "# Improvement & Enhancement Audit",
         "",
@@ -72,6 +87,7 @@ def make_audit_md():
         "Severity: 0 High | 3 Medium | 1 Low  ",
         "4 OPEN (CLOSED + WONTFIX archived in deltas.md — generate_audit_dash.py merges both for the dashboard)",
         "",
+        *delta_lines,
         "> **Split:** 2 CLOSED/WONTFIX findings moved to `deltas.md`. "
         "`generate_audit_dash.py` reads both `audit.md` (open) and `deltas.md` "
         "(closed/wontfix) and merges them into the full register. "
@@ -443,3 +459,119 @@ class TestFromScratchAndClosures:
         assert subprocess.run(
             [sys.executable, SCRIPT, "--audit", str(audit.parent / "gone.md")],
             capture_output=True).returncode == 1
+
+    def test_trailing_newline_count_preserved(self, files):
+        # regression: the write path used to append an unconditional extra
+        # "\n" on top of the roundtrip join, doubling the file ending
+        audit, deltas = files
+        ends = lambda p: len(_read(p)) - len(_read(p).rstrip("\n"))
+        before = (ends(audit), ends(deltas))
+        assert sa.split(str(audit), str(deltas)) == 0
+        assert (ends(audit), ends(deltas)) == before
+
+
+# ─── delta blockquote migration ─────────────────────────────────────────────
+
+
+class TestDeltaBlockMigration:
+
+    def test_delta_blocks_move_verbatim(self, tmp_path):
+        audit, deltas = tmp_path / "audit.md", tmp_path / "deltas.md"
+        audit.write_text(make_audit_md(with_deltas=True), encoding="utf-8")
+        deltas.write_text(make_deltas_md(), encoding="utf-8")
+        assert sa.split(str(audit), str(deltas)) == 0
+        a, d = _read(audit), _read(deltas)
+        # gone from audit.md — no delta blockquote line remains anywhere
+        assert not [ln for ln in a.splitlines() if sa.DELTA_BLOCK_RE.match(ln)]
+        assert "DELTA-PROSE-R07.12" not in a and "DELTA-PROSE-R07.13" not in a
+        assert "PROSE-MARKER-EXEC-SUMMARY" in a      # rest of the file intact
+        assert "> **Split:** 5 CLOSED/WONTFIX" in a   # counts refreshed too
+        # deltas.md: Release Delta Log, release order, blocks byte-verbatim
+        log = d[d.index("## Release Delta Log"):]
+        assert "DELTA-PROSE-R07.12 single-line note." in log
+        assert ("> **R07.13 delta (unit-test fixture release):** "
+                "DELTA-PROSE-R07.13 first line with **bold** and `code` — "
+                "must move verbatim.") in log
+        assert "> continued delta prose for R07.13 (multi-line blockquote run)." in log
+        assert log.index("R07.12 delta") < log.index("R07.13 delta")
+        # the findings split still happened in the same run
+        assert "| SEC-02 | Medium | Security | ✓ CLOSED R07.13 |" in d
+
+    def test_delta_only_run_when_findings_open(self, tmp_path, capsys):
+        # the user's actual scenario: register already open-only, a page of
+        # delta blockquotes still in audit.md → must NOT be a no-op exit
+        audit, deltas = tmp_path / "audit.md", tmp_path / "deltas.md"
+        content = make_audit_md(with_deltas=True).replace(
+            "| SEC-02 | Medium | Security | ✓ CLOSED R07.13 |",
+            "| SEC-02 | Medium | Security | OPEN |").replace(
+            "| SEC-03 | High | Security | ✓ CLOSED R07.13 |",
+            "| SEC-03 | High | Security | OPEN |").replace(
+            "| ROB-01 | Low | Robustness | ⊘ WONTFIX (R07.13, owner decision) |",
+            "| ROB-01 | Low | Robustness | OPEN |").replace(
+            "> **Split:** 2 CLOSED/WONTFIX findings moved",
+            "> **Split:** 1 CLOSED/WONTFIX findings moved").replace(
+            "The dashboard shows all 6 findings (4 open + 2 closed/wontfix).",
+            "The dashboard shows all 5 findings (4 open + 1 closed/wontfix).")
+        audit.write_text(content, encoding="utf-8")
+        deltas.write_text(make_deltas_md(), encoding="utf-8")
+        assert sa.split(str(audit), str(deltas)) == 0
+        assert "delta blockquotes moving" in capsys.readouterr().err
+        a, d = _read(audit), _read(deltas)
+        # deltas moved, findings table untouched
+        assert "DELTA-PROSE-R07.12" not in a and "DELTA-PROSE-R07.13" not in a
+        for row_id in ("SEC-01", "SEC-02", "SEC-03", "ROB-01"):
+            assert f"| {row_id} |" in a
+        # stale Split line refreshed from the real register state
+        assert "> **Split:** 2 CLOSED/WONTFIX findings moved" in a
+        assert "The dashboard shows all 6 findings (4 open + 2 closed/wontfix)." in a
+        # deltas.md: log section added; table + counts untouched
+        log = d[d.index("## Release Delta Log"):]
+        assert "DELTA-PROSE-R07.12" in log and "DELTA-PROSE-R07.13" in log
+        assert "**Counts:** 2 CLOSED · 0 WONTFIX · 2 total" in d
+
+    def test_delta_log_dedupes_existing_release(self, tmp_path):
+        # deltas.md already logs R07.12 → audit.md's R07.12 block is skipped
+        audit, deltas = tmp_path / "audit.md", tmp_path / "deltas.md"
+        audit.write_text(make_audit_md(with_deltas=True), encoding="utf-8")
+        deltas.write_text(make_deltas_md() + "## Release Delta Log\n\n"
+                          "> **R07.12 delta (feature release):** "
+                          "EXISTING-R07.12 hand-curated note.\n", encoding="utf-8")
+        sa.split(str(audit), str(deltas))
+        a, d = _read(audit), _read(deltas)
+        assert "DELTA-PROSE-R07.12" not in d               # deduped, not duplicated
+        log = d[d.index("## Release Delta Log"):]
+        assert "EXISTING-R07.12 hand-curated note." in log
+        assert "DELTA-PROSE-R07.13" in log                 # the new one appended
+        assert log.index("EXISTING-R07.12") < log.index("DELTA-PROSE-R07.13")
+        assert "DELTA-PROSE-R07.12" not in a and "DELTA-PROSE-R07.13" not in a
+
+    def test_delta_log_inserts_before_newer_existing_block(self, tmp_path):
+        audit, deltas = tmp_path / "audit.md", tmp_path / "deltas.md"
+        audit.write_text(make_audit_md(with_deltas=True), encoding="utf-8")
+        deltas.write_text(make_deltas_md() + "## Release Delta Log\n\n"
+                          "> **R07.14 delta (future release):** "
+                          "EXISTING-R07.14 note.\n", encoding="utf-8")
+        sa.split(str(audit), str(deltas))
+        log = _read(deltas)[_read(deltas).index("## Release Delta Log"):]
+        assert (log.index("DELTA-PROSE-R07.12")
+                < log.index("DELTA-PROSE-R07.13")
+                < log.index("EXISTING-R07.14"))
+
+    def test_idempotent_after_delta_move(self, tmp_path):
+        audit, deltas = tmp_path / "audit.md", tmp_path / "deltas.md"
+        audit.write_text(make_audit_md(with_deltas=True), encoding="utf-8")
+        deltas.write_text(make_deltas_md(), encoding="utf-8")
+        assert sa.split(str(audit), str(deltas)) == 0
+        before = (_sha(audit), _sha(deltas))
+        assert sa.split(str(audit), str(deltas)) == 2
+        assert (_sha(audit), _sha(deltas)) == before
+
+    def test_from_scratch_deltas_includes_delta_log(self, tmp_path):
+        audit = tmp_path / "audit.md"
+        audit.write_text(make_audit_md(with_deltas=True), encoding="utf-8")
+        deltas = tmp_path / "audit" / "deltas.md"
+        assert sa.split(str(audit), str(deltas)) == 0
+        d = _read(deltas)
+        assert "## Release Delta Log" in d
+        assert "DELTA-PROSE-R07.12" in d and "DELTA-PROSE-R07.13" in d
+        assert "**Counts:** 2 CLOSED · 1 WONTFIX · 3 total" in d

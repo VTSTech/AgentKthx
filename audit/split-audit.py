@@ -32,12 +32,18 @@ surgery instead:
       breaks reconcile). Still-open members ride along with the table.
     - `## Rxx.xx Closures` sections when present in audit.md (rare; they
       normally land in deltas.md directly at release time)
+    - `> **Rxx.xx delta (...):**` header blockquotes — the per-release
+      delta notes move verbatim into deltas.md's `## Release Delta Log`
+      (release order, matching the Closure Timeline convention; releases
+      already logged are skipped). audit.md's header keeps only the
+      metadata block and the `> **Split:**` note.
   UPDATES (mechanical counts only):
     - audit.md: "N Open Findings", "Severity: X High | Y Medium | Z Low",
       "N OPEN (CLOSED + WONTFIX archived …)", and the "> **Split:**" line
     - deltas.md: "**Counts:**", "**Archived:**", "**Release:**" header lines
   DOES NOT TOUCH (regenerate manually after a split):
-    - Executive Summary, Rxx.xx delta blockquotes, Priority Matrix
+    - Executive Summary, Priority Matrix (a fresh Rxx.xx delta blockquote
+      is authored in audit.md at the next release)
     - closure-timeline prose / "## Rxx.xx Closures" sections in deltas.md
     - brief.md, CHANGELOG.md, version files
 
@@ -55,7 +61,7 @@ Idempotent: re-running on an already-split audit.md is a no-op.
 Exit codes:
     0  split completed successfully (or --dry-run previewed)
     1  bad invocation (audit.md missing/unparseable, duplicate IDs)
-    2  no-op (nothing to move — already split, or no findings)
+    2  no-op (nothing to move — no archived findings, no delta blockquotes)
 
 Written by VTSTech — https://www.vts-tech.org
 """
@@ -87,6 +93,7 @@ DETAIL_HEADING_RE = re.compile(r"^####\s+([A-Z]+-\d+):\s*(.*)$")
 HEADING_RE = re.compile(r"^#{1,4}\s")
 NEW_FINDINGS_HEADING_RE = re.compile(r"^##\s+(R[\d.]+)\s+New Findings\s*$")
 CLOSURES_HEADING_RE = re.compile(r"^##\s+(R[\d.]+)\s+Closures")
+DELTA_BLOCK_RE = re.compile(r"^>\s*\*\*(R[\d.]+)\s+delta\b", re.IGNORECASE)
 RELEASE_RE = re.compile(r"R(\d+)\.(\d+)")
 
 SPLIT_LINE = (
@@ -387,6 +394,91 @@ def scan_closures_sections(lines):
     return out
 
 
+def scan_delta_blocks(lines):
+    """Per-release delta blockquotes (``> **Rxx.xx delta (...):** …``) in
+    audit.md. Returns a list of {'release', 'start_idx', 'end_idx',
+    'block'} in file order; 'block' is the verbatim line list including
+    multi-line '> ' continuations (a new delta start terminates the run)."""
+    out = []
+    n = len(lines)
+    i = 0
+    while i < n:
+        m = DELTA_BLOCK_RE.match(lines[i])
+        if not m:
+            i += 1
+            continue
+        end = i
+        j = i + 1
+        while (j < n and lines[j].lstrip().startswith(">")
+               and not DELTA_BLOCK_RE.match(lines[j])):
+            end = j
+            j += 1
+        out.append({"release": m.group(1), "start_idx": i, "end_idx": end,
+                    "block": lines[i:end + 1]})
+        i = j
+    return out
+
+
+def plan_delta_log_insertions(de, deltas_lines, delta_blocks):
+    """Insert delta blockquotes into deltas.md's '## Release Delta Log'
+    section, creating the section at the end of the file when absent.
+
+    Blocks land in release order (oldest first, matching the Closure
+    Timeline convention). Releases already logged are skipped, so the
+    move is idempotent and never duplicates hand-curated notes.
+    """
+    if not delta_blocks:
+        return []
+    by_release = {}
+    for d in delta_blocks:
+        by_release.setdefault(d["release"], d)
+    new_blocks = sorted(by_release.values(),
+                        key=lambda d: version_tuple(d["release"]))
+    anchor = find_heading_idx(deltas_lines, r"^##\s+Release Delta Log")
+    if anchor is None:
+        payload = ["", "## Release Delta Log", "",
+                   "<!-- Per-release delta notes, moved verbatim from audit.md's "
+                   "header at split time. -->", ""]
+        for d in new_blocks:
+            payload.extend(d["block"])
+            payload.append("")
+        de.insert_after(last_non_blank_idx(deltas_lines), payload)
+        return new_blocks
+    # existing section: span ends at the next heading (any level)
+    n = len(deltas_lines)
+    sec_end = anchor + 1
+    while sec_end < n and not HEADING_RE.match(deltas_lines[sec_end]):
+        sec_end += 1
+    existing = []
+    for i in range(anchor + 1, sec_end):
+        m = DELTA_BLOCK_RE.match(deltas_lines[i])
+        if m:
+            existing.append((m.group(1), i))
+    have = {rel for rel, _ in existing}
+    placed = []
+    for d in new_blocks:
+        if d["release"] in have:
+            continue
+        target = None
+        for rel, idx in existing:
+            if version_tuple(rel) > version_tuple(d["release"]):
+                target = idx
+                break
+        if target is not None:
+            de.insert_before(target, d["block"] + [""])
+        else:
+            last_nb = None
+            for i in range(anchor + 1, sec_end):
+                if deltas_lines[i].strip():
+                    last_nb = i
+            if last_nb is None:
+                de.insert_after(anchor, [""] + d["block"])
+            else:
+                de.insert_after(last_nb, [""] + d["block"])
+        placed.append(d)
+    return placed
+
+
 def find_heading_idx(lines, pattern):
     for i, line in enumerate(lines):
         if re.match(pattern, line):
@@ -586,7 +678,7 @@ def plan_row_insertions(edit, existing_rows, new_rows, table):
 
 
 def build_deltas_from_scratch(meta, moved_rows, blocks_by_cat, nf_blocks,
-                              closure_blocks, batch, today):
+                              closure_blocks, delta_blocks, batch, today):
     closed = sum(1 for r in moved_rows if r.status == "CLOSED")
     wontfix = sum(1 for r in moved_rows if r.status == "WONTFIX")
     lines = [
@@ -630,6 +722,13 @@ def build_deltas_from_scratch(meta, moved_rows, blocks_by_cat, nf_blocks,
         for block in nf_blocks:
             lines.extend(block)
             lines.append("")
+    if delta_blocks:
+        lines += ["## Release Delta Log", "",
+                  "<!-- Per-release delta notes, moved verbatim from audit.md's "
+                  "header at split time. -->", ""]
+        for d in sorted(delta_blocks, key=lambda d: version_tuple(d["release"])):
+            lines.extend(d["block"])
+            lines.append("")
     return "\n".join(lines) + "\n"
 
 
@@ -657,8 +756,10 @@ def split(audit_path, deltas_path, dry_run=False):
 
     archived_rows = [r for r in audit_rows if r.status != "OPEN"]
     open_rows = [r for r in audit_rows if r.status == "OPEN"]
-    if not archived_rows:
-        _log("no CLOSED/WONTFIX findings to move — audit.md is already open-only")
+    delta_blocks = scan_delta_blocks(audit_lines)
+    if not archived_rows and not delta_blocks:
+        _log("nothing to move — no CLOSED/WONTFIX findings, no delta "
+             "blockquotes (audit.md is already split)")
         return 2
 
     deltas_exists = os.path.exists(deltas_path)
@@ -728,6 +829,9 @@ def split(audit_path, deltas_path, dry_run=False):
     if closure_secs:
         _log(f"  Closures sections moving to deltas.md: "
              f"{', '.join(s['release'] for s in closure_secs)}")
+    if delta_blocks:
+        _log(f"  delta blockquotes moving to deltas.md Release Delta Log: "
+             f"{', '.join(d['release'] for d in delta_blocks)}")
     _log(f"deltas.md: {len(existing_rows)} existing + {len(archived_rows)} new = "
          f"{total_archived} archived ({total_closed} CLOSED · {total_wontfix} WONTFIX)")
     if batch:
@@ -741,8 +845,8 @@ def split(audit_path, deltas_path, dry_run=False):
     if dry_run:
         _log("DRY RUN — no files written. Manual follow-ups after a real split:")
         _log("  - author closure/WONTFIX detail prose for the sections flagged above")
-        _log("  - regenerate the Executive Summary + Rxx.xx delta blockquote + "
-             "Priority Matrix markers")
+        _log("  - regenerate the Executive Summary + Priority Matrix markers "
+             "(a fresh Rxx.xx delta blockquote is authored at the next release)")
         _log("  - add the '## Rxx.xx Closures' timeline section in deltas.md "
              "(drives the dashboard closure card)")
         _log("  - refresh brief.md / CHANGELOG at release time")
@@ -776,6 +880,11 @@ def split(audit_path, deltas_path, dry_run=False):
         if (s["content_end"] + 1 < len(audit_lines)
                 and audit_lines[s["content_end"] + 1].strip() == ""):
             ae.drop(s["content_end"] + 1, s["content_end"] + 1)
+    for d in delta_blocks:
+        ae.drop(d["start_idx"], d["end_idx"])
+        if (d["end_idx"] + 1 < len(audit_lines)
+                and audit_lines[d["end_idx"] + 1].strip() == ""):
+            ae.drop(d["end_idx"] + 1, d["end_idx"] + 1)
     apply_audit_header_updates(ae, open_rows, total_archived, total_findings)
 
     # ── deltas.md build ──
@@ -795,7 +904,7 @@ def split(audit_path, deltas_path, dry_run=False):
         meta = extract_meta(audit_content)
         deltas_out = build_deltas_from_scratch(
             meta, archived_rows, blocks_by_cat, nf_blocks, closure_blocks,
-            batch, today)
+            delta_blocks, batch, today)
     else:
         de = FileEdit(deltas_lines)
         plan_row_insertions(de, existing_rows, archived_rows, deltas_table)
@@ -836,15 +945,21 @@ def split(audit_path, deltas_path, dry_run=False):
             for block in closure_blocks:
                 payload.extend(block)
             de.insert_after(last_non_blank_idx(deltas_lines), payload)
+        plan_delta_log_insertions(de, deltas_lines, delta_blocks)
         apply_deltas_header_updates(de, total_closed, total_wontfix,
                                     total_archived, batch, today)
         deltas_out = "\n".join(de.render())
+        # preserve the original file-ending newline count exactly — neither
+        # the old doubling bug nor blanks stacked by EOF-anchored payloads
         if deltas_content.endswith("\n"):
-            deltas_out += "\n"
+            orig_nl = len(deltas_content) - len(deltas_content.rstrip("\n"))
+            deltas_out = deltas_out.rstrip("\n") + "\n" * orig_nl
 
     audit_out = "\n".join(ae.render())
+    # same normalization: the file ending is preserved byte-exactly
     if audit_content.endswith("\n"):
-        audit_out += "\n"
+        orig_nl = len(audit_content) - len(audit_content.rstrip("\n"))
+        audit_out = audit_out.rstrip("\n") + "\n" * orig_nl
 
     write_file(audit_path, audit_out)
     write_file(deltas_path, deltas_out)
@@ -852,8 +967,8 @@ def split(audit_path, deltas_path, dry_run=False):
          f"({total_archived} archived)")
     _log("MANUAL FOLLOW-UP (not done by this tool):")
     _log("  - author closure/WONTFIX detail prose for the sections flagged above")
-    _log("  - regenerate the Executive Summary + Rxx.xx delta blockquote + "
-         "Priority Matrix markers")
+    _log("  - regenerate the Executive Summary + Priority Matrix markers "
+         "(a fresh Rxx.xx delta blockquote is authored at the next release)")
     _log("  - add the '## Rxx.xx Closures' timeline section in deltas.md "
          "(drives the dashboard closure card)")
     _log("  - refresh brief.md / CHANGELOG at release time")
