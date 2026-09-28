@@ -10,7 +10,7 @@ import os
 
 from ..agent import Agent
 from ..backends import get_backend
-from ..colors import yellow, red
+from ..colors import yellow, red, green, dim
 from ..tools import make_builtin_registry
 
 from .parser import _make_confirm_callback
@@ -267,9 +267,65 @@ def _build_agent(args: argparse.Namespace, config) -> Agent:
     agent._num_predict_explicit = getattr(args, "num_predict", None) is not None
     # Set compaction threshold from --compaction arg
     agent._compaction_threshold = compaction_threshold
+
+    # Insufficient-credits session switch: when a cloud backend reports the
+    # session model can't be billed (ZAI 429 "insufficient credits"), run the
+    # proper /model switch path (apply_model_switch) so the whole session
+    # moves to the free fallback with per-model state re-derived — instead of
+    # a silent per-request fallback flag the user can't see.
+    register_insufficient_credits_switch(agent)
+
     return agent
 
 
+
+
+def register_insufficient_credits_switch(agent) -> None:
+    """Wire the backend's insufficient-credits event to the /model switch path.
+
+    Cloud backends (ZaiBackend) expose ``set_model_switch_callback``. When a
+    paid model fails with 429 "insufficient credits", the backend already
+    retries the CURRENT request on the free fallback model inline — this
+    handler then performs the SESSION-level switch by running the exact same
+    code path as the in-chat ``/model <name>`` command (``apply_model_switch``),
+    which re-derives num_ctx / num_predict / model family config from the new
+    model's catalog entry and clears the stale context-safe max_tokens. The
+    chat footer (which renders ``agent.model``) updates automatically.
+
+    Guard: the switch only fires when the session is still on the failed
+    model — an explicit mid-flight ``/model`` change by the user is never
+    clobbered. Without a registered callback the backend keeps the historical
+    per-request fallback behavior (library usage, one-shot runs).
+    """
+    backend = getattr(agent, "backend", None)
+    if backend is None or not hasattr(backend, "set_model_switch_callback"):
+        return
+
+    def _on_insufficient_credits(failed_model: str, fallback_model: str) -> None:
+        # Only react if the session is still on the model that failed —
+        # the user may have switched models while the request ran.
+        if getattr(agent, "model", None) != failed_model:
+            return
+        changes = apply_model_switch(agent, fallback_model)
+        old_model, _ = changes.get("model", (failed_model, fallback_model))
+        print(
+            green(
+                f"\n  Insufficient credits — session model switched: "
+                f"{old_model} -> {fallback_model}"
+            )
+        )
+
+        def _fmt_pred(v):
+            return "(model default)" if v is None else str(v)
+
+        if "num_ctx" in changes:
+            old_ctx, new_ctx = changes["num_ctx"]
+            print(dim(f"    num_ctx: {old_ctx} -> {new_ctx}"))
+        if "num_predict" in changes:
+            old_pred, new_pred = changes["num_predict"]
+            print(dim(f"    num_predict: {_fmt_pred(old_pred)} -> {_fmt_pred(new_pred)}"))
+
+    backend.set_model_switch_callback(_on_insufficient_credits)
 
 
 def _get_catalog_defaults(backend, model: str) -> dict:

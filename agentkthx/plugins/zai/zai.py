@@ -215,7 +215,8 @@ class ZaiBackend(CloudBackend):
       - ``list_models()`` — queries ZAI's ``/api/paas/v4/models`` discovery
         endpoint and merges with the static catalog
       - ``_iter_sse_lines()`` — ZAI-specific 429 insufficient-credits
-        fallback + 400 no-tools retry
+        fallback + 400 no-tools retry; insufficient credits also fires the
+        session model-switch callback (the /model switch path)
       - ``generate_completions_stream()`` — ZAI_FREE_ONLY upfront gate
       - ``_generate_with_auth()`` — non-streaming POST with the same
         ZAI-specific error recovery as the streaming path
@@ -257,74 +258,45 @@ class ZaiBackend(CloudBackend):
             api_key=api_key,
         )
 
-        # Session-sticky insufficient-credits fallback. When a paid model
-        # fails with 429 "insufficient credits", the switch to the free
-        # fallback model is RECORDED here so every later request in this
-        # session goes straight to the free model — instead of re-attempting
-        # the doomed paid model once per request. The ZaiBackend instance is
-        # created once per Agent/chat session (cli/agent_factory.py) and
-        # survives /model switches, so instance state == session state.
-        # Keyed by the originally requested model id.
-        self._credits_fallback_models: dict[str, str] = {}
-        self._credits_fallback_announced: set[str] = set()
+        # Insufficient-credits session switch. When a paid model fails with
+        # 429 "insufficient credits", the CURRENT request still falls back to
+        # the free model inline (so the turn completes), and this callback —
+        # registered by the CLI (agent_factory.register_insufficient_credits_switch)
+        # — performs the PROPER session model switch via the /model switch path
+        # (apply_model_switch), which re-derives num_ctx / num_predict / family
+        # config and updates the footer. The backend never touches agent state
+        # directly — it only reports the event.
+        self._model_switch_callback = None
 
     # ─────────────────────────────────────────────────────────────────────
-    # Session-sticky insufficient-credits fallback
+    # Insufficient-credits session switch (delegated to the /model path)
     # ─────────────────────────────────────────────────────────────────────
 
-    def _credits_map(self) -> dict[str, str]:
-        """Return the per-session paid→free fallback map (lazy-init safe).
+    def set_model_switch_callback(self, callback) -> None:
+        """Register the session model-switch handler.
 
-        Uses getattr so backends constructed via ``__new__`` (unit-test
-        helpers bypass ``__init__``) still behave as "nothing recorded".
+        ``callback(failed_model, fallback_model)`` is fired once per
+        insufficient-credits 429 on a PAID model (streaming or
+        non-streaming). The CLI registers a handler that runs the proper
+        /model switch path (``apply_model_switch``) so the whole session
+        moves to the fallback model with per-model state re-derived.
+        Without a callback the historical per-request fallback remains.
         """
-        map_ = getattr(self, "_credits_fallback_models", None)
-        if map_ is None:
-            map_ = {}
-            self._credits_fallback_models = map_
-        return map_
+        self._model_switch_callback = callback
 
-    def _record_credit_fallback(self, model: str) -> str | None:
-        """Record that ``model`` ran out of credits this session.
+    def _notify_model_switch(self, failed_model: str, fallback_model: str) -> None:
+        """Fire the session model-switch callback (best-effort).
 
-        Called from the 429 insufficient-credits handlers (streaming +
-        non-streaming) at the moment the free-fallback retry is initiated,
-        so any subsequent request for the same model skips the doomed paid
-        call entirely. Free models are never recorded (nothing to fall
-        back TO, and they don't cost anything).
-
-        Returns the fallback model id, or None if nothing was recorded.
+        Never raises into the request path — a broken callback must not
+        turn a recoverable 429 into a crashed turn.
         """
-        if not model or _is_free_model(model):
-            return None
-        fallback = ZAI_FREE_FALLBACK_MODEL
-        self._credits_map().setdefault(model, fallback)
-        return fallback
-
-    def _apply_session_fallback(self, model: str | None) -> str | None:
-        """Rewrite ``model`` to its free fallback if it burned out earlier
-        in this session.
-
-        Announces the sticky switch once per model (the initial per-request
-        fallback already printed a warning; this notice marks that the
-        session itself has moved on). Silent afterwards.
-        """
-        if not model:
-            return model
-        fallback = self._credits_map().get(model)
-        if not fallback:
-            return model
-        announced = getattr(self, "_credits_fallback_announced", None)
-        if announced is None:
-            announced = set()
-            self._credits_fallback_announced = announced
-        if model not in announced:
-            announced.add(model)
-            print(
-                f"\n  \033[33m[ZAI] '{model}' has no credits left this session — "
-                f"using free model '{fallback}' for the rest of the session\033[0m"
-            )
-        return fallback
+        if self._model_switch_callback is None:
+            return
+        try:
+            self._model_switch_callback(failed_model, fallback_model)
+        except Exception as e:
+            if os.environ.get("AGENTKTHX_DEBUG"):
+                print(f"  [ZAI] model-switch callback failed: {e}")
 
     @property
     def backend_type(self) -> BackendType:
@@ -554,14 +526,10 @@ class ZaiBackend(CloudBackend):
 
         Injects Bearer token authentication into every request.
         Supports ZAI_FREE_ONLY mode and auto-fallback on insufficient
-        credits (session-sticky: once a paid model burns out, the free
-        fallback model is remembered for the rest of the session).
+        credits — the current request completes on the free fallback model,
+        and the registered model-switch callback moves the SESSION to it
+        via the proper /model switch path.
         """
-        # Session-sticky insufficient-credits fallback — applied before any
-        # dispatch so both the JEV decision path and the direct path use the
-        # session's free model once credits burn out.
-        model = self._apply_session_fallback(model)
-
         # JEV dispatch — if api_mode is JEV, route through generate_decision()
         # which wraps the underlying LLM call with a decision prompt.
         jev_response = self._maybe_jev_dispatch(
@@ -628,9 +596,6 @@ class ZaiBackend(CloudBackend):
         The response shape is normalized to match generate_completions():
             {content, tool_calls, usage, latency_ms, raw}
         """
-        # Session-sticky insufficient-credits fallback.
-        model = self._apply_session_fallback(model)
-
         # Apply ZAI_FREE_ONLY upfront — decisions should also respect it
         if ZAI_FREE_ONLY and not _is_free_model(model):
             fallback = ZAI_FREE_FALLBACK_MODEL
@@ -664,9 +629,6 @@ class ZaiBackend(CloudBackend):
 
         Always uses OpenAI Chat-Completions SSE streaming.
         """
-        # Session-sticky insufficient-credits fallback.
-        model = self._apply_session_fallback(model)
-
         import urllib.request
         import urllib.error
 
@@ -739,9 +701,10 @@ class ZaiBackend(CloudBackend):
         """Make a streaming POST to ZAI's /api/paas/v4/chat/completions.
 
         Includes ZAI-specific error recovery:
-        - 429 insufficient credits -> retry with free fallback model
-          (session-sticky: the paid→free switch is recorded on the backend
-          instance so later requests skip the doomed paid call entirely)
+        - 429 insufficient credits -> retry with free fallback model, and
+          fire the session model-switch callback so the CLI performs the
+          proper /model switch (per-model state re-derived) for the rest
+          of the session
         - 400 "does not support tools" -> retry without tools (ReAct fallback)
         - 400 "context length" -> reduce max_tokens, persist, retry once (R06.57)
         """
@@ -780,13 +743,16 @@ class ZaiBackend(CloudBackend):
                         continue
 
                 # Insufficient credits -- auto-fallback to free model.
-                # The switch is also recorded on the backend instance so the
-                # REST of this session uses the free model directly instead
-                # of re-attempting the paid model on every request.
+                # The CURRENT request retries on the free model so this turn
+                # completes; the SESSION switch is delegated to the registered
+                # callback (agent_factory.register_insufficient_credits_switch),
+                # which runs the proper /model switch path so num_ctx /
+                # num_predict / family config are re-derived and the footer
+                # reflects the new model.
                 if e.code == 429 and ("insufficient balance" in error_msg or "insufficient" in error_msg or "no resource package" in error_msg):
                     fallback = ZAI_FREE_FALLBACK_MODEL
                     if not _is_free_model(body.get("model", "")):
-                        self._record_credit_fallback(body.get("model", ""))
+                        self._notify_model_switch(body.get("model", ""), fallback)
                         import sys
                         print(
                             f"\n  \033[33m[ZAI-Stream] Insufficient credits for '{body.get('model')}' -- "
@@ -851,9 +817,6 @@ class ZaiBackend(CloudBackend):
         _get_chat_completions_url(), _get_auth_headers(), _iter_sse_lines(),
         and _build_openai_body(stream=True).
         """
-        # Session-sticky insufficient-credits fallback.
-        model = self._apply_session_fallback(model)
-
         # ZAI_FREE_ONLY: reject paid models upfront
         if ZAI_FREE_ONLY and not _is_free_model(model):
             fallback = ZAI_FREE_FALLBACK_MODEL
@@ -885,10 +848,6 @@ class ZaiBackend(CloudBackend):
         super().generate_completions() because we need to inject
         the Authorization header, which the parent method doesn't support.
         """
-        # Session-sticky insufficient-credits fallback (defense in depth —
-        # callers above already applied it; a no-op if they did).
-        model = self._apply_session_fallback(model)
-
         import urllib.request
         import urllib.error
 
@@ -957,13 +916,14 @@ class ZaiBackend(CloudBackend):
             error_msg = error_body.lower() if error_body else ""
 
             # Check for insufficient credits — auto-fallback to free model.
-            # The switch is also recorded on the backend instance so the
-            # REST of this session uses the free model directly instead
-            # of re-attempting the paid model on every request.
+            # The CURRENT request retries on the free model so this turn
+            # completes; the SESSION switch is delegated to the registered
+            # callback (agent_factory.register_insufficient_credits_switch),
+            # which runs the proper /model switch path.
             if e.code == 429 and ("insufficient balance" in error_msg or "insufficient" in error_msg or "no resource package" in error_msg):
                 fallback = ZAI_FREE_FALLBACK_MODEL
                 if not _is_free_model(model):
-                    self._record_credit_fallback(model)
+                    self._notify_model_switch(model, fallback)
                     import sys
                     print(
                         f"\n  \033[33m[ZAI] Insufficient credits for '{model}' — "
