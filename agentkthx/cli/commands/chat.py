@@ -315,10 +315,10 @@ def cmd_chat(args: argparse.Namespace) -> int:
             # Prompt uses \001 ... \002 (readline's RL_PROMPT_START_IGNORE /
             # RL_PROMPT_END_IGNORE) around ANSI escape codes so readline
             # counts them as zero-width. Without these markers, readline
-            # treats `\033[90m` + `You:` + `\033[0m` + ` ` as 14 visible
+            # treats `\033[33m` + `You:` + `\033[0m` + ` ` as 14 visible
             # chars, miscounting the prompt width and breaking wrap detection.
             user_input = input(
-                "\001\033[90m\002You:\001\033[0m\002 "
+                "\001\033[33m\002You:\001\033[0m\002 "
             ).strip()
 
             # Track last user_input for in-session recall (replaces file-based history)

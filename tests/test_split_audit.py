@@ -365,9 +365,12 @@ class TestNewFindingsTables:
         # still-open member rides along, row intact
         assert ("| FEAT-09 | Low | New Features | `agentkthx/tools/y.py` |"
                 " still open feat nine |") in d
-        # placed between the detail groups and the Closure Timeline
-        assert (d.index("#### ROB-01:") < d.index("## R07.13 New Findings")
-                < d.index("## Closure Timeline"))
+        # placed between the detail groups and EOF (after the legacy
+        # Closure Timeline in this fixture — the Timeline is retired and
+        # New Findings tables anchor before the Release Delta Log when
+        # that section exists, else append at EOF)
+        assert (d.index("#### ROB-01:") < d.index("## R07.13 New Findings"))
+        assert (d.index("## Closure Timeline") < d.index("## R07.13 New Findings"))
 
     def test_table_stays_when_no_member_archives(self, tmp_path):
         audit = tmp_path / "audit.md"
@@ -380,6 +383,20 @@ class TestNewFindingsTables:
         sa.split(str(audit), str(deltas))
         assert "## R07.13 New Findings" in _read(audit)
         assert "## R07.13 New Findings" not in _read(deltas)
+
+    def test_table_anchors_before_release_delta_log(self, tmp_path):
+        # the retired Closure Timeline no longer anchors anything: when the
+        # Release Delta Log exists, New Findings tables land before it
+        audit = tmp_path / "audit.md"
+        deltas = tmp_path / "deltas.md"
+        audit.write_text(make_audit_md(with_deltas=True), encoding="utf-8")
+        deltas.write_text(make_deltas_md(), encoding="utf-8")
+        sa.split(str(audit), str(deltas))
+        d = _read(deltas)
+        nf = d.index("## R07.13 New Findings")
+        log = d.index("## Release Delta Log")
+        assert nf < log
+        assert "## R07.13 Closures" not in d
 
 
 # ─── header updates ─────────────────────────────────────────────────────────
@@ -424,7 +441,9 @@ class TestFromScratchAndClosures:
         assert "#### SEC-02:" in d and "#### ROB-01:" in d
         assert "**Status:** ⊘ WONTFIX (R07.13, owner decision)" in d
 
-    def test_closure_section_moves_to_deltas(self, tmp_path):
+    def test_closure_section_dropped_from_audit(self, tmp_path, capsys):
+        # the Closure Timeline is retired: Closures sections found in
+        # audit.md are deleted at split time, NOT moved to deltas.md
         audit = tmp_path / "audit.md"
         deltas = tmp_path / "deltas.md"
         content = make_audit_md().replace(
@@ -438,8 +457,10 @@ class TestFromScratchAndClosures:
         sa.split(str(audit), str(deltas))
         a, d = _read(audit), _read(deltas)
         assert "## R07.13 Closures (Unit Test)" not in a
-        assert "## R07.13 Closures (Unit Test)" in d
-        assert d.index("## R07.07 Closures") < d.index("## R07.13 Closures")
+        assert "## R07.13 Closures (Unit Test)" not in d
+        assert "notes prose" not in d
+        err = capsys.readouterr().err
+        assert "Closures sections DROPPED" in err and "R07.13" in err
 
     def test_idempotent_second_run(self, files):
         audit, deltas = files
