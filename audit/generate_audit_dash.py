@@ -1044,20 +1044,14 @@ Examples:
     else:
         print(f"[gen] parsed {len(findings)} findings (no deltas.md — all from audit.md)", file=sys.stderr)
 
-    closures = parse_closures(audit_md, findings)
-    # Also parse closure sections from deltas.md (archived audits may carry them)
-    if deltas_md:
-        deltas_closures = parse_closures(deltas_md, findings)
-        # Merge: dedupe by release (audit.md wins if overlap)
-        seen = {c["release"] for c in closures}
-        for c in deltas_closures:
-            if c["release"] not in seen:
-                closures.append(c)
-                seen.add(c["release"])
-    print(f"[gen] parsed {len(closures)} closure sections: "
-          f"{', '.join(c['release'] for c in closures)}", file=sys.stderr)
+    # Detail-prose coverage note: the #### sections are the historical
+    # record — every finding should carry full prose (never truncated).
+    empty_detail = sum(1 for f in findings if f["detail"] == f["title"])
+    if empty_detail:
+        print(f"[gen] note: {empty_detail} findings have detail == title "
+              f"(no closure/analysis prose authored yet)", file=sys.stderr)
 
-    html = generate_html(findings, closures, meta)
+    html = generate_html(findings, meta)
 
     out_dir = os.path.dirname(args.output)
     if out_dir:
@@ -1073,7 +1067,7 @@ Examples:
     if not args.no_endpoints:
         ep_dir = out_dir if out_dir else "."
         generated_at = datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
-        written = write_endpoints(ep_dir, meta, findings, closures, audit_md, generated_at, deltas_md)
+        written = write_endpoints(ep_dir, meta, findings, audit_md, generated_at, deltas_md)
         api_root = os.path.join(ep_dir, "api", "findings")
         print(f"[gen] wrote {len(written)} endpoint JSON files into {api_root}/ "
               f"(findings.json, open.json, closed.json, wontfix.json, summary.json, "
