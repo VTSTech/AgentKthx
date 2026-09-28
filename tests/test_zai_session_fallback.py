@@ -1,35 +1,40 @@
 """
-Session-sticky insufficient-credits fallback for the ZAI backend.
+Insufficient-credits session model switch for the ZAI backend.
 
-Before this change, the 429 "insufficient credits" fallback was
-PER-REQUEST: every request re-attempted the paid model, ate a failed
-round-trip, then silently switched to the free fallback for that one
-request only. The next request paid the same penalty again.
+The 429 "insufficient credits" recovery works in two layers:
 
-Now the switch is RECORDED on the ZaiBackend instance (which lives for
-the whole Agent/chat session — see cli/agent_factory.py — and survives
-/model switches): subsequent requests for a burned-out model go straight
-to the free fallback model with no doomed paid attempt.
+1. PER-REQUEST (inside the backend): the current request retries inline on
+   the free fallback model so the turn completes. Historical behavior.
 
-Also pins the chat "You:" prompt color (changed from dim grey
-``\\033[90m`` to yellow ``\\033[33m``) so readline marker refactors
-cannot silently revert it.
+2. SESSION (the /model switch path): the backend fires a model-switch
+   callback — registered by the CLI via
+   ``agent_factory.register_insufficient_credits_switch`` — which runs the
+   exact same code path as the in-chat ``/model`` command
+   (``apply_model_switch``), so the WHOLE SESSION moves to the fallback
+   model with num_ctx / num_predict / family config re-derived and the
+   footer updated. This replaced the earlier internal fallback-flag map,
+   which silently served the free model while ``agent.model`` (and every
+   derived value) still showed the paid model.
+
+The prompt-color tests at the bottom pin the chat "You:" prompt color
+(yellow ``\\033[33m``, not the old dim grey ``\\033[90m``).
 """
 
 from __future__ import annotations
 
-import contextlib
 import io
 import json
 import sys
 import unittest
 import urllib.error
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from agentkthx.plugins.zai.zai import ZaiBackend, ZAI_FREE_FALLBACK_MODEL
+from agentkthx.cli.agent_factory import register_insufficient_credits_switch
 
 SSE_LINES = [
     b'data: {"choices":[{"delta":{"content":"Hello"},"finish_reason":null}]}\n\n',
@@ -43,9 +48,7 @@ def _make_zai_backend():
     b = ZaiBackend.__new__(ZaiBackend)
     b._base_url = "https://api.z.ai"
     b._api_key = "test-key"
-    # Session-sticky fallback state (normally initialized in __init__).
-    b._credits_fallback_models = {}
-    b._credits_fallback_announced = set()
+    b._model_switch_callback = None
     b._get_model_defaults = MagicMock(return_value={
         "temperature": 0.7,
         "max_tokens": 4096,
@@ -95,13 +98,40 @@ def _completion_payload(model: str = ZAI_FREE_FALLBACK_MODEL) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Streaming path (generate_completions_stream -> _iter_sse_lines)
+# Backend side: 429 fires the callback, request still falls back inline
 # ---------------------------------------------------------------------------
 
-class TestStreamSessionFallback(unittest.TestCase):
+class TestStreamCreditsCallback(unittest.TestCase):
 
-    def test_stream_429_records_session_fallback(self):
-        """A 429 on a paid model records the paid->free switch for the session."""
+    def test_stream_429_fires_model_switch_callback(self):
+        """A 429 on a paid model fires the callback with (paid, fallback)
+        and the retried request uses the free model."""
+        b = _make_zai_backend()
+        fired = []
+        b.set_model_switch_callback(lambda failed, fb: fired.append((failed, fb)))
+
+        calls = []
+
+        def _fake_urlopen(req, timeout=None):
+            calls.append(json.loads(req.data.decode("utf-8")))
+            if len(calls) == 1:
+                raise _http_429()
+            return _sse_response()
+
+        with patch("urllib.request.urlopen", side_effect=_fake_urlopen):
+            chunks = list(b.generate_completions_stream(
+                model="glm-5.1",
+                messages=[{"role": "user", "content": "hi"}],
+            ))
+
+        self.assertEqual(fired, [("glm-5.1", ZAI_FREE_FALLBACK_MODEL)])
+        self.assertEqual(calls[0]["model"], "glm-5.1")
+        self.assertEqual(calls[1]["model"], ZAI_FREE_FALLBACK_MODEL)
+        self.assertEqual("".join(c["delta"] for c in chunks), "Hello")
+
+    def test_stream_no_callback_still_falls_back_per_request(self):
+        """Without a registered callback (library usage), the historical
+        per-request fallback keeps the turn working."""
         b = _make_zai_backend()
         calls = []
 
@@ -117,74 +147,63 @@ class TestStreamSessionFallback(unittest.TestCase):
                 messages=[{"role": "user", "content": "hi"}],
             ))
 
-        # First request attempted the paid model, retry used the free one
-        self.assertEqual(calls[0]["model"], "glm-5.1")
         self.assertEqual(calls[1]["model"], ZAI_FREE_FALLBACK_MODEL)
-        # ...and the switch is now sticky for the session
-        self.assertEqual(
-            b._credits_fallback_models,
-            {"glm-5.1": ZAI_FREE_FALLBACK_MODEL},
-        )
         self.assertEqual("".join(c["delta"] for c in chunks), "Hello")
 
-    def test_stream_second_request_skips_paid_model(self):
-        """The request AFTER a recorded burnout must not attempt the paid
-        model at all — one urlopen call, straight to the free model."""
+    def test_stream_callback_exception_never_breaks_the_request(self):
+        """A broken callback must not turn a recoverable 429 into a
+        crashed turn — the fallback retry still completes."""
         b = _make_zai_backend()
-        b._credits_fallback_models = {"glm-5.1": ZAI_FREE_FALLBACK_MODEL}
+
+        def _boom(failed, fb):
+            raise RuntimeError("callback bug")
+
+        b.set_model_switch_callback(_boom)
+
+        def _fake_urlopen(req, timeout=None):
+            body = json.loads(req.data.decode("utf-8"))
+            if body["model"] != ZAI_FREE_FALLBACK_MODEL:
+                raise _http_429()
+            return _sse_response()
+
+        with patch("urllib.request.urlopen", side_effect=_fake_urlopen):
+            chunks = list(b.generate_completions_stream(
+                model="glm-5.1",
+                messages=[{"role": "user", "content": "hi"}],
+            ))
+
+        self.assertEqual("".join(c["delta"] for c in chunks), "Hello")
+
+
+class TestNonStreamCreditsCallback(unittest.TestCase):
+
+    def test_nonstream_429_fires_model_switch_callback(self):
+        """Non-streaming 429 on a paid model fires the callback; the
+        retried request succeeds."""
+        b = _make_zai_backend()
+        fired = []
+        b.set_model_switch_callback(lambda failed, fb: fired.append((failed, fb)))
 
         calls = []
 
         def _fake_urlopen(req, timeout=None):
             calls.append(json.loads(req.data.decode("utf-8")))
-            return _sse_response()
+            if len(calls) == 1:
+                raise _http_429()
+            return _json_response(_completion_payload())
 
         with patch("urllib.request.urlopen", side_effect=_fake_urlopen):
-            list(b.generate_completions_stream(
+            result = b._generate_with_auth(
                 model="glm-5.1",
                 messages=[{"role": "user", "content": "hi"}],
-            ))
+            )
 
-        self.assertEqual(
-            len(calls), 1,
-            "recorded burnout must skip the paid attempt — exactly one "
-            "request expected",
-        )
-        self.assertEqual(calls[0]["model"], ZAI_FREE_FALLBACK_MODEL)
+        self.assertEqual(fired, [("glm-5.1", ZAI_FREE_FALLBACK_MODEL)])
+        self.assertEqual(calls[1]["model"], ZAI_FREE_FALLBACK_MODEL)
+        self.assertEqual(result["content"], "ok")
 
-    def test_stream_announces_sticky_switch_once(self):
-        """The 'no credits left this session' notice prints once per model,
-        not on every subsequent request."""
-        b = _make_zai_backend()
-        b._credits_fallback_models = {"glm-5.1": ZAI_FREE_FALLBACK_MODEL}
-
-        buf = io.StringIO()
-        with patch("urllib.request.urlopen", side_effect=lambda *a, **k: _sse_response()):
-            with contextlib.redirect_stdout(buf):
-                list(b.generate_completions_stream(
-                    model="glm-5.1",
-                    messages=[{"role": "user", "content": "hi"}],
-                ))
-                list(b.generate_completions_stream(
-                    model="glm-5.1",
-                    messages=[{"role": "user", "content": "hi again"}],
-                ))
-
-        self.assertEqual(
-            buf.getvalue().count("no credits left this session"), 1,
-            "sticky-switch notice must print exactly once per model",
-        )
-
-
-# ---------------------------------------------------------------------------
-# Non-streaming path (_generate_with_auth)
-# ---------------------------------------------------------------------------
-
-class TestNonStreamSessionFallback(unittest.TestCase):
-
-    def test_nonstream_429_records_session_fallback(self):
-        """Non-streaming 429 on a paid model records the switch and the
-        retried request succeeds."""
+    def test_nonstream_no_callback_still_falls_back_per_request(self):
+        """Callback-less non-streaming path keeps the inline fallback."""
         b = _make_zai_backend()
         calls = []
 
@@ -200,64 +219,14 @@ class TestNonStreamSessionFallback(unittest.TestCase):
                 messages=[{"role": "user", "content": "hi"}],
             )
 
-        self.assertEqual(calls[0]["model"], "glm-5.1")
-        self.assertEqual(calls[1]["model"], ZAI_FREE_FALLBACK_MODEL)
-        self.assertEqual(
-            b._credits_fallback_models,
-            {"glm-5.1": ZAI_FREE_FALLBACK_MODEL},
-        )
         self.assertEqual(result["content"], "ok")
 
-    def test_nonstream_second_call_skips_paid_model(self):
-        """Subsequent non-streaming call goes straight to the free model."""
+    def test_free_model_429_never_fires_callback(self):
+        """A 429 on an already-free model has nothing to switch to — it
+        raises (existing behavior) and the callback is NOT fired."""
         b = _make_zai_backend()
-        b._credits_fallback_models = {"glm-5.1": ZAI_FREE_FALLBACK_MODEL}
-
-        calls = []
-
-        def _fake_urlopen(req, timeout=None):
-            calls.append(json.loads(req.data.decode("utf-8")))
-            return _json_response(_completion_payload())
-
-        with patch("urllib.request.urlopen", side_effect=_fake_urlopen):
-            b._generate_with_auth(
-                model="glm-5.1",
-                messages=[{"role": "user", "content": "hi"}],
-            )
-
-        self.assertEqual(len(calls), 1)
-        self.assertEqual(calls[0]["model"], ZAI_FREE_FALLBACK_MODEL)
-
-
-# ---------------------------------------------------------------------------
-# Scoping / safety of the sticky map
-# ---------------------------------------------------------------------------
-
-class TestSessionFallbackScoping(unittest.TestCase):
-
-    def test_other_models_not_redirected(self):
-        """Recording a burnout for glm-5.1 must not affect other models."""
-        b = _make_zai_backend()
-        b._credits_fallback_models = {"glm-5.1": ZAI_FREE_FALLBACK_MODEL}
-
-        calls = []
-
-        def _fake_urlopen(req, timeout=None):
-            calls.append(json.loads(req.data.decode("utf-8")))
-            return _json_response(_completion_payload())
-
-        with patch("urllib.request.urlopen", side_effect=_fake_urlopen):
-            b._generate_with_auth(
-                model="glm-4.7",
-                messages=[{"role": "user", "content": "hi"}],
-            )
-
-        self.assertEqual(calls[0]["model"], "glm-4.7")
-
-    def test_free_model_429_not_recorded(self):
-        """A 429 on an already-free model has nothing to fall back to —
-        it raises (existing behavior) and must NOT pollute the map."""
-        b = _make_zai_backend()
+        fired = []
+        b.set_model_switch_callback(lambda failed, fb: fired.append((failed, fb)))
 
         with patch("urllib.request.urlopen", side_effect=lambda *a, **k: (_ for _ in ()).throw(_http_429())):
             with self.assertRaises(RuntimeError):
@@ -266,41 +235,89 @@ class TestSessionFallbackScoping(unittest.TestCase):
                     messages=[{"role": "user", "content": "hi"}],
                 )
 
-        self.assertEqual(b._credits_fallback_models, {})
+        self.assertEqual(fired, [])
 
-    def test_record_ignores_free_models(self):
-        """_record_credit_fallback is a no-op for free models."""
-        b = _make_zai_backend()
-        self.assertIsNone(b._record_credit_fallback("glm-4.5-flash"))
-        self.assertIsNone(b._record_credit_fallback("glm-4.7-flash"))
-        self.assertIsNone(b._record_credit_fallback(""))
-        self.assertEqual(b._credits_map(), {})
 
-    def test_map_isolated_per_instance(self):
-        """Each backend instance (== each session) has its own map."""
-        b1 = _make_zai_backend()
-        b2 = _make_zai_backend()
-        b1._record_credit_fallback("glm-5.1")
-        self.assertEqual(b1._credits_map(), {"glm-5.1": ZAI_FREE_FALLBACK_MODEL})
-        self.assertEqual(b2._credits_map(), {})
+# ---------------------------------------------------------------------------
+# CLI side: the callback runs the proper /model switch path
+# ---------------------------------------------------------------------------
 
-    def test_apply_session_fallback_announces_once(self):
-        """_apply_session_fallback rewrites the model and announces the
-        sticky switch exactly once; later calls are silent no-ops."""
-        b = _make_zai_backend()
-        b._record_credit_fallback("glm-5.1")
+def _make_dummy_agent_with_zai():
+    """A stand-in Agent wired to a catalog-mocked ZaiBackend."""
+    backend = _make_zai_backend()
+    backend.is_cloud = True
+    backend._context_safe_max_tokens = 12345  # stale value from the OLD model
+    backend.get_model_info = MagicMock(return_value=None)
+    backend.get_model_max_context = MagicMock(return_value=132000)
+    backend._get_model_defaults = MagicMock(return_value={
+        "temperature": 0.7,
+        "max_tokens": 98304,
+    })
+
+    agent = SimpleNamespace(
+        model="glm-5.1",
+        num_ctx=204800,
+        _num_predict=None,
+        backend=backend,
+        model_config=SimpleNamespace(default_max_tokens=131072, default_temperature=0.7),
+        model_family="glm",
+        _num_ctx_explicit=False,
+        _num_predict_explicit=False,
+    )
+    return agent, backend
+
+
+class TestRegisterInsufficientCreditsSwitch(unittest.TestCase):
+
+    def test_registers_callback_on_capable_backend(self):
+        agent, backend = _make_dummy_agent_with_zai()
+        register_insufficient_credits_switch(agent)
+        self.assertIsNotNone(backend._model_switch_callback)
+        self.assertTrue(callable(backend._model_switch_callback))
+
+    def test_callback_runs_the_model_switch_path(self):
+        """Firing the callback must switch agent.model through
+        apply_model_switch — per-model state re-derived, stale
+        context-safe max_tokens cleared."""
+        agent, backend = _make_dummy_agent_with_zai()
+        register_insufficient_credits_switch(agent)
 
         buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            m1 = b._apply_session_fallback("glm-5.1")
-            m2 = b._apply_session_fallback("glm-5.1")
-            # Free / unknown models pass through untouched
-            m3 = b._apply_session_fallback("glm-4.5-flash")
+        with patch("sys.stdout", new=buf):
+            backend._model_switch_callback("glm-5.1", ZAI_FREE_FALLBACK_MODEL)
 
-        self.assertEqual(m1, ZAI_FREE_FALLBACK_MODEL)
-        self.assertEqual(m2, ZAI_FREE_FALLBACK_MODEL)
-        self.assertEqual(m3, "glm-4.5-flash")
-        self.assertEqual(buf.getvalue().count("no credits left this session"), 1)
+        # The session model actually moved (footer renders agent.model)
+        self.assertEqual(agent.model, ZAI_FREE_FALLBACK_MODEL)
+        # num_ctx re-derived from the NEW model's catalog (132000, was 204800)
+        self.assertEqual(agent.num_ctx, 132000)
+        # num_predict re-derived (98304, was None = model default)
+        self.assertEqual(agent._num_predict, 98304)
+        # stale context-safe max_tokens cleared by the switch
+        self.assertIsNone(backend._context_safe_max_tokens)
+        # the user-visible notice printed
+        self.assertIn("session model switched", buf.getvalue())
+        self.assertIn("glm-5.1 -> glm-4.5-flash", buf.getvalue())
+
+    def test_callback_guard_does_not_clobber_user_switch(self):
+        """If the session already moved to a different model (explicit
+        /model), a stale 429 for the old model must not switch it."""
+        agent, backend = _make_dummy_agent_with_zai()
+        agent.model = "glm-4.7"  # user switched mid-flight
+        register_insufficient_credits_switch(agent)
+
+        backend._model_switch_callback("glm-5.1", ZAI_FREE_FALLBACK_MODEL)
+
+        self.assertEqual(agent.model, "glm-4.7", "user's explicit model must win")
+
+    def test_register_skips_backends_without_hook(self):
+        """Non-cloud / non-ZAI backends without set_model_switch_callback
+        are simply skipped — no error."""
+        agent = SimpleNamespace(model="m", backend=SimpleNamespace())
+        register_insufficient_credits_switch(agent)  # must not raise
+
+    def test_register_skips_missing_backend(self):
+        agent = SimpleNamespace(model="m")  # no backend attr at all
+        register_insufficient_credits_switch(agent)  # must not raise
 
 
 # ---------------------------------------------------------------------------
