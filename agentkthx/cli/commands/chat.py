@@ -14,6 +14,7 @@ from ...colors import bold, magenta, yellow, dim, green, cyan, bright_green, red
 from ...config import get_config
 from ...tools import make_builtin_registry
 
+from ..footer import footer_line1, footer_line2
 from ..utils import _print_agent_steps
 
 
@@ -45,75 +46,19 @@ def cmd_chat(args: argparse.Namespace) -> int:
     _session_tokens_in = 0
     _session_tokens_out = 0
 
+    # R07.12 dedup (CodeFlow duplicate-block report): both footer lines are
+    # rendered by the shared agentkthx.cli.footer builder — the logic had been
+    # copy-forked between cmd_chat and cmd_agent (incl. 4 identical nested
+    # _fmt_tok definitions) since R06.58. Thin closures keep every call site
+    # unchanged and read the live session counters (accumulated below and in
+    # the turn loop) at call time.
     def _footer_line1() -> str:
         """Build the first footer line: version, model, prompt, context, tokens."""
-        ctx = agent.num_ctx
-        ctx_str = f"{ctx // 1024}K" if ctx and ctx >= 1024 else str(ctx) if ctx else '?'
-        max_t = agent._num_predict if agent._num_predict is not None else agent.model_config.default_max_tokens
-        max_t_str = f"{max_t // 1024}K" if max_t >= 1024 else str(max_t)
-        temp = agent._temperature if agent._temperature is not None else agent.model_config.default_temperature
-        def _fmt_tok(n):
-            n = int(str(n).strip())
-            if n >= 1000:
-                return f"{n/1000:.1f}k"
-            return str(n)
-        _sys_prompt = getattr(agent, '_custom_system_prompt', '') or ''
-        _prompt_chr = len(_sys_prompt)
-        _prompt_tok = _prompt_chr // 4
-        prompt_str = f"{_fmt_tok(_prompt_chr)} chr {_fmt_tok(_prompt_tok)} tok"
-        _e_brand = '\u269b\ufe0f'
-        _e_model = '\U0001f9e0'
-        _e_ctx   = '\U0001f4e6'
-        _e_resp  = '\U0001f4ac'
-        _e_temp  = '\U0001f321\ufe0f'
-        _e_prmpt = '\U0001f4dd'
-        parts = [
-            f"{dim(_e_brand)} {cyan(__version__)}",
-            f"{dim(_e_model)} {cyan(agent.model)}",
-            f"{dim(_e_prmpt)} {yellow(prompt_str)}",
-            f"{dim(_e_ctx)} {yellow(ctx_str)}",
-            f"{dim(_e_resp)} {yellow(max_t_str)}",
-            f"{dim(_e_temp)} {yellow(str(temp))}",
-        ]
-        return ' '.join(parts)
+        return footer_line1(agent)
 
     def _footer_line2() -> str:
         """Build the second footer line: backend, token usage, context %, debug flag."""
-        backend = getattr(agent.backend, 'backend_type', None)
-        bname = backend.value if backend and hasattr(backend, 'value') else str(backend) if backend else '?'
-        def _fmt_tok(n):
-            n = int(str(n).strip())
-            if n >= 1000:
-                return f"{n/1000:.1f}k"
-            return str(n)
-        # Use agent's running totals (updated during the streaming loop)
-        # instead of the post-run _session_tokens_in/out closure vars
-        # which only update after agent.run() returns.
-        _tok_in = getattr(agent, '_running_tokens_in', 0) or _session_tokens_in
-        _tok_out = getattr(agent, '_running_tokens_out', 0) or _session_tokens_out
-        tok_str = f"\u2191{_fmt_tok(_tok_in)} \u2193{_fmt_tok(_tok_out)}"
-        # Session context usage percentage: (in + out) / num_ctx
-        _total_session = _tok_in + _tok_out
-        _ctx = agent.num_ctx or 8192
-        _ctx_pct = min(100, int((_total_session / _ctx) * 100)) if _ctx > 0 else 0
-        # Color the percentage based on usage level
-        if _ctx_pct >= 85:
-            _ctx_pct_str = red(f"{_ctx_pct}%")
-        elif _ctx_pct >= 60:
-            _ctx_pct_str = yellow(f"{_ctx_pct}%")
-        else:
-            _ctx_pct_str = green(f"{_ctx_pct}%")
-        _e_be    = '\U0001f50c'
-        _e_tok   = '\U0001f4c8'
-        _e_dbg   = '\U0001f41b'
-        parts = [
-            f"{dim(_e_be)} {green(bname)}",
-            f"{dim(_e_tok)} {yellow(tok_str)}",
-            f"{dim('ctx')} {_ctx_pct_str}",
-        ]
-        if agent.debug:
-            parts.append(f"{red(_e_dbg + ' debug')}")
-        return ' '.join(parts)
+        return footer_line2(agent, _session_tokens_in, _session_tokens_out)
 
     def _footer_text() -> str:
         """Build the full 2-line footer (backward-compat wrapper).
