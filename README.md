@@ -1,8 +1,8 @@
-# ⚛️ AgentKthx R07.10
+# ⚛️ AgentKthx R07.11
 
 **Status: Alpha**
 
-A minimal, modular, python stdlib, agentic framework for tool calling AI agents. Runs **locally** with [Ollama](https://ollama.com), [BitNet](https://github.com/microsoft/BitNet), [TurboQuant](https://github.com/TheTom/llama-cpp-turboquant), **in the cloud** with [OpenRouter](https://openrouter.ai), [ZAI](https://api.z.ai), [HuggingFace](https://huggingface.co/), [OpenAI](https://openai.com), [OrcaRouter](https://www.orcarouter.ai), [Google Gemini](https://ai.google.dev/gemini-api/docs) and [Mistral](https://mistral.ai). Extensible via a manifest-based **plugin system** for additional backends and features.
+A minimal, modular, python stdlib, agentic framework for tool calling AI agents. Runs **locally** with [Ollama](https://ollama.com), [BitNet](https://github.com/microsoft/BitNet), [TurboQuant](https://github.com/TheTom/llama-cpp-turboquant), **in the cloud** with [OpenRouter](https://openrouter.ai), [ZAI](https://api.z.ai), [HuggingFace](https://huggingface.co/), [OpenAI](https://openai.com), [OrcaRouter](https://www.orcarouter.ai), [Google Gemini](https://ai.google.dev/gemini-api/docs), [Pollinations](https://enter.pollinations.ai) and [Mistral](https://mistral.ai). Extensible via a manifest-based **plugin system** for additional backends and features.
 
 Inspired by the architecture of OpenClaw, rebuilt from scratch for local-first operation.
 
