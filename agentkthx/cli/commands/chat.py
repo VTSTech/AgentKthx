@@ -1168,6 +1168,13 @@ def cmd_chat(args: argparse.Namespace) -> int:
             acp.log_chat("assistant", result.final_answer)
 
     finally:
+        # ROB-12 (R07.12 intra): unregister the footer-refresh callback on
+        # ALL exit paths. The lambda closes over this dead frame's footer
+        # state — if the Agent instance is reused after cmd_chat returns,
+        # the stale callback would keep firing (benign ANSI noise in
+        # production, AttributeError bait in tests). Mirrors the scroll-
+        # region teardown contract below.
+        agent._on_step_callback = None
         # Tear down terminal scroll region on ALL exit paths so the
         # terminal is never left in a broken state.
         _teardown_footer_region()

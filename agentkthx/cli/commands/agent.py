@@ -214,6 +214,10 @@ def cmd_agent(args: argparse.Namespace) -> int:
         # R06.58: tear down the scroll region on every exit path (quit,
         # EOF, Ctrl+C, unexpected exception) so the terminal is never
         # left in a broken state. Mirrors cmd_chat's try/finally pattern.
+        # ROB-12 (R07.12 intra): also unregister the step callback — the
+        # lambda closes over this dead frame's footer state and must not
+        # outlive cmd_agent on a reused Agent.
+        agent._on_step_callback = None
         _teardown_footer_region()
 
     return 0

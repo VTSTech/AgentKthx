@@ -121,9 +121,22 @@ def test_cmd_agent_emits_scroll_region_setup_and_teardown(monkeypatch, capsys):
 def test_cmd_agent_registers_on_step_callback(monkeypatch, capsys):
     """cmd_agent should set agent._on_step_callback so the footer updates
     during streaming. Without it, the footer only updates between goals,
-    not during multi-step execution."""
+    not during multi-step execution.
+
+    ROB-12 (R07.12 intra): the callback's LIFETIME is also pinned — it
+    must be registered during the loop and cleared when cmd_agent exits,
+    so a reused Agent never fires a stale closure into the dead frame.
+    """
+    captured = {}
     inputs = iter(["/quit"])
-    monkeypatch.setattr('builtins.input', lambda *a, **kw: next(inputs))
+
+    def _fake_input(*a, **kw):
+        # First prompt happens AFTER registration but BEFORE the finally
+        # teardown — snapshot the callback at that moment.
+        captured["cb"] = mock_agent._on_step_callback
+        return next(inputs)
+
+    monkeypatch.setattr('builtins.input', _fake_input)
 
     mock_agent = MagicMock()
     mock_agent.model = "test-model"
@@ -154,9 +167,14 @@ def test_cmd_agent_registers_on_step_callback(monkeypatch, capsys):
 
     cli.cmd_agent(_make_args())
 
-    # _on_step_callback should have been set on the agent (not None).
-    assert mock_agent._on_step_callback is not None, (
+    # Registered DURING the loop (snapshotted at the first prompt):
+    assert captured["cb"] is not None, (
         "_on_step_callback was not registered — footer won't update during streaming"
+    )
+    # ROB-12 (R07.12 intra): and cleared on exit — a reused Agent must
+    # never fire the stale closure into the dead cmd_agent frame.
+    assert mock_agent._on_step_callback is None, (
+        "_on_step_callback was not cleared on exit — stale closure outlives cmd_agent"
     )
 
 

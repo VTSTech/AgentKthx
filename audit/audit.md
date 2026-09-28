@@ -4,12 +4,12 @@
 
 **Repository:** https://github.com/VTSTech/AgentKthx  
 **Author:** VTSTech | **License:** MIT | **Date:** 2026-09-28  
-**Commit:** 8cb2040 | **Test Suite:** 1838 passed / 16 skipped  
-55 Open Findings | 7 Categories | SEC, ROB, MAINT, PERF, FEAT, ARCH, TEST  
-Severity: 0 High | 23 Medium | 32 Low  
-55 OPEN (CLOSED + WONTFIX archived in deltas.md — generate_audit_dash.py merges both for the dashboard)
+**Commit:** 8cb2040 | **Test Suite:** 1849 passed / 16 skipped  
+49 Open Findings | 7 Categories | SEC, ROB, MAINT, PERF, FEAT, ARCH, TEST  
+Severity: 0 High | 22 Medium | 27 Low  
+49 OPEN (CLOSED + WONTFIX archived in deltas.md — generate_audit_dash.py merges both for the dashboard)
 
-> **Split:** 49 CLOSED/WONTFIX findings moved to `deltas.md`. `generate_audit_dash.py` reads both `audit.md` (open) and `deltas.md` (closed/wontfix) and merges them into the full register. The dashboard shows all 104 findings (55 open + 49 closed/wontfix).
+> **Split:** 55 CLOSED/WONTFIX findings moved to `deltas.md`. `generate_audit_dash.py` reads both `audit.md` (open) and `deltas.md` (closed/wontfix) and merges them into the full register. The dashboard shows all 104 findings (49 open + 55 closed/wontfix).
 
 ---
 
@@ -30,7 +30,9 @@ R07.12 was the first **audit closure release** — a release dedicated to drivin
 
 Two findings moved to **WONTFIX by owner decision** (SEC-18, SEC-19 — provider-controlled error prose in `RuntimeError` messages). The rationale: first-party API providers are trusted parties (users hand them payment credentials at signup); the response channel strictly dominates the error channel — every turn the model consumes provider-generated text as the conversation itself, so sanitizing error prose while trusting response prose locks the window while the front door stands open; backend error prose terminates at the human terminal and never re-enters model context (the tool-output path that does reach the model is wrapped by the SEC-10/FEAT-01 sanitization); and the single path where provider text was machine-parsed for control flow was SEC-14, already closed in R07.08. The SEC-14 → SEC-18 → SEC-19 "family" is therefore retired rather than consolidated.
 
-Cumulative closure state: **42 CLOSED + 7 WONTFIX of 104 findings (49 archived, 47%)** by mechanical table count. Closures now span R07.00 → R07.12. The remaining highest-leverage closures: MAINT-23/ROB-29 (the ~80-LOC retry-loop skeleton now duplicated across three consecutive cloud backends — one `CloudBackend` primitive closes the family), ROB-15/ROB-18 (PersistentMemory single-transaction + `RLock`), SEC-13 (`AGENTKTHX_REQUIRE_PLUGIN_PINS` enforcement), MAINT-01 (extract `ChatSession`), and TEST-01 (integration test tier). The audit-tracked finding discipline continues to pay for itself — R07.12's test file (`tests/test_r07_12_closure_batch.py`) pins every closure with regression tests in the house per-release style.
+**Intra-release quick-wins batch (no version bump):** six more findings closed — ROB-12 (the `_on_step_callback` stale-closure lifetime, fixed in BOTH `cmd_chat` and `cmd_agent`), ROB-19 (`register_tool` reads `self.debug` directly), PERF-05 (tool-parse cross-strategy dedupe), MAINT-21 (Mistral error-envelope precedence bug — the audit's first Medium closed since the release), MAINT-18 (verification-only: the `apply_model_switch` return dict is consumed), and TEST-02 (the no-op `test_percent2e` rewritten deterministic). Eleven regression tests in `tests/test_r07_12_quick_wins.py`; suite 1838 → 1849, zero regressions.
+
+Cumulative closure state: **48 CLOSED + 7 WONTFIX of 104 findings (55 archived, 53%)** by mechanical table count. Closures now span R07.00 → R07.12 (plus an intra-release quick-wins batch, same release, no version bump). The remaining highest-leverage closures: MAINT-23/ROB-29 (the ~80-LOC retry-loop skeleton now duplicated across three consecutive cloud backends — one `CloudBackend` primitive closes the family), ROB-15/ROB-18 (PersistentMemory single-transaction + `RLock`), SEC-13 (`AGENTKTHX_REQUIRE_PLUGIN_PINS` enforcement), MAINT-01 (extract `ChatSession`), and TEST-01 (integration test tier). The audit-tracked finding discipline continues to pay for itself — R07.12's test file (`tests/test_r07_12_closure_batch.py`) pins every closure with regression tests in the house per-release style.
 
 ## Findings Summary
 
@@ -57,31 +59,25 @@ Cumulative closure state: **42 CLOSED + 7 WONTFIX of 104 findings (49 archived, 
 | TEST-06 | Medium | Testing | OPEN | CI doesn't run black --check or ruff check — code style drift undetected |
 | ROB-09 | Low | Robustness | OPEN | validate_path uses os.path.abspath, doesn't follow symlinks — read_file("/tmp/symlink_to_etc_passwd") bypasses |
 | ROB-11 | Low | Robustness | OPEN | Plugin load-failure path calls unregister() which may itself fail — leaves partial registrations |
-| ROB-12 | Low | Robustness | OPEN | agent._on_step_callback = lambda ... in cmd_chat cannot be unregistered — stale closure fires after chat exits |
 | ROB-17 | Low | Robustness | OPEN | Token-tier pruning can leave a single over-budget message (loop exits when len-1) — documented gap |
 | ROB-18 | Low | Robustness | OPEN | threading.Lock (not RLock) — brittle if future code adds nested locked calls |
-| ROB-19 | Low | Robustness | OPEN | getattr(self, "debug", False) in register_tool masks init-order bugs |
 | ROB-20 | Low | Robustness | OPEN | agent.num_ctx (public) vs agent._num_predict (private) naming inconsistency in apply_model_switch |
 | ROB-22 | Low | Robustness | OPEN | _iter_sse_lines has no exhaustion-raise matching non-streaming path — minor UX inconsistency |
 | ROB-25 | Low | Robustness | OPEN | generate() vs _generate_with_auth() signature defaults mismatch (None vs 0.7/2048) — confusing |
 | MAINT-07 | Low | Maintainability | OPEN | model_family_config.detect_family uses prefix matching with overlapping families — fragile for new Qwen variants |
 | MAINT-15 | Low | Maintainability | OPEN | _write_lock is per-instance, not per-DB-path — multi-instance scenarios still race |
-| MAINT-18 | Low | Maintainability | OPEN | apply_model_switch return dict — verify caller actually consumes it (currently consumed by chat.py:1007 for delta-printing) |
 | MAINT-19 | Low | Maintainability | OPEN | list_models cache is per-instance — class-level cache would dedupe across instances |
 | PERF-03 | Low | Performance | OPEN | _iter_hostname_ips resolves every hostname synchronously on every is_safe_url call — no cache |
 | PERF-04 | Low | Performance | OPEN | _estimate_tokens recomputed for every message on every add() — cache on Message dataclass |
-| PERF-05 | Low | Performance | OPEN | ToolParser.parse runs all 3 parsing strategies even if first succeeds — may produce duplicate tool calls |
 | PERF-06 | Low | Performance | OPEN | _fetch_json reads entire PyPI response (~100KB) before JSON parsing |
 | FEAT-05 | Low | New Features | OPEN | Plugin sandboxing via restricted register() namespace + audit hooks |
 | FEAT-06 | Low | New Features | OPEN | Streaming tool-call argument deltas (function_call_arguments.delta SSE events) |
 | FEAT-07 | Low | New Features | OPEN | Conversation export/import to OpenResponses-format JSON |
 | ARCH-03 | Low | Architecture | OPEN | agent_mode.py and orchestrator.py are only loosely coupled to the Agent class — parallel abstractions |
 | ARCH-04 | Low | Architecture | OPEN | Soul loader does 5-step path resolution with repeated importlib.resources fallbacks — hard to follow |
-| TEST-02 | Low | Testing | OPEN | test_security.py:test_percent2e always passes (assert not is_valid or True) — no-op test |
 | TEST-04 | Low | Testing | OPEN | No test coverage for agent_mode.py rollback functionality (822 LOC, key feature) |
 | TEST-05 | Low | Testing | OPEN | test_bump_version_script.py tests shell script via subprocess — fails on Windows/no-bash |
 | TEST-07 | Low | Testing | OPEN | No test for update_check module's network-failure paths (URLError, socket.timeout, malformed JSON) |
-| MAINT-21 | Medium | Maintainability | OPEN | _parse_mistral_response error-envelope check has operator-precedence bug — `(A or (B and C))` misclassifies any response with `message` field and no `choices` as an error |
 | MAINT-22 | Medium | Maintainability | OPEN | Streaming path bypasses _build_mistral_body — random_seed/safe_prompt/prompt_cache_key/OpenAI-only kwarg stripping NOT applied on streaming (only non-streaming) |
 | ROB-28 | Low | Robustness | OPEN | MistralBackend.list_models catches bare Exception on top of HTTPError/URLError — masks KeyError/AttributeError as "discovery failed" with no traceback |
 | ROB-29 | Low | Robustness | OPEN | MistralBackend _iter_sse_lines + _make_api_request have ~80 LOC duplicated retry/backoff logic — mirrors the MAINT-11 OrcaRouter pattern closed in R07.08 |
@@ -206,28 +202,6 @@ When `_load_plugin` catches an exception during `module.register(self)` (line 86
 Recommendation: Track all `register_*` calls during `register()` execution in a per-plugin transaction, and roll them back on failure. Use a `PluginTransaction` context manager that records every `register_backend`, `register_tool`, `register_cli_command`, `register_hook` call.
 
 **Impact:** Partially-loaded plugins leave orphan registrations in the PluginManager — a backend may be registered but its module is `None`, causing confusion.
-
----
-
----
-
----
-
----
-
-#### ROB-12: `agent._on_step_callback = lambda ...` in `cmd_chat` cannot be unregistered
-
-| Property | Value |
-|----------|-------|
-| **Severity** | Low |
-| **Category** | Robustness |
-| **File(s)** | `agentkthx/cli/commands/chat.py:282-284` |
-
-`agent._on_step_callback = lambda step, tin, tout: _update_footer()` (line 284) is set unconditionally. If the Agent instance is reused after `cmd_chat` returns (e.g., in a test or a script that calls `cmd_chat` then `agent.run` directly), the lambda still fires, calling `_update_footer()` which references the closed-over `_term_size` and `_use_persistent_footer` variables from the dead `cmd_chat` stack frame.
-
-Recommendation: Set `agent._on_step_callback = None` in the `finally:` block of `cmd_chat`. Better: replace the closure-based callback with a method on a `ChatSession` class (see MAINT-01) so the lifetime is explicit.
-
-**Impact:** Stale closures fire after chat exits; benign in production (just writes ANSI escapes to stdout), but causes `AttributeError` in test environments.
 
 ---
 
@@ -415,22 +389,6 @@ Recommendation: Wrap agent descriptions in XML tags (`<agent name="X">descriptio
 ---
 
 
-#### MAINT-21: _parse_mistral_response error-envelope check has operator-precedence bug
-
-| Property | Value |
-|----------|-------|
-| **Severity** | Medium |
-| **Category** | Maintainability |
-| **File(s)** | `agentkthx/plugins/mistral/mistral.py:745` |
-
-`if raw_response.get("object") == "error" or "message" in raw_response and not raw_response.get("choices"):` — Python binds `and` tighter than `or`, so this parses as `(object == "error") or ("message" in raw and no choices)`. Any response carrying a top-level `message` field with no `choices` is classified as an error envelope and raises, even when the gateway meant it as a notice/annotation. Mistral's documented envelope is `{"object": "error", ...}`; the second clause was meant as a fallback heuristic but mis-fires on legitimate shapes.
-
-Recommendation: parenthesize explicitly or drop the heuristic clause and key on the `object` marker the doc specifies; add a regression test with a `{"message": ..., "data": ...}` success shape.
-
-**Impact:** Gateway-side shape drift turns successful responses into raised errors — a correctness landmine one field away from firing.
-
----
-
 #### MAINT-22: Streaming path bypasses _build_mistral_body — Mistral knobs not sent
 
 | Property | Value |
@@ -544,28 +502,6 @@ Recommendation: Use a JSON API (DuckDuckGo has `https://api.duckduckgo.com/?q=..
 Recommendation: Track mtime per `plugin.json` and only re-parse changed files. Maintain a `dict[path, mtime]` and compare on `discover(force=True)`.
 
 **Impact:** Slow plugin reload during development — minor but noticeable.
-
----
-
----
-
----
-
----
-
-#### PERF-05: `ToolParser.parse` runs all 3 parsing strategies even if first succeeds
-
-| Property | Value |
-|----------|-------|
-| **Severity** | Low |
-| **Category** | Performance |
-| **File(s)** | `agentkthx/core/tool_parse.py:275-310` |
-
-`parse(text)` (line 275-310) calls `_parse_native_json(text)`, then `_parse_react(text)`, then `_parse_xml(text)`, and extends the `calls` list with results from each. If the model emits a clean ReAct `Action: tool\nAction Input: {...}`, the JSON parser runs first and may misparse the text (e.g., if the JSON object is valid JSON, it gets parsed as a native call AND the ReAct parser also finds an Action).
-
-Recommendation: Return early if `_parse_native_json` returns results, only fall through to ReAct/XML if JSON parsing finds nothing. Or run all three but dedupe by `(tool_name, args)` tuple.
-
-**Impact:** Duplicate tool calls from a single model response — rare but causes confusion when it happens.
 
 ---
 
@@ -833,28 +769,6 @@ All 984 tests are mocked unit tests — there's no integration tier. `tests/test
 Recommendation: Add `test_chat_commands.py` that feeds simulated user input to a mock `cmd_chat` and asserts the output. Add a record/replay integration tier: run `agentkthx chat --backend=test-backend --record` to capture backend responses, then `--replay` to re-run without network. Target: 60% coverage on `cli/commands/chat.py` and `cli/commands/run.py`.
 
 **Impact:** Regressions in slash-command behavior go undetected; coverage gaps in the CLI layer are unknown.
-
----
-
----
-
----
-
----
-
-#### TEST-02: `test_security.py:test_percent2e` always passes — no-op test
-
-| Property | Value |
-|----------|-------|
-| **Severity** | Low |
-| **Category** | Testing |
-| **File(s)** | `tests/test_security.py:103-116` |
-
-The test `test_percent2e` (line 103) asserts `assert not is_valid or True` — which always passes regardless of `is_valid`'s value. The comment (line 115-116) says "Accept either outcome; the important thing is that even if validated, read_file would fail on a non-existent path." This is a no-op test.
-
-Recommendation: Make the test deterministic by asserting the specific expected behavior (validate_path should reject `%2e%2e` patterns after URL-decoding). Either `assert not is_valid` or `assert is_valid and "expected_reason" in reason`.
-
-**Impact:** Path traversal via URL-encoded `..` is not actually tested; the test gives false confidence.
 
 ---
 

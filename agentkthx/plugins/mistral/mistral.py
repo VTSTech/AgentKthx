@@ -742,7 +742,16 @@ class MistralBackend(CloudBackend):
         a ``_raw_arguments`` fallback for malformed JSON.
         """
         # Mistral error envelope — {"object": "error", "message": ...}
-        if raw_response.get("object") == "error" or "message" in raw_response and not raw_response.get("choices"):
+        # MAINT-21 (R07.12 intra): the previous check was
+        # ``object == "error" or "message" in raw and not choices`` — Python
+        # binds ``and`` tighter than ``or``, so ANY response carrying a
+        # top-level ``message`` field with no ``choices`` was classified as
+        # an API error and raised the provider message at the user, even
+        # when the gateway meant it as a notice/annotation. The documented
+        # error marker is the ``object`` field; key on it alone. A
+        # response with neither the marker nor choices still raises below
+        # via the honest "no choices" branch.
+        if raw_response.get("object") == "error":
             msg = raw_response.get("message", str(raw_response))
             etype = raw_response.get("type", "")
             code = raw_response.get("code", "")

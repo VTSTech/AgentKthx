@@ -1,10 +1,10 @@
 # Audit Deltas — Closed & Wontfix Archive
 
 **Project:** AgentKthx  
-**Release:** R07.12  
+**Release:** R07.12
 **Date:** 2026-09-28  
-**Archived:** 2026-09-28 (R07.12 closure batch)  
-**Counts:** 42 CLOSED · 7 WONTFIX · 49 total
+**Archived:** 2026-09-28 (R07.12 closure batch)
+**Counts:** 48 CLOSED · 7 WONTFIX · 55 total
 
 This file is the archive of CLOSED and WONTFIX findings moved out of
 `audit.md` to keep the active audit focused on OPEN findings.
@@ -33,6 +33,7 @@ This file is the archive of CLOSED and WONTFIX findings moved out of
 | MAINT-02 | Medium | Maintainability | ✓ CLOSED R07.04 | 5 cloud backend plugins (zai/openrouter/gemini/openai/huggingface) duplicate ~5K LOC of structurally identical SSE/retry/catalog code |
 | MAINT-04 | Medium | Maintainability | ✓ CLOSED R07.05 | Two different normalize_args implementations (helpers.py vs args_normal.py) — the latter appears to be dead code |
 | MAINT-05 | Medium | Maintainability | ✓ CLOSED R07.05 | cli/utils.py documents 100+ LOC of dead code (_load_tool_cache, _save_tool_cache, _get_cloud_model_size) |
+| MAINT-21 | Medium | Maintainability | ✓ CLOSED R07.12 (intra) | _parse_mistral_response error-envelope check has operator-precedence bug — `(A or (B and C))` misclassifies any response with `message` field and no `choices` as an error |
 | FEAT-01 | Medium | New Features | ✓ CLOSED R07.04 | Structured tool-output wrapping to mitigate prompt injection |
 | ARCH-01 | Medium | Architecture | ⊘ WONTFIX (intentional) | Backends split across backends/ (native) and plugins/ (cloud) — confusing module layout |
 | SEC-05 | Low | Security | ✓ CLOSED R07.08 | input() prompts in dangerous-tool confirmation don't strip ANSI escapes from tool name/args |
@@ -48,8 +49,10 @@ This file is the archive of CLOSED and WONTFIX findings moved out of
 | ROB-01 | Low | Robustness | ✓ CLOSED R07.06 | _execute_single_tool_call "break" return value doesn't distinguish terminated from cancelled |
 | ROB-07 | Low | Robustness | ✓ CLOSED R07.06 | _ERROR_FIRST_LINE_RE misses alternative traceback formats (During handling of the above exception) |
 | ROB-08 | Low | Robustness | ✓ CLOSED R07.06 | MemoryConfig.max_tokens is unused — sliding window only fires on message count |
+| ROB-12 | Low | Robustness | ✓ CLOSED R07.12 (intra) | agent._on_step_callback = lambda ... in cmd_chat cannot be unregistered — stale closure fires after chat exits |
 | ROB-14 | Low | Robustness | ✓ CLOSED R07.06 | In-chat /model switch only reassigns agent.model — num_ctx/num_predict/model_config stay on the OLD model (stale window invites context-400s) |
 | ROB-16 | Low | Robustness | ✓ CLOSED R07.07 | time.sleep(retry_after) unbounded — malicious Retry-After: 3600 hangs agent for 1 hour |
+| ROB-19 | Low | Robustness | ✓ CLOSED R07.12 (intra) | getattr(self, "debug", False) in register_tool masks init-order bugs |
 | ROB-21 | Low | Robustness | ✓ CLOSED R07.07 | API key min length 8 chars — too weak; real keys are 30+ chars |
 | ROB-23 | Low | Robustness | ✓ CLOSED R07.12 | list_models fallback list is hardcoded — live -free suffix convention now authoritative |
 | ROB-24 | Low | Robustness | ✓ CLOSED R07.12 | get_model_info returns default 128K entry for ANY model string — placeholders now marked catalog_status unknown |
@@ -62,9 +65,12 @@ This file is the archive of CLOSED and WONTFIX findings moved out of
 | MAINT-13 | Low | Maintainability | ✓ CLOSED R07.07 | list_models hardcodes "family": "glm" instead of using self._catalog_family_name() — drift risk |
 | MAINT-16 | Low | Maintainability | ✓ CLOSED R07.07 | add_tool deprecated but emits no DeprecationWarning — callers have no programmatic signal |
 | MAINT-17 | Low | Maintainability | ✓ CLOSED R07.07 | Untrusted-tool-output instruction duplicated verbatim across 3 system-prompt builders |
+| MAINT-18 | Low | Maintainability | ✓ CLOSED R07.12 (intra) | apply_model_switch return dict — verify caller actually consumes it (currently consumed by chat.py:1007 for delta-printing) |
 | MAINT-20 | Low | Maintainability | ✓ CLOSED R07.07 | get_model_info sets free_tier twice for catalog hits (parent + override) — redundant |
+| PERF-05 | Low | Performance | ✓ CLOSED R07.12 (intra) | ToolParser.parse runs all 3 parsing strategies even if first succeeds — may produce duplicate tool calls |
 | PERF-07 | Low | Performance | ⊘ WONTFIX (intentional) | web_search has no result cache — same query re-fetches |
 | FEAT-04 | Low | New Features | ⊘ WONTFIX (intentional) | --dry-run flag for agentkthx run that previews planned tool calls |
+| TEST-02 | Low | Testing | ✓ CLOSED R07.12 (intra) | test_security.py:test_percent2e always passes (assert not is_valid or True) — no-op test |
 | TEST-08 | Low | Testing | ✓ CLOSED R07.08 | No adversarial test coverage for sandboxed_repl.py — sandbox escape regressions go undetected |
 
 ---
@@ -519,6 +525,52 @@ This file is the archive of CLOSED and WONTFIX findings moved out of
 
 ---
 
+#### ROB-12: `agent._on_step_callback = lambda ...` in `cmd_chat` cannot be unregistered
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Robustness |
+| **File(s)** | `agentkthx/cli/commands/chat.py:282-284` |
+
+**Status:** ✓ CLOSED R07.12 (intra-release quick-wins batch)
+
+`agent._on_step_callback = lambda step, tin, tout: _update_footer()` (line 284) is set unconditionally. If the Agent instance is reused after `cmd_chat` returns (e.g., in a test or a script that calls `cmd_chat` then `agent.run` directly), the lambda still fires, calling `_update_footer()` which references the closed-over `_term_size` and `_use_persistent_footer` variables from the dead `cmd_chat` stack frame.
+
+Recommendation: Set `agent._on_step_callback = None` in the `finally:` block of `cmd_chat`. Better: replace the closure-based callback with a method on a `ChatSession` class (see MAINT-01) so the lifetime is explicit.
+
+**Impact:** Stale closures fire after chat exits; benign in production (just writes ANSI escapes to stdout), but causes `AttributeError` in test environments.
+
+**Detail:** Fixed in BOTH commands — the same pattern existed in `cmd_agent` (`cli/commands/agent.py:145`). `agent._on_step_callback = None` now runs in the `finally:` of `cmd_chat` and `cmd_agent`, immediately before the scroll-region teardown, so the footer-refresh lambda can never outlive the frame that owns its closures. Pinned by source scan in `tests/test_r07_12_quick_wins.py` plus the full lifecycle (registered during the loop, `None` after exit) in `tests/test_agent_mode_footer.py::test_cmd_agent_registers_on_step_callback`.
+
+---
+
+---
+
+---
+
+---
+
+#### ROB-19: `getattr(self, "debug", False)` in register_tool masks init-order bugs
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Robustness |
+| **File(s)** | `agentkthx/agent.py:1078` |
+
+`Agent.register_tool` rebuilt the tool parser with `debug=getattr(self, "debug", False)`. The constructor assigns `self.debug` (`agentkthx/core/agent_setup.py`, first statements) long before `register_tool` is reachable, so the defensive default was dead code with a cost: an init-order bug that made `register_tool` run before the constructor set the flag would be silently swallowed (parser quietly runs with `debug=False`) instead of failing loudly.
+
+Recommendation: read `self.debug` directly and let a missing attribute raise.
+
+**Impact:** None observable — which is the point. The getattr default converts a would-be `AttributeError` (a loud init-order signal) into silently wrong debug routing.
+
+**Status:** ✓ CLOSED R07.12 (intra-release quick-wins batch)
+
+**Detail:** `Agent.register_tool` now reads `self.debug` directly. Pinned functionally (construct with `debug=False`, flip the attribute post-construction, re-register — the rebuilt parser must follow the LIVE flag) and by comment-aware source scan in `tests/test_r07_12_quick_wins.py`.
+
+---
+
 ### Maintainability
 
 #### MAINT-02: 5 cloud backend plugins (zai/openrouter/gemini/openai/huggingface) duplicate ~5K LOC of structurally identical SSE/retry/catalog code
@@ -684,6 +736,40 @@ This file is the archive of CLOSED and WONTFIX findings moved out of
 
 ---
 
+#### MAINT-21: _parse_mistral_response error-envelope check has operator-precedence bug
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Medium |
+| **Category** | Maintainability |
+| **File(s)** | `agentkthx/plugins/mistral/mistral.py:745` |
+
+**Status:** ✓ CLOSED R07.12 (intra-release quick-wins batch)
+
+`if raw_response.get("object") == "error" or "message" in raw_response and not raw_response.get("choices"):` — Python binds `and` tighter than `or`, so this parses as `(object == "error") or ("message" in raw and no choices)`. Any response carrying a top-level `message` field with no `choices` is classified as an error envelope and raises, even when the gateway meant it as a notice/annotation. Mistral's documented envelope is `{"object": "error", ...}`; the second clause was meant as a fallback heuristic but mis-fires on legitimate shapes.
+
+Recommendation: parenthesize explicitly or drop the heuristic clause and key on the `object` marker the doc specifies; add a regression test with a `{"message": ..., "data": ...}` success shape.
+
+**Impact:** Gateway-side shape drift turns successful responses into raised errors — a correctness landmine one field away from firing.
+
+**Detail:** The heuristic clause is DROPPED — the parser keys on the documented `{"object": "error"}` marker alone (the audit's second-prescribed option). A response carrying a top-level `message` field with no `choices` now falls through to the honest "no choices" branch instead of surfacing the provider prose as a Mistral API error; a completion that also carries `message` + `choices` parses normally; the documented error envelope still raises verbatim. Regression-pinned by 3 tests in `tests/test_r07_12_quick_wins.py`.
+
+---
+
+#### MAINT-18: apply_model_switch return dict — verify caller actually consumes it (currently consumed by chat.py:1007 for delta-printing)
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Maintainability |
+| **File(s)** | `agentkthx/cli/agent_factory.py:375` (`apply_model_switch`), `agentkthx/cli/commands/chat.py` (`/model` handler) |
+
+**Status:** ✓ CLOSED R07.12 (intra-release quick-wins batch — verification-only closure, no code change)
+
+**Detail:** Verified: `cmd_chat`'s `/model` handler captures `changes = _cli.apply_model_switch(agent, new_model)` and consumes the dict for delta-printing — the "Model changed: X -> Y" line reads `changes.get("model", ...)`, and the per-param deltas (`num_ctx` / `num_predict` / temperature old → new) print from the same dict. The line number moved over releases (chat.py:1007 at audit time → :952 after the intra-release footer dedup shrank the file), but the consumption contract is intact. The verification is pinned as a source-scan test in `tests/test_r07_12_quick_wins.py` so the return-dict consumption cannot silently regress.
+
+---
+
 ### Performance
 
 #### PERF-07: web_search has no result cache — same query re-fetches
@@ -697,6 +783,32 @@ This file is the archive of CLOSED and WONTFIX findings moved out of
 **Status:** ⊘ WONTFIX (intentional)
 
 **Detail:** search results are intended to be live. Caching would serve stale data, which is worse than a redundant fetch for a tool whose entire value proposition is "what does the web say right now?". DuckDuckGo results shift, pages get updated, and an agent re-searching the same query often wants the latest. Not a bug — live results are the feature.
+
+---
+
+#### PERF-05: `ToolParser.parse` runs all 3 parsing strategies even if first succeeds
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Performance |
+| **File(s)** | `agentkthx/core/tool_parse.py:275-310` |
+
+**Status:** ✓ CLOSED R07.12 (intra-release quick-wins batch)
+
+`parse(text)` (line 275-310) calls `_parse_native_json(text)`, then `_parse_react(text)`, then `_parse_xml(text)`, and extends the `calls` list with results from each. If the model emits a clean ReAct `Action: tool\nAction Input: {...}`, the JSON parser runs first and may misparse the text (e.g., if the JSON object is valid JSON, it gets parsed as a native call AND the ReAct parser also finds an Action).
+
+Recommendation: Return early if `_parse_native_json` returns results, only fall through to ReAct/XML if JSON parsing finds nothing. Or run all three but dedupe by `(tool_name, args)` tuple.
+
+**Impact:** Duplicate tool calls from a single model response — rare but causes confusion when it happens.
+
+**Detail:** The audit's option 2 ("run all three but dedupe") is implemented: `parse()` still runs all three strategies (each is a shape specialist), then dedupes by `(tool_name, canonical-JSON-args)` — first occurrence wins (native JSON → ReAct → XML), genuinely DISTINCT calls survive in first-seen order, and single-format texts parse byte-identically to the old parser. A call echoed across shapes (```json codeblock + ReAct block, or the JSON-wrapped ReAct dict) now executes once instead of once per strategy. Pinned by 4 tests in `tests/test_r07_12_quick_wins.py`.
+
+---
+
+---
+
+---
 
 ---
 
@@ -762,6 +874,32 @@ This file is the archive of CLOSED and WONTFIX findings moved out of
 
 ---
 
+#### TEST-02: `test_security.py:test_percent2e` always passes — no-op test
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Testing |
+| **File(s)** | `tests/test_security.py:103-116` |
+
+**Status:** ✓ CLOSED R07.12 (intra-release quick-wins batch)
+
+The test `test_percent2e` (line 103) asserts `assert not is_valid or True` — which always passes regardless of `is_valid`'s value. The comment (line 115-116) says "Accept either outcome; the important thing is that even if validated, read_file would fail on a non-existent path." This is a no-op test.
+
+Recommendation: Make the test deterministic by asserting the specific expected behavior (validate_path should reject `%2e%2e` patterns after URL-decoding). Either `assert not is_valid` or `assert is_valid and "expected_reason" in reason`.
+
+**Impact:** Path traversal via URL-encoded `..` is not actually tested; the test gives false confidence.
+
+**Detail:** `test_percent2e` rewritten deterministic in place. The no-op `assert not is_valid or True` is replaced by the real invariant: `validate_path` performs NO URL decoding, so `%2e%2e` is inert literal filename text — the encoded path must classify IDENTICALLY to a literal, never-decoded path of the same shape (the equality assert catches any future URL-decoding regression, which would flip the encoded path to invalid while the control stays valid), with a POSIX-deterministic `is True` branch for the /tmp-allowed prefix. Both outcome branches are asserted, not "either".
+
+---
+
+---
+
+---
+
+---
+
 ## R07.09 New Findings
 
 | ID | Severity | Category | File(s) | Title |
@@ -801,3 +939,5 @@ This file is the archive of CLOSED and WONTFIX findings moved out of
 > **R07.11 delta (feature release):** 12th plugin added (`pollinations` — unified-gateway cloud backend at gen.pollinations.ai/v1, keyless-tolerant, 94 tests, plugin v0.1.2 after two live-gateway discoveries were fixed intra-release: catalog entitlement scoping → `POLLINATIONS_ANON_CATALOG`; currency-only zero-cost pricing encoding → `_card_is_free` rewrite). Post-release audit pass opened **6 new findings** from the pollinations plugin code (SEC-19, ROB-30, ROB-31, MAINT-23, FEAT-08, TEST-10) and wrote the 6 pending R07.09 per-finding detail sections (MAINT-21/22, ROB-28/29, SEC-18, TEST-09 were table-only since R07.09). Technical reference doc corrected against verified live-gateway behavior (entitlement scoping, zero-cost encoding, rolling health telemetry). Suite 1660 → 1751 (+91). Register 98 → 104 findings. No closures this release.
 
 > **R07.12 delta (audit closure release):** The first release dedicated to closing the register. **5 CLOSED** (SEC-11, SEC-17, ROB-23, ROB-24, ROB-27) + **2 WONTFIX** (SEC-18, SEC-19 — owner decision: trusted first-party providers; the response channel strictly dominates the error channel, backend error prose terminates at the human terminal and never re-enters model context, and the one machine-parsed error path was SEC-14, closed R07.08). The SEC-11 cluster fix (prescribed as one coordinated change by the R07.08 priorities): bounded DNS resolution — `getaddrinfo` now runs on a daemon thread with a 5s wall-clock budget and a 32-record cap (`_resolve_hostname_bounded` / `_iter_hostname_ips`, fail-CLOSED sentinel on timeout), plus an explicit 5-hop redirect budget in `_SSRFSafeRedirectHandler`. ROB-23: OrcaRouter free detection now honors the live upstream `-free` suffix convention (all 4 documented free models follow it) — new free models surface under FREE_ONLY without code updates; the static whitelist stays as the outage-fallback floor. ROB-24: ZAI `get_model_info` unknown-model placeholders are now honest — `catalog_status: "unknown"` marker, AGENTKTHX_DEBUG warning, and a stdlib-difflib "did you mean" typo hint. Suite 1751 → 1774 (+23 tests in `tests/test_r07_12_closure_batch.py`, zero regressions). Register 104 findings: 55 OPEN / 42 CLOSED / 7 WONTFIX (49 archived, 47%).
+
+> **R07.12 delta (intra-release quick-wins batch):** Six findings closed without a version bump — the "quick, non-breaking" batch. **ROB-12**: `agent._on_step_callback` is cleared in the `finally` of BOTH `cmd_chat` and `cmd_agent` (the same stale-closure pattern existed in both; cmd_agent found during the fix); the cmd_agent footer test now asserts the full lifecycle — registered during the loop, `None` after exit. **ROB-19**: `Agent.register_tool` reads `self.debug` directly — the `getattr(..., False)` default was dead defensiveness (the constructor assigns the flag long before register_tool is reachable) that converted a loud init-order `AttributeError` into silently wrong debug routing. **PERF-05**: `ToolParser.parse` dedupes cross-strategy echoes by `(tool_name, canonical-args)` — the audit's "run all three but dedupe" option; distinct calls survive in first-seen order, single-format texts parse byte-identically. **MAINT-21**: the Mistral error-envelope heuristic clause is dropped — classification keys on the documented `{"object": "error"}` marker; notice-shaped bodies (top-level `message`, no `choices`) hit the honest "no choices" branch instead of surfacing provider prose. **TEST-02**: `test_percent2e` rewritten from a no-op (`assert not is_valid or True`) into a deterministic encoded-dots-are-inert assertion (equality with a literal control path + POSIX-deterministic `/tmp` branch). **MAINT-18**: verification-only closure — the `apply_model_switch` return dict IS consumed by `cmd_chat` for delta-printing (source-scan pin; row-only archive section authored here). **11 new tests in `tests/test_r07_12_quick_wins.py`**, zero regressions. Suite 1838 → 1849. Register 104 findings: 49 OPEN / 48 CLOSED / 7 WONTFIX (55 archived, 53%).

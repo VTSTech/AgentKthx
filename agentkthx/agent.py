@@ -1075,7 +1075,13 @@ class Agent(AgentSetupMixin, CompactionMixin, ToolExecutionMixin, StreamingMixin
         self.tools.register_tool(tool)
         # ROB-13 (R07.06): keep the parse-failure debug flag on the
         # re-created parser.
-        self._parser = ToolParser(self.tools.names(), debug=getattr(self, "debug", False))
+        # ROB-19 (R07.12 intra): read ``self.debug`` directly. The old
+        # ``getattr(self, "debug", False)`` was dead defensiveness — the
+        # constructor assigns ``self.debug`` long before ``register_tool``
+        # is reachable — and would have silently swallowed an init-order
+        # bug (a parser rebuilt before the constructor set the flag would
+        # quietly run with debug=False instead of failing loudly).
+        self._parser = ToolParser(self.tools.names(), debug=self.debug)
         self._rebuild_system_prompt_with_tools()
 
     def _rebuild_system_prompt_with_tools(self) -> None:

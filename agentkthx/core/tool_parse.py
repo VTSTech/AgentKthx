@@ -409,9 +409,29 @@ class ToolParser:
         # Try XML format (explicit <tool> tags)
         calls.extend(self._parse_xml(text))
 
+        # PERF-05 (R07.12 intra): the three strategies are shape-specialists
+        # but their match envelopes overlap — a message carrying the SAME
+        # call in two shapes (e.g. a ```json codeblock AND a ReAct
+        # Action/Action Input block, or a JSON-wrapped ReAct dict the
+        # native parser unwraps AND the ReAct scanner re-finds) produced
+        # the same tool call once per strategy, and the loop would execute
+        # it twice. Dedupe by (name, canonical-args): first occurrence wins
+        # (native JSON — the highest-trust shape — precedes ReAct, which
+        # precedes XML), genuinely DISTINCT calls always survive, and
+        # single-format texts (the overwhelming case) are byte-identical
+        # to the old behavior.
+        seen: set[tuple[str, str]] = set()
+        deduped: list[ToolCall] = []
+        for call in calls:
+            key = (call.name, json.dumps(call.arguments, sort_keys=True, default=str))
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(call)
+
         # NO FALLBACKS - tool calls must come from the model explicitly
 
-        return calls
+        return deduped
 
     def _parse_native_json(self, text: str) -> list[ToolCall]:
         """Parse native JSON function calling format.

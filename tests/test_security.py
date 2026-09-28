@@ -101,19 +101,37 @@ class TestPathTraversalEncoded:
     """URL-encoded traversal attempts should still be caught."""
 
     def test_percent2e(self):
-        """%2e = '.'  — validate_path should reject because the raw string
-        does not literally contain '..', but the resolved path still targets
-        /etc.  The critical-directory check after abspath resolves it."""
-        # The raw path lacks '..' so the traversal check passes, but the
-        # resolved absolute path hits /etc which is blocked.
-        is_valid, _ = validate_path("/tmp/%2e%2e/etc/passwd")
-        # This depends on whether the filesystem resolves %2e as a literal
-        # directory name.  On most systems /tmp/%2e%2e does not exist and
-        # abspath will produce /tmp/%2e%2e/etc/passwd which does NOT start
-        # with /etc, so it falls through to the allowed-dirs check.  The key
-        # invariant is that it must NOT be valid.
-        assert not is_valid or True  # Accept either outcome; the important
-        # thing is that even if validated, read_file would fail on a non-existent path.
+        """TEST-02 (R07.12 intra): deterministic rewrite of the old no-op
+        (``assert not is_valid or True`` always passed).
+
+        ``%2e`` is a URL-encoding of ``.`` — and ``validate_path`` performs
+        NO URL decoding: the sequence is handled as literal filename
+        characters. The security-relevant invariant is therefore NOT "the
+        path is rejected" but "encoded dots are inert — never decoded to
+        '..'":
+
+        - the raw-string traversal guard must NOT fire on ``%2e%2e``
+          (it only matches literal ``../`` / ``..\\`` sequences),
+        - so the encoded path is classified exactly like a literal,
+          never-decoded path of the same shape (identical startswith
+          rules apply),
+        - and on POSIX (/tmp is an allowed prefix) the encoded path is
+          reported valid — the file at that literal path does not exist,
+          so a subsequent read_file fails benignly with FileNotFoundError.
+        """
+        is_valid_enc, _ = validate_path("/tmp/%2e%2e/etc/passwd")
+        is_valid_lit, _ = validate_path("/tmp/%2e%2e-literal-inert-check")
+        # Encoded dots must be inert characters: the encoded path is
+        # classified identically to a literal path of the same shape.
+        # (If validate_path ever started URL-decoding, the first path
+        # would normalize to /etc/passwd and flip to invalid while the
+        # literal control path stayed valid — this assert would catch it.)
+        assert is_valid_enc == is_valid_lit, (
+            "URL-encoded %2e%2e must not be decoded into '..' by validate_path"
+        )
+        # POSIX determinism: both resolve under the allowed /tmp prefix.
+        if os.name == "posix":
+            assert is_valid_enc is True
 
     def test_dotdot_in_middle(self):
         is_valid, _ = validate_path("/tmp/../../etc/passwd")
