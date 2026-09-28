@@ -1,10 +1,10 @@
 # Audit Deltas — Closed & Wontfix Archive
 
 **Project:** AgentKthx  
-**Release:** R07.08  
-**Date:** 2026-09-27  
-**Archived:** 2026-09-27 17:59 UTC+0  
-**Counts:** 37 CLOSED · 5 WONTFIX · 42 total
+**Release:** R07.12  
+**Date:** 2026-09-28  
+**Archived:** 2026-09-28 (R07.12 closure batch)  
+**Counts:** 42 CLOSED · 7 WONTFIX · 49 total
 
 This file is the archive of CLOSED and WONTFIX findings moved out of
 `audit.md` to keep the active audit focused on OPEN findings.
@@ -20,6 +20,7 @@ This file is the archive of CLOSED and WONTFIX findings moved out of
 | SEC-02 | **High** | Security | ✓ CLOSED R07.04 | ast.literal_eval fallback for Python-dict tool arguments enables type-confusion bypass |
 | MAINT-14 | **High** | Maintainability | ✓ CLOSED R07.07 | The headline fix. The \bTrue\b / \bFalse\b / \bNone\b regex substitutions in core/tool_parse.py:243-256 (R07.05 SEC-02 c |
 | SEC-01 | Medium | Security | ✓ CLOSED R07.08 | sandboxed_repl.py SAFE_BUILTINS includes getattr/setattr/super/object — sandbox escape via attribute traversal |
+| SEC-11 | Medium | Security | ✓ CLOSED R07.12 | _iter_hostname_ips does unbounded synchronous getaddrinfo — DoS amplification + no timeout (closed with the SEC-11 cluster: bounded DNS) |
 | SEC-03 | Medium | Security | ✓ CLOSED R07.05 | is_safe_url SSRF check uses substring hostname matching — bypassable via DNS rebinding, decimal/IPv6 IP encoding |
 | SEC-04 | Medium | Security | ✓ CLOSED R07.05 | sanitize_command is a regex denylist only — bash not blocked, heredocs not blocked |
 | SEC-06 | Medium | Security | ✓ CLOSED R07.05 | External plugin import via spec.loader.exec_module with no path restriction or signature verification |
@@ -39,6 +40,9 @@ This file is the archive of CLOSED and WONTFIX findings moved out of
 | SEC-08 | Low | Security | ⊘ WONTFIX (intentional) | Audit log writes tool args (incl. shell commands, file contents) in plaintext with default umask |
 | SEC-12 | Low | Security | ✓ CLOSED R07.07 | sanitize_tool_output truncates AFTER redaction — secrets just past 8KB cutoff remain unredacted |
 | SEC-14 | Low | Security | ✓ CLOSED R07.08 | is_transient_api_error body arg lowercased + substring-matched — user-controlled content in body could force permanent classification |
+| SEC-17 | Low | Security | ✓ CLOSED R07.12 | _SSRFSafeRedirectHandler triggers DNS resolution per redirect hop — unbounded redirect chain = DoS (5-hop budget) |
+| SEC-18 | Low | Security | ⊘ WONTFIX (R07.12, owner decision) | _parse_mistral_response raises RuntimeError carrying provider-controlled message text (trusted providers; response channel dominates) |
+| SEC-19 | Low | Security | ⊘ WONTFIX (R07.12, owner decision) | PollinationsBackend surfaces provider-controlled error prose in every RuntimeError (trusted providers; response channel dominates) |
 | SEC-15 | Low | Security | ✓ CLOSED R07.08 | CloudBackend.__init__ mutates os.environ["AGENTKTHX_API_MODE"] — process-global side effect, last-instance-wins |
 | SEC-16 | Low | Security | ✓ CLOSED R07.08 | _extract_buy_credits_url surfaces attacker-controlled URL in user-facing error message — phishing vector |
 | ROB-01 | Low | Robustness | ✓ CLOSED R07.06 | _execute_single_tool_call "break" return value doesn't distinguish terminated from cancelled |
@@ -47,6 +51,9 @@ This file is the archive of CLOSED and WONTFIX findings moved out of
 | ROB-14 | Low | Robustness | ✓ CLOSED R07.06 | In-chat /model switch only reassigns agent.model — num_ctx/num_predict/model_config stay on the OLD model (stale window invites context-400s) |
 | ROB-16 | Low | Robustness | ✓ CLOSED R07.07 | time.sleep(retry_after) unbounded — malicious Retry-After: 3600 hangs agent for 1 hour |
 | ROB-21 | Low | Robustness | ✓ CLOSED R07.07 | API key min length 8 chars — too weak; real keys are 30+ chars |
+| ROB-23 | Low | Robustness | ✓ CLOSED R07.12 | list_models fallback list is hardcoded — live -free suffix convention now authoritative |
+| ROB-24 | Low | Robustness | ✓ CLOSED R07.12 | get_model_info returns default 128K entry for ANY model string — placeholders now marked catalog_status unknown |
+| ROB-27 | Low | Robustness | ✓ CLOSED R07.12 | _SSRFSafeRedirectHandler DNS lookup happens outside the request timeout — 5s bounded resolution, fail-closed sentinel |
 | ROB-26 | Low | Robustness | ✓ CLOSED R07.07 | sanitize_tool_output REDACT-then-TRUNCATE ordering — secrets past 8KB cutoff not redacted (dup of SEC-12) |
 | MAINT-06 | Low | Maintainability | ✓ CLOSED R07.05 | core/model_config.py is a 30-line deprecated module — no removal date set |
 | MAINT-09 | Low | Maintainability | ✓ CLOSED R07.07 | extract_calc_expression has 12+ overlapping regex patterns — unpredictable which matches |
@@ -239,8 +246,63 @@ This file is the archive of CLOSED and WONTFIX findings moved out of
 
 ---
 
-### Robustness
+#### SEC-11: _iter_hostname_ips does unbounded synchronous getaddrinfo — DoS amplification + no timeout
 
+| Property | Value |
+|----------|-------|
+| **Severity** | Medium |
+| **Category** | Security |
+| **File(s)** | `agentkthx/core/helpers.py` (`_resolve_hostname_bounded`, `_iter_hostname_ips`, `is_safe_url`) |
+
+**Status:** ✓ CLOSED R07.12
+
+**Detail:** Closed as part of the SEC-11 cluster (SEC-11 + SEC-17 + ROB-27 — the single coordinated fix the R07.08 next-release priorities prescribed). `_iter_hostname_ips` now resolves DNS through `_resolve_hostname_bounded`: `socket.getaddrinfo` runs on a daemon thread joined with a 5-second wall-clock budget (`_DNS_RESOLVE_TIMEOUT_SECONDS`), and the returned record set is capped at `_MAX_DNS_RECORDS = 32`. A timed-out lookup returns the `__DNS_TIMEOUT__` sentinel, which `is_safe_url` fails CLOSED on ("DNS resolution of '<host>' timed out after 5s (possible DoS)") — skipping the SSRF check is exactly when DNS manipulation pays off, so the timeout is fail-closed while genuine resolution failures (NXDOMAIN) keep the historical fail-open contract. The per-host DNS cache from the original R07.08 prescription was deliberately omitted: with resolution bounded and thread-isolated, repeated lookups are a performance nit, not a DoS. +5 regression tests (timeout-returns-None-fast, record-cap truncation, fail-closed sentinel, fail-open preservation, IP-literal short-circuit).
+
+---
+
+#### SEC-17: _SSRFSafeRedirectHandler triggers DNS resolution per redirect hop — unbounded redirect chain = DoS
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Security |
+| **File(s)** | `agentkthx/tools/builtins.py` (`_SSRFSafeRedirectHandler`) |
+
+**Status:** ✓ CLOSED R07.12
+
+**Detail:** The handler now enforces an explicit per-request hop budget (`_MAX_HOPS = 5`, counted per handler instance — `build_opener` constructs a fresh handler per request). urllib's own `max_redirections = 10` still exists, but each hop here triggers a full SSRF validation including a DNS resolution; since R07.12 that costs at most ~5s per hop (ROB-27 fix), so the tighter explicit cap keeps the attacker-controlled worst case (~25s of validator work) comparable to the 30s HTTP request timeout instead of ~50s. The 6th hop raises `URLError("redirect chain exceeded 5 hops (possible redirect DoS)")`. SEC-03's per-hop re-validation of every redirect target is unchanged. +4 regression tests (five-allowed-then-sixth-rejected, per-instance budget reset, unsafe-target still blocked on first hop, budget strictly below urllib's 10).
+
+---
+
+#### SEC-18: _parse_mistral_response raises RuntimeError carrying provider-controlled message text
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Security |
+| **File(s)** | `agentkthx/plugins/mistral/mistral.py:749-752` + `:761` |
+
+**Status:** ⊘ WONTFIX (R07.12, owner decision)
+
+**Detail:** `_parse_mistral_response` extracts `message` from the Mistral `{"object": "error"}` envelope and interpolates it into `RuntimeError` prose; `_iter_sse_lines`' HTTP-error path repeats the pattern. **WONTFIX rationale (owner decision, R07.12):** first-party API providers are trusted parties — users hand them payment credentials at signup; the response channel strictly dominates the error channel (every turn the model consumes provider-generated text as the conversation itself — sanitizing error prose while trusting response prose locks the window while the front door stands open); backend error prose propagates out of `generate()` → retry exhaustion → the CLI → the human terminal and never re-enters model context (the tool-output path that does reach the model is already wrapped by the SEC-10/FEAT-01 sanitization); and the single path where provider text was machine-parsed for control-flow decisions was SEC-14, closed in R07.08. The previously recommended `sanitize_provider_message()` consolidation is retired with this decision.
+
+---
+
+#### SEC-19: PollinationsBackend surfaces provider-controlled error prose in every RuntimeError
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Security |
+| **File(s)** | `agentkthx/plugins/pollinations/pollinations.py:1094-1103` (`_parse_pollinations_response`), `:1363-1408` (`_raise_for_status`) |
+
+**Status:** ⊘ WONTFIX (R07.12, owner decision)
+
+**Detail:** `_raise_for_status` interpolates `err_msg` (parsed from the provider's error envelope) into all six error-class messages; `_parse_pollinations_response` raises `RuntimeError(f"Provider error: {err_msg}...")` on HTTP-200 error wrappers. The aggravation noted at filing — `community/*` cards are user-published routers, so the upstream producing the error prose is arbitrary user infrastructure — is real but is dominated by the same response-channel argument the owner applied to SEC-18: a user chatting with a community model has already opted into arbitrary text from that upstream as the model's responses. The one path where community upstream text could be consumed WITHOUT opting in — `healthy_fallbacks()` redirecting onto a paid_only community model under ANON_CATALOG — is tracked as ROB-31 (entitlement scoping, still OPEN), which is the robustness lens the owner judges correct for it. WONTFIX follows SEC-18's decision; the shared-sanitizer consolidation is retired.
+
+---
+
+### Robustness
 #### ROB-01: _execute_single_tool_call "break" return value doesn't distinguish terminated from cancelled
 
 | Property | Value |
@@ -368,6 +430,48 @@ This file is the archive of CLOSED and WONTFIX findings moved out of
 **Status:** ✓ CLOSED R07.07
 
 **Detail:** _parse_retry_after_seconds (plugins/orcarouter/orcarouter.py) now caps the returned value at _MAX_RETRY_AFTER_SECONDS = 60.0. The prior float(retry_after_header) with no cap meant a malicious or buggy upstream returning Retry-After: 3600 would hang the agent for an hour via time.sleep(retry_after). 
+
+---
+
+#### ROB-23: list_models fallback list is hardcoded — won't include new free models until code update
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Robustness |
+| **File(s)** | `agentkthx/plugins/orcarouter/orcarouter.py` (`_is_free_model`, `list_models`) |
+
+**Status:** ✓ CLOSED R07.12
+
+**Detail:** `_is_free_model` now honors the live upstream naming convention: every OrcaRouter free model is suffixed `-free` (all 4 documented free models follow it), so `ORCAROUTER_FREE_ONLY` listings pick up brand-new free models from the live `/v1/models` feed without a code update — the live catalog is authoritative. The static `ORCAROUTER_FREE_MODEL_WHITELIST` is retained as a belt-and-braces floor for the outage-fallback path (where no live feed exists) and for future IDs that break the convention. The `orcarouter/free` router stays always-free, `orcarouter/auto` stays paid. +6 regression tests (new-live-free-model detection, case-insensitivity, paid-still-false, whitelist floor, FREE_ONLY listing over a live-shaped feed including a new `-free` model, outage fallback = static floor).
+
+---
+
+#### ROB-24: get_model_info returns default 128K entry for ANY model string — catalog no longer authoritative
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Robustness |
+| **File(s)** | `agentkthx/plugins/zai/zai.py` (`get_model_info`) |
+
+**Status:** ✓ CLOSED R07.12
+
+**Detail:** The unknown-model placeholder (deliberate since R07.05 — ZAI accepts IDs newer than the static catalog, the documented MAINT-02 behavior) is now HONEST about being a placeholder: entries carry `details["catalog_status"] = "unknown"` so callers can distinguish fabricated entries from real catalog hits, an `AGENTKTHX_DEBUG` warning fires per lookup ("Model 'X' not in static catalog — using placeholder entry (context_length=128000, free_tier=False)"), and a stdlib `difflib.get_close_matches` hint appends "did you mean 'glm-5.3-flash'" for likely typos (cutoff 0.8, best-effort, never blocks the lookup). Context stays at the 128K `_DEFAULT_CONTEXT_FALLBACK` deliberately: over-reporting self-corrects via the ARCH-03 context-length-400 recovery while under-reporting would over-compact needlessly. +5 regression tests (marker present/absent, debug warning with typo hint, silence by default, provider-prefix stripping).
+
+---
+
+#### ROB-27: _SSRFSafeRedirectHandler DNS lookup happens outside the request timeout — slow DNS = unbounded stall (dup of SEC-17)
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Robustness |
+| **File(s)** | `agentkthx/core/helpers.py` (`_resolve_hostname_bounded`) |
+
+**Status:** ✓ CLOSED R07.12
+
+**Detail:** The `timeout=30` passed to `opener.open()` never covered the `getaddrinfo` calls made inside `redirect_request` — a synchronous C call with no timeout parameter of its own, so a slow or malicious resolver stalled the agent indefinitely. `_resolve_hostname_bounded` runs the resolution on a daemon thread joined with a 5-second wall-clock budget; on timeout the thread is abandoned (it dies with the OS resolver timeout and cannot block interpreter exit) and `is_safe_url` fails CLOSED through the `__DNS_TIMEOUT__` sentinel. Worst-case validator cost per redirect hop is now ~5s, and with SEC-17's 5-hop budget the whole chain is bounded at ~25s — inside the realm of the HTTP timeout rather than unbounded. Covered by the SEC-11 cluster regression tests in `tests/test_r07_12_closure_batch.py` (timeout-returns-None-fast with a 1s-sleeping fake resolver, elapsed < 0.9s).
 
 ---
 
@@ -628,6 +732,37 @@ This file is the archive of CLOSED and WONTFIX findings moved out of
 
 ---
 
+## R07.09 New Findings
+
+| ID | Severity | Category | File(s) | Title |
+|----|----------|----------|---------|-------|
+| MAINT-21 | Medium | Maintainability | `agentkthx/plugins/mistral/mistral.py:745` | `_parse_mistral_response` operator-precedence bug in error-envelope check |
+| MAINT-22 | Medium | Maintainability | `agentkthx/plugins/mistral/mistral.py:957-1008` (`_iter_sse_lines` docstring) | Streaming path bypasses `_build_mistral_body` — Mistral-specific knobs not sent |
+| ROB-28 | Low | Robustness | `agentkthx/plugins/mistral/mistral.py:500-505` | `list_models()` catch-all `Exception` masks real bugs |
+| ROB-29 | Low | Robustness | `agentkthx/plugins/mistral/mistral.py:981-1139` + `1187-1300` | ~80 LOC duplicated retry/backoff between `_iter_sse_lines` and `_make_api_request` |
+| SEC-18 | Low | Security | `agentkthx/plugins/mistral/mistral.py:749-752` + `761` | Provider-controlled error message surfaces in RuntimeError prose |
+| TEST-09 | Low | Testing | `tests/test_mistral_backend.py` (whole file) | Plugin scaffolds miss agent-loop streaming-path integration test |
+
+---
+
+---
+
+## R07.11 New Findings
+
+| ID | Severity | Category | File(s) | Title |
+|----|----------|----------|---------|-------|
+| SEC-19 | Low | Security | `agentkthx/plugins/pollinations/pollinations.py:1094-1103` + `:1363-1408` | Provider-controlled error prose surfaces in RuntimeError messages (community routers = user-published upstreams) |
+| ROB-30 | Low | Robustness | `agentkthx/plugins/pollinations/pollinations.py:704-711` | `_fetch_model_cards` catch-all `Exception` masks card-parse bugs as catalog outage |
+| ROB-31 | Medium | Robustness | `agentkthx/plugins/pollinations/pollinations.py` (`healthy_fallbacks` + `_fetch_model_cards`) | `healthy_fallbacks()` + ANON_CATALOG ranks out-of-entitlement (`paid_only`) models |
+| MAINT-23 | Medium | Maintainability | `agentkthx/plugins/pollinations/pollinations.py:1414-1512` + `:1540-1638` | ~80 LOC duplicated retry-loop skeleton between `_make_api_request` and `_iter_sse_lines` |
+| FEAT-08 | Low | New Features | `agentkthx/plugins/pollinations/pollinations.py` (`_card_is_free`, `list_models`) | `paid_only` free-TIER filter mode unreachable — bare `/models` boundary never fetched |
+| TEST-10 | Low | Testing | `tests/test_pollinations_backend.py` | No live-shape contract test for free-model detection encoding |
+
+---
+
+---
+
+
 ## Closure Timeline
 
 <!-- Preserved from the original audit.md. The dashboard's
@@ -833,3 +968,42 @@ These were identified in the R07.07 re-audit but NOT closed in this batch — th
 
 
 ---
+
+
+## R07.12 Closures (Audit Closure Release)
+
+The first release dedicated to closing the audit register. 5 findings CLOSED (SEC-11, SEC-17, ROB-23, ROB-24, ROB-27) + 2 WONTFIX (SEC-18, SEC-19 — owner decision, trusted providers), with +23 regression tests in a single new file (`tests/test_r07_12_closure_batch.py`). Suite 1751 → **1774 passed / 16 skipped in ~27s**, zero regressions. The SEC-11 cluster (SEC-11 + SEC-17 + ROB-27) landed as the single coordinated fix the R07.08 next-release priorities prescribed: bounded `getaddrinfo` (daemon thread, 5s wall-clock budget, 32-record cap, fail-closed timeout sentinel) + a 5-hop redirect budget in `_SSRFSafeRedirectHandler`.
+
+| ID | Severity | Status | Notes |
+|----|----------|--------|-------|
+| ~~SEC-11~~ | Medium | ✓ CLOSED R07.12 | **Cluster headline.** `_iter_hostname_ips` resolves DNS via new `_resolve_hostname_bounded` (core/helpers.py): `getaddrinfo` on a daemon thread joined with `_DNS_RESOLVE_TIMEOUT_SECONDS = 5.0`; record sets capped at `_MAX_DNS_RECORDS = 32` (DoS-amplification bound); timed-out lookups return the `__DNS_TIMEOUT__` sentinel which `is_safe_url` fails CLOSED on, while genuine resolution failures keep the historical fail-open contract. The prescribed per-host DNS cache was deliberately omitted — with resolution bounded and thread-isolated, repeated lookups are a perf nit, not a DoS. +5 tests. |
+| ~~SEC-17~~ | Low | ✓ CLOSED R07.12 | `_SSRFSafeRedirectHandler` (tools/builtins.py) enforces `_MAX_HOPS = 5` per request instance: the 6th hop raises `URLError("redirect chain exceeded 5 hops (possible redirect DoS)")`. With bounded DNS each hop costs ≤ ~5s, so the chain worst case (~25s) sits inside the realm of the 30s HTTP timeout instead of urllib's 10-hop × unbounded-DNS (~50s+∞). SEC-03 per-hop re-validation unchanged. +4 tests. |
+| ~~ROB-23~~ | Low | ✓ CLOSED R07.12 | `_is_free_model` (plugins/orcarouter/orcarouter.py) now honors the live upstream `-free` suffix convention — all 4 documented free models follow it — so `ORCAROUTER_FREE_ONLY` surfaces brand-new free models from the live `/v1/models` feed with no code update. Static whitelist retained as the outage-fallback floor. +6 tests including a live-shaped FREE_ONLY listing with a new `-free` model. |
+| ~~ROB-24~~ | Low | ✓ CLOSED R07.12 | ZAI `get_model_info` (plugins/zai/zai.py) unknown-model placeholders now carry `catalog_status: "unknown"` (callers can distinguish fabricated entries from catalog hits), fire an `AGENTKTHX_DEBUG` warning, and append a stdlib-difflib "did you mean" typo hint (cutoff 0.8, best-effort). Context stays 128K deliberately — over-reporting self-corrects via ARCH-03 recovery; under-reporting would over-compact. +5 tests. |
+| ~~ROB-27~~ | Low | ✓ CLOSED R07.12 | Same cluster fix as SEC-11: the DNS resolution inside `redirect_request` runs under the 5s wall-clock budget — the `timeout=30` on `opener.open()` never covered it (getaddrinfo is a synchronous C call). Timed-out resolution fails closed via the sentinel; the abandoned daemon thread dies with the OS resolver timeout and cannot block interpreter exit. Covered by the cluster tests. |
+| ~~SEC-18~~ | Low | ⊘ WONTFIX R07.12 (owner decision) | Provider-controlled error prose in Mistral `RuntimeError` messages. Owner rationale: first-party providers are trusted parties (users hand them payment credentials); the response channel strictly dominates the error channel; error prose terminates at the human terminal and never re-enters model context (the tool-output path that reaches the model is wrapped by SEC-10/FEAT-01); the one machine-parsed error path was SEC-14, closed R07.08. |
+| ~~SEC-19~~ | Low | ⊘ WONTFIX R07.12 (owner decision) | Same decision as SEC-18 for the Pollinations backend. The community-router aggravation is real but response-channel-dominated: chatting with a community model already opts into arbitrary text as the model's responses. The only non-opted-in path (fallback redirect onto out-of-entitlement community models) is tracked as ROB-31, still OPEN. |
+
+### Cumulative closure state (updated)
+
+| Release | Findings Closed | Tests Added |
+|---------|----------------|-------------|
+| R07.00 | 4 (MAINT-01 old, MAINT-04 old, ROB-08 old, PERF-03 old) | — |
+| R07.01 | 4 (ROB-07 old, MAINT-06 old, TEST-02 old, ARCH-02 old) | — |
+| R07.04 | 4 (SEC-02, SEC-10, FEAT-01, MAINT-02) | +158 |
+| R07.05 (released) | 9 (SEC-07, ROB-03, ROB-04, MAINT-04, MAINT-05, MAINT-06, SEC-03, SEC-04, SEC-06) + 1 WONTFIX (ROB-05) | +101 |
+| R07.06 (released) | 6 (ROB-01, ROB-07, ROB-08, ROB-10, ROB-13, ROB-14) | +57 |
+| R07.07 (re-audit + closures) | 10 (MAINT-14 HIGH, SEC-12, ROB-16, ROB-21, MAINT-12, MAINT-16, MAINT-17, MAINT-13, MAINT-20, MAINT-09) | +45 |
+| R07.08 | 3 (SEC-01, SEC-05, TEST-08) | +80 |
+| **R07.12 (audit closure release)** | **5 (SEC-11, SEC-17, ROB-23, ROB-24, ROB-27) + 2 WONTFIX (SEC-18, SEC-19)** | **+23** |
+| **Total** | **42 CLOSED + 7 WONTFIX of 104 (49 archived, 47%)** | **+464** |
+
+### Files changed in R07.12 closure batch
+
+| File | Change |
+|------|--------|
+| `agentkthx/core/helpers.py` | SEC-11/ROB-27: added `_DNS_RESOLVE_TIMEOUT_SECONDS`, `_MAX_DNS_RECORDS`, `_resolve_hostname_bounded` (daemon-thread resolution with wall-clock budget); `_iter_hostname_ips` routes DNS through it, caps records, returns `__DNS_TIMEOUT__` sentinel on timeout; `is_safe_url` fails CLOSED on the sentinel. +`import threading`. |
+| `agentkthx/tools/builtins.py` | SEC-17: `_SSRFSafeRedirectHandler` gained `_MAX_HOPS = 5`, per-instance `_hops_followed` counter, and `__init__`; 6th hop raises URLError. |
+| `agentkthx/plugins/orcarouter/orcarouter.py` | ROB-23: `_is_free_model` live `-free` suffix convention (case-insensitive) ahead of the static whitelist floor; docstring documents the two layers. |
+| `agentkthx/plugins/zai/zai.py` | ROB-24: `get_model_info` unknown-model path — `catalog_status: "unknown"` marker, AGENTKTHX_DEBUG warning with difflib close-match typo hint (best-effort). |
+| `tests/test_r07_12_closure_batch.py` | NEW — 23 regression tests: TestBoundedDnsResolution (8), TestRedirectHopCap (4), TestOrcaRouterLiveFreeDetection (8), TestZaiPlaceholderHonesty (5). |

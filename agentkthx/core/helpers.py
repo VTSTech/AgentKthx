@@ -11,6 +11,7 @@ import ipaddress
 import os
 import re
 import socket
+import threading
 from difflib import SequenceMatcher
 from typing import Any, Literal
 from urllib.parse import urlparse
@@ -589,6 +590,59 @@ def _ip_address_blocked(ip: "ipaddress.IPv4Address | ipaddress.IPv6Address") -> 
     )
 
 
+# ---------------------------------------------------------------------------
+# Bounded DNS resolution (SEC-17 / ROB-27, R07.12)
+# ---------------------------------------------------------------------------
+#
+# ``socket.getaddrinfo`` is a synchronous C call with no timeout parameter.
+# Before R07.12 the SSRF validator called it directly, so a malicious or
+# broken DNS server could stall an agent indefinitely (ROB-27) — and a
+# hostname resolving to thousands of A records amplified that cost per
+# redirect hop (SEC-17, with SEC-11's unbounded record set). Both bounds
+# below cap the worst case at ~5 seconds per lookup regardless of what
+# DNS does.
+
+#: Wall-clock budget for one DNS resolution (seconds). A lookup that
+#: exceeds it is treated as a timed-out resolution.
+_DNS_RESOLVE_TIMEOUT_SECONDS: float = 5.0
+
+#: Maximum number of resolved addresses examined per lookup. A record
+#: set larger than this is truncated — mixed public/private record sets
+#: already defeat address-based checks via rebinding (documented residual
+#: in ``is_safe_url``), so the cap trades that theoretical corner for a
+#: hard bound on validator work.
+_MAX_DNS_RECORDS: int = 32
+
+
+def _resolve_hostname_bounded(host: str) -> list[str] | None:
+    """Resolve ``host`` with a wall-clock timeout; None means timeout.
+
+    Runs ``socket.getaddrinfo`` on a daemon thread and joins with
+    ``_DNS_RESOLVE_TIMEOUT_SECONDS``. Returns the list of resolved
+    address strings, an empty list for genuine resolution failures
+    (NXDOMAIN et al., fail-open per the historical contract), or None
+    when the thread outlived the budget (caller decides; the SSRF
+    validator treats that as blocked). The daemon thread is abandoned
+    on timeout — it dies with the OS resolver timeout, bounded by the
+    system, and cannot block interpreter exit.
+    """
+    result: list[str] | None = None
+
+    def _worker() -> None:
+        nonlocal result
+        try:
+            result = [str(info[4][0]) for info in socket.getaddrinfo(host, None)]
+        except (socket.gaierror, OSError, UnicodeError):
+            result = []  # unresolvable — fail-open contract
+
+    worker = threading.Thread(target=_worker, daemon=True, name="ssrf-dns")
+    worker.start()
+    worker.join(_DNS_RESOLVE_TIMEOUT_SECONDS)
+    if worker.is_alive():
+        return None  # timed out — resolution still pending
+    return result
+
+
 def _iter_hostname_ips(hostname: str) -> list[str]:
     """
     Normalize a URL hostname into the IP address(es) it can reach (SEC-03).
@@ -603,6 +657,13 @@ def _iter_hostname_ips(hostname: str) -> list[str]:
     decision to the subsequent fetch instead of blocking on transient DNS
     hiccups. Residual DNS-rebinding risk (address changes between this
     check and the actual connect) is documented in is_safe_url.
+
+    R07.12 (SEC-17/ROB-27): DNS resolution is now bounded — a wall-clock
+    timeout (``_DNS_RESOLVE_TIMEOUT_SECONDS``) and a record cap
+    (``_MAX_DNS_RECORDS``). A lookup that exceeds the budget returns the
+    single sentinel ``["__DNS_TIMEOUT__"]`` so ``is_safe_url`` can fail
+    CLOSED on it: a resolver that slow is either broken or hostile, and
+    skipping the SSRF check is exactly when DNS manipulation pays off.
     """
     host = hostname.strip("[]")  # belt+braces; urlparse already strips []
 
@@ -620,14 +681,14 @@ def _iter_hostname_ips(hostname: str) -> list[str]:
     except (OSError, ValueError, UnicodeError):
         pass
 
-    # 3. DNS name — resolve and return every address it maps to.
-    ips: list[str] = []
-    try:
-        for info in socket.getaddrinfo(host, None):
-            ips.append(str(info[4][0]))
-    except (socket.gaierror, OSError, UnicodeError):
-        pass  # unresolvable: the later fetch would fail too
-    return ips
+    # 3. DNS name — resolve with a wall-clock budget (R07.12 SEC-17/ROB-27)
+    #    and return every address it maps to, capped at _MAX_DNS_RECORDS.
+    resolved = _resolve_hostname_bounded(host)
+    if resolved is None:
+        # Timed out — sentinel that is_safe_url fails CLOSED on. Not a
+        # routable address; deliberately distinct from any real spelling.
+        return ["__DNS_TIMEOUT__"]
+    return resolved[:_MAX_DNS_RECORDS]
 
 
 def is_safe_url(url: str, block_ssrf: bool = True) -> tuple[bool, str]:
@@ -703,7 +764,16 @@ def is_safe_url(url: str, block_ssrf: bool = True) -> tuple[bool, str]:
 
         # SEC-03 (R07.05): substring checks are not enough — normalize the
         # hostname to actual IP addresses and judge each one.
-        for ip_str in _iter_hostname_ips(hostname):
+        resolved_ips = _iter_hostname_ips(hostname)
+        if "__DNS_TIMEOUT__" in resolved_ips:
+            # R07.12 (ROB-27): DNS exceeded _DNS_RESOLVE_TIMEOUT_SECONDS.
+            # Fail CLOSED — a resolver that slow is broken or hostile, and
+            # skipping the check is exactly when DNS manipulation pays off.
+            return False, (
+                f"SSRF protection: DNS resolution of '{hostname}' timed out "
+                f"after {_DNS_RESOLVE_TIMEOUT_SECONDS:.0f}s (possible DoS)"
+            )
+        for ip_str in resolved_ips:
             try:
                 ip = ipaddress.ip_address(ip_str)
             except ValueError:

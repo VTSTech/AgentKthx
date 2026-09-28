@@ -366,9 +366,29 @@ class _SSRFSafeRedirectHandler(urllib.request.HTTPRedirectHandler):
     Without this, validating only the original URL is bypassable by any
     public URL that 302s to ``http://127.0.0.1/`` (or any other private
     address) — urllib's default redirect handling would follow it blindly.
+
+    R07.12 (SEC-17): an explicit per-request hop budget. urllib's own
+    ``max_redirections`` (10) already exists, but each hop here triggers a
+    full SSRF validation including a DNS resolution — bounded to ~5s each
+    since R07.12, yet 10 hops still means up to ~50s of validator work an
+    attacker controls. The tighter explicit cap keeps the worst case
+    comparable to the 30s HTTP timeout: 5 hops × ~5s DNS.
     """
 
+    #: Maximum redirect hops followed per request (SEC-17, R07.12).
+    _MAX_HOPS: int = 5
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._hops_followed = 0
+
     def redirect_request(self, req, fp, code, msg, headers, newurl):
+        self._hops_followed += 1
+        if self._hops_followed > self._MAX_HOPS:
+            raise urllib.error.URLError(
+                f"SSRF protection: redirect chain exceeded {self._MAX_HOPS} hops "
+                f"(possible redirect DoS) — refusing to follow to {newurl}"
+            )
         is_safe, error = is_safe_url(newurl)
         if not is_safe:
             raise urllib.error.URLError(

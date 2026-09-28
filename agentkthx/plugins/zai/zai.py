@@ -413,7 +413,36 @@ class ZaiBackend(CloudBackend):
         # Model not in static catalog — still valid if ZAI knows it.
         # free_tier defaults to False (paid) — the safe assumption for
         # a model we have no pricing data for.
+        #
+        # R07.12 (ROB-24): the placeholder is now HONEST about being a
+        # placeholder — ``catalog_status: "unknown"`` distinguishes it
+        # from real catalog entries (the catalog is authoritative again:
+        # callers can tell the difference), a debug warning fires once
+        # per lookup, and a difflib close-match suggests the likely typo
+        # ("glm-4.6-flas" -> "glm-4.6-flash"). Context stays at the 128K
+        # fallback deliberately: ZAI accepts IDs newer than the static
+        # catalog (the documented MAINT-02 behavior), and over-reporting
+        # context self-corrects via the ARCH-03 context-length-400
+        # recovery, while under-reporting would over-compact needlessly.
         model_key = model.split("/")[-1] if "/" in model else model
+        if os.environ.get("AGENTKTHX_DEBUG"):
+            hint = ""
+            try:
+                from difflib import get_close_matches
+
+                matches = get_close_matches(
+                    model_key, list(self.MODELS.keys()), n=1, cutoff=0.8
+                )
+                if matches:
+                    hint = f" — did you mean '{matches[0]}'?"
+            except Exception:
+                pass  # suggestion is best-effort; never block the lookup
+            print(
+                f"  [ZAI] Model '{model_key}' not in static catalog — "
+                f"using placeholder entry (context_length="
+                f"{self._DEFAULT_CONTEXT_FALLBACK}, free_tier=False)"
+                f"{hint}"
+            )
         return {
             "name": model_key,
             "size": 0,
@@ -423,6 +452,7 @@ class ZaiBackend(CloudBackend):
                 "backend": self._catalog_backend_name(),
                 "context_length": self._DEFAULT_CONTEXT_FALLBACK,
                 "free_tier": False,
+                "catalog_status": "unknown",  # ROB-24 (R07.12): placeholder marker
                 "is_chat_model": True,
             },
         }

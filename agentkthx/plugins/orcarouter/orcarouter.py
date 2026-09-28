@@ -249,10 +249,21 @@ def _extract_buy_credits_url(err_str: str) -> str | None:
 
 
 def _is_free_model(model_id: str) -> bool:
-    """Return True if the model ID is in the OrcaRouter free-tier whitelist.
+    """Return True if the model ID is free-tier.
 
-    Strips provider prefix if present, then checks against
-    ``ORCAROUTER_FREE_MODEL_WHITELIST`` and the ``orcarouter/free`` router.
+    Two detection layers (R07.12, ROB-23):
+
+    1. Live convention — every OrcaRouter free model is suffixed
+       ``-free`` upstream (all 4 documented free models follow it). This
+       makes the LIVE catalog authoritative: new free models appear under
+       ``ORCAROUTER_FREE_ONLY`` automatically, without a code update.
+    2. Static whitelist — ``ORCAROUTER_FREE_MODEL_WHITELIST`` stays as a
+       belt-and-braces floor for the outage-fallback path (no live feed
+       available there) and for IDs that break the convention someday.
+
+    The ``orcarouter/free`` named router is always free (it never escapes
+    to paid capacity); ``orcarouter/auto`` is NOT (it picks the cheapest
+    live model, which may be paid).
     """
     # The free router is always "free" (it never escapes to paid)
     if model_id == "orcarouter/free":
@@ -260,6 +271,10 @@ def _is_free_model(model_id: str) -> bool:
     # The auto router is NOT free (picks cheapest, which may be paid)
     if model_id == "orcarouter/auto":
         return False
+    # Live convention (R07.12): upstream free models are suffixed -free.
+    if model_id.lower().endswith("-free"):
+        return True
+    # Static whitelist floor (also covers the outage-fallback path).
     # Strip provider prefix if present (e.g. "deepseek/deepseek-v4-flash-free")
     # — the whitelist already has the prefixed form, but be tolerant.
     return model_id in ORCAROUTER_FREE_MODEL_WHITELIST

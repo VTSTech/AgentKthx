@@ -1,7 +1,7 @@
 # Codebase Intelligence Brief: AgentKthx
 
-> Generated: 2026-09-28 | Auditor: Super-Z (GLM) via `codebase-audit` v0.2.0 | Commit: `1033b6b` (R07.11, PyPI 0.7.11)
-> Supersedes: R07.06 brief (2026-09-27) — updated in the R07.11 re-audit pass: +2 plugins since (mistral R07.09, pollinations R07.11 → 12 plugins / 7 cloud backends / 11 backend types), suite 1461 → 1751 passed (+290), register 98 → 104 findings (62 open). Full regeneration still due — this pass refreshed the header, suite counts, and the audit-findings sections.
+> Generated: 2026-09-28 | Auditor: Super-Z (GLM) via `codebase-audit` v0.2.0 | Commit: `5240273` (R07.12, PyPI 0.7.12)
+> Supersedes: R07.11 brief (2026-09-28) — updated in the R07.12 closure pass: audit closure release (5 CLOSED: SEC-11/SEC-17/ROB-23/ROB-24/ROB-27; 2 WONTFIX: SEC-18/SEC-19 owner decision), suite 1751 → 1774 passed (+23), register 104 findings (55 open / 42 closed / 7 wontfix, 47% archived). Full regeneration still due — this pass refreshed the header, suite counts, and the audit-findings sections.
 
 ---
 
@@ -13,7 +13,7 @@
 | **Tech Stack** | Python >= 3.12, **zero runtime dependencies** (`dependencies = []` — stdlib `urllib`/`json`/`sqlite3`/`ast`/`subprocess`/`socket`/`ipaddress`/`threading` only); dev: pytest/black/ruff |
 | **Entry Point** | Console script `agentkthx` → `agentkthx.cli:main` → `cli/main.py:main()` → `cli/parser.py` dispatch → `cli/commands/<cmd>.py` |
 | **Build/Run** | `pip install agentkthx` (PyPI 0.7.06) or `pip install -e .` from source; `agentkthx chat`, `agentkthx version`, `agentkthx models`, etc. (84+ CLI flags across 15 subcommands) |
-| **Test Command** | `python -m pytest tests/ -q` → **1751 passed / 16 skipped in ~25s** (was 1461 / 9 at R07.06; +290 across R07.07–R07.11, incl. +94 for the pollinations plugin); CI matrix Python 3.12 / 3.13 in `.github/workflows/ci.yml`, parallel `coverage` job uploads 30-day `coverage.xml` artifact |
+| **Test Command** | `python -m pytest tests/ -q` → **1774 passed / 16 skipped in ~27s** (was 1751 / 16 at R07.11; +23 in the R07.12 closure batch `tests/test_r07_12_closure_batch.py`); CI matrix Python 3.12 / 3.13 in `.github/workflows/ci.yml`, parallel `coverage` job uploads 30-day `coverage.xml` artifact |
 
 ---
 
@@ -80,7 +80,7 @@ The 10 most important files. Touch these for almost any meaningful change. 9 of 
 | File | Purpose | Why It Matters |
 |------|---------|----------------|
 | `agentkthx/agent.py` (1089 LOC) | `Agent` class — 5-mixin composition. Holds `run()`, `_generate_with_retry()`, `_generate()`, `_run_core()`, `add_tool`/`register_tool`/`rebuild_system_prompt` (R07.05 split). | R07.05 split `add_tool` into 3 methods: `register_tool()` (no memory clear — safe mid-session), `rebuild_system_prompt()` (explicit clear+rebuild for soul swaps), and `add_tool()` (deprecated alias, still clears for backward compat). **`add_tool` does NOT emit `DeprecationWarning`** — third-party callers have no programmatic migration signal. |
-| `agentkthx/core/helpers.py` (1384 LOC, +270) | Security primitives + arg normalization + fuzzy matching + calc extraction. `validate_path`, `sanitize_command`, `is_safe_url` (now with `_iter_hostname_ips`/`_ip_address_blocked`), NEW `sanitize_tool_output` (R07.05 SEC-10). | Imported by 18+ modules. R07.05 added `sanitize_tool_output()` (8KB truncation + secret redaction + ANSI stripping) wired into every tool result. New SSRF defenses are DNS-resolution-based: **`_iter_hostname_ips` does unbounded synchronous `getaddrinfo` with no timeout** — DoS amplification risk on adversarial DNS (NEW finding SEC-11). |
+| `agentkthx/core/helpers.py` (1384 LOC, +270) | Security primitives + arg normalization + fuzzy matching + calc extraction. `validate_path`, `sanitize_command`, `is_safe_url` (now with `_iter_hostname_ips`/`_ip_address_blocked`), NEW `sanitize_tool_output` (R07.05 SEC-10). | Imported by 18+ modules. R07.05 added `sanitize_tool_output()` (8KB truncation + secret redaction + ANSI stripping) wired into every tool result. New SSRF defenses are DNS-resolution-based: R07.12 (SEC-11 closed): DNS resolution now bounded — daemon-thread `getaddrinfo` with 5s wall-clock budget, 32-record cap, fail-closed `__DNS_TIMEOUT__` sentinel; `sanitize_tool_output` wraps every tool result. |
 | `agentkthx/core/agentic_loop.py` (794 LOC, +34) | `_run_loop_iteration` — unified agentic loop body. Drives `Response` state machine, tool dispatch, error recovery, finish_reason handling. | R07.06 ROB-01: Ctrl+C in `_execute_single_tool_call` now sets `state.terminated = True` (was: returned `"break"` without flag, leaving the run half-cancelled). R07.05 SEC-10: `_process_tool_result` wraps every tool result via `sanitize_tool_output` BEFORE passing to memory / FunctionCallOutputItem / `build_enhanced_observation`. **`_is_simple_result` now sees `<tool_output>` wrapper as first line** — regex checks for numeric/date/time no longer fire on sanitized output; behavior mitigated by `< 200` length check + `simple_tools` set membership. |
 | `agentkthx/core/error_recovery.py` (923 LOC, +13) | `ErrorRecoveryTracker` state machine, `is_error_result` classifier, `should_terminate`, `build_enhanced_observation`, `_is_simple_result`. | R07.06 ROB-07: `_ERROR_FIRST_LINE_RE` expanded with alternative traceback framings (`During handling of the above exception`, `The above exception was the direct cause`, bare `File "...", line N`). **Residual risk**: prose containing `File "notes.txt"` in a tool result is still misclassified, but SEC-10 wrapping shields this — the wrapper tag is now the first line. |
 | `agentkthx/plugins/_loader.py` (1531 LOC, +139) | `PluginManager` singleton, manifest v0.2 parser, Kahn topological-sort dependency loader, hook dispatch with per-plugin failure isolation, external plugin import via `spec_from_file_location`. | R07.05 SEC-06: optional `sha256` field on `plugin.json` (string = `__init__.py` hash; dict = relative file paths). `_validate_sha256_pin` fails manifest parse on malformed pins; `_verify_sha256_pins` runs BEFORE `exec_module` (fail-closed on mismatch/missing/escaping path); `_warn_loose_plugin_perms` advisory on group/world-writable plugin dirs (POSIX only, built-ins skipped). **Pin is OPT-IN** — plugins without `sha256` field still load (NEW finding SEC-13: no `AGENTKTHX_REQUIRE_PLUGIN_PINS` enforcement mode). |
@@ -94,10 +94,10 @@ The 10 most important files. Touch these for almost any meaningful change. 9 of 
 
 | File | Why It Matters |
 |------|----------------|
-| `agentkthx/plugins/orcarouter/orcarouter.py` (1156 LOC, NEW) | 10th backend (6th cloud), first scaffolded from scratch on `CloudBackend`. Free-tier error classification distinguishes retryable (`err_free_rate`) from terminal (`err_free_used`, `free_quota_exhausted`). `ORCAROUTER_FALLBACK_MODELS` env var → `extra_body.models` (up to 5, `route: "fallback"`). `ORCAROUTER_INCLUDE_COST` → per-request cost reporting. **NEW findings**: `time.sleep(retry_after)` unbounded (R07.06 ROB-23 — `Retry-After: 3600` hangs agent for 1 hour); `_extract_buy_credits_url` surfaces attacker-controlled URL in user-facing error (NEW SEC-16 — phishing vector); ~150 LOC of retry logic duplicated between streaming/non-streaming paths (NEW MAINT-11). |
+| `agentkthx/plugins/orcarouter/orcarouter.py` (1156 LOC, NEW) | 10th backend (6th cloud), first scaffolded from scratch on `CloudBackend`. Free-tier error classification distinguishes retryable (`err_free_rate`) from terminal (`err_free_used`, `free_quota_exhausted`). `ORCAROUTER_FALLBACK_MODELS` env var → `extra_body.models` (up to 5, `route: "fallback"`). `ORCAROUTER_INCLUDE_COST` → per-request cost reporting. Historical findings in this file: `time.sleep(retry_after)` unbounded (ROB-16, closed R07.07 — 60s cap); `_extract_buy_credits_url` phishing URL (SEC-16, closed R07.08); retry-logic duplication (MAINT-11, closed R07.08). R07.12: `_is_free_model` now honors the live upstream `-free` suffix convention (ROB-23 closed) — new free models surface under `ORCAROUTER_FREE_ONLY` without code updates; static whitelist kept as the outage-fallback floor. |
 | `agentkthx/plugins/zai/zai.py` (1141 LOC, refactored) | First plugin migrated to `CloudBackend` base. `__init__` collapsed to single `super().__init__()` call. Catalog updated: `glm-5.3-flash` correctly marked as NOT free (was bug). `get_model_info` returns default 128K entry for unknown models (ZAI accepts any model ID). |
 | `agentkthx/cli/agent_factory.py` (R07.06 +94 LOC) | NEW `apply_model_switch(agent, new_model) -> dict`. Re-derives `num_ctx`, `num_predict`, `model_config`, `model_family` on `/model` switch. `_build_agent` stashes `_num_ctx_explicit` / `_num_predict_explicit` flags; `/param num_ctx <v>` at runtime sets the flag too (chat.py:900). `/model` prints derived deltas. |
-| `agentkthx/tools/builtins.py` (1363 LOC, +25) | NEW `_SSRFSafeRedirectHandler` (R07.05 SEC-03). `http_get` opens through this handler so 30x redirects re-validate via `is_safe_url` on every hop. **NEW finding SEC-17**: each `is_safe_url` call on a redirect hop triggers DNS resolution (`_iter_hostname_ips` → `socket.getaddrinfo`) — unbounded redirect chain = DoS. |
+| `agentkthx/tools/builtins.py` (1363 LOC, +25) | NEW `_SSRFSafeRedirectHandler` (R07.05 SEC-03). `http_get` opens through this handler so 30x redirects re-validate via `is_safe_url` on every hop. R07.12 (SEC-17 closed): explicit `_MAX_HOPS = 5` per-request redirect budget — the 6th hop raises URLError; per-hop validation cost is bounded by the R07.12 DNS timeout. |
 | `agentkthx/core/memory.py` (432 LOC, +6) | R07.06 ROB-08: `MemoryConfig.max_tokens` default flipped `4096 → 0` (was never enforced; turning it on would prune tool-heavy histories to ~2 results since `sanitize_tool_output` caps results at 8KB ≈ 2K est. tokens each). Token-tier pruning now real but opt-in. |
 
 ---
@@ -283,7 +283,7 @@ Key coupling points:
 
 13. **3 try/except ImportError blocks in `__init__.py`** — `PersistentMemory`, `ACPPlugin`, Soul types are silently `None` on import failure.
 
-14. **`is_safe_url` SSRF check now resolves DNS** (R07.05 SEC-03 closure) — `_iter_hostname_ips` calls `socket.getaddrinfo(host, None)` synchronously with no timeout, no cache, no cap on returned IPs. **NEW finding SEC-11**: malicious DNS server returning thousands of A records blocks the agent; slow upstream resolver stalls every tool call. Combined with `_SSRFSafeRedirectHandler` (NEW finding SEC-17): every redirect hop triggers another DNS lookup, unbounded redirect chain = DoS.
+14. **`is_safe_url` SSRF check resolves DNS bounded** (R07.12 SEC-11/SEC-17/ROB-27 closure) — `_iter_hostname_ips` routes through `_resolve_hostname_bounded`: `getaddrinfo` on a daemon thread with a 5s wall-clock budget, record sets capped at 32, timed-out lookups fail CLOSED via the `__DNS_TIMEOUT__` sentinel (genuine resolution failures stay fail-open). `_SSRFSafeRedirectHandler` enforces `_MAX_HOPS = 5`; the abandoned daemon thread dies with the OS resolver timeout and cannot block interpreter exit.
 
 15. **`sanitize_command` heredoc regex** (R07.05 SEC-04 closure) — `bash`/`sh`/`zsh`/`ksh`/`fish` added to `BLOCKED_COMMANDS`; heredoc pattern `<<\s*['\"]?[A-Za-z_]\w*` added to injection regexes. **Residual gaps**: brace expansion and ANSI-C quoting documented but not blocked. `bash <script>` form rejected; direct `./script.sh` invocation still works (shebang honored).
 
@@ -293,7 +293,7 @@ Key coupling points:
 
 18. **`tool_parse.py` `\bTrue\b` / `\bFalse\b` / `\bNone\b` regex substitutions mangle string values** (R07.05 SEC-02 closure) — Substitutions run AFTER single→double quote conversion but on the WHOLE string, not respecting string-literal boundaries. `{"prompt": "None of the above is True"}` becomes `{"prompt": "null of the above is true"}`. Verified by reproducer. **NEW finding MAINT-14 — should be re-classified ROB-High (correctness bug, silent data corruption).**
 
-19. **OrcaRouter `time.sleep(retry_after)` unbounded** (`orcarouter.py:848`) — `_parse_retry_after_seconds` returns `float(header)` with no cap. Malicious or buggy upstream returning `Retry-After: 3600` hangs the agent for an hour. **NEW finding ROB-23.**
+19. **OrcaRouter Retry-After cap** (ROB-16, closed R07.07) — `_parse_retry_after_seconds` caps at `_MAX_RETRY_AFTER_SECONDS = 60.0`; negative values clamp to 0.0. Related R07.12 closure: `list_models` free detection now live-convention-driven (ROB-23 closed).
 
 20. **OrcaRouter `_extract_buy_credits_url` surfaces attacker-controlled URL** (`orcarouter.py:229`) — The URL from the upstream provider's error body is interpolated directly into the user-facing RuntimeError message. An attacker controlling a malicious upstream provider (or MITM if HTTPS isn't enforced) could inject a phishing URL. **NEW finding SEC-16.**
 
@@ -323,7 +323,7 @@ Key coupling points:
 
 ## What's Missing / Incomplete
 
-1. **No integration tests** — All 1751 tests are mocked unit tests. TEST-01 still open. Coverage baseline: 42.7% line coverage (R07.01).
+1. **No integration tests** — All 1774 tests are mocked unit tests. TEST-01 still open. Coverage baseline: 42.7% line coverage (R07.01).
 2. **No `black --check` or `ruff check` in CI** — TEST-06 still open.
 3. **No `mypy` / type checking** — `pyproject.toml` has no `[tool.mypy]` section.
 4. **No `CONTRIBUTING.md`** — `docs/CREDITS.md` lists contributors but no guide.
