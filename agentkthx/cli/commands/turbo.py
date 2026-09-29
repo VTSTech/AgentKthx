@@ -125,7 +125,7 @@ def cmd_turbo(args: argparse.Namespace) -> int:
                 num_predict=getattr(args, "num_predict", None),
                 cache_type_k=args.turbo_k,
                 cache_type_v=args.turbo_v,
-                flash_attn=getattr(args, "flash_attn", False),
+                flash_attn=getattr(args, "flash_attn", None),  # R07.16: None|on|off|auto (was bool)
                 sparsity=getattr(args, "sparsity", 0.0),
                 num_threads=getattr(args, "threads", 0),
                 threads_batch=getattr(args, "threads_batch", 0),

@@ -277,7 +277,13 @@ def create_parser() -> argparse.ArgumentParser:
         help="V cache type (default: auto-detected)",
     )
     turbo_start_parser.add_argument(
-        "--flash-attn", action="store_true", help="Enable flash attention (-fa)"
+        "--flash-attn",
+        choices=["on", "off", "auto"],
+        default=None,
+        help="Flash attention mode (llama-server's -fa flag). 'on' forces FA, "
+        "'off' disables it, 'auto' lets the server decide (server default is "
+        "'auto'). Not passing --flash-attn means no -fa flag is sent and the "
+        "server uses its own default.",
     )
     turbo_start_parser.add_argument(
         "--sparsity", type=float, default=0.0, help="Sparse V decoding threshold (0.0=off)"

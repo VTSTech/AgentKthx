@@ -92,7 +92,9 @@ class TurboState:
     turbo_mode: str = ""
     host: str = "localhost"
     server_path: str = ""
-    flash_attn: bool = False
+    flash_attn: str = (
+        ""  # R07.16: "on"/"off"/"auto" (was bool pre-R07.16; legacy True/False still loads via from_dict filter)
+    )
     sparsity: float = 0.0
     started_at: float = 0.0
 
@@ -245,7 +247,7 @@ def _build_command(
     ctx: int,
     cache_type_k: str,
     cache_type_v: str,
-    flash_attn: bool = False,
+    flash_attn: Optional[str] = None,
     sparsity: float = 0.0,
     num_threads: int = 0,
     num_predict: int = 0,
@@ -285,9 +287,19 @@ def _build_command(
     if cache_type_v:
         cmd.extend(["-ctv", cache_type_v])
 
-    # Flash attention
+    # Flash attention. R07.16: TurboQuant llama-server fork's -fa flag is
+    # tri-state ('on', 'off', 'auto') — bare -fa is rejected. Emit -fa <value>
+    # only when an explicit value is provided; otherwise let the server use
+    # its own default ('auto').
     if flash_attn:
-        cmd.append("-fa")
+        # Handle legacy bool form (True → "on", False → skip) AND the new
+        # string form ("on"/"off"/"auto") for backward compat with old
+        # TurboState files that saved flash_attn as a bool.
+        if isinstance(flash_attn, bool):
+            if flash_attn:
+                cmd.extend(["-fa", "on"])
+        elif flash_attn in ("on", "off", "auto"):
+            cmd.extend(["-fa", flash_attn])
 
     # Sparse V decoding (attention-gated skip)
     if sparsity > 0.0:
@@ -335,7 +347,7 @@ def start_server(
     num_predict: Optional[int] = None,
     cache_type_k: Optional[str] = None,
     cache_type_v: Optional[str] = None,
-    flash_attn: bool = False,
+    flash_attn: Optional[str] = None,  # R07.16: "on"/"off"/"auto" (was bool)
     sparsity: float = 0.0,
     num_threads: int = 0,
     threads_batch: int = 0,
@@ -528,7 +540,22 @@ def start_server(
     else:
         print(f"  Predict:     {dim('unlimited')}")
     print(f"  Port:        {port}")
-    print(f"  Flash Attn:  {'ON' if flash_attn else dim('off')}")
+    # R07.16: --flash-attn is now tri-state ('on'/'off'/'auto'). Show the
+    # explicit value when set; otherwise note the server uses its own default.
+    if flash_attn:
+        # Handle legacy bool form (True → "ON", False → "off") for backward
+        # compat with old TurboState files + older code paths.
+        if isinstance(flash_attn, bool):
+            fa_display = bright_green("ON") if flash_attn else dim("off")
+        else:
+            fa_display = (
+                bright_green(flash_attn.upper())
+                if flash_attn == "on"
+                else (dim(flash_attn) if flash_attn == "off" else yellow(flash_attn))
+            )
+        print(f"  Flash Attn:  {fa_display}")
+    else:
+        print(f"  Flash Attn:  {dim('auto (server default)')}")
     if sparsity > 0:
         print(f"  Sparse V:    {sparsity}")
     if num_threads > 0:
@@ -841,7 +868,20 @@ def print_status(state: TurboState) -> None:
     print(f"  Uptime:     {uptime_str}")
     print(f"  Server:     {dim(state.server_path)}")
     if state.flash_attn:
-        print(f"  Flash Attn: {bright_green('ON')}")
+        # R07.16: state.flash_attn is now a string ("on"/"off"/"auto").
+        # Legacy state files may have a bool (True/False) — handle both.
+        fa_val = state.flash_attn
+        if isinstance(fa_val, bool):
+            fa_display = bright_green("ON") if fa_val else dim("off")
+        elif fa_val in ("on", "off", "auto"):
+            fa_display = (
+                bright_green(fa_val.upper())
+                if fa_val == "on"
+                else (dim(fa_val) if fa_val == "off" else yellow(fa_val))
+            )
+        else:
+            fa_display = str(fa_val)
+        print(f"  Flash Attn: {fa_display}")
     if state.sparsity > 0:
         print(f"  Sparse V:   {state.sparsity}")
     print()
