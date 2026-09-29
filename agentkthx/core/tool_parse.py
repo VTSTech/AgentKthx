@@ -23,7 +23,10 @@ from .models import ToolCall
 # visible. The ``\*{0,2}`` quantifier matches 0–2 asterisks on each
 # side, so both ``Action:`` and ``**Action:**`` parse identically.
 
-_THOUGHT_RE = re.compile(r"\*{0,2}Thought:\*{0,2}\s*(.*?)(?=\*{0,2}(?:Action|Final Answer):\*{0,2}|$)", re.DOTALL | re.IGNORECASE)
+_THOUGHT_RE = re.compile(
+    r"\*{0,2}Thought:\*{0,2}\s*(.*?)(?=\*{0,2}(?:Action|Final Answer):\*{0,2}|$)",
+    re.DOTALL | re.IGNORECASE,
+)
 _ACTION_RE = re.compile(
     r"\*{0,2}Action:\*{0,2}\s*[`\"']?(\w+)[`\"']?\s*\n?\s*\*{0,2}Action Input:\*{0,2}\s*(.*?)(?=\n\s*(?:Observation:|\*{0,2}(?:Thought|Final Answer|Action):\*{0,2}|Example)|$)",
     re.DOTALL | re.IGNORECASE,

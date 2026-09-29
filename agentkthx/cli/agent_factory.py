@@ -498,11 +498,7 @@ def _get_local_catalog_defaults(backend, model: str) -> dict:
                     # Prefer the saved num_predict; if it's 0 (legacy state file
                     # from before R08), derive ctx // 32 so chat matches what
                     # `turbo start` would have computed for the same ctx.
-                    num_predict = (
-                        state.num_predict
-                        if state.num_predict > 0
-                        else state.ctx // 32
-                    )
+                    num_predict = state.num_predict if state.num_predict > 0 else state.ctx // 32
                     return {
                         "num_ctx": state.ctx,
                         "num_predict": num_predict,
@@ -558,7 +554,7 @@ def _is_local_base_url(url: str) -> bool:
     # Strip protocol
     for proto in ("http://", "https://"):
         if url_lower.startswith(proto):
-            url_lower = url_lower[len(proto):]
+            url_lower = url_lower[len(proto) :]
             break
     # Strip path (keep host[:port])
     host = url_lower.split("/", 1)[0]

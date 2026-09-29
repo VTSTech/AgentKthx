@@ -325,8 +325,14 @@ def _print_config_summary(
         ("OLLAMA_NUM_CTX", "Ollama context window size"),
         ("BITNET_BASE_URL", "BitNet server URL"),
         ("BITNET_TUNNEL", "BitNet remote tunnel URL"),
-        ("TURBOQUANT_BASE_URL", "TurboQuant backend URL (R07.16 primary; LLAMA_SERVER_BASE_URL also accepted as backward-compat alias)"),
-        ("LLAMA_SERVER_BASE_URL", "(Deprecated alias for TURBOQUANT_BASE_URL — still read as backward-compat fallback)"),
+        (
+            "TURBOQUANT_BASE_URL",
+            "TurboQuant backend URL (R07.16 primary; LLAMA_SERVER_BASE_URL also accepted as backward-compat alias)",
+        ),
+        (
+            "LLAMA_SERVER_BASE_URL",
+            "(Deprecated alias for TURBOQUANT_BASE_URL — still read as backward-compat fallback)",
+        ),
         # ── ZAI ──
         ("ZAI_BASE_URL", "ZAI API URL"),
         ("ZAI_API_KEY", "ZAI API key"),

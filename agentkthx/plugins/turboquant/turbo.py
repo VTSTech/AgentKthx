@@ -546,7 +546,9 @@ def start_server(
     print(f"  Server:      {server_path}")
     if extra_args:
         print(f"  Extra:       {dim(' '.join(extra_args))}")
-    print(f"  {dim('Tip: additional llama-server args can be appended after `--` on the agentkthx CLI.')}")
+    print(
+        f"  {dim('Tip: additional llama-server args can be appended after `--` on the agentkthx CLI.')}"
+    )
     print()
 
     # Start the server
