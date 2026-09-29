@@ -18,6 +18,7 @@ import os
 import sqlite3
 import threading
 import uuid
+import weakref
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -50,6 +51,41 @@ def _get_db_path(db_path: str | None = None) -> str:
     except OSError:
         pass
     return os.path.join(_DEFAULT_DB_DIR, _DEFAULT_DB_NAME)
+
+
+# ─────────────────────────────────────────────────────────────────────
+# MAINT-15 (R07.15): per-DB-path write-lock registry
+# ─────────────────────────────────────────────────────────────────────
+# ROB-03 (R07.05) put a threading.Lock around every SQLite write, but the
+# lock lived ON THE INSTANCE — two PersistentMemory instances pointing at
+# the SAME database file (e.g. two sessions in one process, Orchestrator
+# parallel mode with per-agent memory, or a tool thread constructing its
+# own handle) each had their own lock, so the "database is locked"
+# race the lock was meant to prevent could still happen across instances.
+# SQLite file locking serializes the writes at the OS level, but
+# concurrent execute() calls still trip busy_timeout errors.
+#
+# The registry below hands out ONE lock per real database path. Keys are
+# realpath-normalized (symlink/relative-path independent) and the map is a
+# WeakValueDictionary: instances hold the only strong reference via
+# ``self._write_lock``, so entries vanish when the last handle for a path
+# is garbage-collected — no unbounded growth, no explicit teardown.
+# The guard lock makes get-or-create atomic; between the lookup and the
+# caller's ``self._write_lock = ...`` assignment the lock object cannot be
+# collected (strong local reference).
+_write_locks: "weakref.WeakValueDictionary[str, threading.Lock]" = weakref.WeakValueDictionary()
+_write_locks_guard = threading.Lock()
+
+
+def _get_write_lock(db_path: str) -> threading.Lock:
+    """Return the process-wide write lock for this database path (MAINT-15)."""
+    key = os.path.realpath(db_path)
+    with _write_locks_guard:
+        lock = _write_locks.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _write_locks[key] = lock
+        return lock
 
 
 def _init_db(conn: sqlite3.Connection) -> None:
@@ -152,7 +188,11 @@ class PersistentMemory(Memory):
         # threads can still trip the busy_timeout. This Lock ensures only
         # one thread writes at a time. Reads are lock-free (SQLite handles
         # concurrent reads natively).
-        self._write_lock = threading.Lock()
+        # MAINT-15 (R07.15): the lock is now per-DB-PATH (shared through the
+        # module-level registry above), not per-instance — two handles on
+        # the same database file share one lock, closing the multi-instance
+        # race ROB-03's per-instance lock left open.
+        self._write_lock = _get_write_lock(self._db_path)
 
     # ------------------------------------------------------------------ #
     #  Database connection (lazy)                                      #

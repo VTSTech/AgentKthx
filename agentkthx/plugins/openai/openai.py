@@ -706,6 +706,12 @@ class OpenAIBackend(OpenAICompatibleBackend):
     """
 
     # Model cache with 1-hour timeout (mirrors OpenRouterBackend / HuggingFaceBackend).
+    # MAINT-19 (R07.15): these are genuinely CLASS-level attributes — live
+    # fetches write via ``type(self)`` so every instance shares one cache
+    # per TTL window. Writing ``self._model_cache`` from a method would
+    # silently create an instance attribute that shadows the class one
+    # (the per-instance cache bug this finding describes). The exception
+    # fallback in list_models() is the one deliberate instance-level write.
     _model_cache: list[dict] | None = None
     _cache_time: float = 0.0
     _CACHE_TIMEOUT: int = 3600  # 1 hour in seconds
@@ -978,17 +984,26 @@ class OpenAIBackend(OpenAICompatibleBackend):
                     if _is_free_model(m["name"])
                 ]
 
-            self._model_cache = sorted(available_models, key=lambda x: x["name"])
-            self._cache_time = current_time
+            # MAINT-19 (R07.15): cache at CLASS level (type(self)) so every
+            # instance of this backend shares one fetch per TTL window.
+            # __init__ calls list_models() on EVERY construction (the CLI's
+            # agent_factory builds a temp backend for model discovery plus
+            # the real one), so the old instance-level write re-fetched
+            # /v1/models once per instance. type(self) assigns on the actual
+            # class, keeping subclasses isolated (each gets its own attribute
+            # on first write).
+            sorted_models = sorted(available_models, key=lambda x: x["name"])
+            type(self)._model_cache = sorted_models
+            type(self)._cache_time = current_time
 
             if os.environ.get("AGENTKTHX_DEBUG"):
-                print(f"  [OpenAI Debug] Stored {len(self._model_cache)} models in cache")
-                for m in self._model_cache[:10]:
+                print(f"  [OpenAI Debug] Stored {len(sorted_models)} models in cache")
+                for m in sorted_models[:10]:
                     print(f"    - {m['name']}")
-                if len(self._model_cache) > 10:
-                    print(f"    ... and {len(self._model_cache) - 10} more")
+                if len(sorted_models) > 10:
+                    print(f"    ... and {len(sorted_models) - 10} more")
 
-            return self._model_cache
+            return sorted_models
 
         except Exception as e:
             # Fallback to static catalog if API fails
@@ -1019,6 +1034,11 @@ class OpenAIBackend(OpenAICompatibleBackend):
             if OPENAI_FREE_ONLY:
                 catalog_models = [m for m in catalog_models if _is_free_model(m["name"])]
 
+            # MAINT-19: the failure fallback deliberately stays INSTANCE-level —
+            # a network failure's static catalog must not poison the shared
+            # class cache for instances that might succeed (e.g. after the
+            # network comes back). Preserves the exact pre-MAINT-19
+            # single-instance semantics for the failing instance.
             self._model_cache = sorted(catalog_models, key=lambda x: x["name"])
             self._cache_time = current_time
             return self._model_cache

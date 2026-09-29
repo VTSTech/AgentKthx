@@ -378,6 +378,11 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
     """
 
     # Model cache with 1-hour timeout (mirrors OpenRouterBackend).
+    # MAINT-19 (R07.15): genuinely CLASS-level — live fetches write via
+    # ``type(self)`` so instances share one cache per TTL window (the
+    # constructor calls list_models() on every construction). The
+    # exception fallback in list_models() is the one deliberate
+    # instance-level write (failure results must not poison the share).
     _model_cache: list[dict] | None = None
     _cache_time: float = 0.0
     _CACHE_TIMEOUT: int = 3600  # 1 hour in seconds
@@ -929,17 +934,21 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
                     )
                 ]
 
-            self._model_cache = sorted(available_models, key=lambda x: x["name"])
-            self._cache_time = current_time
+            # MAINT-19 (R07.15): class-level cache via type(self) — see the
+            # attribute comment above. Returns the local so a test-seeded
+            # instance attribute can never shadow the fresh result.
+            sorted_models = sorted(available_models, key=lambda x: x["name"])
+            type(self)._model_cache = sorted_models
+            type(self)._cache_time = current_time
 
             if os.environ.get("AGENTKTHX_DEBUG"):
-                print(f"  [HF Debug] Stored {len(self._model_cache)} models in cache")
-                for m in self._model_cache[:10]:
+                print(f"  [HF Debug] Stored {len(sorted_models)} models in cache")
+                for m in sorted_models[:10]:
                     print(f"    - {m['name']}")
-                if len(self._model_cache) > 10:
-                    print(f"    ... and {len(self._model_cache) - 10} more")
+                if len(sorted_models) > 10:
+                    print(f"    ... and {len(sorted_models) - 10} more")
 
-            return self._model_cache
+            return sorted_models
 
         except Exception as e:
             # Fallback to static catalog if API fails
@@ -962,6 +971,8 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
             if self._free_only_effective:
                 catalog_models = [m for m in catalog_models if _is_free_model(m["name"])]
 
+            # MAINT-19: failure fallback stays INSTANCE-level (must not
+            # poison the shared class cache — see attribute comment).
             self._model_cache = sorted(catalog_models, key=lambda x: x["name"])
             self._cache_time = current_time
             return self._model_cache

@@ -33,6 +33,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from agentkthx.cli.agent_factory import apply_model_switch
+from agentkthx.core.model_family_config import get_family_config
 from agentkthx.plugins.zai.zai import ZaiBackend, ZAI_MODELS
 
 
@@ -212,10 +213,22 @@ class TestDerivedStateRefresh(unittest.TestCase):
         self.agent = _StubAgent(_make_zai_backend(), model="glm-5.3")
 
     def test_model_config_and_family_refreshed(self):
-        """Family config is a pure function of the name — must re-derive."""
+        """Family config is a pure function of the name — must re-derive.
+
+        MAINT-07 (R07.15): qwen2.5 is now an explicit FAMILY_CONFIGS entry,
+        so model_config.family reports the ACTUAL detected family
+        ("qwen2.5") instead of the old 2-step indirection that silently
+        resolved through the qwen2 config object. Template values (start/
+        stop tokens, temperature) are identical — the qwen2.5 entry is a
+        clone of qwen2 — so only the reported name changed."""
         apply_model_switch(self.agent, "qwen2.5:0.5b")
         self.assertEqual(self.agent.model_family, "qwen2.5")
-        self.assertEqual(self.agent.model_config.family, "qwen2")
+        self.assertEqual(self.agent.model_config.family, "qwen2.5")
+        # Template parity with qwen2 is preserved (the clone contract)
+        self.assertEqual(
+            self.agent.model_config.stop_tokens,
+            get_family_config("qwen2").stop_tokens,
+        )
 
     def test_unknown_family_resolves_to_unknown(self):
         apply_model_switch(self.agent, "glm-5.3")

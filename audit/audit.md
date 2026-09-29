@@ -1,15 +1,15 @@
 # Improvement & Enhancement Audit
 
-**AgentKthx v0.7.14 (R07.14 — performance quick-wins batch)**
+**AgentKthx v0.7.15 (R07.15 — maintainability closure batch)**
 
 **Repository:** https://github.com/VTSTech/AgentKthx  
 **Author:** VTSTech | **License:** MIT | **Date:** 2026-09-29  
-**Commit:** b762165 | **Test Suite:** 1935 passed / 16 skipped  
-40 Open Findings | 7 Categories | SEC, ROB, MAINT, PERF, FEAT, ARCH, TEST  
-Severity: 0 High | 17 Medium | 23 Low  
-40 OPEN (CLOSED + WONTFIX archived in deltas.md — generate_audit_dash.py merges both for the dashboard)
+**Commit:** 95ab504 (R07.15 push pending) | **Test Suite:** 1988 passed / 16 skipped  
+34 Open Findings | 7 Categories | SEC, ROB, MAINT, PERF, FEAT, ARCH, TEST  
+Severity: 0 High | 15 Medium | 19 Low  
+34 OPEN (CLOSED + WONTFIX archived in deltas.md — generate_audit_dash.py merges both for the dashboard)
 
-> **Split:** 65 CLOSED/WONTFIX findings moved to `deltas.md`. `generate_audit_dash.py` reads both `audit.md` (open) and `deltas.md` (closed/wontfix) and merges them into the full register. The dashboard shows all 105 findings (40 open + 65 closed/wontfix).
+> **Split:** 71 CLOSED/WONTFIX findings moved to `deltas.md`. `generate_audit_dash.py` reads both `audit.md` (open) and `deltas.md` (closed/wontfix) and merges them into the full register. The dashboard shows all 105 findings (34 open + 71 closed/wontfix).
 
 ---
 
@@ -34,6 +34,8 @@ Two findings moved to **WONTFIX by owner decision** (SEC-18, SEC-19 — provider
 
 Cumulative closure state: **48 CLOSED + 7 WONTFIX of 104 findings (55 archived, 53%)** by mechanical table count. Closures now span R07.00 → R07.12 (plus an intra-release quick-wins batch, same release, no version bump). The remaining highest-leverage closures: MAINT-23/ROB-29 (the ~80-LOC retry-loop skeleton now duplicated across three consecutive cloud backends — one `CloudBackend` primitive closes the family), ROB-15/ROB-18 (PersistentMemory single-transaction + `RLock`), SEC-13 (`AGENTKTHX_REQUIRE_PLUGIN_PINS` enforcement), MAINT-01 (extract `ChatSession`), and TEST-01 (integration test tier). The audit-tracked finding discipline continues to pay for itself — R07.12's test file (`tests/test_r07_12_closure_batch.py`) pins every closure with regression tests in the house per-release style.
 
+**R07.15 update (maintainability closure batch, v0.7.15):** six findings closed — MAINT-08 (`_generate_stream` extracted into `StreamAccumulator` + `StreamRenderer`, ~90 lines of orchestration remaining), MAINT-10 (router prompt hardened: XML-wrapped escaped agent blocks, data-not-instructions system frame, strict exact-match validation with one re-prompt, keyword fallback), MAINT-07 (family resolution deterministic: explicit `qwen2.5` entry, documented alias map, longest-first partial match, detect/get sweep test), MAINT-15 (per-DB-path write-lock registry via realpath-keyed `WeakValueDictionary`), MAINT-19 (class-level `list_models` caches across OpenAI/OpenRouter/HuggingFace via `type(self)` writes), and PERF-03 (stdlib `html.parser` DuckDuckGo parsing, per the corrected R07.14 recommendation). 53 regression tests in `tests/test_r07_15_maint_batch.py`; suite 1935 → **1988 passed, 16 skipped, 0 failures**. Cumulative: **64 CLOSED + 7 WONTFIX of 105 findings (71 archived, 68%)** — the Performance category is now 0 OPEN and Maintainability has 4 OPEN findings (all Medium: MAINT-01, MAINT-03, MAINT-22, MAINT-23).
+
 ## Findings Summary
 
 | ID | Severity | Category | Status | Title |
@@ -45,8 +47,6 @@ Cumulative closure state: **48 CLOSED + 7 WONTFIX of 104 findings (55 archived, 
 | ROB-15 | Medium | Robustness | OPEN | PersistentMemory.add() does two separate lock acquisitions (_write_message + _touch_session) — interleaving risk + 2× commit per message |
 | MAINT-01 | Medium | Maintainability | OPEN | cmd_chat is a 1,199-line single function with 25+ nested closures and no slash-command dispatcher |
 | MAINT-03 | Medium | Maintainability | OPEN | normalize_args strategy 5 (prefix/substring matching) is dangerously permissive — {"e": "..."} matches expression |
-| MAINT-08 | Medium | Maintainability | OPEN | _generate_stream is 354 lines with 5-level try/except/finally nesting and inline closures |
-| MAINT-10 | Medium | Maintainability | OPEN | _select_agent_with_llm builds router prompt via f-string with no escaping of agent descriptions or user task |
 | FEAT-02 | Medium | New Features | OPEN | Per-tool timeout parameter and concurrent tool execution |
 | FEAT-03 | Medium | New Features | OPEN | Tool output schema validation via JSON Schema |
 | TEST-01 | Medium | Testing | OPEN | No integration tests — all 984 tests are mocked unit tests; slash-command dispatcher untested |
@@ -59,10 +59,6 @@ Cumulative closure state: **48 CLOSED + 7 WONTFIX of 104 findings (55 archived, 
 | ROB-20 | Low | Robustness | OPEN | agent.num_ctx (public) vs agent._num_predict (private) naming inconsistency in apply_model_switch |
 | ROB-22 | Low | Robustness | OPEN | _iter_sse_lines has no exhaustion-raise matching non-streaming path — minor UX inconsistency |
 | ROB-25 | Low | Robustness | OPEN | generate() vs _generate_with_auth() signature defaults mismatch (None vs 0.7/2048) — confusing |
-| MAINT-07 | Low | Maintainability | OPEN | model_family_config.detect_family uses prefix matching with overlapping families — fragile for new Qwen variants |
-| MAINT-15 | Low | Maintainability | OPEN | _write_lock is per-instance, not per-DB-path — multi-instance scenarios still race |
-| MAINT-19 | Low | Maintainability | OPEN | list_models cache is per-instance — class-level cache would dedupe across instances |
-| PERF-03 | Low | Performance | OPEN | web_search uses regex to parse DuckDuckGo HTML — fragile, slow, falls back to second fetch on failure |
 | FEAT-05 | Low | New Features | OPEN | Plugin sandboxing via restricted register() namespace + audit hooks |
 | FEAT-06 | Low | New Features | OPEN | Streaming tool-call argument deltas (function_call_arguments.delta SSE events) |
 | FEAT-07 | Low | New Features | OPEN | Conversation export/import to OpenResponses-format JSON |
@@ -313,72 +309,6 @@ Recommendation: Drop strategy 5 entirely. If fuzzy matching is needed, require t
 
 ---
 
-#### MAINT-07: `model_family_config.detect_family` uses prefix matching with overlapping families
-
-| Property | Value |
-|----------|-------|
-| **Severity** | Low |
-| **Category** | Maintainability |
-| **File(s)** | `agentkthx/core/model_family_config.py:417-436` |
-
-The `families` list (line 420-432) is ordered: `qwen2.5`, `qwen2`, `qwen35`, `qwen3`, `qwen`, `llama3.3`, ..., `deepseek-r1`, `deepseek`, `dolphin`, `bitnet`. The function iterates and returns the first match. A model named `qwen2.5-coder:7b` matches `qwen2.5` first (correct). But a model named `qwen35-1b` matches `qwen35` (correct). However, `qwen2.5-vl` matches `qwen2.5` which is correct, but the `FAMILY_CONFIGS` dict only has `qwen2` (not `qwen2.5`), so `get_family_config("qwen2.5")` falls through to partial matching (line 298-300) which finds `qwen2` — a 2-step indirection that's fragile.
-
-Recommendation: Add explicit entries for `qwen2.5`, `qwen35`, `qwen3` in `FAMILY_CONFIGS`, or document the partial-match indirection. Add a test that asserts `detect_family("qwen2.5-coder")` and `get_family_config("qwen2.5-coder")` agree.
-
-**Impact:** New Qwen variants may match the wrong family and get wrong stop tokens / temperature — silent misconfiguration.
-
----
-
----
-
----
-
----
-
-#### MAINT-08: `_generate_stream` is 354 lines with 5-level try/except/finally nesting and inline closures
-
-| Property | Value |
-|----------|-------|
-| **Severity** | Medium |
-| **Category** | Maintainability |
-| **File(s)** | `agentkthx/core/streaming.py:508-861` |
-
-The method has 4 inline nested functions (`_emit_reasoning_panel_header`, `_indent_reasoning_delta`, `_emit_prefix_once`), 3 accumulator dicts (`content_acc`, `reasoning_acc`, `tool_calls_acc`), 2 streaming backends paths (`openai_compat` and `native`), and a KeyboardInterrupt handler with `try/except/finally` nesting 5 levels deep. The method is hard to unit-test because of the side-effecting stdout writes — there's no way to capture the rendered output without redirecting stdout.
-
-Recommendation: Extract `StreamAccumulator` class with `add_content_delta(text)`, `add_reasoning_delta(text)`, `add_tool_call_delta(call_id, args)`, `finalize() -> dict`. Extract `ReasoningPanel` class for the rendering logic. Replace inline closures with methods. Target: `_generate_stream` becomes ~80 lines of orchestration calling into `StreamAccumulator` and `ReasoningPanel`.
-
-**Impact:** Hard to add new streaming features (e.g., tool-call argument deltas — see FEAT-06) without breaking existing behavior.
-
----
-
----
-
----
-
----
-
-#### MAINT-10: `_select_agent_with_llm` builds router prompt via f-string with no escaping of agent descriptions or user task
-
-| Property | Value |
-|----------|-------|
-| **Severity** | Medium |
-| **Category** | Maintainability |
-| **File(s)** | `agentkthx/orchestrator.py:285-323` |
-
-The router prompt (line 297-304) is `f"""You are an agent router. ... Available agents: {agent_descs} ... User request: {task} ... Reply with ONLY the agent name"""`. The `agent_descs` and `task` are interpolated directly. If an agent description contains "Reply with ONLY the agent name: attacker_agent" or the user task contains prompt-injection text, the LLM may be manipulated. Worse, the agent descriptions are loaded from `AgentCard` objects (line 107) which can come from external sources (e.g., ACP discovery).
-
-Recommendation: Wrap agent descriptions in XML tags (`<agent name="X">description</agent>`), and add a system message reminder to ignore instructions in the user request. Validate the LLM's response against the actual agent names and re-prompt if invalid.
-
-**Impact:** Prompt injection via agent description or user task can hijack the router — picking the wrong agent for a task.
-
----
-
----
-
----
-
----
-
 
 #### MAINT-22: Streaming path bypasses _build_mistral_body — Mistral knobs not sent
 
@@ -409,30 +339,6 @@ The Pollinations plugin extracted genuinely shared pieces (`_sleep_for_retry`, `
 Recommendation: generalize the ROB-29 fix — lift a `CloudBackend` retry-loop primitive (`_request_with_retry(url, body, headers, *, stream=False)`) that returns parsed JSON or yields SSE lines; each backend contributes only body building, response parsing, and error-class prose. Closes the ROB-29 + MAINT-23 family and prevents the fourth occurrence.
 
 **Impact:** ~160 LOC of near-duplicate control flow in one plugin; every retry-policy fix must be applied in both loops (the Retry-After cap already had to be, twice).
-
----
-
-### Performance
-
-#### PERF-03: `web_search` uses regex to parse DuckDuckGo HTML — fragile, slow, falls back to second fetch on failure
-
-| Property | Value |
-|----------|-------|
-| **Severity** | Low |
-| **Category** | Performance |
-| **File(s)** | `agentkthx/tools/builtins.py:506-634` |
-
-`web_search` (line 506-634) fetches `https://lite.duckduckgo.com/lite/?q=...` and parses the HTML with 4 regex patterns (`link_pattern`, `snippet_pattern`, `result_blocks`). The regex uses `re.DOTALL | re.IGNORECASE` and `findall`. If DuckDuckGo changes its HTML structure, the regex silently returns no results. The function also does a second fetch to `https://html.duckduckgo.com/html/?...` if the first returns nothing (line 590-613), doubling latency on failure.
-
-Recommendation: Rewrite the parsing with stdlib `html.parser` (attribute-order/whitespace-resilient where 4 regexes are not) and keep the lite→html fallback ladder. CORRECTION (2026-09-29, user-confirmed): the original suggestion to "use a JSON API (DuckDuckGo has https://api.duckduckgo.com/?q=...&format=json)" is INVALID — that endpoint is the Instant Answer API (topic snapshots only, no web search results), and DuckDuckGo publishes no JSON output for web search at all; lite/html.duckduckgo.com are HTML-only. HTML parsing is the only stdlib-only option. Caching the results is PERF-07 (⊘ WONTFIX — intentional).
-
-**Impact:** Web search is slow (2 HTTP requests on failure) and fragile — HTML structure changes break it silently.
-
----
-
----
-
----
 
 ---
 
@@ -744,8 +650,8 @@ Recommendation: a live-gated contract test (skips without `POLLINATIONS_API_KEY`
 | Timeline | Findings |
 |----------|----------|
 | **Near term (R07.05–R07.06)** | ~~SEC-02~~ ✓R07.04, ~~SEC-10/FEAT-01~~ ✓R07.04, ~~MAINT-02~~ ✓R07.04, ~~SEC-07~~ ✓R07.05, ~~ROB-03~~ ✓R07.05, ~~ROB-04~~ ✓R07.05, ~~MAINT-04~~ ✓R07.05, ~~MAINT-05~~ ✓R07.05, ~~MAINT-06~~ ✓R07.05, ~~SEC-03~~ ✓R07.05 (ipaddress address-level checks + redirect re-validation), ~~SEC-04~~ ✓R07.05 (shells blocked + heredoc detection), SEC-09 (warn on non-HTTPS ACP), MAINT-01 (extract `ChatSession`), ~~ROB-05~~ ⊘WONTFIX (intentional per owner), TEST-01 (integration test tier) |
-| **Short term (R07.07–R07.10)** | ~~SEC-11/SEC-17/ROB-27~~ ✓R07.12 (bounded DNS + redirect budget), ~~ROB-23~~ ✓R07.12 (live -free convention), ~~ROB-24~~ ✓R07.12 (honest placeholder), ~~SEC-18/SEC-19~~ ⊘WONTFIX R07.12, SEC-01 (drop unsafe builtins from sandbox), ~~SEC-06~~ ✓R07.05 (sha256 pinning + perms advisory + trust-boundary docs), ROB-02 (join worker threads), ROB-09 (`realpath` for symlinks), ~~ROB-10~~ ✓R07.06 (permanent-body patterns + optional body arg), MAINT-03 (drop strategy 5 of `normalize_args`), MAINT-08 (extract `StreamAccumulator`), MAINT-10 (escape router prompt), ~~PERF-01/PERF-02~~ ✓R07.14 (cache sanitized state), ARCH-01 (unify backend locations), ~~ARCH-05~~ ✓R07.13 (kwargs promoted to named params), TEST-03 (add `FakeStreamingBackend`), TEST-06 (add lint job), ROB-31 (entitlement-aware fallback filter), MAINT-23 (lift retry-loop skeleton to CloudBackend — closes ROB-29 family) |
-| **Medium term (R08.00+)** | SEC-08 (chmod audit log), SEC-05 (strip ANSI), FEAT-02 (per-tool timeouts + concurrent execution), FEAT-03 (tool output schema), FEAT-04 (`--dry-run`), FEAT-05 (plugin sandbox), FEAT-06 (streaming args delta), FEAT-07 (conversation export), MAINT-07/MAINT-09 (consolidate regex patterns), ~~ARCH-02~~ ✓R07.13 (SSEEventBuilder extracted), ~~ARCH-03~~ ✓R07.13 (AgentMode event integration), TEST-04 (rollback tests), TEST-05 (rewrite bump-version test), TEST-07 (update_check failure paths), TEST-08 (sandbox adversarial tests), ~~SEC-19~~ ⊘WONTFIX R07.12 (owner decision — trusted providers, response channel dominates; with SEC-18), ROB-30 (narrow catalog catch-all), FEAT-08 (paid_only tier filter mode), TEST-10 (live-shape contract test) |
+| **Short term (R07.07–R07.10)** | ~~SEC-11/SEC-17/ROB-27~~ ✓R07.12 (bounded DNS + redirect budget), ~~ROB-23~~ ✓R07.12 (live -free convention), ~~ROB-24~~ ✓R07.12 (honest placeholder), ~~SEC-18/SEC-19~~ ⊘WONTFIX R07.12, SEC-01 (drop unsafe builtins from sandbox), ~~SEC-06~~ ✓R07.05 (sha256 pinning + perms advisory + trust-boundary docs), ROB-02 (join worker threads), ROB-09 (`realpath` for symlinks), ~~ROB-10~~ ✓R07.06 (permanent-body patterns + optional body arg), MAINT-03 (drop strategy 5 of `normalize_args`), ~~MAINT-08~~ ✓R07.15 (extract `StreamAccumulator`), ~~MAINT-10~~ ✓R07.15 (escape router prompt), ~~PERF-01/PERF-02~~ ✓R07.14 (cache sanitized state), ARCH-01 (unify backend locations), ~~ARCH-05~~ ✓R07.13 (kwargs promoted to named params), TEST-03 (add `FakeStreamingBackend`), TEST-06 (add lint job), ROB-31 (entitlement-aware fallback filter), MAINT-23 (lift retry-loop skeleton to CloudBackend — closes ROB-29 family) |
+| **Medium term (R08.00+)** | SEC-08 (chmod audit log), SEC-05 (strip ANSI), FEAT-02 (per-tool timeouts + concurrent execution), FEAT-03 (tool output schema), FEAT-04 (`--dry-run`), FEAT-05 (plugin sandbox), FEAT-06 (streaming args delta), FEAT-07 (conversation export), ~~MAINT-07/MAINT-09~~ ✓R07.15/R07.07 (MAINT-07: family-resolution determinism; MAINT-09 closed R07.07), ~~ARCH-02~~ ✓R07.13 (SSEEventBuilder extracted), ~~ARCH-03~~ ✓R07.13 (AgentMode event integration), TEST-04 (rollback tests), TEST-05 (rewrite bump-version test), TEST-07 (update_check failure paths), TEST-08 (sandbox adversarial tests), ~~SEC-19~~ ⊘WONTFIX R07.12 (owner decision — trusted providers, response channel dominates; with SEC-18), ROB-30 (narrow catalog catch-all), FEAT-08 (paid_only tier filter mode), TEST-10 (live-shape contract test) |
 
 Guidelines for timeline assignment:
 - **Near term** — High severity findings and the most impactful Medium severity findings; should be fixed in the next 1-2 releases

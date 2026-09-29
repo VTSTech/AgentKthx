@@ -196,7 +196,10 @@ class OpenRouterBackend(OpenAICompatibleBackend):
     with OpenRouter-specific authentication and model handling.
     """
     
-    # Model cache with 1-hour timeout
+    # Model cache with 1-hour timeout.
+    # MAINT-19 (R07.15): genuinely CLASS-level — live fetches write via
+    # ``type(self)`` so instances share one cache per TTL window. The
+    # exception fallback below is the one deliberate instance-level write.
     _model_cache = None
     _cache_time = 0
     _CACHE_TIMEOUT = 3600  # 1 hour in seconds
@@ -413,17 +416,20 @@ class OpenRouterBackend(OpenAICompatibleBackend):
                 # named ``openrouter/free`` router is also accepted, not
                 # just ``:free``-suffix models.
                 free_models = [m for m in available_models if _is_free_model(m["name"])]
-                self._model_cache = sorted(free_models, key=lambda x: x["name"])
+                sorted_models = sorted(free_models, key=lambda x: x["name"])
             else:
-                self._model_cache = sorted(available_models, key=lambda x: x["name"])
-            
+                sorted_models = sorted(available_models, key=lambda x: x["name"])
+
+            # MAINT-19 (R07.15): class-level cache via type(self) — see the
+            # attribute comment above.
+            type(self)._model_cache = sorted_models
             if os.environ.get("AGENTKTHX_DEBUG"):
-                print(f"  [OpenRouter Debug] Stored {len(self._model_cache)} models in cache:")
-                for model in self._model_cache:
+                print(f"  [OpenRouter Debug] Stored {len(sorted_models)} models in cache:")
+                for model in sorted_models:
                     print(f"    - {model['name']}")
-            
-            self._cache_time = current_time
-            return self._model_cache
+
+            type(self)._cache_time = current_time
+            return sorted_models
             
         except Exception as e:
             # Fallback to catalog if API fails
@@ -447,8 +453,11 @@ class OpenRouterBackend(OpenAICompatibleBackend):
                 # included paid flash variants (e.g. glm-4.5-flash is paid
                 # on ZAI) and missed the ``openrouter/free`` router.
                 free_models = [m for m in catalog_models if _is_free_model(m["name"])]
+                # MAINT-19: failure fallback stays INSTANCE-level (must not
+                # poison the shared class cache — see attribute comment).
                 self._model_cache = sorted(free_models, key=lambda x: x["name"])
             else:
+                # MAINT-19: failure fallback stays INSTANCE-level.
                 self._model_cache = sorted(catalog_models, key=lambda x: x["name"])
             
             self._cache_time = current_time

@@ -14,6 +14,7 @@ import subprocess
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 
@@ -558,6 +559,116 @@ _BROWSER_USER_AGENT = os.environ.get(
 )
 
 
+def _unwrap_ddg_url(url: str) -> str:
+    """Unwrap DuckDuckGo's ``//duckduckgo.com/l/?uddg=URL`` redirect wrapper."""
+    if url.startswith("//duckduckgo.com/l/?uddg="):
+        from urllib.parse import parse_qs, urlsplit
+        qs = parse_qs(urlsplit(url).query)
+        if "uddg" in qs:
+            return qs["uddg"][0]
+    return url
+
+
+class _DDGResultParser(HTMLParser):
+    """PERF-03 (R07.15): stdlib ``html.parser`` replacement for the four
+    regex patterns DuckDuckGo result parsing used to lean on.
+
+    One parser handles BOTH endpoint layouts — the result anchor and
+    snippet class names differ, the structure (title anchor first, then
+    its snippet element) is the same:
+
+    - html.duckduckgo.com: ``<a class="result__a" href=...>TITLE</a>`` +
+      ``<a class="result__snippet">SNIPPET</a>``
+    - lite.duckduckgo.com: ``<a class="result-link" href=...>TITLE</a>`` +
+      ``<td class="result-snippet">SNIPPET</td>``
+
+    Being a real HTML tokenizer, it is resilient where the regexes were
+    not: attribute order, quote style, extra whitespace, nested tags
+    inside titles/snippets, and character references (``convert_charrefs``
+    decodes them). Each result lands in ``results`` as
+    ``{"url": ..., "title": ..., "snippet": ...}``; a snippet attaches to
+    the most recent result anchor (document order), which reproduces the
+    per-block pairing of the html endpoint and the sequential pairing of
+    the lite endpoint. The ``uddg=`` redirect wrapper is unwrapped in
+    place via ``_unwrap_ddg_url``.
+    """
+
+    _RESULT_CLASSES = {"result__a", "result-link"}
+    _SNIPPET_CLASSES = {"result__snippet", "result-snippet"}
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.results: list[dict] = []
+        # NOTE (R07.15): these attribute names are deliberately namespaced
+        # with a _ddg_ prefix. A plain ``_pending`` collides with at least
+        # one optimized CPython build's html.parser, which keeps a buffered
+        # chunk LIST in ``self._pending`` and ``.clear()``s it inside base
+        # close() — silently emptying our pending-result dict (same object
+        # id, emptied in place). Vanilla CPython has no such attribute, so
+        # this class of bug only bites on patched interpreters — exactly
+        # the kind of thing that costs an afternoon to debug.
+        self._ddg_pending: dict | None = None
+        self._ddg_capture: str | None = None  # "title" | "snippet" | None
+        self._ddg_buf: list[str] = []
+
+    # -- tag events -----------------------------------------------------
+    def handle_starttag(self, tag, attrs):
+        classes = set((dict(attrs).get("class") or "").split())
+        if classes & self._RESULT_CLASSES:
+            self._flush_pending()
+            self._ddg_pending = {
+                "url": _unwrap_ddg_url(dict(attrs).get("href") or ""),
+                "title": "",
+                "snippet": "",
+            }
+            self._ddg_capture = "title"
+            self._ddg_buf = []
+        elif classes & self._SNIPPET_CLASSES:
+            self._ddg_capture = "snippet"
+            self._ddg_buf = []
+
+    def handle_endtag(self, tag):
+        if self._ddg_capture == "title" and tag == "a":
+            if self._ddg_pending is not None:
+                self._ddg_pending["title"] = " ".join("".join(self._ddg_buf).split())
+            self._ddg_capture = None
+        elif self._ddg_capture == "snippet" and tag in ("a", "td"):
+            if self._ddg_pending is not None:
+                self._ddg_pending["snippet"] = " ".join("".join(self._ddg_buf).split())
+            self._ddg_capture = None
+
+    def handle_data(self, data):
+        if self._ddg_capture:
+            self._ddg_buf.append(data)
+
+    # -- lifecycle ------------------------------------------------------
+    def _flush_pending(self) -> None:
+        if self._ddg_pending and self._ddg_pending.get("url"):
+            self.results.append(self._ddg_pending)
+        self._ddg_pending = None
+
+    def close(self) -> None:
+        super().close()
+        self._flush_pending()
+
+
+def _collect_ddg_results(entries: list[dict], num_results: int) -> list[dict]:
+    """Normalize parsed DDG entries into result dicts.
+
+    Applies the title fallback (``Result N``), caps snippets at
+    ``MAX_SEARCH_SNIPPET``, and drops entries with a URL but neither
+    title nor snippet — the same acceptance rule the regex version
+    applied per endpoint, now in one place for both.
+    """
+    out: list[dict] = []
+    for i, entry in enumerate(entries[:num_results]):
+        title = entry.get("title") or f"Result {i + 1}"
+        snippet = (entry.get("snippet") or "")[:MAX_SEARCH_SNIPPET]
+        if entry.get("url") and (entry.get("title") or entry.get("snippet")):
+            out.append({"title": title, "url": entry["url"], "snippet": snippet})
+    return out
+
+
 def web_search(query: str, num_results: int | None = None) -> str:
     """
     Search the web using DuckDuckGo (HTML version, no API key required).
@@ -578,8 +689,6 @@ def web_search(query: str, num_results: int | None = None) -> str:
     import urllib.request
     import urllib.error
     import urllib.parse
-    import json
-    import re
 
     if num_results is None:
         num_results = MAX_SEARCH_RESULTS
@@ -620,40 +729,15 @@ def web_search(query: str, num_results: int | None = None) -> str:
             # Parse HTML results — DuckDuckGo's html endpoint uses
             # <a class="result__a" href="URL">TITLE</a> +
             # <a class="result__snippet">SNIPPET</a> structure.
-            result_blocks = re.split(
-                r'<div class="result results_links results_links_deep web-result',
-                html,
-            )
-            for block in result_blocks[1:num_results + 1]:
-                title_match = re.search(
-                    r'<a[^>]+class="result__a"[^>]*>(.*?)</a>',
-                    block, re.DOTALL | re.IGNORECASE,
-                )
-                url_match = re.search(
-                    r'<a[^>]+class="result__a"[^>]+href="([^"]+)"',
-                    block,
-                )
-                snippet_match = re.search(
-                    r'<a[^>]+class="result__snippet"[^>]*>(.*?)</a>',
-                    block, re.DOTALL | re.IGNORECASE,
-                )
-
-                title = re.sub(r"<[^>]+>", "", title_match.group(1)).strip() if title_match else ""
-                result_url = url_match.group(1) if url_match else ""
-                snippet = re.sub(r"<[^>]+>", "", snippet_match.group(1)).strip() if snippet_match else ""
-                # DuckDuckGo wraps URLs in a redirect — unwrap //duckduckgo.com/l/?uddg=URL
-                if result_url.startswith("//duckduckgo.com/l/?uddg="):
-                    from urllib.parse import parse_qs, urlsplit
-                    qs = parse_qs(urlsplit(result_url).query)
-                    if "uddg" in qs:
-                        result_url = qs["uddg"][0]
-
-                if result_url and (title or snippet):
-                    results.append({
-                        "title": title or "Result",
-                        "url": result_url,
-                        "snippet": snippet[:MAX_SEARCH_SNIPPET] if snippet else "",
-                    })
+            # PERF-03 (R07.15): parsing went from a block split + 4 regexes
+            # to a stdlib html.parser walk (_DDGResultParser) — attribute
+            # order, quote style, entities and whitespace are handled by
+            # the real tokenizer, and an HTML change degrades to "no
+            # results" exactly as before instead of mis-parsing.
+            parser = _DDGResultParser()
+            parser.feed(html)
+            parser.close()
+            results.extend(_collect_ddg_results(parser.results, num_results))
         except (urllib.error.HTTPError, urllib.error.URLError, Exception) as e:
             # Don't abort — fall through to the lite endpoint below.
             # Real errors will surface if BOTH endpoints fail.
@@ -681,33 +765,14 @@ def web_search(query: str, num_results: int | None = None) -> str:
                 # Parse lite endpoint results — different HTML structure:
                 # <a class="result-link" href="URL">TITLE</a> +
                 # <td class="result-snippet">SNIPPET</td>
-                link_pattern = re.compile(
-                    r'<a[^>]+class="result-link"[^>]+href="([^"]+)"[^>]*>(.*?)</a>',
-                    re.DOTALL | re.IGNORECASE,
-                )
-                snippet_pattern = re.compile(
-                    r'<td[^>]+class="result-snippet"[^>]*>(.*?)</td>',
-                    re.DOTALL | re.IGNORECASE,
-                )
-
-                links = link_pattern.findall(html2)
-                for i, (result_url, title_raw) in enumerate(links):
-                    if i >= num_results:
-                        break
-                    title = re.sub(r"<[^>]+>", "", title_raw).strip() or f"Result {i + 1}"
-                    snippet = ""
-                    link_end = html2.find(result_url) + len(result_url)
-                    remaining = html2[link_end:link_end + 2000]
-                    snippet_match = snippet_pattern.search(remaining)
-                    if snippet_match:
-                        snippet = re.sub(r"<[^>]+>", "", snippet_match.group(1)).strip()
-                        snippet = re.sub(r"\s+", " ", snippet)[:MAX_SEARCH_SNIPPET]
-                    if result_url and (title or snippet):
-                        results.append({
-                            "title": title,
-                            "url": result_url,
-                            "snippet": snippet,
-                        })
+                # PERF-03 (R07.15): the same stdlib parser handles both
+                # shapes via class-name sets (replaces the regex pair AND
+                # the 2000-char forward-search window used to pair
+                # snippets with links).
+                parser2 = _DDGResultParser()
+                parser2.feed(html2)
+                parser2.close()
+                results.extend(_collect_ddg_results(parser2.results, num_results))
             except (urllib.error.HTTPError, urllib.error.URLError, Exception) as e:
                 # Both endpoints failed — fall through to the no-results return
                 pass

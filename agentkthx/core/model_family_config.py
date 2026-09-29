@@ -11,7 +11,7 @@ Written by VTSTech — https://www.vts-tech.org
 from __future__ import annotations
 
 import platform
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Literal
 
 # Platform detection for cross-platform hints
@@ -266,6 +266,17 @@ Keep answers brief. One word when possible.""",
     ),
 }
 
+# MAINT-07 (R07.15): explicit entry for Qwen2.5 — detect_family() returns
+# "qwen2.5" for those models, but FAMILY_CONFIGS only had "qwen2", so
+# get_family_config("qwen2.5") silently relied on substring partial
+# matching ("qwen2" in "qwen2.5") to find the config — a 2-step
+# indirection that new variants could easily break (the finding's exact
+# impact: wrong stop tokens / temperature with no error). Qwen2.5 shares
+# the Qwen2 ChatML template exactly (same start/stop tokens, temperature,
+# and tool format), so the entry is a clone with only the family name
+# changed — pinned by the detect/get agreement test.
+FAMILY_CONFIGS["qwen2.5"] = replace(FAMILY_CONFIGS["qwen2"], family="qwen2.5")
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # FAMILY ALIASES
@@ -274,9 +285,37 @@ Keep answers brief. One word when possible.""",
 # Some detected families are not stored in FAMILY_CONFIGS but share the
 # same tokenizer/architecture as another family.  These aliases map the
 # detected family string to the canonical config key.
+#
+# MAINT-07 (R07.15): this map is now the SINGLE documented hop between
+# detect_family() outputs and configs. Every detectable family either has
+# its own FAMILY_CONFIGS entry, is aliased here, or is in the documented
+# _DEFAULT_THROUGH_FAMILIES set below — no substring guessing involved.
 _FAMILY_ALIASES: dict[str, str] = {
     "bitnet": "llama",  # BitNet 1.58 uses LLaMA 3 tokenizer (128K vocab, <|eot_id|>/<|end_of_text|> EOS)
+    # Qwen dotted-variant naming: Qwen3.5 models tagged "qwen3.5" (Ollama
+    # style) detected as "qwen3.5" would otherwise substring-match "qwen3"
+    # and wrongly inherit its needs_think_directive=True (Qwen3.5 has NO
+    # thinking mode — see the qwen35 config note).
+    "qwen3.5": "qwen35",
+    "qwen": "qwen2",  # bare "qwen" prefix — closest template is Qwen2 ChatML (was implicit via partial match)
+    # Llama 3.x minor versions share the exact Llama 3 template
+    # (<|start_header_id|> etc.) — alias to the canonical llama config.
+    "llama3.3": "llama",
+    "llama3.2": "llama",
+    "llama3.1": "llama",
+    "llama3": "llama",
+    # Gemma 2 uses the same <start_of_turn>/<end_of_turn> template as
+    # Gemma 3. Previously get_family_config("gemma2") fell through the
+    # substring partial match (neither "gemma3" nor "gemma2" contains the
+    # other) into the EMPTY default config — no stop tokens, i.e. exactly
+    # the silent-misconfiguration the finding warned about.
+    "gemma2": "gemma3",
 }
+
+# MAINT-07: detectable families with NO template-specific config authored.
+# get_family_config() returns the neutral default for these — intentional
+# and pinned by the sweep test so a future rename can't silently change it.
+_DEFAULT_THROUGH_FAMILIES = {"phi3", "phi", "mistral", "mixtral", "codellama", "command-r", "command"}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -284,7 +323,14 @@ _FAMILY_ALIASES: dict[str, str] = {
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def get_family_config(family: str) -> ModelFamilyConfig:
-    """Get configuration for a model family."""
+    """Get configuration for a model family.
+
+    Resolution order (MAINT-07): alias map → direct key → substring
+    partial match (kept for unknown future names) → neutral default.
+    Every family ``detect_family()`` can return resolves deterministically:
+    see ``_FAMILY_ALIASES`` and ``_DEFAULT_THROUGH_FAMILIES`` for the two
+    documented non-direct cases.
+    """
     family_lower = family.lower() if family else ""
 
     # Resolve aliases first (e.g., "bitnet" → "qwen2")
@@ -294,8 +340,12 @@ def get_family_config(family: str) -> ModelFamilyConfig:
     if family_lower in FAMILY_CONFIGS:
         return FAMILY_CONFIGS[family_lower]
 
-    # Partial match
-    for key in FAMILY_CONFIGS:
+    # Partial match — LONGEST key first (MAINT-07): without the length
+    # sort, "qwen2" would win over the explicit "qwen2.5" entry for
+    # "qwen2.5-coder" purely by dict insertion order. Most-specific
+    # substring wins; the direct/alias paths above already handled exact
+    # names.
+    for key in sorted(FAMILY_CONFIGS, key=len, reverse=True):
         if key in family_lower or family_lower in key:
             return FAMILY_CONFIGS[key]
 
@@ -414,23 +464,31 @@ NEVER respond with empty content. ALWAYS call a tool when asked to compute."""
     return hints
 
 
+# Ordered detection list — MOST-SPECIFIC PREFIX FIRST. MAINT-07: the
+# overlaps are deliberate but order-sensitive: "qwen2.5" must precede
+# "qwen2", "qwen35"/"qwen3.5" must precede "qwen3" (both are supersets),
+# and "deepseek-r1" must precede "deepseek". detect_family() returns one
+# of these strings; get_family_config() resolves every one of them (see
+# the aliases / default-through set above).
+_DETECT_FAMILIES = [
+    "qwen2.5", "qwen2", "qwen35", "qwen3.5", "qwen3", "qwen",
+    "llama3.3", "llama3.2", "llama3.1", "llama3", "llama",
+    "mistral", "mixtral",
+    "gemma3", "gemma2", "gemma",
+    "granitemoe", "granite",
+    "phi3", "phi",
+    "codellama",
+    "command-r", "command",
+    "deepseek-r1", "deepseek",  # deepseek-r1 must come before deepseek
+    "dolphin",
+    "bitnet",  # BitNet 1.58 (LLaMA 3 tokenizer, 128K vocab)
+]
+
+
 def detect_family(model_name: str) -> str | None:
-    """Detect model family from model name."""
+    """Detect model family from model name (order-sensitive: _DETECT_FAMILIES)."""
     name_lower = model_name.lower()
-    families = [
-        "qwen2.5", "qwen2", "qwen35", "qwen3", "qwen",
-        "llama3.3", "llama3.2", "llama3.1", "llama3", "llama",
-        "mistral", "mixtral",
-        "gemma3", "gemma2", "gemma",
-        "granitemoe", "granite",
-        "phi3", "phi",
-        "codellama",
-        "command-r", "command",
-        "deepseek-r1", "deepseek",  # deepseek-r1 must come before deepseek
-        "dolphin",
-        "bitnet",  # BitNet 1.58 (LLaMA 3 tokenizer, 128K vocab)
-    ]
-    for f in families:
+    for f in _DETECT_FAMILIES:
         if f in name_lower:
             return f
     return None
