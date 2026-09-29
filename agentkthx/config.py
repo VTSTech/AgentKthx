@@ -73,7 +73,7 @@ TURBOQUANT_CTX = int(os.environ.get("TURBOQUANT_CTX", "8192"))
 # OpenRouter plugin (agentkthx/plugins/openrouter/)
 OPENROUTER_BASE_URL = os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
-OPENROUTER_DEFAULT_MODEL = os.environ.get("OPENROUTER_DEFAULT_MODEL", "anthropic/claude-3.5-sonnet")
+OPENROUTER_DEFAULT_MODEL = os.environ.get("OPENROUTER_DEFAULT_MODEL", "openrouter/free")
 OPENROUTER_FREE_ONLY = os.environ.get("OPENROUTER_FREE_ONLY", "").lower() in ("1", "true", "yes")
 
 # OrcaRouter plugin (agentkthx/plugins/orcarouter/)
@@ -291,7 +291,7 @@ AGENTKTHX_BACKEND = os.environ.get("AGENTKTHX_BACKEND", "ollama").lower()
 # BitNet default: bitnet-b1.58-2b-4t
 # Ollama default: qwen2.5-coder:0.5b-instruct-q4_k_m
 # ZAI default: glm-5.1
-# OpenRouter default: anthropic/claude-3.5-sonnet
+# OpenRouter default: openrouter/free
 if AGENTKTHX_BACKEND == "bitnet":
     DEFAULT_MODEL = os.environ.get("AGENTKTHX_MODEL", "bitnet-b1.58-2b-4t")
 elif AGENTKTHX_BACKEND in ("llama-server", "llama_server"):
@@ -299,7 +299,7 @@ elif AGENTKTHX_BACKEND in ("llama-server", "llama_server"):
 elif AGENTKTHX_BACKEND == "zai":
     DEFAULT_MODEL = os.environ.get("AGENTKTHX_MODEL", "glm-5.1")
 elif AGENTKTHX_BACKEND == "openrouter":
-    DEFAULT_MODEL = os.environ.get("AGENTKTHX_MODEL", "anthropic/claude-3.5-sonnet")
+    DEFAULT_MODEL = os.environ.get("AGENTKTHX_MODEL", "openrouter/free")
 elif AGENTKTHX_BACKEND == "gemini":
     DEFAULT_MODEL = os.environ.get("AGENTKTHX_MODEL", "gemini-3.8-flash")
 elif AGENTKTHX_BACKEND == "huggingface" or AGENTKTHX_BACKEND == "hf":

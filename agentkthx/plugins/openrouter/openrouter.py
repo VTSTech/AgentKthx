@@ -14,7 +14,7 @@ Endpoints used:
 Configuration:
   OPENROUTER_API_KEY    — API key for authentication (required)
   OPENROUTER_BASE_URL   — API base URL (default: https://openrouter.ai/api/v1)
-  OPENROUTER_DEFAULT_MODEL — Default model (default: anthropic/claude-3.5-sonnet)
+  OPENROUTER_DEFAULT_MODEL — Default model (default: openrouter/free)
 
 Usage:
   # CLI
@@ -23,7 +23,7 @@ Usage:
 
   # Python API
   from agentkthx import Agent
-  agent = Agent(model="anthropic/claude-3.5-sonnet", backend="openrouter", tools=["calculator"])
+  agent = Agent(model="openrouter/free", backend="openrouter", tools=["calculator"])
   result = agent.run("What is 15 * 8?")
 
 Written by VTSTech — https://www.vts-tech.org
