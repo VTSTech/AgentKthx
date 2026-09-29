@@ -597,6 +597,13 @@ class PluginManager:
         self._plugins: dict[str, Plugin] = {}
         self._failed: dict[str, str] = {}       # name -> error message
         self._manifests: list[PluginManifest] | None = None  # discovery cache
+        # PERF-04 (R07.14): mtime cache for force=True rescans —
+        # maps str(manifest_path) -> (st_mtime | None, PluginManifest).
+        # Unchanged manifests are REUSED verbatim instead of re-parsed, so
+        # a dev-loop ``discover(force=True)`` only pays ``json.load`` for
+        # the plugin.json files that actually changed. Pruned to the paths
+        # seen in the latest scan so removed plugins drop their entries.
+        self._manifest_cache: dict[str, tuple[float | None, PluginManifest]] = {}
         self._on_init_emitted = False
         self._shutdown_emitted = False
 
@@ -706,12 +713,20 @@ class PluginManager:
         Results are cached (``force=True`` re-scans). Directories starting
         with ``_`` or ``.`` are skipped. First root wins on name collisions.
         No plugin code is imported here.
+
+        PERF-04 (R07.14): a forced rescan re-uses the manifest object
+        of every ``plugin.json`` whose ``st_mtime`` is unchanged and only
+        re-parses new/modified files. Removed plugins drop out of both the
+        result and the cache. Caveat (documented, accepted): files touched
+        twice within one mtime tick can slip through — mtime granularity is
+        a dev-reload nicety here, not a correctness boundary.
         """
         if self._manifests is not None and not force:
             return list(self._manifests)
 
         manifests: list[PluginManifest] = []
         seen: set[str] = set()
+        seen_paths: set[str] = set()
 
         for root, kind in self._roots:
             if kind == "user" and not root.exists():
@@ -740,13 +755,33 @@ class PluginManager:
                 if not manifest_path.exists():
                     continue
 
+                path_key = str(manifest_path)
+                seen_paths.add(path_key)
+
+                # PERF-04: reuse the cached manifest when the file is
+                # unchanged; re-parse only new/modified manifests.
+                mtime: float | None = None
                 try:
-                    manifest = _parse_manifest(
-                        manifest_path, root_kind=kind, warnings=self.warnings
-                    )
-                except Exception as e:
-                    _warn(self.warnings, f"failed to parse {manifest_path}: {e}")
-                    continue
+                    mtime = manifest_path.stat().st_mtime
+                except OSError:
+                    pass  # stat race — fall through to a fresh parse
+                cached_entry = self._manifest_cache.get(path_key)
+                if (
+                    cached_entry is not None
+                    and mtime is not None
+                    and cached_entry[0] == mtime
+                ):
+                    manifest = cached_entry[1]
+                else:
+                    try:
+                        manifest = _parse_manifest(
+                            manifest_path, root_kind=kind, warnings=self.warnings
+                        )
+                    except Exception as e:
+                        _warn(self.warnings, f"failed to parse {manifest_path}: {e}")
+                        continue
+                    if mtime is not None:
+                        self._manifest_cache[path_key] = (mtime, manifest)
 
                 if manifest.name in seen:
                     _warn(
@@ -758,6 +793,15 @@ class PluginManager:
                 seen.add(manifest.name)
                 manifest.dir = entry
                 manifests.append(manifest)
+
+        # Drop cache entries whose plugin.json disappeared this scan so a
+        # re-created file with a stale-equal mtime still re-parses.
+        if seen_paths:
+            self._manifest_cache = {
+                k: v for k, v in self._manifest_cache.items() if k in seen_paths
+            }
+        else:
+            self._manifest_cache = {}
 
         self._manifests = manifests
         return list(manifests)

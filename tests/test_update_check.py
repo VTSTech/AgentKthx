@@ -44,8 +44,13 @@ class _FakeResponse:
         self._payload = payload
         self.closed = False
 
-    def read(self):
-        return self._payload
+    def read(self, amt=-1):
+        # PERF-06 (R07.14): _fetch_json now reads through a byte cap,
+        # so the stand-in honors urllib's real read(amt) contract instead
+        # of the argument-less read() it used to fake.
+        if amt is None or amt < 0:
+            return self._payload
+        return self._payload[:amt]
 
     def close(self):
         self.closed = True

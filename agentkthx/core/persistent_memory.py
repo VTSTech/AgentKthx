@@ -331,6 +331,12 @@ class PersistentMemory(Memory):
 
         self._messages = []
         self._system_prompt = None
+        # PERF-01/PERF-02 (R07.14): load() rebuilds _messages from
+        # the DB outside the normal add() funnel — DB rows may contain
+        # orphans from crashed runs, and the size estimate starts from
+        # scratch. Mark both caches stale (sanitize runs on the next
+        # get_messages(), chars recompute lazily).
+        self._invalidate_caches()
 
         for row in rows:
             seq, role, content, tool_calls_json, tool_call_id, name = row

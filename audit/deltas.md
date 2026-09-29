@@ -1,10 +1,10 @@
 # Audit Deltas — Closed & Wontfix Archive
 
 **Project:** AgentKthx  
-**Release:** R07.13
+**Release:** R07.14
 **Date:** 2026-09-29  
-**Archived:** 2026-09-28 (R07.13 closure batch)
-**Counts:** 53 CLOSED · 7 WONTFIX · 60 total
+**Archived:** 2026-09-29 (R07.14 closure batch)
+**Counts:** 57 CLOSED · 7 WONTFIX · 64 total
 
 This file is the archive of CLOSED and WONTFIX findings moved out of
 `audit.md` to keep the active audit focused on OPEN findings.
@@ -34,6 +34,8 @@ This file is the archive of CLOSED and WONTFIX findings moved out of
 | MAINT-04 | Medium | Maintainability | ✓ CLOSED R07.05 | Two different normalize_args implementations (helpers.py vs args_normal.py) — the latter appears to be dead code |
 | MAINT-05 | Medium | Maintainability | ✓ CLOSED R07.05 | cli/utils.py documents 100+ LOC of dead code (_load_tool_cache, _save_tool_cache, _get_cloud_model_size) |
 | MAINT-21 | Medium | Maintainability | ✓ CLOSED R07.12 (intra) | _parse_mistral_response error-envelope check has operator-precedence bug — `(A or (B and C))` misclassifies any response with `message` field and no `choices` as an error |
+| PERF-01 | Medium | Performance | ✓ CLOSED R07.14 | Memory.sanitize_history runs on every get_messages() call — O(n²) for long histories |
+| PERF-02 | Medium | Performance | ✓ CLOSED R07.14 | _check_compaction iterates all messages + JSON-serializes tool_calls on every step |
 | FEAT-01 | Medium | New Features | ✓ CLOSED R07.04 | Structured tool-output wrapping to mitigate prompt injection |
 | ARCH-01 | Medium | Architecture | ⊘ WONTFIX (intentional) | Backends split across backends/ (native) and plugins/ (cloud) — confusing module layout |
 | ARCH-02 | Medium | Architecture | ✓ CLOSED R07.13 | openresponses.stream_response_events is a 163-line generator mixing protocol logic with state mutation |
@@ -70,7 +72,9 @@ This file is the archive of CLOSED and WONTFIX findings moved out of
 | MAINT-17 | Low | Maintainability | ✓ CLOSED R07.07 | Untrusted-tool-output instruction duplicated verbatim across 3 system-prompt builders |
 | MAINT-18 | Low | Maintainability | ✓ CLOSED R07.12 (intra) | apply_model_switch return dict — verify caller actually consumes it (currently consumed by chat.py:1007 for delta-printing) |
 | MAINT-20 | Low | Maintainability | ✓ CLOSED R07.07 | get_model_info sets free_tier twice for catalog hits (parent + override) — redundant |
+| PERF-04 | Low | Performance | ✓ CLOSED R07.14 | discover(force=True) re-scans all plugin roots — no mtime check |
 | PERF-05 | Low | Performance | ✓ CLOSED R07.12 (intra) | ToolParser.parse runs all 3 parsing strategies even if first succeeds — may produce duplicate tool calls |
+| PERF-06 | Low | Performance | ✓ CLOSED R07.14 | _fetch_json reads entire PyPI response (~100KB) before JSON parsing |
 | PERF-07 | Low | Performance | ⊘ WONTFIX (intentional) | web_search has no result cache — same query re-fetches |
 | FEAT-04 | Low | New Features | ⊘ WONTFIX (intentional) | --dry-run flag for agentkthx run that previews planned tool calls |
 | ARCH-03 | Low | Architecture | ✓ CLOSED R07.13 | agent_mode.py and orchestrator.py are only loosely coupled to the Agent class — parallel abstractions |
@@ -817,6 +821,110 @@ Recommendation: Return early if `_parse_native_json` returns results, only fall 
 
 ---
 
+#### PERF-01: `Memory.sanitize_history` runs on every `get_messages()` call — O(n²) for long histories
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Medium |
+| **Category** | Performance |
+| **File(s)** | `agentkthx/core/memory.py:120-209` |
+
+**Status:** ✓ CLOSED R07.14
+
+`get_messages()` (line 120-138) calls `self.sanitize_history()` at the top. `sanitize_history` (line 140-209) does two passes: pass 1 drops orphan tool results (O(n) with a set), pass 2 fills dangling calls with placeholders (O(n × m) where m is the number of tool_calls per assistant message). For a 50-message history with 5 tool_calls each, that's 250 iterations per call. Called once per `generate()` — on a 25-step agentic loop with 50-message history, that's 12,500 iterations total per run.
+
+Recommendation: Cache the sanitized state and only re-run when `_messages` is mutated (track via a `_dirty` flag set in `add`/`add_tool_call`/`add_tool_result`/`clear`/`compact_messages`).
+
+**Impact:** Slows long agentic runs; measurable on multi-step agent loops.
+
+**Detail:** Closed with the audit's own recommendation: a `_sanitize_dirty` flag on `Memory` (R07.14). Every mutating path invalidates — `add()` (the funnel for `add_tool_call`/`add_tool_result`, which also covers the `_prune_if_needed` rebuild), `clear()`, `compact_messages()` (which additionally truncates `msg.content` IN PLACE, so it invalidates unconditionally rather than on a structural check — a list-identity-only flag would miss the shrinkage), and `PersistentMemory.load()` (rebuilds `_messages` from the DB). `get_messages()` now sanitizes only when dirty, and `sanitize_history()` marks the state clean at its end (it remains idempotent and directly callable). The repair is O(n × tool_calls) once per mutation instead of once per `get_messages()` — on the audit's 25-step/50-message example, from 25 sanitize runs per agent run to one per mutation, with zero behavioral change: the R06.52 pairing guarantees (orphan drop, placeholder fill) are pinned by the existing suite plus 4 new cache-invalidation tests in `tests/test_r07_14_perf_quick_wins.py`.
+
+---
+
+---
+
+---
+
+---
+
+#### PERF-02: `_check_compaction` iterates all messages + JSON-serializes tool_calls on every step
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Medium |
+| **Category** | Performance |
+| **File(s)** | `agentkthx/core/compaction.py:45-118` |
+
+**Status:** ✓ CLOSED R07.14
+
+`_check_compaction` (called at the top of each step via `callbacks.on_step_start`) iterates `for msg in self.memory: total_chars += len(content); tc = getattr(msg, 'tool_calls', None); if tc: total_chars += len(json.dumps(tc, ensure_ascii=False))`. Then `_snapshot_running_tokens` (called from `_check_compaction` and from `_update_running_tokens`) does the SAME iteration again. On a 50-message history with 5 tool_calls each, that's 100 `json.dumps` calls per step.
+
+Recommendation: Cache `total_chars` on the Memory object, invalidate on add/compact. Or use a cheaper estimate (`len(content) + 50 * len(tool_calls)`).
+
+**Impact:** Each step pays O(n × tool_calls) for token estimation — measurable on long-running chat sessions.
+
+**Detail:** Closed with the audit's primary option: `Memory.estimated_chars()` caches the exact `len(content) + len(json.dumps(tool_calls, ensure_ascii=False))` total, invalidated by the same `_invalidate_caches()` funnel as PERF-01 and recomputed lazily. `CompactionMixin` routes all three consumers (`_check_compaction`, `_snapshot_running_tokens`, and the input half of `_update_running_tokens`) through a single `_estimate_memory_chars()` helper: 3 full history scans with up to 2×n `json.dumps` calls per step became 1 lazy recompute per mutation and cache hits everywhere else — pinned at literally ZERO `json.dumps` calls on a warm cache by test. The estimate formula is unchanged, so compaction thresholds behave identically. The helper falls back to the historical inline scan for non-`Memory` memories via an `isinstance(memory, Memory)` predicate — a duck-type check proved mock-unsafe (a MagicMock's auto-attributes are callable and returned a mock, not an int), so the cache is explicitly a Memory-class feature and the documented duck-typed host contract (test doubles included) keeps working unchanged. +6 tests in `tests/test_r07_14_perf_quick_wins.py`.
+
+---
+
+---
+
+---
+
+---
+
+#### PERF-04: `discover(force=True)` re-scans all plugin roots — no mtime check
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Performance |
+| **File(s)** | `agentkthx/plugins/_loader.py:576-637` |
+
+**Status:** ✓ CLOSED R07.14
+
+`discover(force=False)` returns the cached `_manifests` list. `discover(force=True)` re-scans all roots and re-parses every `plugin.json`. There's no mtime check — calling `discover(force=True)` after every plugin edit re-reads all manifests even if only one changed.
+
+Recommendation: Track mtime per `plugin.json` and only re-parse changed files. Maintain a `dict[path, mtime]` and compare on `discover(force=True)`.
+
+**Impact:** Slow plugin reload during development — minor but noticeable.
+
+**Detail:** Closed with the audit's recommendation: `PluginManager._manifest_cache: dict[str(path), (st_mtime, manifest)]`. `discover(force=True)` stats each `plugin.json`, reuses the cached manifest object when `st_mtime` is unchanged, and re-parses only new/modified files; the cache is pruned to the paths seen in the latest scan so removed plugins drop from both the results and the cache (a re-created path with a stale-equal mtime re-parses — pinned by test). Unchanged manifests are reused by IDENTITY, so manifest objects stay stable across reloads. Dedup/first-root-wins semantics are untouched. Documented caveat (accepted, in-code): a file touched twice within one mtime tick can slip through — this is a dev-reload nicety, not a correctness boundary. +4 tests in `tests/test_r07_14_perf_quick_wins.py`.
+
+---
+
+---
+
+---
+
+---
+
+#### PERF-06: `_fetch_json` reads entire PyPI response (~100KB) before JSON parsing
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Performance |
+| **File(s)** | `agentkthx/update_check.py:146-163` |
+
+**Status:** ✓ CLOSED R07.14
+
+`resp.read().decode("utf-8")` reads the full PyPI JSON (which can be 100KB+) into a string, then `json.loads` parses it. PyPI's `/pypi/agentkthx/json` returns the full package metadata including all releases.
+
+Recommendation: Use `json.load(resp)` to stream-parse, or only fetch the `info.version` field via a more targeted API (e.g., `https://pypi.org/pypi/agentkthx/json` → just read the first 4KB which contains `info.version`).
+
+**Impact:** 100KB+ memory spike per CLI invocation — minor but wasteful for a version check.
+
+**Detail:** Closed with a bounded read: `_MAX_UPDATE_JSON_BYTES = 262144` (256KB) and `json.loads(resp.read(cap))` parsed directly from bytes. The audit's first suggestion ("use `json.load(resp)` to stream-parse") was illusory — `json.load` calls `fp.read()` internally, so nothing streams. The second ("read the first 4KB which contains `info.version`") was wrong on PyPI's key order: `info.description` — the full README, 44,291 chars live-measured — precedes `info.version` alphabetically, so the version is NOT in the first 4KB. Live measurement 2026-09-29: the document is 94,189 bytes; the cap is ~2.7× headroom, so well-formed bodies parse byte-identically to the old read-all+decode path; an over-cap/truncated body raises `JSONDecodeError`, which `check_for_update` already swallows per-source (the check is best-effort and retried on the next invocation); and the unbounded bytes+str pair is gone — one transient bounded buffer. `test_update_check`'s `_FakeResponse.read` was widened to urllib's real `read(amt)` contract that the bounded read exposes. +4 tests in `tests/test_r07_14_perf_quick_wins.py`.
+
+---
+
+---
+
+---
+
+---
+
 ### New Features
 
 #### FEAT-01: Structured tool-output wrapping to mitigate prompt injection
@@ -1022,3 +1130,5 @@ All 5 OPEN Architecture findings closed in a single pass. Suite: 1849 → 1882 p
 > **R07.12 delta (audit closure release):** The first release dedicated to closing the register. **5 CLOSED** (SEC-11, SEC-17, ROB-23, ROB-24, ROB-27) + **2 WONTFIX** (SEC-18, SEC-19 — owner decision: trusted first-party providers; the response channel strictly dominates the error channel, backend error prose terminates at the human terminal and never re-enters model context, and the one machine-parsed error path was SEC-14, closed R07.08). The SEC-11 cluster fix (prescribed as one coordinated change by the R07.08 priorities): bounded DNS resolution — `getaddrinfo` now runs on a daemon thread with a 5s wall-clock budget and a 32-record cap (`_resolve_hostname_bounded` / `_iter_hostname_ips`, fail-CLOSED sentinel on timeout), plus an explicit 5-hop redirect budget in `_SSRFSafeRedirectHandler`. ROB-23: OrcaRouter free detection now honors the live upstream `-free` suffix convention (all 4 documented free models follow it) — new free models surface under FREE_ONLY without code updates; the static whitelist stays as the outage-fallback floor. ROB-24: ZAI `get_model_info` unknown-model placeholders are now honest — `catalog_status: "unknown"` marker, AGENTKTHX_DEBUG warning, and a stdlib-difflib "did you mean" typo hint. Suite 1751 → 1774 (+23 tests in `tests/test_r07_12_closure_batch.py`, zero regressions). Register 104 findings: 55 OPEN / 42 CLOSED / 7 WONTFIX (49 archived, 47%).
 
 > **R07.12 delta (intra-release quick-wins batch):** Six findings closed without a version bump — the "quick, non-breaking" batch. **ROB-12**: `agent._on_step_callback` is cleared in the `finally` of BOTH `cmd_chat` and `cmd_agent` (the same stale-closure pattern existed in both; cmd_agent found during the fix); the cmd_agent footer test now asserts the full lifecycle — registered during the loop, `None` after exit. **ROB-19**: `Agent.register_tool` reads `self.debug` directly — the `getattr(..., False)` default was dead defensiveness (the constructor assigns the flag long before register_tool is reachable) that converted a loud init-order `AttributeError` into silently wrong debug routing. **PERF-05**: `ToolParser.parse` dedupes cross-strategy echoes by `(tool_name, canonical-args)` — the audit's "run all three but dedupe" option; distinct calls survive in first-seen order, single-format texts parse byte-identically. **MAINT-21**: the Mistral error-envelope heuristic clause is dropped — classification keys on the documented `{"object": "error"}` marker; notice-shaped bodies (top-level `message`, no `choices`) hit the honest "no choices" branch instead of surfacing provider prose. **TEST-02**: `test_percent2e` rewritten from a no-op (`assert not is_valid or True`) into a deterministic encoded-dots-are-inert assertion (equality with a literal control path + POSIX-deterministic `/tmp` branch). **MAINT-18**: verification-only closure — the `apply_model_switch` return dict IS consumed by `cmd_chat` for delta-printing (source-scan pin; row-only archive section authored here). **11 new tests in `tests/test_r07_12_quick_wins.py`**, zero regressions. Suite 1838 → 1849. Register 104 findings: 49 OPEN / 48 CLOSED / 7 WONTFIX (55 archived, 53%).
+
+> **R07.14 delta (performance quick-wins release):** Four performance findings closed — the PERF batch (PERF-01, PERF-02, PERF-04, PERF-06). **PERF-01**: `Memory.get_messages()` re-runs the O(n × tool_calls) `sanitize_history` repair only after a mutation (`_sanitize_dirty` flag; invalidation funnels through `add`/`clear`/`compact_messages`/`PersistentMemory.load`) instead of on every call — the repair ran once per agentic step before, now once per mutation with identical R06.52 pairing guarantees. **PERF-02**: the compaction heuristic's size estimate is cached on `Memory` (`estimated_chars()`, same invalidation funnel) and all three `CompactionMixin` consumers route through one `_estimate_memory_chars()` helper — 3 full history scans with per-message `json.dumps` per step became cache hits (zero `json.dumps` on a warm cache, pinned by test); estimate formula unchanged so thresholds behave identically; duck-typed foreign memories keep the fallback scan via a mock-safe `isinstance(memory, Memory)` predicate. **PERF-04**: `PluginManager.discover(force=True)` tracks `plugin.json` mtimes and re-parses only changed manifests, reusing unchanged ones by identity; removed plugins drop from results and cache. **PERF-06**: `update_check._fetch_json` reads the PyPI response through a 256KB cap parsed directly from bytes — the audit's `json.load(resp)` "streaming" suggestion was illusory (`json.load` calls `fp.read()` internally) and the "first 4KB has info.version" suggestion was wrong (the README precedes `version` in PyPI's alphabetical key order; live doc = 94,189 bytes on 2026-09-29); cap ≈ 2.7× headroom, over-cap bodies fail the per-source check silently as designed. **PERF-03 stays OPEN with a corrected recommendation** — its original "use DuckDuckGo's JSON API" suggestion was invalid per user confirmation: `api.duckduckgo.com` is the Instant Answer API (topic snapshots, no web-search results, no JSON output); lite/html.duckduckgo.com are HTML-only, so HTML parsing remains the only stdlib-only path. **18 new tests in `tests/test_r07_14_perf_quick_wins.py`**, zero regressions. Suite 1882 → **1900 passed, 16 skipped, 0 failures**. Register 104 findings: **40 OPEN / 57 CLOSED / 7 WONTFIX (64 archived, 62%)**.

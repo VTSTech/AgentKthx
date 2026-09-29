@@ -1,15 +1,15 @@
 # Improvement & Enhancement Audit
 
-**AgentKthx v0.7.12 (R07.12 — audit closure release)**
+**AgentKthx v0.7.14 (R07.14 — performance quick-wins batch)**
 
 **Repository:** https://github.com/VTSTech/AgentKthx  
-**Author:** VTSTech | **License:** MIT | **Date:** 2026-09-28  
-**Commit:** e1f2081 | **Test Suite:** 1882 passed / 16 skipped  
-44 Open Findings | 7 Categories | SEC, ROB, MAINT, PERF, FEAT, ARCH, TEST  
-Severity: 0 High | 19 Medium | 25 Low  
-44 OPEN (CLOSED + WONTFIX archived in deltas.md — generate_audit_dash.py merges both for the dashboard)
+**Author:** VTSTech | **License:** MIT | **Date:** 2026-09-29  
+**Commit:** 4b69989 | **Test Suite:** 1900 passed / 16 skipped  
+40 Open Findings | 7 Categories | SEC, ROB, MAINT, PERF, FEAT, ARCH, TEST  
+Severity: 0 High | 17 Medium | 23 Low  
+40 OPEN (CLOSED + WONTFIX archived in deltas.md — generate_audit_dash.py merges both for the dashboard)
 
-> **Split:** 60 CLOSED/WONTFIX findings moved to `deltas.md`. `generate_audit_dash.py` reads both `audit.md` (open) and `deltas.md` (closed/wontfix) and merges them into the full register. The dashboard shows all 104 findings (44 open + 60 closed/wontfix).
+> **Split:** 64 CLOSED/WONTFIX findings moved to `deltas.md`. `generate_audit_dash.py` reads both `audit.md` (open) and `deltas.md` (closed/wontfix) and merges them into the full register. The dashboard shows all 104 findings (40 open + 64 closed/wontfix).
 
 ---
 
@@ -47,8 +47,6 @@ Cumulative closure state: **48 CLOSED + 7 WONTFIX of 104 findings (55 archived, 
 | MAINT-03 | Medium | Maintainability | OPEN | normalize_args strategy 5 (prefix/substring matching) is dangerously permissive — {"e": "..."} matches expression |
 | MAINT-08 | Medium | Maintainability | OPEN | _generate_stream is 354 lines with 5-level try/except/finally nesting and inline closures |
 | MAINT-10 | Medium | Maintainability | OPEN | _select_agent_with_llm builds router prompt via f-string with no escaping of agent descriptions or user task |
-| PERF-01 | Medium | Performance | OPEN | Memory.sanitize_history runs on every get_messages() call — O(n²) for long histories |
-| PERF-02 | Medium | Performance | OPEN | _check_compaction iterates all messages + JSON-serializes tool_calls on every step |
 | FEAT-02 | Medium | New Features | OPEN | Per-tool timeout parameter and concurrent tool execution |
 | FEAT-03 | Medium | New Features | OPEN | Tool output schema validation via JSON Schema |
 | TEST-01 | Medium | Testing | OPEN | No integration tests — all 984 tests are mocked unit tests; slash-command dispatcher untested |
@@ -64,9 +62,7 @@ Cumulative closure state: **48 CLOSED + 7 WONTFIX of 104 findings (55 archived, 
 | MAINT-07 | Low | Maintainability | OPEN | model_family_config.detect_family uses prefix matching with overlapping families — fragile for new Qwen variants |
 | MAINT-15 | Low | Maintainability | OPEN | _write_lock is per-instance, not per-DB-path — multi-instance scenarios still race |
 | MAINT-19 | Low | Maintainability | OPEN | list_models cache is per-instance — class-level cache would dedupe across instances |
-| PERF-03 | Low | Performance | OPEN | _iter_hostname_ips resolves every hostname synchronously on every is_safe_url call — no cache |
-| PERF-04 | Low | Performance | OPEN | _estimate_tokens recomputed for every message on every add() — cache on Message dataclass |
-| PERF-06 | Low | Performance | OPEN | _fetch_json reads entire PyPI response (~100KB) before JSON parsing |
+| PERF-03 | Low | Performance | OPEN | web_search uses regex to parse DuckDuckGo HTML — fragile, slow, falls back to second fetch on failure |
 | FEAT-05 | Low | New Features | OPEN | Plugin sandboxing via restricted register() namespace + audit hooks |
 | FEAT-06 | Low | New Features | OPEN | Streaming tool-call argument deltas (function_call_arguments.delta SSE events) |
 | FEAT-07 | Low | New Features | OPEN | Conversation export/import to OpenResponses-format JSON |
@@ -418,50 +414,6 @@ Recommendation: generalize the ROB-29 fix — lift a `CloudBackend` retry-loop p
 
 ### Performance
 
-#### PERF-01: `Memory.sanitize_history` runs on every `get_messages()` call — O(n²) for long histories
-
-| Property | Value |
-|----------|-------|
-| **Severity** | Medium |
-| **Category** | Performance |
-| **File(s)** | `agentkthx/core/memory.py:120-209` |
-
-`get_messages()` (line 120-138) calls `self.sanitize_history()` at the top. `sanitize_history` (line 140-209) does two passes: pass 1 drops orphan tool results (O(n) with a set), pass 2 fills dangling calls with placeholders (O(n × m) where m is the number of tool_calls per assistant message). For a 50-message history with 5 tool_calls each, that's 250 iterations per call. Called once per `generate()` — on a 25-step agentic loop with 50-message history, that's 12,500 iterations total per run.
-
-Recommendation: Cache the sanitized state and only re-run when `_messages` is mutated (track via a `_dirty` flag set in `add`/`add_tool_call`/`add_tool_result`/`clear`/`compact_messages`).
-
-**Impact:** Slows long agentic runs; measurable on multi-step agent loops.
-
----
-
----
-
----
-
----
-
-#### PERF-02: `_check_compaction` iterates all messages + JSON-serializes tool_calls on every step
-
-| Property | Value |
-|----------|-------|
-| **Severity** | Medium |
-| **Category** | Performance |
-| **File(s)** | `agentkthx/core/compaction.py:45-118` |
-
-`_check_compaction` (called at the top of each step via `callbacks.on_step_start`) iterates `for msg in self.memory: total_chars += len(content); tc = getattr(msg, 'tool_calls', None); if tc: total_chars += len(json.dumps(tc, ensure_ascii=False))`. Then `_snapshot_running_tokens` (called from `_check_compaction` and from `_update_running_tokens`) does the SAME iteration again. On a 50-message history with 5 tool_calls each, that's 100 `json.dumps` calls per step.
-
-Recommendation: Cache `total_chars` on the Memory object, invalidate on add/compact. Or use a cheaper estimate (`len(content) + 50 * len(tool_calls)`).
-
-**Impact:** Each step pays O(n × tool_calls) for token estimation — measurable on long-running chat sessions.
-
----
-
----
-
----
-
----
-
 #### PERF-03: `web_search` uses regex to parse DuckDuckGo HTML — fragile, slow, falls back to second fetch on failure
 
 | Property | Value |
@@ -472,53 +424,9 @@ Recommendation: Cache `total_chars` on the Memory object, invalidate on add/comp
 
 `web_search` (line 506-634) fetches `https://lite.duckduckgo.com/lite/?q=...` and parses the HTML with 4 regex patterns (`link_pattern`, `snippet_pattern`, `result_blocks`). The regex uses `re.DOTALL | re.IGNORECASE` and `findall`. If DuckDuckGo changes its HTML structure, the regex silently returns no results. The function also does a second fetch to `https://html.duckduckgo.com/html/?...` if the first returns nothing (line 590-613), doubling latency on failure.
 
-Recommendation: Use a JSON API (DuckDuckGo has `https://api.duckduckgo.com/?q=...&format=json`) or a proper HTML parser (`html.parser` from stdlib). Cache results (see PERF-07).
+Recommendation: Rewrite the parsing with stdlib `html.parser` (attribute-order/whitespace-resilient where 4 regexes are not) and keep the lite→html fallback ladder. CORRECTION (2026-09-29, user-confirmed): the original suggestion to "use a JSON API (DuckDuckGo has https://api.duckduckgo.com/?q=...&format=json)" is INVALID — that endpoint is the Instant Answer API (topic snapshots only, no web search results), and DuckDuckGo publishes no JSON output for web search at all; lite/html.duckduckgo.com are HTML-only. HTML parsing is the only stdlib-only option. Caching the results is PERF-07 (⊘ WONTFIX — intentional).
 
 **Impact:** Web search is slow (2 HTTP requests on failure) and fragile — HTML structure changes break it silently.
-
----
-
----
-
----
-
----
-
-#### PERF-04: `discover(force=True)` re-scans all plugin roots — no mtime check
-
-| Property | Value |
-|----------|-------|
-| **Severity** | Low |
-| **Category** | Performance |
-| **File(s)** | `agentkthx/plugins/_loader.py:576-637` |
-
-`discover(force=False)` returns the cached `_manifests` list. `discover(force=True)` re-scans all roots and re-parses every `plugin.json`. There's no mtime check — calling `discover(force=True)` after every plugin edit re-reads all manifests even if only one changed.
-
-Recommendation: Track mtime per `plugin.json` and only re-parse changed files. Maintain a `dict[path, mtime]` and compare on `discover(force=True)`.
-
-**Impact:** Slow plugin reload during development — minor but noticeable.
-
----
-
----
-
----
-
----
-
-#### PERF-06: `_fetch_json` reads entire PyPI response (~100KB) before JSON parsing
-
-| Property | Value |
-|----------|-------|
-| **Severity** | Low |
-| **Category** | Performance |
-| **File(s)** | `agentkthx/update_check.py:146-163` |
-
-`resp.read().decode("utf-8")` reads the full PyPI JSON (which can be 100KB+) into a string, then `json.loads` parses it. PyPI's `/pypi/agentkthx/json` returns the full package metadata including all releases.
-
-Recommendation: Use `json.load(resp)` to stream-parse, or only fetch the `info.version` field via a more targeted API (e.g., `https://pypi.org/pypi/agentkthx/json` → just read the first 4KB which contains `info.version`).
-
-**Impact:** 100KB+ memory spike per CLI invocation — minor but wasteful for a version check.
 
 ---
 
@@ -836,8 +744,8 @@ Recommendation: a live-gated contract test (skips without `POLLINATIONS_API_KEY`
 | Timeline | Findings |
 |----------|----------|
 | **Near term (R07.05–R07.06)** | ~~SEC-02~~ ✓R07.04, ~~SEC-10/FEAT-01~~ ✓R07.04, ~~MAINT-02~~ ✓R07.04, ~~SEC-07~~ ✓R07.05, ~~ROB-03~~ ✓R07.05, ~~ROB-04~~ ✓R07.05, ~~MAINT-04~~ ✓R07.05, ~~MAINT-05~~ ✓R07.05, ~~MAINT-06~~ ✓R07.05, ~~SEC-03~~ ✓R07.05 (ipaddress address-level checks + redirect re-validation), ~~SEC-04~~ ✓R07.05 (shells blocked + heredoc detection), SEC-09 (warn on non-HTTPS ACP), MAINT-01 (extract `ChatSession`), ~~ROB-05~~ ⊘WONTFIX (intentional per owner), TEST-01 (integration test tier) |
-| **Short term (R07.07–R07.10)** | ~~SEC-11/SEC-17/ROB-27~~ ✓R07.12 (bounded DNS + redirect budget), ~~ROB-23~~ ✓R07.12 (live -free convention), ~~ROB-24~~ ✓R07.12 (honest placeholder), ~~SEC-18/SEC-19~~ ⊘WONTFIX R07.12, SEC-01 (drop unsafe builtins from sandbox), ~~SEC-06~~ ✓R07.05 (sha256 pinning + perms advisory + trust-boundary docs), ROB-02 (join worker threads), ROB-09 (`realpath` for symlinks), ~~ROB-10~~ ✓R07.06 (permanent-body patterns + optional body arg), MAINT-03 (drop strategy 5 of `normalize_args`), MAINT-08 (extract `StreamAccumulator`), MAINT-10 (escape router prompt), PERF-01/PERF-02 (cache sanitized state), ARCH-01 (unify backend locations), ARCH-05 (replace `**kwargs` with dataclass), TEST-03 (add `FakeStreamingBackend`), TEST-06 (add lint job), ROB-31 (entitlement-aware fallback filter), MAINT-23 (lift retry-loop skeleton to CloudBackend — closes ROB-29 family) |
-| **Medium term (R08.00+)** | SEC-08 (chmod audit log), SEC-05 (strip ANSI), FEAT-02 (per-tool timeouts + concurrent execution), FEAT-03 (tool output schema), FEAT-04 (`--dry-run`), FEAT-05 (plugin sandbox), FEAT-06 (streaming args delta), FEAT-07 (conversation export), MAINT-07/MAINT-09 (consolidate regex patterns), ARCH-02 (extract `SSEEventBuilder`), ARCH-03 (integrate `AgentMode` with OpenResponses), TEST-04 (rollback tests), TEST-05 (rewrite bump-version test), TEST-07 (update_check failure paths), TEST-08 (sandbox adversarial tests), ~~SEC-19~~ ⊘WONTFIX R07.12 (owner decision — trusted providers, response channel dominates; with SEC-18), ROB-30 (narrow catalog catch-all), FEAT-08 (paid_only tier filter mode), TEST-10 (live-shape contract test) |
+| **Short term (R07.07–R07.10)** | ~~SEC-11/SEC-17/ROB-27~~ ✓R07.12 (bounded DNS + redirect budget), ~~ROB-23~~ ✓R07.12 (live -free convention), ~~ROB-24~~ ✓R07.12 (honest placeholder), ~~SEC-18/SEC-19~~ ⊘WONTFIX R07.12, SEC-01 (drop unsafe builtins from sandbox), ~~SEC-06~~ ✓R07.05 (sha256 pinning + perms advisory + trust-boundary docs), ROB-02 (join worker threads), ROB-09 (`realpath` for symlinks), ~~ROB-10~~ ✓R07.06 (permanent-body patterns + optional body arg), MAINT-03 (drop strategy 5 of `normalize_args`), MAINT-08 (extract `StreamAccumulator`), MAINT-10 (escape router prompt), ~~PERF-01/PERF-02~~ ✓R07.14 (cache sanitized state), ARCH-01 (unify backend locations), ~~ARCH-05~~ ✓R07.13 (kwargs promoted to named params), TEST-03 (add `FakeStreamingBackend`), TEST-06 (add lint job), ROB-31 (entitlement-aware fallback filter), MAINT-23 (lift retry-loop skeleton to CloudBackend — closes ROB-29 family) |
+| **Medium term (R08.00+)** | SEC-08 (chmod audit log), SEC-05 (strip ANSI), FEAT-02 (per-tool timeouts + concurrent execution), FEAT-03 (tool output schema), FEAT-04 (`--dry-run`), FEAT-05 (plugin sandbox), FEAT-06 (streaming args delta), FEAT-07 (conversation export), MAINT-07/MAINT-09 (consolidate regex patterns), ~~ARCH-02~~ ✓R07.13 (SSEEventBuilder extracted), ~~ARCH-03~~ ✓R07.13 (AgentMode event integration), TEST-04 (rollback tests), TEST-05 (rewrite bump-version test), TEST-07 (update_check failure paths), TEST-08 (sandbox adversarial tests), ~~SEC-19~~ ⊘WONTFIX R07.12 (owner decision — trusted providers, response channel dominates; with SEC-18), ROB-30 (narrow catalog catch-all), FEAT-08 (paid_only tier filter mode), TEST-10 (live-shape contract test) |
 
 Guidelines for timeline assignment:
 - **Near term** — High severity findings and the most impactful Medium severity findings; should be fixed in the next 1-2 releases

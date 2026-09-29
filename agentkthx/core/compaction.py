@@ -32,6 +32,33 @@ Host contract (attributes the mixin expects on ``self``):
 
 import json
 
+from .memory import Memory
+
+
+def _estimate_memory_chars(memory) -> int:
+    """Total char estimate for the compaction heuristic (PERF-02, R07.14).
+
+    For the ``Memory`` class (and subclasses such as ``PersistentMemory``)
+    this delegates to ``Memory.estimated_chars()`` — a cache invalidated on
+    every memory mutation and recomputed lazily — so the agentic loop stops
+    re-scanning the full history (plus a ``json.dumps`` per assistant
+    message with tool_calls) three times per step. The predicate is an
+    ``isinstance`` check on purpose: the cache is a Memory-class feature,
+    and anything else (duck-typed stand-ins, test doubles) must take the
+    historical fallback scan so the documented host contract — iterable of
+    objects with ``.content`` and optional ``.tool_calls`` — keeps working
+    unchanged.
+    """
+    if isinstance(memory, Memory):
+        return memory.estimated_chars()
+    total = 0
+    for msg in memory:
+        total += len(getattr(msg, 'content', '') or '')
+        tc = getattr(msg, 'tool_calls', None)
+        if tc:
+            total += len(json.dumps(tc, ensure_ascii=False))
+    return total
+
 
 class CompactionMixin:
     """Mixin providing compaction + running-token tracking for Agent.
@@ -61,15 +88,10 @@ class CompactionMixin:
         if getattr(self, "_compaction_threshold", 0.85) >= 1.0:
             return 0  # compaction disabled
 
-        # Estimate total tokens: ~4 chars per token (rough heuristic)
-        total_chars = 0
-        for msg in self.memory:
-            content = getattr(msg, 'content', '') or ''
-            total_chars += len(content)
-            # Also count tool_calls (small but present)
-            tc = getattr(msg, 'tool_calls', None)
-            if tc:
-                total_chars += len(json.dumps(tc, ensure_ascii=False))
+        # Estimate total tokens: ~4 chars per token (rough heuristic).
+        # PERF-02 (R07.14): routed through the memory-side cache —
+        # no full scan + json.dumps storm on this every-step path.
+        total_chars = _estimate_memory_chars(self.memory)
         estimated_tokens = total_chars // 4
 
         # Get context limit
@@ -92,13 +114,9 @@ class CompactionMixin:
 
         if compacted > 0:
             # Recount post-compaction size for an accurate log line.
-            post_chars = 0
-            for msg in self.memory:
-                c = getattr(msg, 'content', '') or ''
-                post_chars += len(c)
-                tc = getattr(msg, 'tool_calls', None)
-                if tc:
-                    post_chars += len(json.dumps(tc, ensure_ascii=False))
+            # compact_messages() invalidated the cache, so this recomputes
+            # from the truncated state.
+            post_chars = _estimate_memory_chars(self.memory)
             post_tokens = post_chars // 4
             print(f"  [Compaction] {compacted} messages compacted "
                   f"(~{estimated_tokens // 1000}K → "
@@ -131,13 +149,7 @@ class CompactionMixin:
         conversation history). The just-generated output is small
         compared to the accumulated input.
         """
-        total_chars = 0
-        for msg in self.memory:
-            content = getattr(msg, 'content', '') or ''
-            total_chars += len(content)
-            tc = getattr(msg, 'tool_calls', None)
-            if tc:
-                total_chars += len(json.dumps(tc, ensure_ascii=False))
+        total_chars = _estimate_memory_chars(self.memory)
         total_tokens = total_chars // 4
         self._running_tokens_in = int(total_tokens * 0.9)
         self._running_tokens_out = int(total_tokens * 0.1)
@@ -171,13 +183,11 @@ class CompactionMixin:
                 for the output-half estimate).
             tokens: Provider-reported usage (prompt+completion), if any.
         """
-        _est_in_chars = 0
-        for msg in self.memory:
-            c = getattr(msg, 'content', '') or ''
-            _est_in_chars += len(c)
-            tc = getattr(msg, 'tool_calls', None)
-            if tc:
-                _est_in_chars += len(json.dumps(tc, ensure_ascii=False))
+        # PERF-02 (R07.14): input half via the memory-side cache.
+        # This call runs right after the step's messages were added, so it
+        # is the one that recomputes — the next step's _check_compaction
+        # and _snapshot_running_tokens then hit the warm cache.
+        _est_in_chars = _estimate_memory_chars(self.memory)
         _est_out_chars = len(content) + sum(
             len(json.dumps(tc, ensure_ascii=False))
             for tc in native_tool_calls

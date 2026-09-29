@@ -143,6 +143,19 @@ def _opted_out() -> bool:
     )
 
 
+# PERF-06 (R07.14): cap the response read for the update check.
+# PyPI's /pypi/<pkg>/json embeds the full README (info.description) plus all
+# release metadata — ~100-150KB for agentkthx — and the historical
+# ``resp.read().decode("utf-8")`` held bytes + str simultaneously with no
+# upper bound. 256KB is ~2x today's document, so well-formed bodies parse
+# byte-identically; a larger-or-truncated body raises JSONDecodeError, which
+# ``check_for_update`` already treats as a silent per-source failure (the
+# check is best-effort and retried on the next invocation). Note the audit's
+# "use json.load(resp) to stream-parse" suggestion was illusory — json.load
+# calls fp.read() internally — so the bounded read IS the memory fix.
+_MAX_UPDATE_JSON_BYTES = 262144
+
+
 def _fetch_json(url: str, timeout: float) -> dict:
     """GET a JSON document; raises on any network/parse problem."""
     req = urllib.request.Request(
@@ -154,7 +167,10 @@ def _fetch_json(url: str, timeout: float) -> dict:
     )
     resp = _urlopen(req, timeout=timeout)
     try:
-        return json.loads(resp.read().decode("utf-8"))
+        # PERF-06: bounded read, parsed directly from bytes (json detects
+        # the RFC 8259 encoding itself) — one transient buffer, hard cap,
+        # no full-document str copy on top of it.
+        return json.loads(resp.read(_MAX_UPDATE_JSON_BYTES))
     finally:
         try:
             resp.close()

@@ -7,6 +7,8 @@ Written by VTSTech — https://www.vts-tech.org
 
 from __future__ import annotations
 
+import json
+
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -123,6 +125,29 @@ class Memory:
         self.config = config or MemoryConfig()
         self._messages: list[Message] = []
         self._system_prompt: str | None = None
+        # PERF-01 (R07.14): sanitize_history is idempotent, so its
+        # result only needs recomputing after a mutation. Every mutating
+        # path (add/clear/compact_messages/sanitize/load) funnels through
+        # ``_invalidate_caches()``; get_messages() skips the two-pass
+        # repair while the state is clean.
+        self._sanitize_dirty: bool = True
+        # PERF-02 (R07.14): cached size estimate for the compaction
+        # heuristic (len(content) + len(json.dumps(tool_calls)) per
+        # message). ``None`` means stale; recomputed lazily by
+        # ``estimated_chars()`` and invalidated by ``_invalidate_caches()``.
+        self._chars_cache: int | None = None
+
+    def _invalidate_caches(self) -> None:
+        """Mark the sanitize + size caches stale (PERF-01/PERF-02, R07.14).
+
+        Called by every mutating path: ``add`` (the sole entry point for
+        append-style changes, covering ``add_tool_call``/``add_tool_result``),
+        ``clear``, ``compact_messages`` (which ALSO truncates ``msg.content``
+        in place — a structural-only check would miss that), and
+        ``PersistentMemory.load`` (rebuilds ``_messages`` from the DB).
+        """
+        self._sanitize_dirty = True
+        self._chars_cache = None
 
     def add(self, role: str, content: str, **kwargs) -> None:
         """Add a message to memory."""
@@ -135,6 +160,7 @@ class Memory:
             self._messages = [m for m in self._messages if m.role != "system"]
 
         self._messages.append(msg)
+        self._invalidate_caches()
         self._prune_if_needed()
 
     def add_tool_call(self, role: str, content: str, tool_calls: list[dict]) -> None:
@@ -145,13 +171,42 @@ class Memory:
         """Add a tool result message."""
         self.add("tool", content, tool_call_id=tool_call_id, name=name)
 
+    def estimated_chars(self) -> int:
+        """Cached size estimate for the compaction heuristic (PERF-02).
+
+        Sums ``len(content)`` plus ``len(json.dumps(tool_calls))`` over all
+        messages — the exact quantity ``CompactionMixin``'s threshold
+        check and running-token snapshot previously recomputed with a full
+        scan + per-message ``json.dumps`` on EVERY agentic step (three
+        scans per step across ``_check_compaction``,
+        ``_snapshot_running_tokens`` and ``_update_running_tokens``).
+
+        The cache is invalidated by ``_invalidate_caches()`` on every
+        mutation and recomputed lazily here, so the estimate is computed
+        once per mutation instead of once per consumer per step.
+        """
+        if self._chars_cache is None:
+            total = 0
+            for m in self._messages:
+                total += len(m.content or "")
+                tc = getattr(m, "tool_calls", None)
+                if tc:
+                    total += len(json.dumps(tc, ensure_ascii=False))
+            self._chars_cache = total
+        return self._chars_cache
+
     def get_messages(self) -> list[dict]:
         """Get all messages as dictionaries."""
         # R06.52: repair tool-call pairing before handing history to the
         # backend. Orphan tool results and dangling tool calls both produce
         # illegal ChatCompletions sequences (HTTP 400 on OpenRouter,
         # code 1214 on ZAI). Sanitizing is idempotent.
-        self.sanitize_history()
+        # PERF-01 (R07.14): the two-pass repair is O(n × tool_calls);
+        # on a 25-step agentic loop that used to re-run on every step even
+        # when nothing had changed. The state produced here is already
+        # sanitized, so only re-run after a mutation flipped the flag.
+        if self._sanitize_dirty:
+            self.sanitize_history()
         result = []
 
         # Add system prompt first if present
@@ -235,6 +290,11 @@ class Memory:
             i = j
 
         self._messages = final
+        # The state is now repaired: mark it clean (PERF-01) and drop the
+        # size cache — dropped orphans / inserted placeholders change the
+        # total (PERF-02).
+        self._sanitize_dirty = False
+        self._chars_cache = None
 
     def clear(self) -> None:
         """Clear all messages (except system prompt if configured)."""
@@ -243,6 +303,7 @@ class Memory:
         else:
             self._messages = []
             self._system_prompt = None
+        self._invalidate_caches()
 
     def _prune_if_needed(self) -> None:
         """
@@ -391,6 +452,11 @@ class Memory:
                         + msg.content[-tail:]
                     )
                     compacted_count += 1
+
+        # The per-message cap truncates ``msg.content`` IN PLACE, so the
+        # caches must drop regardless of which branch returns (PERF-02 —
+        # a structural-only invalidation would miss the shrinkage).
+        self._invalidate_caches()
 
         if len(non_system) <= keep_count:
             # Even if nothing was compacted by position, the per-message
