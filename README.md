@@ -46,7 +46,7 @@ Inspired by the architecture of OpenClaw, rebuilt from scratch for local-first o
 - **Zero dependencies** — Uses Python stdlib only (urllib for HTTP)
 - **Plugin system** — Manifest-based plugin discovery, lazy loading, and dependency resolution (R05.0)
 - **Plugin Spec v0.2 (R06.5)** — Lifecycle hooks (`on_init`/`on_run_start`/`on_run_end`/`on_error`/`on_shutdown`), plugin-provided tools, external plugin roots (`~/.agentkthx/plugins/`, `$AGENTKTHX_PLUGIN_PATH`), dual-form manifests (`extensions` block) with deprecation warnings for legacy fields, optional `sha256` content pinning (R07.05 SEC-06), `plugins --load/--unload/--reload/--json/--verbose` management
-- **Native + plugin backends** — Ollama built-in; OpenRouter, BitNet, ZAI, ACP, TurboQuant, Gemini, OrcaRouter, Mistral as plugins
+- **Native + plugin backends** — Ollama + llama-server built-in; OpenRouter, BitNet, ZAI, ACP, TurboQuant, Gemini, OrcaRouter, Mistral, HuggingFace, OpenAI, Pollinations as plugins
 - **Multi-cloud support** — Access to 500+ models from OpenRouter, OpenAI, Anthropic, Google (Gemini + Gemma), Cohere, plus 11 upstream providers via OrcaRouter's zero-markup gateway
 - **CloudBackend base class** (R07.05 MAINT-02) — shared cloud-backend boilerplate consolidated; new cloud backends are ~100 LOC instead of ~1500 LOC
 - **Dual API support** — OpenResponses (`--api openre`) and OpenAI Chat-Completions (`--api openai`)
@@ -72,8 +72,8 @@ Inspired by the architecture of OpenClaw, rebuilt from scratch for local-first o
 - **Persistent status footer** — 2-line terminal footer with live model/backend/token info (R05.4, scroll-region based)
 - **OpenRouter 429 retry** — Automatic retry with `Retry-After` header support for rate-limited providers (R05.4)
 - **OrcaRouter Retry-After cap** (R07.07 ROB-16) — `Retry-After` honored up to 60s; longer waits capped (prevents malicious `Retry-After: 3600` from hanging the agent for an hour)
-- **Tool-call visibility** — Tool calls and results displayed in chat mode (R05.4)
-- **Audit-tracked development** — every release since R07.04 documents findings in `audit/audit.md` with stable IDs (SEC-XX, ROB-XX, MAINT-XX, PERF-XX, FEAT-XX, ARCH-XX, TEST-XX) and closure deltas. 37 of 88 findings closed across R07.00 → R07.07 (42%). Run `/skill codebase-audit` to regenerate the brief against the current codebase.
+- **Tool-call visibility** — Tool calls and results displayed in chat mode (R05.4); per-response stats (`⏱️ N steps, M tool calls, Xms` + tools used) in both chat and agent modes (R07.15)
+- **Audit-tracked development** — every release since R07.04 documents findings in `audit/audit.md` with stable IDs (SEC-XX, ROB-XX, MAINT-XX, PERF-XX, FEAT-XX, ARCH-XX, TEST-XX) and closure deltas. 68 CLOSED + 7 WONTFIX of 105 findings archived across R07.00 → R07.15 (71%). Run `/skill codebase-audit` to regenerate the brief against the current codebase.
 
 ## Installation
 
@@ -436,7 +436,7 @@ See [docs/api/GEMINI_API_TECHNICAL_REFERENCE.md](docs/api/GEMINI_API_TECHNICAL_R
 
 ### Hugging Face Configuration
 
-Hugging Face Inference Router backend (`https://router.huggingface.co/v1`) — proxies 100+ open-weight models (Llama, Qwen, DeepSeek, Mistral, Gemma, GLM, Phi, Command-R, gpt-oss) served by ~18 partner providers (Together, Groq, Novita, DeepInfra, Fireworks, Cerebras, Replicate, Fal AI, Featherless, Baseten, Cohere, Nscale, OVHcloud, Public AI, Scaleway, WaveSpeedAI, Z.ai, HF Inference) through a single OpenAI-compatible `/chat/completions` endpoint. Unlike OpenRouter, HF doesn't use a `:free` model-id suffix — free-tier status is determined by account credit + provider routing, so `HF_FREE_ONLY` enforces a curated 31-model whitelist.
+Hugging Face Inference Router backend (`https://router.huggingface.co/v1`) — proxies 100+ open-weight models (Llama, Qwen, DeepSeek, Mistral, Gemma, GLM, Phi, Command-R, gpt-oss) served by ~18 partner providers (Together, Groq, Novita, DeepInfra, Fireworks, Cerebras, Replicate, Fal AI, Featherless, Baseten, Cohere, Nscale, OVHcloud, Public AI, Scaleway, WaveSpeedAI, Z.ai, HF Inference) through a single OpenAI-compatible `/chat/completions` endpoint. Unlike OpenRouter, HF doesn't use a `:free` model-id suffix — free-tier status is determined by account credit + provider routing, so `HF_FREE_ONLY` enforces a curated free-tier whitelist (3 models verified actually free via partner providers).
 
 #### Environment Variables
 
@@ -444,7 +444,7 @@ Hugging Face Inference Router backend (`https://router.huggingface.co/v1`) — p
 export HF_TOKEN="hf_your_fine_grained_token"     # Required (or HUGGING_FACE_HUB_TOKEN)
 export HF_BASE_URL="https://router.huggingface.co/v1"  # Optional (default — Inference Router)
 export HF_DEFAULT_MODEL="openai/gpt-oss-120b"    # Optional
-export HF_FREE_ONLY="1"                           # Optional (strict 31-model whitelist)
+export HF_FREE_ONLY="1"                           # Optional (strict free-tier whitelist, 3 models)
 export HF_FREE_FALLBACK_MODEL="Qwen/Qwen2.5-7B-Instruct-1M"  # Optional (swap on HTTP 402)
 export HF_PROVIDER_POLICY="cheapest"              # Optional: "" | fastest | cheapest | preferred | <partner-name>
 ```
@@ -483,10 +483,10 @@ agentkthx chat --backend hf -m Qwen/Qwen3-4B-Thinking-2507 --stream --think
 # DeepSeek-R1 for hard reasoning tasks
 agentkthx chat --backend hf -m deepseek-ai/DeepSeek-R1 --stream --think
 
-# List available models (live /v1/models + 31-model static catalog fallback)
+# List available models (live /v1/models + 19-model static catalog fallback)
 agentkthx models --backend hf
 
-# Free-tier whitelist only (31 models, auto-appends :cheapest suffix)
+# Free-tier whitelist only (3 models, auto-appends :cheapest suffix)
 HF_FREE_ONLY=1 agentkthx models --backend hf
 
 # Pin to a specific partner provider
@@ -655,7 +655,7 @@ In chat mode, toggle at runtime:
 
 **Warning**: `--security off` disables ALL safety checks. Only use when you trust the model and need unrestricted access (e.g., local dev with a fine-tuned model that legitimately uses `&&`, `|`, etc.).
 
-See `audit/audit.md` for the full security audit trail (88 findings tracked across SEC/ROB/MAINT/PERF/FEAT/ARCH/TEST categories, 29 closed across R07.04 → R07.07).
+See `audit/audit.md` for the full security audit trail (105 findings tracked across SEC/ROB/MAINT/PERF/FEAT/ARCH/TEST categories — 68 CLOSED + 7 WONTFIX archived across R07.00 → R07.15, 30 OPEN).
 
 ## Configuration
 
@@ -690,7 +690,7 @@ HF_TOKEN=hf_...                                 # Required (or HUGGING_FACE_HUB_
 HF_BASE_URL=https://router.huggingface.co/v1     # Optional (default — Inference Router)
 HF_BASE_URL_LEGACY=https://api-inference.huggingface.co  # Legacy Serverless TGI surface (not used by v0.1)
 HF_DEFAULT_MODEL=openai/gpt-oss-120b             # Optional
-HF_FREE_ONLY=true                               # Strict free-tier whitelist (31 models)
+HF_FREE_ONLY=true                               # Strict free-tier whitelist (3 models)
 HF_FREE_FALLBACK_MODEL=Qwen/Qwen2.5-7B-Instruct-1M  # Swap on HTTP 402 when HF_FREE_ONLY=false
 HF_PROVIDER_POLICY=cheapest                     # Optional: "" | fastest | cheapest | preferred | <partner-name>
                                                 # When HF_FREE_ONLY=true, policy is forced to :cheapest
@@ -842,12 +842,12 @@ All tested models achieve 100% on the Quick Diagnostic. Native models are ~2x fa
 # Install dev dependencies
 pip install -e ".[dev]"
 
-# Run unit tests (1506 passed / 9 skipped in ~25s)
+# Run unit tests (2051 passed / 16 skipped in ~15s)
 pytest
 
-# Format code
-black agentkthx
-ruff check agentkthx
+# Format code (CI gates on ruff + black over agentkthx/ and tests/)
+black agentkthx tests
+ruff check agentkthx tests
 ```
 
 ### Audit Trail
@@ -858,7 +858,7 @@ AgentKthx is developed with an audit-tracked discipline: every release since R07
 - `audit/audit.md` — detailed findings report with severity, recommendations, and closure status per release
 - The `codebase-audit` skill ships with the repo at `agentkthx/skills/codebase-audit/` — invoke via `/skill codebase-audit` in chat mode to regenerate the brief against the current codebase.
 
-**Cumulative closure state: 37 of 88 findings (42%)** across R07.00 → R07.07, +361 tests since R07.04.
+**Cumulative closure state: 68 CLOSED + 7 WONTFIX of 105 findings (75 archived, 71%)** across R07.00 → R07.15; test suite at 2051 passed / 16 skipped.
 
 ## License
 

@@ -2,9 +2,9 @@
 
 AgentKthx is a modular agent framework designed for local LLMs with tool-calling capabilities. It implements the OpenResponses specification for multi-provider, interoperable LLM interfaces.
 
-**Specification Compliance**: 100% (R03.5+) -- R04.x, R05.x, R06.0–R07.02
+**Specification Compliance**: 100% (R03.5+) -- R04.x, R05.x, R06.0–R07.15
 
-**Version**: R07.02
+**Version**: R07.15 (0.7.15)
 - OpenResponses API: 100%
 - Chat Completions API: 100%
 - Soul Spec v0.5: 100%
@@ -15,19 +15,21 @@ AgentKthx is a modular agent framework designed for local LLMs with tool-calling
 ```
 agentkthx/
 ├── core/
-│   ├── types.py              # Enum types (StepResultType, BackendType.{OLLAMA, LLAMA_SERVER, BITNET, ZAI, OPENROUTER, GEMINI, HUGGINGFACE}, ApiMode.OPENRE/OPENAI, ToolSupportLevel)
+│   ├── types.py              # Enum types (StepResultType, BackendType.{OLLAMA, LLAMA_SERVER, BITNET, ZAI, OPENROUTER, GEMINI, HUGGINGFACE, OPENAI, ORCAROUTER, MISTRAL, POLLINATIONS}, ApiMode.OPENRE/OPENAI/JEV, ToolSupportLevel)
 │   ├── models.py             # Data models (Tool, ToolParam, StepResult, AgentRun)
 │   ├── memory.py             # Sliding window conversation memory
 │   ├── persistent_memory.py  # SQLite-backed PersistentMemory(Memory) subclass (R04.3)
 │   ├── tool_parse.py         # ReAct/JSON tool call extraction (see Tool Parser section)
 │   ├── tool_cache.py         # Persistent tool support detection cache (R03.6)
-│   ├── helpers.py            # Utilities (fuzzy match, argument normalization, security)
-│   ├── model_config.py       # Model configuration (temperature, max tokens)
-│   ├── model_family_config.py # Family-specific behavior (stop tokens, formats)
+│   ├── helpers.py            # Utilities (fuzzy match, security) plus the argument
+│   │                         # normalizer: normalize_args, fix_calculator_args,
+│   │                         # synthesize_missing_args (was core/args_normal.py)
+│   ├── model_family_config.py # Family-specific behavior (start/stop tokens, temperatures,
+│   │                         # max tokens, tool formats; FAMILY_CONFIGS)
 │   ├── prompts.py            # Tool argument aliases (TOOL_ARG_ALIASES), platform constants,
 │   │                         # few-shot prompting suffixes, system prompt builders
-│   ├── args_normal.py        # Full argument normalizer, calculator argument fixer,
-│   │                         # missing argument synthesizer
+│   ├── api_resilience.py     # Bounded DNS resolution + redirect budget (R07.05 SEC-11)
+│   ├── safe_eval.py          # Sandboxed expression evaluation (R07.08 SEC-01)
 │   ├── error_recovery.py     # ErrorRecoveryTracker, build_enhanced_observation(),
 │   │                         # build_retry_context(), is_error_result()
 │   ├── openresponses.py      # OpenResponses specification types
@@ -85,7 +87,7 @@ agentkthx/
 │   │   └── bitnet.py          # BitNetBackend: LlamaServerBackend with bitnet_mode=True
 │   ├── zai/                  # ZAI cloud API plugin
 │   │   ├── plugin.json       # Manifest (type: backend, provides: zai)
-│   │   └── zai.py             # ZaiBackend: GLM models via ZAI API, 13-model catalog
+│   │   └── zai.py             # ZaiBackend: GLM models via ZAI API, 17-model catalog
 │   ├── gemini/               # Google Gemini cloud API plugin (R06.56)
 │   │   ├── plugin.json       # Manifest (type: backend, provides: gemini)
 │   │   ├── __init__.py       # register()/unregister() entrypoints
@@ -95,10 +97,28 @@ agentkthx/
 │   ├── huggingface/          # Hugging Face Inference Router plugin (R07.02)
 │   │   ├── plugin.json       # Manifest (type: backend, provides: huggingface + hf alias)
 │   │   ├── __init__.py       # register()/unregister() with alias_of="huggingface"
-│   │   └── huggingface.py    # HuggingFaceBackend: 154-model live catalog, per-provider
-│   │                         # is_free auto-detection, whoami-v2 free-tier probe,
+│   │   └── huggingface.py    # HuggingFaceBackend: live /v1/models catalog + 19-model
+│   │                         # static fallback, per-provider is_free auto-detection,
+│   │                         # whoami-v2 free-tier probe,
 │   │                         # :cheapest routing suffix support, HTTP 402 credit-
 │   │                         # exhaustion fallback to HF_FREE_FALLBACK_MODEL
+│   ├── openrouter/           # OpenRouter cloud API plugin
+│   │   ├── plugin.json       # Manifest (type: backend, provides: openrouter)
+│   │   └── openrouter.py     # OpenRouterBackend: 500+ models, openrouter/free router
+│   │                         # entry injection, 429 Retry-After retry
+│   ├── openai/               # OpenAI platform API plugin (R07.03)
+│   │   ├── plugin.json       # Manifest (type: backend, provides: openai + oai alias)
+│   │   └── openai.py         # OpenAIBackend: GPT + o-series, reasoning-effort ladder
+│   ├── orcarouter/           # OrcaRouter zero-markup gateway plugin (R07.05)
+│   │   ├── plugin.json       # Manifest (type: backend, provides: orcarouter + orca alias)
+│   │   └── orcarouter.py     # OrcaRouterBackend: 11 upstream providers, fallback models,
+│   │                         # SSE exhaustion raise (ROB-22)
+│   ├── mistral/              # Mistral La Plateforme plugin (R07.09)
+│   │   ├── plugin.json       # Manifest (type: backend, provides: mistral + mst alias)
+│   │   └── mistral.py        # MistralBackend: paid tiers + free Labs models
+│   ├── pollinations/         # Pollinations free-tier plugin
+│   │   ├── plugin.json       # Manifest (type: backend, provides: pollinations + poll alias)
+│   │   └── pollinations.py   # PollinationsBackend: free-tier chat models
 │   ├── turboquant/           # TurboQuant server management plugin
 │   │   ├── plugin.json       # Manifest (type: feature, provides: turbo CLI command)
 │   │   └── turbo.py           # Server lifecycle, Ollama model registry, GGUF parsing
@@ -113,6 +133,9 @@ agentkthx/
 │   │                         # - SPDX license validation
 │   │                         # - Compatibility parsing
 │   │                         # - Environment compatibility checks
+│   ├── codebase-audit/       # /skill codebase-audit — regenerates audit/brief.md
+│   ├── crypto-signals/       # Crypto signal agent skill (example skill w/ scripts)
+│   ├── skill-creator/        # Skill-authoring skill (eval + validation scripts)
 │   └── test-harness/         # Diagnostic skill for testing skill system
 │       └── SKILL.md
 │
@@ -127,12 +150,19 @@ agentkthx/
 │   │   ├── IDENTITY.md       # Identity (concise)
 │   │   ├── STYLE.md          # Communication style (concise)
 │   │   └── AGENTS.md         # Agent configuration
-│   └── nova-skills/          # Skill-guided assistant soul (for use with --skills)
+│   ├── nova-skills/          # Skill-guided assistant soul (for use with --skills)
+│   │   ├── soul.json         # Manifest
+│   │   ├── SOUL.md           # Persona definition (concise)
+│   │   ├── IDENTITY.md       # Identity (concise)
+│   │   ├── STYLE.md          # Communication style (concise)
+│   │   └── AGENTS.md         # Agent configuration
+│   └── nova-trading/         # Trading-assistant soul (crypto-signals demo)
 │       ├── soul.json         # Manifest
 │       ├── SOUL.md           # Persona definition (concise)
 │       ├── IDENTITY.md       # Identity (concise)
 │       ├── STYLE.md          # Communication style (concise)
-│       └── AGENTS.md         # Agent configuration
+│       ├── AGENTS.md         # Agent configuration
+│       └── TRADING_REFERENCE.md # Trading domain reference
 │
 ├── examples/                 # Test examples and benchmarks
 │
@@ -164,18 +194,23 @@ agentkthx/
 │   ├── agent_factory.py      # _build_agent, _init_acp, skill-prompt loading
 │   ├── banner.py             # ASCII banner + update-check notice
 │   ├── headers.py            # Session/run header + summary printers
+│   ├── footer.py             # Persistent 2-line status footer (R05.4)
 │   ├── utils.py              # Model resolution, step printing, tool cache
 │   ├── main.py               # main() — dispatch + plugin wiring
 │   └── commands/             # One module per subcommand (14 modules):
 │                             # run, chat, agent, models, test, config, turbo,
 │                             # soul, skills, sessions, plugins, modelfile,
-│                             # tools, version (+update)
+│                             # tools, version — plus `update`, dispatched via
+│                             # cmd_update() in version.py (no separate module)
 ├── model_discovery.py        # Ollama model listing and selection
 ├── shared_args.py            # Shared CLI argument definitions + SharedConfig dataclass (R04.2)
+├── update_check.py           # Startup + post-run update check (PyPI + GitHub main)
 │
 ├── docs/                     # Documentation
 │   ├── ARCH.md               # Technical documentation for developers
 │   ├── CHANGELOG.md          # Version history and release notes
+│   ├── 00_04_CHANGELOG.md    # Historical changelog (R00–R04)
+│   ├── 05_06_CHANGELOG.md    # Historical changelog (R05–R06)
 │   ├── CREDITS.md            # Credits, acknowledgments, and development history
 │   ├── PLUGIN_SPEC.md        # Plugin system specification (R05.0)
 │   ├── TESTS.md              # Benchmark results and testing guide
@@ -188,8 +223,12 @@ agentkthx/
 │   └── R07.00-MODULARIZATION-PLAN.md     # Modularization plan (executed in R07.00)
 │
 ├── audit/                    # Audit materials (R06.41)
-│   ├── audit.md              # Codebase audit findings report
-│   └── brief.md              # Condensed project orientation brief
+│   ├── audit.md              # Codebase audit findings report (open findings)
+│   ├── brief.md              # Condensed project orientation brief
+│   ├── deltas.md             # Archived CLOSED/WONTFIX findings (split from audit.md)
+│   ├── split-audit.py        # audit.md → audit.md + deltas.md splitter
+│   ├── generate_audit_dash.py # Merges both into the audit-dash/ dashboard data
+│   └── verify_open_findings.py # Re-verifies OPEN findings against the codebase
 │
 ├── README.md                 # Project overview, quick start, features
 └── LICENSE                   # MIT License
@@ -221,7 +260,7 @@ class Agent(
 ): ...
 ```
 
-`agent.py` itself (1096 lines, down from 3466 at R06.58) retains `run()`, the MAINT-04 Phase 1-4 shared helpers (`_generate_with_retry`, `_handle_finish_reason`, `_check_tool_choice_required`, `_parse_tool_calls`, `_finalize_run`, `_enforce_final_answer`, `_handle_blocked_tool_call`, `_reject_for_tool_choice`), `_generate()`, and the thin `_run_core` / `_run_core_streaming` wrappers. The public API is unchanged: `from agentkthx import Agent`.
+`agent.py` itself (1212 lines, down from 3466 at R06.58) retains `run()`, the MAINT-04 Phase 1-4 shared helpers (`_generate_with_retry`, `_handle_finish_reason`, `_check_tool_choice_required`, `_parse_tool_calls`, `_finalize_run`, `_enforce_final_answer`, `_handle_blocked_tool_call`, `_reject_for_tool_choice`), `_generate()`, and the thin `_run_core` / `_run_core_streaming` wrappers. The public API is unchanged: `from agentkthx import Agent`.
 
 #### Unified agentic loop (R07.00 Phase 5, closes MAINT-04)
 
@@ -536,7 +575,7 @@ soul = load_soul("nova-helper", reload=True)
 AgentKthx uses a two-tier backend architecture:
 
 1. **Native backends** -- Ollama and llama-server are built-in, always available, zero overhead.
-2. **Plugin backends** -- BitNet, ZAI, and any future backends are loaded on demand via the plugin system. Plugins register their backend classes through `register_backend(name, cls)` and are lazily loaded by `_ensure_plugin()` when first requested.
+2. **Plugin backends** -- BitNet, ZAI, OpenRouter, Gemini, HuggingFace, OpenAI, OrcaRouter, Mistral, Pollinations, and any future backends are loaded on demand via the plugin system. Plugins register their backend classes through `register_backend(name, cls)` and are lazily loaded by `_ensure_plugin()` when first requested.
 
 Backend resolution in `get_backend(name)`:
 ```
@@ -557,7 +596,11 @@ The `--backend` flag selects which backend to use:
 | `zai` | plugin | `ZaiBackend` | ZAI cloud API (GLM models) |
 | `openrouter` | plugin | `OpenRouterBackend` | OpenRouter cloud API (500+ models) |
 | `gemini` | plugin | `GeminiBackend` | Google Gemini API (71 models, free tier, Gemma) |
-| `huggingface` (alias: `hf`) | plugin | `HuggingFaceBackend` | Hugging Face Inference Router (154 models, 18 partner providers, free-tier auto-detect) |
+| `huggingface` (alias: `hf`) | plugin | `HuggingFaceBackend` | Hugging Face Inference Router (live catalog + 19-model static fallback, 18 partner providers, free-tier auto-detect) |
+| `openai` (alias: `oai`) | plugin | `OpenAIBackend` | OpenAI platform API (GPT + o-series) |
+| `mistral` (alias: `mst`) | plugin | `MistralBackend` | Mistral La Plateforme (paid tiers + free Labs models) |
+| `orcarouter` (alias: `orca`) | plugin | `OrcaRouterBackend` | OrcaRouter zero-markup gateway (11 upstream providers) |
+| `pollinations` (alias: `poll`) | plugin | `PollinationsBackend` | Pollinations free-tier API |
 
 Plugin backends are automatically discovered and loaded on first use. See `docs/PLUGIN_SPEC.md` for the full plugin specification.
 
@@ -617,11 +660,15 @@ The ZAI backend is a plugin providing `ZaiBackend`, connecting to the ZAI cloud 
 | `ZAI_FREE_ONLY` | `false` | Restrict to free models only |
 | `ZAI_FREE_FALLBACK_MODEL` | `glm-4.5-flash` | Free model used when paid model fails |
 
-**Model Catalog** (13 models, pricing per 1M tokens input/output):
+**Model Catalog** (17 models, pricing per 1M tokens input/output):
 
 | Model | Pricing | Free? |
 |-------|---------|-------|
 | GLM 5.1 | $1.40/$4.40 | No |
+| GLM 5.2 | $1.40/$4.40 | No |
+| GLM 5.3 | $1.40/$4.40 | No |
+| GLM 5.3 Flash | $0.15/$0.50 | No |
+| GLM 5.3 FlashX | $0.37/$1.25 | No |
 | GLM 5 Turbo | $1.20/$4.00 | No |
 | GLM 5 | $1.00/$3.20 | No |
 | GLM 4.7 | $0.60/$2.20 | No |
@@ -675,9 +722,9 @@ See `docs/api/GEMINI_API_TECHNICAL_REFERENCE.md` for the 1553-line technical ref
 The Hugging Face backend is a plugin that provides `HuggingFaceBackend`, inheriting from `OpenAICompatibleBackend` (the shared base class extracted in R06.55). It connects to the Hugging Face Inference Router at `https://router.huggingface.co/v1` — a unified proxy that exposes 100+ open-weight models (Llama, Qwen, DeepSeek, Mistral, Gemma, GLM, Phi, Command-R, gpt-oss) served by ~18 partner providers (Together, Groq, Novita, DeepInfra, Fireworks, Cerebras, Replicate, Fal AI, Featherless, Baseten, Cohere, Nscale, OVHcloud, Public AI, Scaleway, WaveSpeedAI, Z.ai, HF Inference) through a single OpenAI-compatible `/chat/completions` endpoint. This is the third cloud-provider backend (after ZAI and OpenRouter) and the first to ship with a dedicated API Technical Reference written **before** the implementation, as the blueprint (see `docs/api/HUGGINGFACE_API_TECHNICAL_REFERENCE.md` committed in R07.01).
 
 Key features:
-- **154-model live catalog** from `/v1/models` (with 31-model static catalog `HF_MODELS` as fallback when the API is unreachable)
+- **Live catalog** from `/v1/models` (with the 19-model static `HF_MODELS` catalog as fallback when the API is unreachable)
 - **Per-provider parse shape** (R07.02 polish) — `_parse_hf_model()` captures the full per-provider array: `pricing: {input, output}` (USD per 1M tokens, MIN aggregated as `cheapest_input_per_1m` / `cheapest_output_per_1m`), `is_free` (OR aggregated as `any_free_provider`), `supports_tools` (any/all signals), `supports_structured_output`, `first_token_latency_ms`, `throughput`, `status`, `is_model_author`. Top-level `context_length` and `max_completion_tokens` aggregated as MAX across providers (best-case budget — actual budget depends on which partner the router picks under `:fastest` routing). Full raw `providers[]` array preserved on the parsed model for forward-compat.
-- **`is_free` auto-detection** (R07.02 polish) — `_is_free_model_live()` instance method supplements the static `HF_FREE_MODEL_WHITELIST` (31 open-weight models verified to have free-tier access via partner providers) with live API `is_free` flag consultation. Currently `false` for all 336 combos even with auth (Sept 2026 state), but if HF flips any combo free tomorrow (sponsored/promo window), AgentKthx auto-picks it up with zero code change.
+- **`is_free` auto-detection** (R07.02 polish) — `_is_free_model_live()` instance method supplements the static `HF_FREE_MODEL_WHITELIST` (3 open-weight models verified to have free-tier access via partner providers) with live API `is_free` flag consultation. Currently `false` for all 336 combos even with auth (Sept 2026 state), but if HF flips any combo free tomorrow (sponsored/promo window), AgentKthx auto-picks it up with zero code change.
 - **`whoami-v2` free-tier probe** (R07.02 polish) — `_probe_whoami()` hits `https://huggingface.co/api/whoami-v2` on every `__init__` to (a) validate the token before the first chat call (catches typos/expired tokens early), and (b) detect free-tier users via `canPay=false`. Best-effort — failures swallowed; `_user_info` stays None and the backend still works (paid inference will surface its own 401 at request time). A `read`-role fine-grained token (the default) is enough; higher-role endpoints (`/api/inference-providers`, `/api/billing/usage`) require `write`/`admin` role but we don't need them.
 - **`_resolve_free_only_mode()` auto-detection** (R07.02 polish) — explicit env var > whoami auto-detect > module-constant fallback: explicit `HF_FREE_ONLY=true` → strict (no auto-detect); explicit `HF_FREE_ONLY=false` → permissive (opt-out — skips whoami entirely); unset → auto-detect: `canPay=false` → strict + one-time stderr warning, `canPay=true` → permissive, whoami unreachable → fall back to module-level `HF_FREE_ONLY` constant. VTSTech's account (`canPay=false`) gets auto-enabled whitelist protection + warning even without setting the env var explicitly; if a billing card is later added, the auto-detection flips to permissive with no code change.
 - **Provider routing via model-id suffix** — `:fastest` (default), `:cheapest` (auto-applied when `HF_FREE_ONLY=true`), `:preferred` (user's preference order at huggingface.co/settings/inference-providers), `:<partner-name>` (pin to a specific partner like `:groq`, `:together`, `:novita`, `:deepinfra`, `:fireworks`, `:cerebras`). Controlled by the `HF_PROVIDER_POLICY` env var (auto-applied when no explicit suffix on the model id).
@@ -692,7 +739,7 @@ Key features:
 
 Configuration env vars: `HF_TOKEN` (or `HUGGING_FACE_HUB_TOKEN` fallback), `HF_BASE_URL`, `HF_BASE_URL_LEGACY` (documented but not used by v0.1), `HF_DEFAULT_MODEL`, `HF_FREE_ONLY`, `HF_FREE_FALLBACK_MODEL`, `HF_PROVIDER_POLICY`, `HF_MAX_429_RETRIES`.
 
-See `docs/api/HUGGINGFACE_API_TECHNICAL_REFERENCE.md` for the 1019-line technical reference covering all endpoints, error codes, rate limits, and implementation details. The parallel `docs/api/OPENAI_API_TECHNICAL_REFERENCE.md` (1677 lines, also committed in R07.01) awaits the planned R07.0x OpenAI plugin — same blueprint pattern.
+See `docs/api/HUGGINGFACE_API_TECHNICAL_REFERENCE.md` for the 1019-line technical reference covering all endpoints, error codes, rate limits, and implementation details. The parallel `docs/api/OPENAI_API_TECHNICAL_REFERENCE.md` (1677 lines, also committed in R07.01) became the blueprint for the OpenAI platform backend plugin shipped in R07.03 — the blueprint-first pattern in action.
 
 ```bash
 # Default routing (fastest)
@@ -704,12 +751,12 @@ agentkthx chat --backend hf --model meta-llama/Llama-3.3-70B-Instruct:groq
 # Reasoning model with chain-of-thought display
 agentkthx chat --backend hf --model Qwen/Qwen3-4B-Thinking-2507 --stream --think
 
-# Free-tier whitelist only (31 models, auto-appends :cheapest suffix)
+# Free-tier whitelist only (3 models, auto-appends :cheapest suffix)
 HF_FREE_ONLY=1 agentkthx models --backend hf
 
 # Auto-detection mode (unset HF_FREE_ONLY — probe whoami-v2 first)
 unset HF_FREE_ONLY
-agentkthx models --backend hf   # warning fires once, 31-model whitelist auto-enforced
+agentkthx models --backend hf   # warning fires once, 3-model whitelist auto-enforced
 ```
 
 ---
@@ -768,10 +815,14 @@ Each plugin ships a `plugin.json` manifest:
 |--------|------|----------|
 | `acp` | feature | ACP v1.0.6 integration (audit logging, session monitoring) |
 | `bitnet` | backend | `bitnet` backend (LlamaServerBackend with bitnet_mode) |
-| `zai` | backend | `zai` backend (GLM models via ZAI API, 13-model catalog) |
+| `zai` | backend | `zai` backend (GLM models via ZAI API, 17-model catalog) |
 | `openrouter` | backend | `openrouter` backend (500+ models via OpenRouter API) |
 | `gemini` | backend | `gemini` backend (71 Gemini/Gemma models, free-tier data, `<thought>` tag parser) |
-| `huggingface` (alias: `hf`) | backend | `huggingface` backend (154 models via HF Inference Router, 31-model free-tier whitelist, per-provider `is_free` auto-detection, whoami-v2 free-tier probe) |
+| `huggingface` (alias: `hf`) | backend | `huggingface` backend (live model catalog via HF Inference Router, 3-model free-tier whitelist, per-provider `is_free` auto-detection, whoami-v2 free-tier probe) |
+| `openai` (alias: `oai`) | backend | `openai` backend (OpenAI platform API, GPT + o-series) |
+| `mistral` (alias: `mst`) | backend | `mistral` backend (Mistral La Plateforme, paid tiers + free Labs models) |
+| `orcarouter` (alias: `orca`) | backend | `orcarouter` backend (zero-markup gateway to 11 upstream providers) |
+| `pollinations` (alias: `poll`) | backend | `pollinations` backend (Pollinations free-tier API) |
 | `turboquant` | feature | `turbo` CLI command (server lifecycle, model registry) |
 | `test-plugin` | feature | `test-backend` backend, `plugin-test` CLI command |
 
@@ -859,7 +910,7 @@ See the Retry-with-Error-Feedback section below for full details.
 
 ## Argument Normalization System (R04.2)
 
-`core/args_normal.py` and `core/prompts.py` provide a comprehensive argument normalization pipeline that helps small models use tools correctly despite natural language variations in argument formatting.
+`core/helpers.py` and `core/prompts.py` provide a comprehensive argument normalization pipeline that helps small models use tools correctly despite natural language variations in argument formatting.
 
 ### Tool Argument Aliases (`core/prompts.py`)
 
@@ -889,7 +940,7 @@ TOOL_ARG_ALIASES = {
 
 `CONTEXTUAL_ALIASES` provides disambiguation for aliases that only apply in specific contexts.
 
-### Normalization Pipeline (`core/args_normal.py`)
+### Normalization Pipeline (`core/helpers.py`)
 
 Three core functions:
 
@@ -1617,9 +1668,9 @@ agentkthx agent --acp --acp-url https://tunnel.example.com
 
 ## Model Family Configuration
 
-`core/model_family_config.py` defines behavior for 10 model families:
+`core/model_family_config.py` defines behavior for 11 model families:
 
-**Supported Families**: gemma3, granite, granitemoe, qwen2, qwen3, qwen35, llama, dolphin, deepseek-r1, deepseek
+**Supported Families**: deepseek, deepseek-r1, dolphin, gemma3, granite, granitemoe, llama, qwen2, qwen2.5, qwen3, qwen35
 
 ### Family Aliases
 
@@ -1646,7 +1697,7 @@ This ensures BitNet models (which report `"bitnet"` as their architecture in GGU
 
 ### CLI Package Layout (R07.00)
 
-The CLI lives in the `agentkthx/cli/` package (Phase 8 split of the former 4270-line `cli.py`): shared machinery in 8 top-level modules (`parser`, `agent_factory`, `banner`, `headers`, `utils`, `main`, `__init__`, `__main__`), one module per subcommand under `commands/` (14 modules).
+The CLI lives in the `agentkthx/cli/` package (Phase 8 split of the former 4270-line `cli.py`): shared machinery in 9 top-level modules (`parser`, `agent_factory`, `banner`, `headers`, `footer`, `utils`, `main`, `__init__`, `__main__`), one module per subcommand under `commands/` (14 modules).
 
 `cli/__init__.py` is a **compatibility facade**: it re-exports every module-level name that existed on the old `cli` module — all `cmd_*` handlers, helpers, constants, `main`, `create_parser` — so `from agentkthx.cli import X` keeps working unchanged. The four collaborators shared across command modules (`_build_agent`, `_init_acp`, `_print_session_header`, `_print_update_notice`) are resolved by command modules **through the facade at call time**, so `monkeypatch.setattr("agentkthx.cli._build_agent", …)` affects all consumers exactly as it did pre-split — the patch-compatibility contract is test-enforced (`tests/test_cli_package_split.py`).
 
@@ -1674,8 +1725,8 @@ The CLI lives in the `agentkthx/cli/` package (Phase 8 split of the former 4270-
 | `-m, --model` | run, chat, agent, test | Model to use |
 | `--tools` | run, chat, agent | Comma-separated tool list |
 | `--skills` | run, chat, agent | Comma-separated skill names to load |
-| `--backend` | all | Backend (ollama, bitnet, llama-server, zai, openrouter, gemini, huggingface/hf) |
-| `--api` | run, chat, agent, test | API mode: `openre` (OpenResponses) or `openai` (OpenAI Chat-Completions) |
+| `--backend` | all | Backend (ollama, llama-server, bitnet, zai, openrouter, gemini, huggingface/hf, openai/oai, orcarouter/orca, mistral/mst, pollinations/poll) |
+| `--api` | run, chat, agent, test | API mode: `openre` (OpenResponses), `openai` (OpenAI Chat-Completions), or `jev` (JEV System-One decisions) |
 | `--response-format` | run, chat, agent | Response format: `text` or `json` (Chat-Completions mode) |
 | `--truncation` | run, chat, agent | Truncation behavior: `auto` or `disabled` |
 | `--soul` | run, chat, agent | Path to Soul Spec package |
@@ -1835,10 +1886,10 @@ Final Answer: 1024
 
 ### Model-Specific Configs
 
-Model configurations are defined in `core/model_config.py`:
-- Temperature defaults
-- Max token limits
-- Stop sequences
+Per-family model configurations live in `core/model_family_config.py` (`FAMILY_CONFIGS`, one `ModelFamilyConfig` dataclass per family):
+- Temperature / top_p defaults (`default_temperature`, `preferred_temperature`, `default_top_p`)
+- Max token limits (`default_max_tokens`)
+- Start/stop tokens and tool format
 
 Family-specific behavior in `core/model_family_config.py`:
 - Thinking mode (disabled for qwen3, deepseek-r1)

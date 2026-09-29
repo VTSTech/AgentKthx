@@ -4,7 +4,7 @@
 
 **Repository:** https://github.com/VTSTech/AgentKthx  
 **Author:** VTSTech | **License:** MIT | **Date:** 2026-09-29  
-**Commit:** 00ad56a (R07.15 + intra-release amendments) | **Test Suite:** 2051 passed / 16 skipped  
+**Commit:** 8d0b8c7 (R07.15 + intra-release amendments) | **Test Suite:** 2051 passed / 16 skipped  
 30 Open Findings | 7 Categories | SEC, ROB, MAINT, PERF, FEAT, ARCH, TEST  
 Severity: 0 High | 13 Medium | 17 Low  
 30 OPEN (CLOSED + WONTFIX archived in deltas.md — generate_audit_dash.py merges both for the dashboard)
