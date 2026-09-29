@@ -363,7 +363,8 @@ class ToolParser:
     - Markdown code blocks with JSON
     """
 
-    def __init__(self, tool_names: list[str] | None = None, debug: bool = False):
+    def __init__(self, tool_names: list[str] | None = None, debug: bool = False,
+                 force_react: bool = False):
         """
         Initialize parser with known tool names for fuzzy matching.
 
@@ -372,9 +373,17 @@ class ToolParser:
             debug: When True, print the ReAct JSON parse-failure chain
                 (ROB-13, R07.06) so unparseable ``Action Input`` blocks can
                 be traced to the fallback that produced the final args.
+            force_react: When True, enforce ReAct-only parsing (ROB-32,
+                R07.14) — the native-JSON and XML strategies are skipped
+                and only explicit ``Action:``/``Action Input:`` blocks
+                produce tool calls. For small local models that speak the
+                ReAct text protocol, where the higher-trust JSON/XML
+                matchers can only misfire. Default False runs the full
+                native → ReAct → XML chain unchanged.
         """
         self.tool_names = set(tool_names or [])
         self.debug = debug
+        self.force_react = force_react
 
     def parse(self, text: str) -> list[ToolCall]:
         """
@@ -400,14 +409,22 @@ class ToolParser:
         """
         calls = []
 
-        # Try native JSON first (for models with function calling)
-        calls.extend(self._parse_native_json(text))
+        if self.force_react:
+            # ROB-32 (R07.14): force_react=True enforces the ReAct text
+            # protocol — only explicit Action/Action Input blocks produce
+            # tool calls. The native-JSON and XML matchers are skipped:
+            # on models that emit ReAct they add no recall (ReAct runs
+            # anyway in the default chain) and can only misfire or dupes.
+            calls.extend(self._parse_react(text))
+        else:
+            # Try native JSON first (for models with function calling)
+            calls.extend(self._parse_native_json(text))
 
-        # Try ReAct format (explicit Action/Action Input)
-        calls.extend(self._parse_react(text))
+            # Try ReAct format (explicit Action/Action Input)
+            calls.extend(self._parse_react(text))
 
-        # Try XML format (explicit <tool> tags)
-        calls.extend(self._parse_xml(text))
+            # Try XML format (explicit <tool> tags)
+            calls.extend(self._parse_xml(text))
 
         # PERF-05 (R07.12 intra): the three strategies are shape-specialists
         # but their match envelopes overlap — a message carrying the SAME

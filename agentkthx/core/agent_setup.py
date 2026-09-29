@@ -88,6 +88,9 @@ class AgentSetupMixin:
         # OpenResponses parameters
         tool_choice: str | ToolChoice = "auto",  # Default per OpenResponses spec
         allowed_tools: list[str] | None = None,
+        # ReAct enforcement (ROB-32, R07.14 — re-promoted; silently swallowed
+        # from R03.3 until ARCH-05's fail-fast exposed the drift)
+        force_react: bool = False,
         # Skills injection
         skills_prompt: str | None = None,
         # Retry-with-error-feedback
@@ -132,6 +135,13 @@ class AgentSetupMixin:
             num_predict: Maximum tokens to generate (default: model-specific)
             tool_choice: Control tool invocation ("auto", "required", "none", or specific tool name)
             allowed_tools: List of tools the model is allowed to invoke (subset of tools)
+            force_react: Enforce ReAct-only tool-call parsing (ROB-32, R07.14).
+                When True, the ToolParser skips the native-JSON and XML text
+                strategies and parses only explicit Action/Action Input
+                blocks — for small local models that speak the ReAct text
+                protocol. Default False keeps the standing chain: native
+                tool_calls first, ReAct text fallback. CLI surface:
+                --force-react flag or AGENTKTHX_FORCE_REACT=1 (shared_args).
             skills_prompt: Optional skill instructions to append to the system prompt
             retry_on_error: Whether to retry failed tool calls with error feedback (default: True)
             max_tool_retries: Maximum retries per tool call failure (default: 2)
@@ -167,7 +177,7 @@ class AgentSetupMixin:
                 f"Agent.__init__ got unexpected keyword argument(s): {unknown}. "
                 f"Valid kwargs are: model, tools, backend, max_steps, memory_config, "
                 f"debug, system_prompt, soul, soul_level, num_ctx, temperature, top_p, "
-                f"num_predict, tool_choice, allowed_tools, skills_prompt, retry_on_error, "
+                f"num_predict, tool_choice, allowed_tools, force_react, skills_prompt, retry_on_error, "
                 f"max_tool_retries, max_api_retries, truncation, thinking_level, think, "
                 f"reasoning_effort, show_reasoning, response_format, confirm_dangerous, "
                 f"persistent, session_id, memory_db. (ARCH-05: kwargs swallowing closed R07.13)"
@@ -179,6 +189,12 @@ class AgentSetupMixin:
         self.model = model
         self.max_steps = max_steps
         self.debug = debug
+        # ROB-32 (R07.14): the attribute silently vanished in R03.3 and the
+        # kwarg was swallowed by **kwargs ever since — ARCH-05 (R07.13)
+        # turned that latent drift into a hard TypeError on every
+        # _build_agent call. Re-promoted as an explicit parameter and wired
+        # into the ToolParser below.
+        self.force_react = force_react
 
         # R06.54: transient API error tolerance (rate limits, empty
         # responses, connection blips). 0 disables retrying entirely.
@@ -495,7 +511,11 @@ class AgentSetupMixin:
         # Initialize tool parser
         # ROB-13 (R07.06): thread the agent's debug flag into the parser so
         # ReAct JSON parse-failure chains are visible under --debug.
-        self._parser = ToolParser(self.tools.names(), debug=self.debug)
+        # ROB-32 (R07.14): thread force_react through — ReAct-only parsing
+        # when the flag is set (small local models on the ReAct text
+        # protocol); default False keeps the native-first fallback chain.
+        self._parser = ToolParser(self.tools.names(), debug=self.debug,
+                                  force_react=self.force_react)
 
         # Add system prompt to memory
         self.memory.add("system", self._custom_system_prompt)
