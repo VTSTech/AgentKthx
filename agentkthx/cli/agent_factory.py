@@ -327,13 +327,26 @@ def _get_catalog_defaults(backend, model: str) -> dict:
     Returns:
         dict: num_ctx and num_predict defaults from catalog
     """
-    # Only apply catalog defaults for cloud providers
+    # Cloud providers: query the provider's catalog API (existing logic).
     # R06.57 (MAINT-05): replaced hardcoded [OPENROUTER, ZAI, GEMINI] list
     # with backend.is_cloud — a 5th cloud backend will automatically get
     # catalog-based defaults if it implements _get_model_defaults.
-    if not getattr(backend, "is_cloud", False):
-        return {}
+    if getattr(backend, "is_cloud", False):
+        return _get_cloud_catalog_defaults(backend, model)
 
+    # Local backends (llama-server, ollama, bitnet): consult the running
+    # TurboQuant server state first (best source of truth — it reflects
+    # what the server actually has allocated via `-c` and `--n-predict`),
+    # then fall back to the Ollama catalog GGUF metadata for the model
+    # name (context_length from the GGUF header, num_predict = ctx // 32
+    # per the same R06.55 empirical finding used by `agentkthx turbo start`).
+    # Returns {} when neither source is available, so chat falls back to
+    # config.num_ctx (the pre-R08 behavior).
+    return _get_local_catalog_defaults(backend, model)
+
+
+def _get_cloud_catalog_defaults(backend, model: str) -> dict:
+    """Cloud-provider catalog defaults (existing logic, extracted)."""
     try:
         family = None
         if hasattr(backend, "get_model_info"):
@@ -362,6 +375,70 @@ def _get_catalog_defaults(backend, model: str) -> dict:
     except Exception:
         # If catalog lookup fails, return empty dict
         return {}
+
+
+def _get_local_catalog_defaults(backend, model: str) -> dict:
+    """Local-backend catalog defaults (llama-server / ollama / bitnet).
+
+    Precedence:
+      1. Running TurboQuant server state (~/.agentkthx/turbo.state) —
+         reflects what the server actually has allocated via `-c` and
+         `--n-predict`. This is the best source of truth when the user
+         just ran `agentkthx turbo start <model>` and is now chatting
+         against it via `--backend llama-server`.
+      2. Ollama catalog GGUF metadata for the model name —
+         ``context_length`` from the model's GGUF header (parsed by
+         ``discover_models`` in ``ollama_registry.py``), with
+         ``num_predict = ctx // 32`` per the R06.55 empirical finding.
+      3. Empty dict — chat falls back to ``config.num_ctx`` (pre-R08
+         behavior, e.g. when the user is targeting their own llama-server
+         with a direct GGUF path that isn't an Ollama model name).
+
+    All imports are lazy so agent_factory startup doesn't pay the cost
+    unless this code path actually fires.
+    """
+    # 1) Running TurboQuant server state
+    try:
+        from ..plugins.turboquant.turbo import TurboState, _is_process_alive
+
+        state = TurboState.load()
+        if state is not None and state.pid > 0 and state.ctx > 0:
+            # Verify the PID is still alive so we don't trust a stale state
+            # file left over from a crashed/killed server. _is_process_alive
+            # also handles zombie detection on Linux via /proc/<pid>/stat.
+            if _is_process_alive(state.pid):
+                # Prefer the saved num_predict; if it's 0 (legacy state file
+                # from before R08), derive ctx // 32 so chat matches what
+                # `turbo start` would have computed for the same ctx.
+                num_predict = (
+                    state.num_predict
+                    if state.num_predict > 0
+                    else state.ctx // 32
+                )
+                return {
+                    "num_ctx": state.ctx,
+                    "num_predict": num_predict,
+                }
+    except Exception:
+        pass  # Fall through to Ollama catalog lookup
+
+    # 2) Ollama catalog GGUF metadata (works for any Ollama-pulled model,
+    #    regardless of which local backend the user picked)
+    try:
+        from ..backends.ollama_registry import find_model
+
+        ollama_model = find_model(model)
+        if ollama_model is not None and ollama_model.context_length > 0:
+            ctx = ollama_model.context_length
+            return {
+                "num_ctx": ctx,
+                "num_predict": ctx // 32,
+            }
+    except Exception:
+        pass
+
+    # 3) Fall back to empty dict (chat will use config.num_ctx)
+    return {}
 
 
 def apply_model_switch(agent, new_model: str) -> dict:
