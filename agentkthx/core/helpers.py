@@ -16,7 +16,6 @@ from difflib import SequenceMatcher
 from typing import Any, Literal
 from urllib.parse import urlparse
 
-
 # ============================================================================
 # Security Mode
 # ============================================================================
@@ -63,6 +62,7 @@ def _security_enabled() -> bool:
 # ============================================================================
 # Fuzzy Matching
 # ============================================================================
+
 
 def fuzzy_match(query: str, candidates: list[str], threshold: float = 0.4) -> str | None:
     """
@@ -123,28 +123,26 @@ ARG_ALIASES = {
     # Calculator
     "expression": ["expr", "exp", "formula", "calculation", "math"],
     "equation": ["expr", "expression", "formula"],
-
     # File operations
     "file_path": ["path", "filepath", "file", "filename", "location"],
     "content": ["text", "data", "body", "value"],
     "output_path": ["output", "destination", "save_path", "save_to"],
-
     # Shell
     "command": ["cmd", "shell", "script", "exec"],
     "timeout": ["time_limit", "max_time", "seconds"],
-
     # Web
     "url": ["uri", "link", "endpoint", "address"],
     "query": ["search", "term", "keywords", "q"],
     "headers": ["header", "http_headers"],
-
     # General
     "input": ["value", "arg", "parameter"],
     "output": ["result", "return_value"],
 }
 
 
-def normalize_args(args: dict[str, Any], expected_params: list[str], tool_name: str = "") -> dict[str, Any]:
+def normalize_args(
+    args: dict[str, Any], expected_params: list[str], tool_name: str = ""
+) -> dict[str, Any]:
     """
     Normalize argument names to match expected parameters.
 
@@ -163,7 +161,7 @@ def normalize_args(args: dict[str, Any], expected_params: list[str], tool_name: 
     """
     if not args:
         return {}
-    
+
     # Guard: ensure args is a dict
     if not isinstance(args, dict):
         if args is None:
@@ -175,10 +173,10 @@ def normalize_args(args: dict[str, Any], expected_params: list[str], tool_name: 
     normalized = {}
     expected_set = set(expected_params)
     power_parts = {}
-    
+
     # Import tool-specific aliases
-    from .prompts import TOOL_ARG_ALIASES, CONTEXTUAL_ALIASES
-    
+    from .prompts import CONTEXTUAL_ALIASES, TOOL_ARG_ALIASES
+
     # Get tool-specific aliases
     tool_aliases = TOOL_ARG_ALIASES.get(tool_name, {}) if tool_name else {}
     contextual_aliases = CONTEXTUAL_ALIASES.get(tool_name, set()) if tool_name else set()
@@ -231,12 +229,12 @@ def normalize_args(args: dict[str, Any], expected_params: list[str], tool_name: 
                 else:
                     target_param = alias_target
                     target_pname = alias_target
-        
+
         # Strategy 2: Direct match
         if target_param is None and key in expected_set:
             target_param = key
             target_pname = key
-        
+
         # Strategy 3: Case-insensitive match
         if target_param is None:
             for param in expected_params:
@@ -271,12 +269,18 @@ def normalize_args(args: dict[str, Any], expected_params: list[str], tool_name: 
             normalized[target_pname] = value
         elif target_pname in normalized and isinstance(normalized[target_pname], str):
             pass
-    
+
     # Handle power operation combination for calculator
     if power_parts and "expression" in expected_set:
         base = power_parts.get("base") or power_parts.get("value") or power_parts.get("x")
-        exp = power_parts.get("exponent") or power_parts.get("power") or power_parts.get("n") or power_parts.get("p") or power_parts.get("exp")
-        
+        exp = (
+            power_parts.get("exponent")
+            or power_parts.get("power")
+            or power_parts.get("n")
+            or power_parts.get("p")
+            or power_parts.get("exp")
+        )
+
         if base is not None and exp is not None:
             normalized["expression"] = f"{base} ** {exp}"
         elif base is not None:
@@ -310,28 +314,64 @@ def normalize_args(args: dict[str, Any], expected_params: list[str], tool_name: 
 # (power-user escape hatch).
 BLOCKED_COMMANDS = {
     # System modification
-    "rm", "rmdir", "del", "format", "fdisk", "mkfs",
-    "dd", "shred", "wipe", "srm",
-
+    "rm",
+    "rmdir",
+    "del",
+    "format",
+    "fdisk",
+    "mkfs",
+    "dd",
+    "shred",
+    "wipe",
+    "srm",
     # Privilege escalation
-    "sudo", "su", "doas", "pkexec", "gksudo", "kdesu",
-
+    "sudo",
+    "su",
+    "doas",
+    "pkexec",
+    "gksudo",
+    "kdesu",
     # Network attacks
-    "nmap", "nc", "netcat", "telnet", "wget", "curl",
-    "ssh", "scp", "sftp", "rsync",
-
+    "nmap",
+    "nc",
+    "netcat",
+    "telnet",
+    "wget",
+    "curl",
+    "ssh",
+    "scp",
+    "sftp",
+    "rsync",
     # Package management (could install malware)
-    "apt", "apt-get", "yum", "dnf", "pacman", "pip", "npm", "yarn", "cargo",
-
+    "apt",
+    "apt-get",
+    "yum",
+    "dnf",
+    "pacman",
+    "pip",
+    "npm",
+    "yarn",
+    "cargo",
     # Process control
-    "kill", "killall", "pkill", "xkill", "systemctl", "service",
-
+    "kill",
+    "killall",
+    "pkill",
+    "xkill",
+    "systemctl",
+    "service",
     # User management
-    "useradd", "userdel", "usermod", "passwd", "adduser", "deluser",
-
+    "useradd",
+    "userdel",
+    "usermod",
+    "passwd",
+    "adduser",
+    "deluser",
     # Dangerous shell features
-    "exec", "eval", "source", ".", "alias",
-
+    "exec",
+    "eval",
+    "source",
+    ".",
+    "alias",
     # Shells (SEC-04, R07.05) — `bash -c "rm -rf /tmp/x"` previously slipped
     # past this blocklist because only shell FEATURES (exec/eval/source)
     # were blocked, not the shell binaries themselves. Any shell invoked by
@@ -340,14 +380,26 @@ BLOCKED_COMMANDS = {
     # tool already runs through /bin/sh; legitimate uses of an interactive
     # shell by an agent are rare — power users can opt out with
     # `--security off`.
-    "bash", "sh", "zsh", "ksh", "fish",
-
+    "bash",
+    "sh",
+    "zsh",
+    "ksh",
+    "fish",
     # Filesystem
-    "mount", "umount", "chown", "chmod", "chattr", "lsattr",
-
+    "mount",
+    "umount",
+    "chown",
+    "chmod",
+    "chattr",
+    "lsattr",
     # Shell escapes
-    "vi", "vim", "nano", "emacs", "less", "more", "man",
-
+    "vi",
+    "vim",
+    "nano",
+    "emacs",
+    "less",
+    "more",
+    "man",
     # Universal multi-call binaries — `busybox rm` bypasses the `rm` block.
     # Legit uses exist (Alpine, embedded) but agents rarely need this; if
     # they do, the user can opt out with `--security off`.
@@ -368,18 +420,18 @@ DANGEROUS_FLAG_COMBOS: dict[str, list[tuple[str, str]]] = {
     # `find -exec` and `-execdir` run arbitrary commands; `-delete` removes
     # files en masse. The base `find` binary is essential for file discovery.
     "find": [
-        (r"\s-exec\b",   "find -exec runs arbitrary commands"),
+        (r"\s-exec\b", "find -exec runs arbitrary commands"),
         (r"\s-execdir\b", "find -execdir runs arbitrary commands"),
         (r"\s-delete\b", "find -delete removes files en masse"),
     ],
     # `xargs rm` chains deletion across many files; same for mv/dd/shred.
     # `xargs` alone is fine for legit pipelines like `find . -print | xargs grep foo`.
     "xargs": [
-        (r"\brm\b",     "xargs rm chains deletion"),
-        (r"\brmdir\b",  "xargs rmdir chains directory removal"),
-        (r"\bmv\b",     "xargs mv chains moves"),
-        (r"\bdd\b",     "xargs dd chains low-level device writes"),
-        (r"\bshred\b",  "xargs shred chains shredding"),
+        (r"\brm\b", "xargs rm chains deletion"),
+        (r"\brmdir\b", "xargs rmdir chains directory removal"),
+        (r"\bmv\b", "xargs mv chains moves"),
+        (r"\bdd\b", "xargs dd chains low-level device writes"),
+        (r"\bshred\b", "xargs shred chains shredding"),
     ],
     # `python -c` / `python3 -c` runs inline Python — arbitrary code.
     # The base `python` binary is fine for running scripts.
@@ -417,24 +469,47 @@ DANGEROUS_FLAG_COMBOS: dict[str, list[tuple[str, str]]] = {
 # Dangerous URL patterns
 BLOCKED_URL_PATTERNS = {
     # Local network
-    "localhost", "127.0.0.1", "0.0.0.0", "::1",
-    "10.", "192.168.", "172.16.", "172.17.", "172.18.",
-    "172.19.", "172.20.", "172.21.", "172.22.", "172.23.",
-    "172.24.", "172.25.", "172.26.", "172.27.", "172.28.",
-    "172.29.", "172.30.", "172.31.",
-
+    "localhost",
+    "127.0.0.1",
+    "0.0.0.0",
+    "::1",
+    "10.",
+    "192.168.",
+    "172.16.",
+    "172.17.",
+    "172.18.",
+    "172.19.",
+    "172.20.",
+    "172.21.",
+    "172.22.",
+    "172.23.",
+    "172.24.",
+    "172.25.",
+    "172.26.",
+    "172.27.",
+    "172.28.",
+    "172.29.",
+    "172.30.",
+    "172.31.",
     # Cloud metadata endpoints
     "169.254.169.254",  # AWS/GCP/Azure metadata
-
     # Internal services
-    "internal.", "local.", "private.", "intranet.",
+    "internal.",
+    "local.",
+    "private.",
+    "intranet.",
 }
 
 # Allowed file paths (whitelist approach)
 ALLOWED_PATH_PATTERNS = {
-    "/tmp", "/temp", "/content",
-    "./output", "./data", "./files",
-    "~/tmp", "~/temp",
+    "/tmp",
+    "/temp",
+    "/content",
+    "./output",
+    "./data",
+    "./files",
+    "~/tmp",
+    "~/temp",
 }
 
 # Windows-specific temp directories (will be checked dynamically)
@@ -444,9 +519,9 @@ _WINDOWS_TEMP_ENV_VARS = ["TEMP", "TMP", "LOCALAPPDATA"]
 def _get_system_temp_dirs() -> list[str]:
     """Get system temp directories (cross-platform)."""
     import tempfile
-    
+
     dirs = []
-    
+
     # Standard temp directory
     try:
         system_temp = tempfile.gettempdir()
@@ -454,7 +529,7 @@ def _get_system_temp_dirs() -> list[str]:
             dirs.append(system_temp)
     except Exception:
         pass
-    
+
     # Windows-specific: check environment variables
     if os.name == "nt":
         for env_var in _WINDOWS_TEMP_ENV_VARS:
@@ -464,7 +539,7 @@ def _get_system_temp_dirs() -> list[str]:
                 # LOCALAPPDATA\Temp is common on Windows
                 if env_var == "LOCALAPPDATA":
                     dirs.append(os.path.join(env_val, "Temp"))
-    
+
     return list(set(dirs))  # Remove duplicates
 
 
@@ -520,7 +595,7 @@ def validate_path(path: str, allowed_dirs: list[str] | None = None) -> tuple[boo
         windir = os.environ.get("WINDIR", "C:\\Windows").lower()
         program_files = os.environ.get("ProgramFiles", "C:\\Program Files").lower()
         program_files_x86 = os.environ.get("ProgramFiles(x86)", "C:\\Program Files (x86)").lower()
-        
+
         resolved_lower = resolved.lower()
         critical_paths = [
             windir,
@@ -535,7 +610,18 @@ def validate_path(path: str, allowed_dirs: list[str] | None = None) -> tuple[boo
             if critical and resolved_lower.startswith(critical.lower()):
                 return False, "Access to system directory denied"
     else:  # Unix-like
-        critical_system_dirs = ["/etc", "/root", "/var", "/usr", "/bin", "/sbin", "/boot", "/dev", "/proc", "/sys"]
+        critical_system_dirs = [
+            "/etc",
+            "/root",
+            "/var",
+            "/usr",
+            "/bin",
+            "/sbin",
+            "/boot",
+            "/dev",
+            "/proc",
+            "/sys",
+        ]
         for critical in critical_system_dirs:
             if resolved.startswith(critical):
                 return False, f"Access to system directory denied: {critical}"
@@ -545,14 +631,23 @@ def validate_path(path: str, allowed_dirs: list[str] | None = None) -> tuple[boo
     for temp_dir in system_temps:
         try:
             temp_abs = os.path.abspath(temp_dir)
-            if resolved.lower().startswith(temp_abs.lower()) if os.name == "nt" else resolved.startswith(temp_abs):
+            if (
+                resolved.lower().startswith(temp_abs.lower())
+                if os.name == "nt"
+                else resolved.startswith(temp_abs)
+            ):
                 return True, ""
         except Exception:
             pass
 
     # Allow /tmp, /home, and CWD for file operations (Unix) — check RESOLVED path
     cwd = os.path.abspath(".")
-    if resolved.startswith("/tmp") or resolved.startswith("/var/tmp") or resolved.startswith("/home") or resolved.startswith(cwd):
+    if (
+        resolved.startswith("/tmp")
+        or resolved.startswith("/var/tmp")
+        or resolved.startswith("/home")
+        or resolved.startswith(cwd)
+    ):
         return True, ""
 
     # Check against allowed directories — check RESOLVED path
@@ -560,7 +655,11 @@ def validate_path(path: str, allowed_dirs: list[str] | None = None) -> tuple[boo
     for allowed_dir in allowed:
         try:
             abs_allowed = os.path.abspath(allowed_dir)
-            if resolved.lower().startswith(abs_allowed.lower()) if os.name == "nt" else resolved.startswith(abs_allowed):
+            if (
+                resolved.lower().startswith(abs_allowed.lower())
+                if os.name == "nt"
+                else resolved.startswith(abs_allowed)
+            ):
                 return True, ""
         except Exception:
             pass
@@ -912,10 +1011,17 @@ def sanitize_command(command: str) -> tuple[bool, str, str]:
 
 # Op word to symbol mapping for expression extraction
 _OP_MAP = {
-    'plus': '+', 'add': '+', 'and': '+',
-    'minus': '-', 'subtract': '-', 'less': '-',
-    'times': '*', 'multiplied': '*', 'multiply': '*',
-    'divided': '/', 'divide': '/',
+    "plus": "+",
+    "add": "+",
+    "and": "+",
+    "minus": "-",
+    "subtract": "-",
+    "less": "-",
+    "times": "*",
+    "multiplied": "*",
+    "multiply": "*",
+    "divided": "/",
+    "divide": "/",
 }
 
 
@@ -926,60 +1032,86 @@ def extract_calc_expression(user_input: str) -> str | None:
     """
     q = user_input.strip()
     q_lower = q.lower()
-    
+
     # Skip if this looks like a file path (contains /tmp, /home, etc.)
     # File paths often contain numbers and / which get misinterpreted as division
-    path_indicators = ['/tmp', '/home', '/var', '/etc', '/usr', '/opt', '/root',
-                       'c:\\', 'd:\\', '\\\\', '.txt', '.json', '.py', '.md',
-                       'file_path', 'read file', 'write file', 'list directory']
+    path_indicators = [
+        "/tmp",
+        "/home",
+        "/var",
+        "/etc",
+        "/usr",
+        "/opt",
+        "/root",
+        "c:\\",
+        "d:\\",
+        "\\\\",
+        ".txt",
+        ".json",
+        ".py",
+        ".md",
+        "file_path",
+        "read file",
+        "write file",
+        "list directory",
+    ]
     if any(indicator in q_lower for indicator in path_indicators):
         # This looks like a file operation, not a math question
         return None
-    
+
     # Skip if the prompt is about reading/writing files or shell commands
-    action_indicators = ['echo ', 'shell', 'command', 'execute', 'run ', 
-                         'read the file', 'write to', 'list the', 'show me the file']
+    action_indicators = [
+        "echo ",
+        "shell",
+        "command",
+        "execute",
+        "run ",
+        "read the file",
+        "write to",
+        "list the",
+        "show me the file",
+    ]
     if any(indicator in q_lower for indicator in action_indicators):
         return None
-    
+
     # ---- Multi-step patterns (try first!) ----
-    
+
     # Pattern: "X times Y, then subtract/add Z" or "X times Y then minus Z"
     multi_step = re.search(
-        r'(\d+(?:\.\d+)?)\s*(?:times|multiplied?\s*by|\*)\s*(\d+(?:\.\d+)?)[,\s]*(?:then\s+)?(?:subtract|minus|add|plus)?\s*(\d+(?:\.\d+)?)',
-        q_lower
+        r"(\d+(?:\.\d+)?)\s*(?:times|multiplied?\s*by|\*)\s*(\d+(?:\.\d+)?)[,\s]*(?:then\s+)?(?:subtract|minus|add|plus)?\s*(\d+(?:\.\d+)?)",
+        q_lower,
     )
     if multi_step:
         nums = multi_step.groups()
         # Determine second operator from context
-        after_second = q_lower[q_lower.find(nums[1])+len(nums[1]):] if nums[1] in q_lower else ""
-        if 'subtract' in after_second or 'minus' in after_second:
+        after_second = q_lower[q_lower.find(nums[1]) + len(nums[1]) :] if nums[1] in q_lower else ""
+        if "subtract" in after_second or "minus" in after_second:
             return f"{nums[0]} * {nums[1]} - {nums[2]}"
-        elif 'add' in after_second or 'plus' in after_second:
+        elif "add" in after_second or "plus" in after_second:
             return f"{nums[0]} * {nums[1]} + {nums[2]}"
         else:
             # Default: look for the word after the second number
-            if 'subtract' in q_lower or 'minus' in q_lower:
+            if "subtract" in q_lower or "minus" in q_lower:
                 return f"{nums[0]} * {nums[1]} - {nums[2]}"
             # Check for "times X minus Y" pattern
-            if 'times' in q_lower and ('minus' in q_lower or 'subtract' in q_lower):
+            if "times" in q_lower and ("minus" in q_lower or "subtract" in q_lower):
                 return f"{nums[0]} * {nums[1]} - {nums[2]}"
-    
+
     # Pattern: "X minus Y plus Z" or "X minus Y, then add Z"
     chain_pattern = re.search(
-        r'(\d+(?:\.\d+)?)\s*(?:minus|subtract)\s*(\d+(?:\.\d+)?)[,\s]*(?:then\s+)?(?:plus|add)?\s*(\d+(?:\.\d+)?)',
-        q_lower
+        r"(\d+(?:\.\d+)?)\s*(?:minus|subtract)\s*(\d+(?:\.\d+)?)[,\s]*(?:then\s+)?(?:plus|add)?\s*(\d+(?:\.\d+)?)",
+        q_lower,
     )
     if chain_pattern:
         nums = chain_pattern.groups()
         return f"{nums[0]} - {nums[1]} + {nums[2]}"
-    
+
     # ---- Explicit math expressions in prompt ----
-    
+
     # Pattern: "compute X minus Y plus Z" (explicit instruction)
     explicit_expr = re.search(
-        r'(?:compute|calculate)\s+(\d+(?:\.\d+)?)\s*(minus|plus|times|divided)\s*(\d+(?:\.\d+)?)(?:\s*(plus|minus|times|divided)\s*(\d+(?:\.\d+)?))?',
-        q_lower
+        r"(?:compute|calculate)\s+(\d+(?:\.\d+)?)\s*(minus|plus|times|divided)\s*(\d+(?:\.\d+)?)(?:\s*(plus|minus|times|divided)\s*(\d+(?:\.\d+)?))?",
+        q_lower,
     )
     if explicit_expr:
         parts = explicit_expr.groups()
@@ -987,32 +1119,32 @@ def extract_calc_expression(user_input: str) -> str | None:
         if parts[3] and parts[4]:
             expr += f" {_OP_MAP.get(parts[3], parts[3])} {parts[4]}"
         return expr
-    
+
     # ---- Word problem patterns ----
-    
+
     # Pattern: "has X ... sell/sold A ... and B" → X - A - B
     word_sold = re.search(
-        r'(?:has|had|with)\s*(\d+).*?(?:sell|sold|lost|gave|used|spent)\s*(\d+).*?and\s*(\d+)',
-        q_lower
+        r"(?:has|had|with)\s*(\d+).*?(?:sell|sold|lost|gave|used|spent)\s*(\d+).*?and\s*(\d+)",
+        q_lower,
     )
     if word_sold:
         return f"{word_sold.group(1)} - {word_sold.group(2)} - {word_sold.group(3)}"
-    
+
     # Pattern: "left" after numbers suggests subtraction
-    if 'left' in q_lower and 'how many' in q_lower:
-        numbers = re.findall(r'\d+', q)
+    if "left" in q_lower and "how many" in q_lower:
+        numbers = re.findall(r"\d+", q)
         if len(numbers) >= 3:
             # First number is usually the starting amount
             return f"{numbers[0]} - {numbers[1]} - {numbers[2]}"
         elif len(numbers) >= 2:
             return f"{numbers[0]} - {numbers[1]}"
-    
+
     # ---- Time/duration patterns ----
-    
+
     # Pattern: "opens at X and closes at Y" → (Y - X) mod 12 or Y - X + 12 if Y < X
     time_pattern = re.search(
-        r'(?:opens?|starts?)\s*(?:at\s+)?(\d+)(?:\s*(?:am|pm))?[^.]+(?:closes?|ends?)\s*(?:at\s+)?(\d+)(?:\s*(?:am|pm))?',
-        q_lower
+        r"(?:opens?|starts?)\s*(?:at\s+)?(\d+)(?:\s*(?:am|pm))?[^.]+(?:closes?|ends?)\s*(?:at\s+)?(\d+)(?:\s*(?:am|pm))?",
+        q_lower,
     )
     if time_pattern:
         start = int(time_pattern.group(1))
@@ -1022,51 +1154,58 @@ def extract_calc_expression(user_input: str) -> str | None:
             return f"{end + 12 - start}"
         else:
             return f"{end - start}"
-    
+
     # ---- Single operations (fallback) ----
-    
+
     # Pattern: "square root of X" or "sqrt of X"
-    sqrt_match = re.search(r'square\s*root\s*of\s*(\d+(?:\.\d+)?)', q_lower)
+    sqrt_match = re.search(r"square\s*root\s*of\s*(\d+(?:\.\d+)?)", q_lower)
     if not sqrt_match:
-        sqrt_match = re.search(r'sqrt\s*of\s*(\d+(?:\.\d+)?)', q_lower)
+        sqrt_match = re.search(r"sqrt\s*of\s*(\d+(?:\.\d+)?)", q_lower)
     if sqrt_match:
         return f"sqrt({sqrt_match.group(1)})"
-    
+
     # Pattern: "X to the power of Y" or "X raised to Y"
-    power_match = re.search(r'(\d+(?:\.\d+)?)\s*(?:to\s*the\s*power\s*of|raised\s*to|to\s*the\s*\d*(?:th|st|nd|rd)?\s*power|\*\*|\^)\s*(\d+(?:\.\d+)?)', q_lower)
+    power_match = re.search(
+        r"(\d+(?:\.\d+)?)\s*(?:to\s*the\s*power\s*of|raised\s*to|to\s*the\s*\d*(?:th|st|nd|rd)?\s*power|\*\*|\^)\s*(\d+(?:\.\d+)?)",
+        q_lower,
+    )
     if power_match:
         return f"{power_match.group(1)} ** {power_match.group(2)}"
-    
+
     # Pattern: "(X + Y) times Z" - complex expression with parentheses
-    complex_times = re.search(r'\(([^)]+)\)\s*(?:times|multiplied\s*by|\*)\s*(\d+(?:\.\d+)?)', q_lower)
+    complex_times = re.search(
+        r"\(([^)]+)\)\s*(?:times|multiplied\s*by|\*)\s*(\d+(?:\.\d+)?)", q_lower
+    )
     if complex_times:
-        inner = complex_times.group(1).replace('plus', '+').replace('minus', '-').replace(' ', ' ')
-        inner = re.sub(r'\s+', '', inner)
+        inner = complex_times.group(1).replace("plus", "+").replace("minus", "-").replace(" ", " ")
+        inner = re.sub(r"\s+", "", inner)
         return f"({inner}) * {complex_times.group(2)}"
-    
+
     # Pattern: "X times Y" or "X multiplied by Y"
-    times_match = re.search(r'(\d+(?:\.\d+)?)\s*(?:times|multiplied\s*by|\*)\s*(\d+(?:\.\d+)?)', q_lower)
+    times_match = re.search(
+        r"(\d+(?:\.\d+)?)\s*(?:times|multiplied\s*by|\*)\s*(\d+(?:\.\d+)?)", q_lower
+    )
     if times_match:
         return f"{times_match.group(1)} * {times_match.group(2)}"
-    
+
     # Pattern: "X divided by Y"
-    div_match = re.search(r'(\d+(?:\.\d+)?)\s*divided\s*by\s*(\d+(?:\.\d+)?)', q_lower)
+    div_match = re.search(r"(\d+(?:\.\d+)?)\s*divided\s*by\s*(\d+(?:\.\d+)?)", q_lower)
     if div_match:
         return f"{div_match.group(1)} / {div_match.group(2)}"
-    
+
     # Pattern: "X plus Y" or "X minus Y"
-    plus_match = re.search(r'(\d+(?:\.\d+)?)\s*plus\s*(\d+(?:\.\d+)?)', q_lower)
+    plus_match = re.search(r"(\d+(?:\.\d+)?)\s*plus\s*(\d+(?:\.\d+)?)", q_lower)
     if plus_match:
         return f"{plus_match.group(1)} + {plus_match.group(2)}"
-    
-    minus_match = re.search(r'(\d+(?:\.\d+)?)\s*minus\s*(\d+(?:\.\d+)?)', q_lower)
+
+    minus_match = re.search(r"(\d+(?:\.\d+)?)\s*minus\s*(\d+(?:\.\d+)?)", q_lower)
     if minus_match:
         return f"{minus_match.group(1)} - {minus_match.group(2)}"
-    
+
     # Fallback: Find numbers and operators
-    numbers = re.findall(r'\d+\.?\d*', q)
-    operators = re.findall(r'[+\-*/^]', q)
-    
+    numbers = re.findall(r"\d+\.?\d*", q)
+    operators = re.findall(r"[+\-*/^]", q)
+
     if numbers and operators:
         expr_parts = []
         for i, num in enumerate(numbers):
@@ -1074,10 +1213,10 @@ def extract_calc_expression(user_input: str) -> str | None:
             if i < len(operators):
                 expr_parts.append(operators[i])
         return " ".join(expr_parts)
-    
+
     if numbers:
         return numbers[0]
-    
+
     return None
 
 
@@ -1087,26 +1226,26 @@ def synthesize_tool_args(tool_name: str, args: dict, user_input: str) -> dict:
     Helps small models that provide incomplete arguments.
     """
     args = dict(args)
-    
+
     if tool_name == "calculator":
         expr = args.get("expression", "")
-        
+
         # If expression is a dict or other non-string, extract it
         if isinstance(expr, dict):
             # Model gave a schema instead of a value
             expr = ""
         elif not isinstance(expr, str):
             expr = str(expr) if expr else ""
-        
+
         # Extract what the expression should be from the user input
         extracted = extract_calc_expression(user_input)
-        
+
         # Check if the model's expression is incomplete or wrong
         if extracted:
             # Compare: if extracted has more operators, use it
-            model_ops = len(re.findall(r'[+\-*/^]', expr))
-            extracted_ops = len(re.findall(r'[+\-*/^]', extracted))
-            
+            model_ops = len(re.findall(r"[+\-*/^]", expr))
+            extracted_ops = len(re.findall(r"[+\-*/^]", extracted))
+
             # If extracted has more operations, use it
             if extracted_ops > model_ops:
                 if isinstance(args.get("expression"), dict):
@@ -1114,7 +1253,7 @@ def synthesize_tool_args(tool_name: str, args: dict, user_input: str) -> dict:
                 else:
                     args["expression"] = extracted
                 return args
-            
+
             # Special case: compare actual results
             if model_ops > 0 and extracted_ops == 0:
                 try:
@@ -1124,6 +1263,7 @@ def synthesize_tool_args(tool_name: str, args: dict, user_input: str) -> dict:
                     # Empty allowed_names: the model's expression here is
                     # pure arithmetic, no math functions expected.
                     from .safe_eval import safe_eval
+
                     model_result = float(safe_eval(expr, {}))
                     extracted_num = float(extracted)
 
@@ -1139,25 +1279,26 @@ def synthesize_tool_args(tool_name: str, args: dict, user_input: str) -> dict:
                         return args
                 except Exception:
                     pass
-        
+
         # Check if expression is just an operator or very short
         if len(expr) <= 2 or expr in ["+", "-", "*", "/", "^", "**"]:
             if extracted:
                 args["expression"] = extracted
                 args = {"expression": extracted}
-        
+
         # Check if expression is just a number but question implies operation
-        elif expr and re.match(r'^\d+\.?\d*$', str(expr).strip()):
+        elif expr and re.match(r"^\d+\.?\d*$", str(expr).strip()):
             q_lower = user_input.lower()
             if "sqrt" in q_lower or "square root" in q_lower:
                 args["expression"] = f"sqrt({expr})"
-    
+
     return args
 
 
 # ============================================================================
 # Additional Helper Functions for Small Models
 # ============================================================================
+
 
 def strip_tool_prefix(result: str) -> str:
     """Strip the 'tool_name → ' prefix added to successful results entries."""
@@ -1185,15 +1326,31 @@ def is_simple_answered_query(user_input: str, successful_results: list[str]) -> 
 
     # Date/time patterns
     date_time_keywords = [
-        "date", "time", "day", "today", "now", "current date",
-        "what day", "what time", "year", "month",
+        "date",
+        "time",
+        "day",
+        "today",
+        "now",
+        "current date",
+        "what day",
+        "what time",
+        "year",
+        "month",
     ]
     if any(kw in lower for kw in date_time_keywords):
         return True
 
     # Simple arithmetic / single calculation
-    math_keywords = ["what is", "calculate", "compute", "sqrt", "square root",
-                     "result of", "value of", "evaluate"]
+    math_keywords = [
+        "what is",
+        "calculate",
+        "compute",
+        "sqrt",
+        "square root",
+        "result of",
+        "value of",
+        "evaluate",
+    ]
     math_ops = ["+", "-", "*", "/", "^", "**", "%"]
     if any(kw in lower for kw in math_keywords) and len(lower) < 60:
         return True
@@ -1215,24 +1372,43 @@ def is_greeting_or_simple(text: str) -> bool:
     """
     lower = text.lower().strip()
     greetings = [
-        "hi", "hello", "hey", "hola", "howdy", "greetings",
-        "good morning", "good afternoon", "good evening",
-        "what's up", "whats up", "sup", "yo",
-        "thanks", "thank you", "ok", "okay", "yes", "no", "sure",
-        "bye", "goodbye", "see you", "cya",
+        "hi",
+        "hello",
+        "hey",
+        "hola",
+        "howdy",
+        "greetings",
+        "good morning",
+        "good afternoon",
+        "good evening",
+        "what's up",
+        "whats up",
+        "sup",
+        "yo",
+        "thanks",
+        "thank you",
+        "ok",
+        "okay",
+        "yes",
+        "no",
+        "sure",
+        "bye",
+        "goodbye",
+        "see you",
+        "cya",
     ]
-    
+
     # Check for exact match or greeting at start
     if lower in greetings:
         return True
     for g in greetings:
         if lower.startswith(g + " "):
             return True
-    
+
     # Very short messages (< 10 chars) are likely simple
     if len(lower) < 10 and not any(c in lower for c in "0123456789+-*/=><"):
         return True
-    
+
     return False
 
 
@@ -1242,59 +1418,73 @@ def is_small_model(model: str) -> bool:
     Small models benefit from few-shot prompting.
     """
     model_lower = model.lower()
-    
+
     # Check for size indicators in model name
     small_indicators = [
-        ":0.5b", ":0.6b", ":1b", ":1.5b", ":1.8b",
-        "0.5b", "0.6b", "1b", "1.5b",
-        "270m", "135m", "350m", "500m", "800m",
-        "tiny", "mini", "micro", "small"
+        ":0.5b",
+        ":0.6b",
+        ":1b",
+        ":1.5b",
+        ":1.8b",
+        "0.5b",
+        "0.6b",
+        "1b",
+        "1.5b",
+        "270m",
+        "135m",
+        "350m",
+        "500m",
+        "800m",
+        "tiny",
+        "mini",
+        "micro",
+        "small",
     ]
-    
+
     for indicator in small_indicators:
         if indicator in model_lower:
             return True
-    
+
     # Check parameter count after common model names
-    param_match = re.search(r'(\d+(?:\.\d+)?)[bm]', model_lower)
+    param_match = re.search(r"(\d+(?:\.\d+)?)[bm]", model_lower)
     if param_match:
         size_str = param_match.group(1)
         try:
             size = float(size_str)
-            if 'm' in model_lower[param_match.end()-1:param_match.end()]:
+            if "m" in model_lower[param_match.end() - 1 : param_match.end()]:
                 return True  # Any million-parameter model is small
             if size < 2:
                 return True  # Less than 2 billion
         except ValueError:
             pass
-    
+
     return False
 
 
 # Repetition detection pattern - catches "Final Answer: X" repeated multiple times
-_REPETITION_RE = re.compile(r'(Final Answer:\s*[^\n]+)(\s*\1){2,}', re.IGNORECASE)
+_REPETITION_RE = re.compile(r"(Final Answer:\s*[^\n]+)(\s*\1){2,}", re.IGNORECASE)
 
 
 def detect_and_fix_repetition(text: str) -> str:
     """
     Detect and fix repetitive output from small models.
-    
+
     Some models (like qwen3:0.6b) get stuck in loops repeating the same phrase:
         "Final Answer: 120\nFinal Answer: 120\nFinal Answer: 120..."
-    
+
     This function detects such patterns and returns the text with only one instance.
     Also handles general repetition of any phrase 3+ times.
     """
     if not text:
         return text
-    
+
     # Fix "Final Answer:" repetition specifically
     match = _REPETITION_RE.search(text)
     if match:
-        text = _REPETITION_RE.sub(r'\1', text)
-    
+        text = _REPETITION_RE.sub(r"\1", text)
+
     # Also detect and fix any line repeated 3+ times at the end
-    lines = text.split('\n')
+    lines = text.split("\n")
     if len(lines) >= 3:
         last_line = lines[-1].strip()
         if last_line:
@@ -1304,9 +1494,9 @@ def detect_and_fix_repetition(text: str) -> str:
                     repeat_count += 1
                 else:
                     break
-            
+
             if repeat_count >= 3:
-                text = '\n'.join(lines[:-repeat_count + 1])
+                text = "\n".join(lines[: -repeat_count + 1])
 
     return text
 
@@ -1347,24 +1537,24 @@ def detect_and_fix_repetition(text: str) -> str:
 # header, so it's matched WITHOUT requiring a ``=`` or ``:`` separator —
 # the token follows ``Bearer`` directly (after whitespace).
 _SECRET_LINE_RE = re.compile(
-    r'\b('
-    r'password|passwd|pwd|'
-    r'api[_-]?key|auth[_-]?token|access[_-]?token|refresh[_-]?token|'
-    r'secret[_-]?key|client[_-]?secret|private[_-]?key|'
+    r"\b("
+    r"password|passwd|pwd|"
+    r"api[_-]?key|auth[_-]?token|access[_-]?token|refresh[_-]?token|"
+    r"secret[_-]?key|client[_-]?secret|private[_-]?key|"
     # AWS env vars: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SECRET_KEY
-    r'aws[_-]?(?:secret[_-])?(?:access|secret)[_-]?key(?:[_-]?id)?|'
-    r'connection[_-]?string'
-    r')'
-    r'(\s*[:=]\s*)(\S+)'
+    r"aws[_-]?(?:secret[_-])?(?:access|secret)[_-]?key(?:[_-]?id)?|"
+    r"connection[_-]?string"
+    r")"
+    r"(\s*[:=]\s*)(\S+)"
     # Bearer <token> — value follows directly (no = or :)
-    r'|\b(bearer)(\s+)(\S+)',
+    r"|\b(bearer)(\s+)(\S+)",
     re.IGNORECASE,
 )
 
 # ANSI escape sequences (CSI, OSC, etc.). Strip these from tool output
 # so a malicious ``http_get`` response can't clear the user's screen,
 # rewrite the terminal title, or enable mouse tracking during chat.
-_ANSI_ESCAPE_RE = re.compile(r'\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-_]')
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-_]")
 
 # Default cap on tool result size before truncation. 8KB is enough for
 # most legitimate tool outputs (a directory listing, a small file, a
@@ -1420,7 +1610,7 @@ def sanitize_tool_output(
     body = result if isinstance(result, str) else str(result)
 
     if strip_ansi:
-        body = _ANSI_ESCAPE_RE.sub('', body)
+        body = _ANSI_ESCAPE_RE.sub("", body)
 
     # SEC-12 / ROB-26 (R07.07): truncate BEFORE redacting, not after.
     # The prior order was redact→truncate, which left a partial-secret edge
@@ -1452,8 +1642,8 @@ def sanitize_tool_output(
         body = _SECRET_LINE_RE.sub(_redact, body)
 
     # Build wrapper tag. Use XML-safe attribute values (escape quotes).
-    tool_attr = tool_name.replace('"', '&quot;') if tool_name else ""
-    call_attr = (tool_call_id or "").replace('"', '&quot;') if tool_call_id else ""
+    tool_attr = tool_name.replace('"', "&quot;") if tool_name else ""
+    call_attr = (tool_call_id or "").replace('"', "&quot;") if tool_call_id else ""
 
     attrs = ""
     if tool_attr:

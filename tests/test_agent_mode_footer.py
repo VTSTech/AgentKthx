@@ -14,12 +14,8 @@ escape sequences were emitted to stdout.
 
 from __future__ import annotations
 
-import io
 import os
-import sys
-from unittest.mock import patch, MagicMock
-
-import pytest
+from unittest.mock import MagicMock
 
 
 def _term_size(lines: int = 24, cols: int = 80):
@@ -31,6 +27,7 @@ def _term_size(lines: int = 24, cols: int = 80):
 def _make_args():
     """Minimal argparse.Namespace for cmd_agent."""
     import argparse
+
     ns = argparse.Namespace(
         model="test-model",
         backend="zai",
@@ -67,7 +64,7 @@ def test_cmd_agent_emits_scroll_region_setup_and_teardown(monkeypatch, capsys):
     mode — every subsequent shell command scrolls in the wrong region."""
     # Patch input() to return /quit immediately so the loop exits.
     inputs = iter(["/quit"])
-    monkeypatch.setattr('builtins.input', lambda *a, **kw: next(inputs))
+    monkeypatch.setattr("builtins.input", lambda *a, **kw: next(inputs))
 
     # Patch _build_agent to return a mock agent — we don't need a real LLM.
     mock_agent = MagicMock()
@@ -93,28 +90,26 @@ def test_cmd_agent_emits_scroll_region_setup_and_teardown(monkeypatch, capsys):
     mock_term = _term_size()
 
     from agentkthx import cli
-    monkeypatch.setattr(cli, '_build_agent', lambda *a, **kw: mock_agent)
-    monkeypatch.setattr(cli, '_init_acp', lambda *a, **kw: (None, False))
-    monkeypatch.setattr(cli, '_print_session_header', lambda *a, **kw: None)
-    monkeypatch.setattr(cli, '_print_update_notice', lambda *a, **kw: None)
-    monkeypatch.setattr('sys.stdout.isatty', lambda: True)
+
+    monkeypatch.setattr(cli, "_build_agent", lambda *a, **kw: mock_agent)
+    monkeypatch.setattr(cli, "_init_acp", lambda *a, **kw: (None, False))
+    monkeypatch.setattr(cli, "_print_session_header", lambda *a, **kw: None)
+    monkeypatch.setattr(cli, "_print_update_notice", lambda *a, **kw: None)
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
     # NOTE: accept *args, **kwargs so pytest's own internal call to
     # get_terminal_size(fallback=(80,24)) doesn't break.
-    monkeypatch.setattr('shutil.get_terminal_size',
-                        lambda *a, **kw: mock_term)
+    monkeypatch.setattr("shutil.get_terminal_size", lambda *a, **kw: mock_term)
 
     args = _make_args()
     rc = cli.cmd_agent(args)
 
     captured = capsys.readouterr()
     # Setup emits DECSTBM: \033[1;Nr where N = lines - 2 = 22
-    assert "\033[1;22r" in captured.out, (
-        "scroll region setup not emitted — terminal won't reserve footer"
-    )
+    assert (
+        "\033[1;22r" in captured.out
+    ), "scroll region setup not emitted — terminal won't reserve footer"
     # Teardown emits DECSTBM reset: \033[r
-    assert "\033[r" in captured.out, (
-        "scroll region teardown not emitted — terminal left broken"
-    )
+    assert "\033[r" in captured.out, "scroll region teardown not emitted — terminal left broken"
     assert rc == 0
 
 
@@ -136,7 +131,7 @@ def test_cmd_agent_registers_on_step_callback(monkeypatch, capsys):
         captured["cb"] = mock_agent._on_step_callback
         return next(inputs)
 
-    monkeypatch.setattr('builtins.input', _fake_input)
+    monkeypatch.setattr("builtins.input", _fake_input)
 
     mock_agent = MagicMock()
     mock_agent.model = "test-model"
@@ -157,25 +152,25 @@ def test_cmd_agent_registers_on_step_callback(monkeypatch, capsys):
     mock_term = _term_size()
 
     from agentkthx import cli
-    monkeypatch.setattr(cli, '_build_agent', lambda *a, **kw: mock_agent)
-    monkeypatch.setattr(cli, '_init_acp', lambda *a, **kw: (None, False))
-    monkeypatch.setattr(cli, '_print_session_header', lambda *a, **kw: None)
-    monkeypatch.setattr(cli, '_print_update_notice', lambda *a, **kw: None)
-    monkeypatch.setattr('sys.stdout.isatty', lambda: True)
-    monkeypatch.setattr('shutil.get_terminal_size',
-                        lambda *a, **kw: mock_term)
+
+    monkeypatch.setattr(cli, "_build_agent", lambda *a, **kw: mock_agent)
+    monkeypatch.setattr(cli, "_init_acp", lambda *a, **kw: (None, False))
+    monkeypatch.setattr(cli, "_print_session_header", lambda *a, **kw: None)
+    monkeypatch.setattr(cli, "_print_update_notice", lambda *a, **kw: None)
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    monkeypatch.setattr("shutil.get_terminal_size", lambda *a, **kw: mock_term)
 
     cli.cmd_agent(_make_args())
 
     # Registered DURING the loop (snapshotted at the first prompt):
-    assert captured["cb"] is not None, (
-        "_on_step_callback was not registered — footer won't update during streaming"
-    )
+    assert (
+        captured["cb"] is not None
+    ), "_on_step_callback was not registered — footer won't update during streaming"
     # ROB-12 (R07.12 intra): and cleared on exit — a reused Agent must
     # never fire the stale closure into the dead cmd_agent frame.
-    assert mock_agent._on_step_callback is None, (
-        "_on_step_callback was not cleared on exit — stale closure outlives cmd_agent"
-    )
+    assert (
+        mock_agent._on_step_callback is None
+    ), "_on_step_callback was not cleared on exit — stale closure outlives cmd_agent"
 
 
 def test_cmd_agent_skips_footer_in_non_tty(monkeypatch, capsys):
@@ -183,7 +178,7 @@ def test_cmd_agent_skips_footer_in_non_tty(monkeypatch, capsys):
     NOT emit scroll-region escape sequences — they'd corrupt log files
     and CI output."""
     inputs = iter(["/quit"])
-    monkeypatch.setattr('builtins.input', lambda *a, **kw: next(inputs))
+    monkeypatch.setattr("builtins.input", lambda *a, **kw: next(inputs))
 
     mock_agent = MagicMock()
     mock_agent.model = "test-model"
@@ -200,17 +195,18 @@ def test_cmd_agent_skips_footer_in_non_tty(monkeypatch, capsys):
     mock_agent.memory = MagicMock()
 
     from agentkthx import cli
-    monkeypatch.setattr(cli, '_build_agent', lambda *a, **kw: mock_agent)
-    monkeypatch.setattr(cli, '_init_acp', lambda *a, **kw: (None, False))
-    monkeypatch.setattr(cli, '_print_session_header', lambda *a, **kw: None)
-    monkeypatch.setattr(cli, '_print_update_notice', lambda *a, **kw: None)
+
+    monkeypatch.setattr(cli, "_build_agent", lambda *a, **kw: mock_agent)
+    monkeypatch.setattr(cli, "_init_acp", lambda *a, **kw: (None, False))
+    monkeypatch.setattr(cli, "_print_session_header", lambda *a, **kw: None)
+    monkeypatch.setattr(cli, "_print_update_notice", lambda *a, **kw: None)
     # stdout is NOT a TTY
-    monkeypatch.setattr('sys.stdout.isatty', lambda: False)
+    monkeypatch.setattr("sys.stdout.isatty", lambda: False)
 
     cli.cmd_agent(_make_args())
 
     captured = capsys.readouterr()
     # No scroll-region setup should be emitted when not a TTY
-    assert "\033[1;" not in captured.out or "r" not in captured.out.split("\033[1;")[1][:10], (
-        "scroll-region escape emitted in non-TTY mode — would corrupt logs"
-    )
+    assert (
+        "\033[1;" not in captured.out or "r" not in captured.out.split("\033[1;")[1][:10]
+    ), "scroll-region escape emitted in non-TTY mode — would corrupt logs"

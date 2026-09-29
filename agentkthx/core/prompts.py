@@ -24,106 +24,202 @@ PLATFORM_LIST_CMD = "dir" if _IS_WINDOWS else "ls"
 TOOL_ARG_ALIASES = {
     "calculator": {
         # Common hallucinations for expression
-        "a": "expression", "b": "expression", "x": "expression", "y": "expression",
-        "num": "expression", "number": "expression",
-        "input": "expression", "formula": "expression", "math": "expression",
-        "expr": "expression", "calc": "expression", "result": "expression",
-        "param": "expression", "args": "expression", "arg": "expression",
+        "a": "expression",
+        "b": "expression",
+        "x": "expression",
+        "y": "expression",
+        "num": "expression",
+        "number": "expression",
+        "input": "expression",
+        "formula": "expression",
+        "math": "expression",
+        "expr": "expression",
+        "calc": "expression",
+        "result": "expression",
+        "param": "expression",
+        "args": "expression",
+        "arg": "expression",
         # Power operations - combine into expression
-        "base": "_combine_power", "exponent": "_combine_power", "power": "_combine_power",
-        "n": "_combine_power", "p": "_combine_power", "exp": "_combine_power",
+        "base": "_combine_power",
+        "exponent": "_combine_power",
+        "power": "_combine_power",
+        "n": "_combine_power",
+        "p": "_combine_power",
+        "exp": "_combine_power",
     },
     "python_repl": {
         "code": "code",  # correct
-        "script": "code", "cmd": "code", "command": "code",
-        "python": "code", "py": "code", "exec": "code", "execute": "code",
-        "expression": "code", "expr": "code", "statement": "code",
-        "program": "code", "source": "code", "input": "code",
+        "script": "code",
+        "cmd": "code",
+        "command": "code",
+        "python": "code",
+        "py": "code",
+        "exec": "code",
+        "execute": "code",
+        "expression": "code",
+        "expr": "code",
+        "statement": "code",
+        "program": "code",
+        "source": "code",
+        "input": "code",
     },
     "write_file": {
         "path": "file_path",  # actual param name is file_path
-        "filepath": "file_path", "file_path": "file_path", "filename": "file_path",
-        "file": "file_path", "dest": "file_path", "destination": "file_path",
-        "output_path": "file_path", "outputfile": "file_path", "location": "file_path",
+        "filepath": "file_path",
+        "file_path": "file_path",
+        "filename": "file_path",
+        "file": "file_path",
+        "dest": "file_path",
+        "destination": "file_path",
+        "output_path": "file_path",
+        "outputfile": "file_path",
+        "location": "file_path",
         "content": "content",  # correct
-        "data": "content", "text": "content", "body": "content",
-        "output": "content", "string": "content", "value": "content",
-        "write": "content", "output_data": "content",
+        "data": "content",
+        "text": "content",
+        "body": "content",
+        "output": "content",
+        "string": "content",
+        "value": "content",
+        "write": "content",
+        "output_data": "content",
     },
     "read_file": {
         "path": "file_path",  # actual param name is file_path
-        "filepath": "file_path", "file_path": "file_path", "filename": "file_path",
-        "file": "file_path", "input": "file_path", "source": "file_path", "location": "file_path",
+        "filepath": "file_path",
+        "file_path": "file_path",
+        "filename": "file_path",
+        "file": "file_path",
+        "input": "file_path",
+        "source": "file_path",
+        "location": "file_path",
     },
     "list_directory": {
         "path": "path",  # correct
-        "dir": "path", "directory": "path", "folder": "path",
-        "dir_path": "path", "directory_path": "path", "folder_path": "path",
+        "dir": "path",
+        "directory": "path",
+        "folder": "path",
+        "dir_path": "path",
+        "directory_path": "path",
+        "folder_path": "path",
         "location": "path",
     },
     "shell": {
         "command": "command",  # correct
-        "cmd": "command", "exec": "command", "shell_cmd": "command",
-        "bash": "command", "script": "command", "instruction": "command",
-        "run": "command", "execute": "command", "op": "command",
-        "text": "command", "input": "command", "arg": "command",
-        "args": "command", "str": "command", "value": "command",
+        "cmd": "command",
+        "exec": "command",
+        "shell_cmd": "command",
+        "bash": "command",
+        "script": "command",
+        "instruction": "command",
+        "run": "command",
+        "execute": "command",
+        "op": "command",
+        "text": "command",
+        "input": "command",
+        "arg": "command",
+        "args": "command",
+        "str": "command",
+        "value": "command",
     },
     "web_search": {
         "query": "query",  # correct
-        "search": "query", "q": "query", "term": "query", "search_query": "query",
-        "keywords": "query", "text": "query", "input": "query",
+        "search": "query",
+        "q": "query",
+        "term": "query",
+        "search_query": "query",
+        "keywords": "query",
+        "text": "query",
+        "input": "query",
     },
     "get_weather": {
         "city": "city",  # correct
-        "location": "city", "place": "city", "town": "city",
-        "where": "city", "area": "city", "region": "city",
+        "location": "city",
+        "place": "city",
+        "town": "city",
+        "where": "city",
+        "area": "city",
+        "region": "city",
     },
     "convert_currency": {
         "amount": "amount",  # correct
         "from_currency": "from_currency",  # correct
         "to_currency": "to_currency",  # correct
         # Common variations
-        "from": "from_currency", "to": "to_currency",
-        "source_currency": "from_currency", "target_currency": "to_currency",
-        "money": "amount", "value": "amount", "price": "amount",
+        "from": "from_currency",
+        "to": "to_currency",
+        "source_currency": "from_currency",
+        "target_currency": "to_currency",
+        "money": "amount",
+        "value": "amount",
+        "price": "amount",
     },
     "edit_file": {
         # Common hallucinations for file_path
         "file_path": "file_path",  # correct
-        "path": "file_path", "filepath": "file_path", "file": "file_path",
-        "filename": "file_path", "source": "file_path",
+        "path": "file_path",
+        "filepath": "file_path",
+        "file": "file_path",
+        "filename": "file_path",
+        "source": "file_path",
         # Common hallucinations for old_string
         "old_string": "old_string",  # correct
-        "old": "old_string", "find": "old_string", "search": "old_string",
-        "replace": "old_string", "target": "old_string", "original": "old_string",
-        "before": "old_string", "from": "old_string", "match": "old_string",
-        "old_text": "old_string", "old_content": "old_string",
+        "old": "old_string",
+        "find": "old_string",
+        "search": "old_string",
+        "replace": "old_string",
+        "target": "old_string",
+        "original": "old_string",
+        "before": "old_string",
+        "from": "old_string",
+        "match": "old_string",
+        "old_text": "old_string",
+        "old_content": "old_string",
         # Common hallucinations for new_string
         "new_string": "new_string",  # correct
-        "new": "new_string", "replacement": "new_string", "with": "new_string",
-        "to": "new_string", "after": "new_string", "replacement_text": "new_string",
-        "new_text": "new_string", "new_content": "new_string",
+        "new": "new_string",
+        "replacement": "new_string",
+        "with": "new_string",
+        "to": "new_string",
+        "after": "new_string",
+        "replacement_text": "new_string",
+        "new_text": "new_string",
+        "new_content": "new_string",
         # Common hallucinations for replace_all
         "replace_all": "replace_all",  # correct
-        "all": "replace_all", "global": "replace_all", "everywhere": "replace_all",
+        "all": "replace_all",
+        "global": "replace_all",
+        "everywhere": "replace_all",
     },
     "todo": {
         # Common hallucinations for action
         "action": "action",  # correct
-        "act": "action", "cmd": "action", "op": "action",
-        "command": "action", "do": "action", "type": "action",
+        "act": "action",
+        "cmd": "action",
+        "op": "action",
+        "command": "action",
+        "do": "action",
+        "type": "action",
         # Common hallucinations for content
         "content": "content",  # correct
-        "text": "content", "task": "content", "description": "content",
-        "desc": "content", "item": "content", "todo": "content",
-        "message": "content", "value": "content", "input": "content",
+        "text": "content",
+        "task": "content",
+        "description": "content",
+        "desc": "content",
+        "item": "content",
+        "todo": "content",
+        "message": "content",
+        "value": "content",
+        "input": "content",
         # Common hallucinations for task_id
         "task_id": "task_id",  # correct
-        "id": "task_id", "todo_id": "task_id",
+        "id": "task_id",
+        "todo_id": "task_id",
         # Common hallucinations for priority
         "priority": "priority",  # correct
-        "pri": "priority", "level": "priority", "importance": "priority",
+        "pri": "priority",
+        "level": "priority",
+        "importance": "priority",
     },
 }
 
@@ -301,19 +397,19 @@ def get_tool_prompt(tools: list, tool_support: str = "react", family: str | None
 
     for tool in tools:
         # Get tool name and description
-        name = getattr(tool, 'name', str(tool))
-        desc = getattr(tool, 'description', '')
-        params = getattr(tool, 'params', [])
-        
+        name = getattr(tool, "name", str(tool))
+        desc = getattr(tool, "description", "")
+        params = getattr(tool, "params", [])
+
         # Build arguments example
         if params:
             param_pairs = []
             for p in params:
-                p_name = getattr(p, 'name', str(p))
-                p_type = getattr(p, 'type', 'string')
-                if p_type == 'string':
+                p_name = getattr(p, "name", str(p))
+                p_type = getattr(p, "type", "string")
+                if p_type == "string":
                     param_pairs.append(f'"{p_name}": "..."')
-                elif p_type in ('number', 'integer', 'float'):
+                elif p_type in ("number", "integer", "float"):
                     param_pairs.append(f'"{p_name}": 0')
                 else:
                     param_pairs.append(f'"{p_name}": ...')
@@ -322,14 +418,16 @@ def get_tool_prompt(tools: list, tool_support: str = "react", family: str | None
             args_example = "{}"
 
         # Truncate description if too long for table
-        short_desc = desc.split('.')[0] if desc else "No description"
+        short_desc = desc.split(".")[0] if desc else "No description"
         if len(short_desc) > 50:
             short_desc = short_desc[:47] + "..."
 
         lines.append(f"| `{name}` | {short_desc} | `{args_example}` |")
 
     lines.append("")
-    lines.append("**CRITICAL RULE**: If a tool is NOT in the available tools list, do NOT try to use it. Respond directly instead.")
+    lines.append(
+        "**CRITICAL RULE**: If a tool is NOT in the available tools list, do NOT try to use it. Respond directly instead."
+    )
 
     if not is_native:
         # ReAct format instructions — only for text-parsing models

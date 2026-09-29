@@ -53,8 +53,8 @@ def _estimate_memory_chars(memory) -> int:
         return memory.estimated_chars()
     total = 0
     for msg in memory:
-        total += len(getattr(msg, 'content', '') or '')
-        tc = getattr(msg, 'tool_calls', None)
+        total += len(getattr(msg, "content", "") or "")
+        tc = getattr(msg, "tool_calls", None)
         if tc:
             total += len(json.dumps(tc, ensure_ascii=False))
     return total
@@ -118,11 +118,13 @@ class CompactionMixin:
             # from the truncated state.
             post_chars = _estimate_memory_chars(self.memory)
             post_tokens = post_chars // 4
-            print(f"  [Compaction] {compacted} messages compacted "
-                  f"(~{estimated_tokens // 1000}K → "
-                  f"~{post_tokens // 1000}K tokens, "
-                  f"threshold {threshold_tokens // 1000}K of "
-                  f"{ctx // 1000}K context)")
+            print(
+                f"  [Compaction] {compacted} messages compacted "
+                f"(~{estimated_tokens // 1000}K → "
+                f"~{post_tokens // 1000}K tokens, "
+                f"threshold {threshold_tokens // 1000}K of "
+                f"{ctx // 1000}K context)"
+            )
 
         # R06.58 BUGFIX: ALWAYS re-snapshot running totals from the
         # post-compaction memory state, regardless of whether compaction
@@ -189,8 +191,7 @@ class CompactionMixin:
         # and _snapshot_running_tokens then hit the warm cache.
         _est_in_chars = _estimate_memory_chars(self.memory)
         _est_out_chars = len(content) + sum(
-            len(json.dumps(tc, ensure_ascii=False))
-            for tc in native_tool_calls
+            len(json.dumps(tc, ensure_ascii=False)) for tc in native_tool_calls
         )
         # If the provider returned real usage, prefer it for the OUTPUT
         # half (it's accurate for this turn's generated tokens). For

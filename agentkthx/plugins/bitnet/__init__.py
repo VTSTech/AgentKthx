@@ -12,6 +12,7 @@ from __future__ import annotations
 def register(manager) -> None:
     """Register the BitNet backend with the plugin manager."""
     from .bitnet import BitNetBackend
+
     manager.register_backend("bitnet", BitNetBackend)
 
 

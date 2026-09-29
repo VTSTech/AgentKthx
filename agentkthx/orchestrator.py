@@ -27,16 +27,16 @@ from typing import Callable, Literal
 from .agent import Agent
 from .tools import ToolRegistry
 
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # AGENT CARD
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 @dataclass
 class AgentCard:
     """
     Card describing an agent's capabilities.
-    
+
     Parameters
     ----------
     name : str
@@ -58,6 +58,7 @@ class AgentCard:
     fallback : bool
         If True, this agent runs when others fail
     """
+
     name: str
     description: str = ""
     capabilities: list[str] = field(default_factory=list)
@@ -87,9 +88,11 @@ class AgentCard:
 # ORCHESTRATOR RESULT
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 @dataclass
 class OrchestratorResult:
     """Result from orchestrator execution."""
+
     mode: str  # "router" | "pipeline" | "parallel"
     chosen_agent: str | None = None  # For router mode
     agents_used: list[str] = field(default_factory=list)
@@ -100,9 +103,11 @@ class OrchestratorResult:
     success: bool = True
     error: str = ""
 
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # ORCHESTRATOR
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 class Orchestrator:
     """
@@ -156,7 +161,7 @@ class Orchestrator:
 
         self._agents: dict[str, AgentCard] = {}
         self._agent_list: list[AgentCard] = []
-        
+
         # Thread-local storage for parallel execution
         self._thread_local = threading.local()
         self._lock = threading.Lock()
@@ -166,6 +171,7 @@ class Orchestrator:
         # Create agent if not provided
         if card.agent is None:
             from .tools import make_builtin_registry
+
             tools = ToolRegistry()
             if card.tools:
                 builtin = make_builtin_registry()
@@ -243,7 +249,7 @@ class Orchestrator:
             result.final_answer = run.final_answer
             result.agent_results[chosen] = run.final_answer
             result.agent_times[chosen] = time.perf_counter() - start
-            result.success = run.success if hasattr(run, 'success') else True
+            result.success = run.success if hasattr(run, "success") else True
         except Exception as e:
             result.agent_results[chosen] = f"[Error] {e}"
             result.agent_times[chosen] = time.perf_counter() - start
@@ -388,13 +394,15 @@ Reply with ONLY the agent name (nothing else). Pick the most suitable agent."""
             # Pass 2 — ONE re-prompt restating the valid names (MAINT-10:
             # "validate the LLM's response against the actual agent names
             # and re-prompt if invalid").
-            chosen = _strict_match(_ask(
-                [
-                    {"role": "system", "content": system_msg},
-                    {"role": "user", "content": _router_prompt(True)},
-                ],
-                temperature=0.0,
-            ))
+            chosen = _strict_match(
+                _ask(
+                    [
+                        {"role": "system", "content": system_msg},
+                        {"role": "user", "content": _router_prompt(True)},
+                    ],
+                    temperature=0.0,
+                )
+            )
             if chosen:
                 return chosen
         except Exception:
@@ -425,7 +433,7 @@ Reply with ONLY the agent name (nothing else). Pick the most suitable agent."""
             try:
                 run = card.agent.run(enhanced_input)
                 agent_result = run.final_answer
-                result.success = run.success if hasattr(run, 'success') else True
+                result.success = run.success if hasattr(run, "success") else True
             except Exception as e:
                 agent_result = f"[Error in {card.name}]: {e}"
                 result.success = False
@@ -470,9 +478,7 @@ Reply with ONLY the agent name (nothing else). Pick the most suitable agent."""
 
             # Wait for all with timeout
             done, not_done = concurrent.futures.wait(
-                futures,
-                timeout=self.timeout,
-                return_when=concurrent.futures.ALL_COMPLETED
+                futures, timeout=self.timeout, return_when=concurrent.futures.ALL_COMPLETED
             )
 
             # Cancel any still running
@@ -511,6 +517,7 @@ Reply with ONLY the agent name (nothing else). Pick the most suitable agent."""
         elif self.merge_strategy == "vote":
             # Simple voting: most common answer wins
             from collections import Counter
+
             # Normalize and count
             normalized = [r.strip().lower()[:100] for r in results.values()]
             counts = Counter(normalized)

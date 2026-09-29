@@ -40,7 +40,6 @@ from __future__ import annotations
 
 import argparse
 import inspect
-import os
 from types import SimpleNamespace
 
 import pytest
@@ -50,9 +49,7 @@ from agentkthx.cli import agent_factory as fact
 from agentkthx.core.models import Tool
 from agentkthx.core.tool_parse import ToolParser
 from agentkthx.shared_args import parse_shared_args
-
 from tests.test_loop_resilience import StubBackend
-
 
 # ----------------------------------------------------------------------------
 # Fixtures
@@ -113,6 +110,7 @@ def _cli_config() -> SimpleNamespace:
 # ROB-32 — Agent.__init__ accepts and stores force_react
 # ============================================================================
 
+
 class TestAgentForceReactParam:
 
     def test_default_is_false(self):
@@ -141,6 +139,7 @@ class TestAgentForceReactParam:
 # ----------------------------------------------------------------------------
 # ROB-32 — ToolParser: force_react enforces ReAct-only parsing
 # ============================================================================
+
 
 class TestToolParserForceReact:
 
@@ -177,6 +176,7 @@ class TestToolParserForceReact:
 # ROB-32 — the flag survives the register_tool parser rebuild
 # ============================================================================
 
+
 class TestAgentParserThreading:
 
     def test_initial_parser_threads_flag(self):
@@ -201,6 +201,7 @@ class TestAgentParserThreading:
 # ----------------------------------------------------------------------------
 # ROB-32 — THE CONTRACT: _build_agent → real Agent (the smoke-test crash)
 # ============================================================================
+
 
 class TestFactoryAgentContract:
 

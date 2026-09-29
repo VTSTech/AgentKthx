@@ -35,10 +35,10 @@ from agentkthx.agent_mode import _format_response_stats, _step_tool_stats
 from agentkthx.core.models import AgentRun, StepResult, ToolCall
 from agentkthx.core.types import StepResultType
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _tool(name: str, args: dict | None = None) -> StepResult:
     return StepResult(
@@ -69,6 +69,7 @@ def _subparser_help(command: str) -> str:
 # 1. Dynamic --backend help text
 # ---------------------------------------------------------------------------
 
+
 class TestBackendHelp:
     @pytest.mark.parametrize("command", ["chat", "agent", "run"])
     def test_help_lists_plugin_backends(self, command):
@@ -76,15 +77,23 @@ class TestBackendHelp:
         subcommand's --backend help (they always worked at runtime)."""
         help_text = _subparser_help(command)
         for backend in ("mistral", "orcarouter", "pollinations"):
-            assert backend in help_text, (
-                f"'{backend}' missing from '{command} --help' --backend text"
-            )
+            assert (
+                backend in help_text
+            ), f"'{backend}' missing from '{command} --help' --backend text"
 
     @pytest.mark.parametrize("command", ["chat", "agent", "run"])
     def test_help_lists_core_backends(self, command):
         help_text = _subparser_help(command)
-        for backend in ("ollama", "llama-server", "bitnet", "zai",
-                        "openrouter", "gemini", "openai", "huggingface"):
+        for backend in (
+            "ollama",
+            "llama-server",
+            "bitnet",
+            "zai",
+            "openrouter",
+            "gemini",
+            "openai",
+            "huggingface",
+        ):
             assert backend in help_text
 
     def test_choices_for_help_dynamic_contains_merged_registry(self):
@@ -112,8 +121,16 @@ class TestBackendHelp:
         assert "ollama" in names
         assert "orcarouter" in names  # fallback names the shipped plugins
         assert names == [
-            "ollama", "bitnet", "llama-server", "zai", "openrouter",
-            "huggingface", "gemini", "openai", "mistral", "orcarouter",
+            "ollama",
+            "bitnet",
+            "llama-server",
+            "zai",
+            "openrouter",
+            "huggingface",
+            "gemini",
+            "openai",
+            "mistral",
+            "orcarouter",
             "pollinations",
         ]
 
@@ -136,16 +153,14 @@ class TestBackendHelp:
         import agentkthx.shared_args as sa
 
         src = inspect.getsource(sa)
-        stale = (
-            "(ollama, bitnet, llama-server, zai, openrouter, huggingface, "
-            "gemini, openai)"
-        )
+        stale = "(ollama, bitnet, llama-server, zai, openrouter, huggingface, " "gemini, openai)"
         assert stale not in src
 
 
 # ---------------------------------------------------------------------------
 # 2. Per-response stats formatting (shared by agent mode + chat)
 # ---------------------------------------------------------------------------
+
 
 class TestFormatResponseStats:
     def test_plain_chat_reply_single_step_zero_tools(self):
@@ -228,8 +243,11 @@ class TestFormatResponseStats:
         the same run (single source of truth)."""
         run = AgentRun(
             final_answer="done",
-            steps=[_tool("web_search"), _tool("web_search"),
-                   StepResult(type=StepResultType.FINAL_ANSWER, content="d")],
+            steps=[
+                _tool("web_search"),
+                _tool("web_search"),
+                StepResult(type=StepResultType.FINAL_ANSWER, content="d"),
+            ],
             total_ms=10.0,
         )
         count, names = _step_tool_stats(run)
@@ -242,6 +260,7 @@ class TestFormatResponseStats:
 # 3. Wiring pins — both call sites render through the shared helper
 # ---------------------------------------------------------------------------
 
+
 class TestWiringPins:
     def test_agent_mode_display_uses_shared_helper(self):
         """The old inline f-string in agent_mode's verbose footer is
@@ -252,7 +271,7 @@ class TestWiringPins:
         src = inspect.getsource(am)
         assert "_format_response_stats(run)" in src
         # The old inline format (pluralizing nothing, no shared logic):
-        assert '{len(run.steps)} steps, {tool_call_count} tool calls' not in src
+        assert "{len(run.steps)} steps, {tool_call_count} tool calls" not in src
 
     def test_chat_renders_stats_per_response(self):
         """chat.py must import the shared helper and render its lines

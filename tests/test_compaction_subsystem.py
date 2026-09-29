@@ -13,8 +13,6 @@ Verifies the structural move of the compaction subsystem from
    provider-usage and no-usage branches.
 """
 
-import json
-
 from agentkthx.core.compaction import CompactionMixin
 
 
@@ -45,19 +43,18 @@ class _MinimalHost(CompactionMixin):
 
 
 def test_mixin_provides_all_three_methods():
-    for name in ("_check_compaction", "_snapshot_running_tokens",
-                 "_update_running_tokens"):
-        assert callable(getattr(CompactionMixin, name, None)), (
-            f"CompactionMixin is missing {name}")
+    for name in ("_check_compaction", "_snapshot_running_tokens", "_update_running_tokens"):
+        assert callable(getattr(CompactionMixin, name, None)), f"CompactionMixin is missing {name}"
         host = _MinimalHost([])
-        assert callable(getattr(host, name)), (
-            f"host instance cannot call {name}")
+        assert callable(getattr(host, name)), f"host instance cannot call {name}"
 
 
 def test_agent_inherits_from_mixin():
     from agentkthx.agent import Agent
-    assert issubclass(Agent, CompactionMixin), (
-        "Agent must inherit CompactionMixin after the Phase 7 extraction")
+
+    assert issubclass(
+        Agent, CompactionMixin
+    ), "Agent must inherit CompactionMixin after the Phase 7 extraction"
 
 
 def test_agent_does_not_redefine_moved_methods():
@@ -68,12 +65,12 @@ def test_agent_does_not_redefine_moved_methods():
     divergence this phase eliminates.
     """
     from agentkthx.agent import Agent
-    for name in ("_check_compaction", "_snapshot_running_tokens",
-                 "_update_running_tokens"):
+
+    for name in ("_check_compaction", "_snapshot_running_tokens", "_update_running_tokens"):
         defined_on_agent = name in vars(Agent)
         assert not defined_on_agent, (
-            f"Agent.__dict__ still contains {name} — extraction left a "
-            f"shadowing copy behind")
+            f"Agent.__dict__ still contains {name} — extraction left a " f"shadowing copy behind"
+        )
 
 
 def test_mixin_works_on_minimal_host_decoupled_from_agent():

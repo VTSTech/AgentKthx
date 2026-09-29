@@ -61,23 +61,20 @@ from __future__ import annotations
 import json
 import os
 import time
-import urllib.request
 import urllib.error
-from typing import Any, Generator, Optional
+import urllib.request
+from typing import Generator
 
-from agentkthx.backends.base import BaseBackend, BackendConfig
+from agentkthx.backends.base import BackendConfig
 from agentkthx.backends.openai_compat import OpenAICompatibleBackend
-from agentkthx.core.types import BackendType, ToolSupportLevel, ApiMode
-from agentkthx.core.models import Tool, ToolParam
 from agentkthx.config import (
     GEMINI_BASE_URL,
-    GEMINI_API_KEY,
-    GEMINI_DEFAULT_MODEL,
     GEMINI_FREE_ONLY,
-    GEMINI_THINKING_LEVEL,
     GEMINI_SERVICE_TIER,
+    GEMINI_THINKING_LEVEL,
 )
-
+from agentkthx.core.models import Tool
+from agentkthx.core.types import ApiMode, BackendType, ToolSupportLevel
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Free Tier rate-limit data (ground truth from Google AI Studio)
@@ -107,81 +104,81 @@ from agentkthx.config import (
 
 FREE_TIER_LIMITS: dict[str, dict[str, int]] = {
     # === Text-out chat models (FREE on Free tier) ===
-    "gemini-2.5-flash":          {"rpm": 5,   "tpm": 250_000, "rpd": 20},
-    "gemini-2.5-flash-lite":     {"rpm": 10,  "tpm": 250_000, "rpd": 20},
-    "gemini-3-flash-preview":    {"rpm": 5,   "tpm": 250_000, "rpd": 20},
-    "gemini-3.1-flash-lite":     {"rpm": 15,  "tpm": 250_000, "rpd": 500},
-    "gemini-3.5-flash":          {"rpm": 5,   "tpm": 250_000, "rpd": 20},
-    "gemini-3.5-flash-lite":     {"rpm": 15,  "tpm": 250_000, "rpd": 500},
-    "gemini-3.6-flash":          {"rpm": 5,   "tpm": 250_000, "rpd": 20},
-    "gemini-3.7-flash":          {"rpm": 5,   "tpm": 250_000, "rpd": 20},
-    "gemini-3.8-flash":          {"rpm": 5,   "tpm": 250_000, "rpd": 20},
+    "gemini-2.5-flash": {"rpm": 5, "tpm": 250_000, "rpd": 20},
+    "gemini-2.5-flash-lite": {"rpm": 10, "tpm": 250_000, "rpd": 20},
+    "gemini-3-flash-preview": {"rpm": 5, "tpm": 250_000, "rpd": 20},
+    "gemini-3.1-flash-lite": {"rpm": 15, "tpm": 250_000, "rpd": 500},
+    "gemini-3.5-flash": {"rpm": 5, "tpm": 250_000, "rpd": 20},
+    "gemini-3.5-flash-lite": {"rpm": 15, "tpm": 250_000, "rpd": 500},
+    "gemini-3.6-flash": {"rpm": 5, "tpm": 250_000, "rpd": 20},
+    "gemini-3.7-flash": {"rpm": 5, "tpm": 250_000, "rpd": 20},
+    "gemini-3.8-flash": {"rpm": 5, "tpm": 250_000, "rpd": 20},
     # Note: Gemini 2 Flash / 2 Flash Lite (legacy 2.0) show 0/0/0 — being
     # shut down. Not on free tier.
-
     # === Multi-modal generative (TTS variants — FREE on Free tier) ===
-    "gemini-2.5-flash-preview-tts":       {"rpm": 3, "tpm": 10_000, "rpd": 10},
-    "gemini-2.5-pro-preview-tts":         {"rpm": 0, "tpm": 0,       "rpd": 0},  # NOT free
-    "gemini-3.1-flash-tts-preview":       {"rpm": 3, "tpm": 10_000, "rpd": 10},
-    "gemini-3.8-flash-tts":               {"rpm": 3, "tpm": 10_000, "rpd": 10},
-    "gemini-3.8-flash-lite-tts":         {"rpm": 3, "tpm": 10_000, "rpd": 10},
-
+    "gemini-2.5-flash-preview-tts": {"rpm": 3, "tpm": 10_000, "rpd": 10},
+    "gemini-2.5-pro-preview-tts": {"rpm": 0, "tpm": 0, "rpd": 0},  # NOT free
+    "gemini-3.1-flash-tts-preview": {"rpm": 3, "tpm": 10_000, "rpd": 10},
+    "gemini-3.8-flash-tts": {"rpm": 3, "tpm": 10_000, "rpd": 10},
+    "gemini-3.8-flash-lite-tts": {"rpm": 3, "tpm": 10_000, "rpd": 10},
     # === Live API / Transcribe (FREE on Free tier, but uses audio endpoints) ===
-    "gemini-3.5-transcribe":              {"rpm": 3, "tpm": 10_000, "rpd": 25},
-    "gemini-3.5-transcribe-live":         {"rpm": 3, "tpm": 10_000, "rpd": 25},  # inferred
-
+    "gemini-3.5-transcribe": {"rpm": 3, "tpm": 10_000, "rpd": 25},
+    "gemini-3.5-transcribe-live": {"rpm": 3, "tpm": 10_000, "rpd": 25},  # inferred
     # === Embeddings (FREE on Free tier) ===
-    "gemini-embedding-001":               {"rpm": 100, "tpm": 30_000, "rpd": 1_000},
-    "gemini-embedding-2-preview":        {"rpm": 100, "tpm": 30_000, "rpd": 1_000},
-    "gemini-embedding-2":                 {"rpm": 100, "tpm": 30_000, "rpd": 1_000},  # inferred
-
+    "gemini-embedding-001": {"rpm": 100, "tpm": 30_000, "rpd": 1_000},
+    "gemini-embedding-2-preview": {"rpm": 100, "tpm": 30_000, "rpd": 1_000},
+    "gemini-embedding-2": {"rpm": 100, "tpm": 30_000, "rpd": 1_000},  # inferred
     # === Robotics (FREE on Free tier, but uses specialized robotics endpoint) ===
-    "gemini-robotics-er-2-preview":              {"rpm": 5, "tpm": 250_000, "rpd": 20},
-    "gemini-robotics-er-2-streaming-preview":    {"rpm": 5, "tpm": 250_000, "rpd": 20},  # inferred
-    "gemini-robotics-er-1.6-preview":            {"rpm": 5, "tpm": 250_000, "rpd": 20},  # inferred
-
+    "gemini-robotics-er-2-preview": {"rpm": 5, "tpm": 250_000, "rpd": 20},
+    "gemini-robotics-er-2-streaming-preview": {"rpm": 5, "tpm": 250_000, "rpd": 20},  # inferred
+    "gemini-robotics-er-1.6-preview": {"rpm": 5, "tpm": 250_000, "rpd": 20},  # inferred
     # === Managed agents (FREE on Free tier) ===
-    "antigravity-preview-05-2026":        {"rpm": 60, "tpm": 100_000, "rpd": 100},
-    "antigravity-preview-09-2026":        {"rpm": 60, "tpm": 100_000, "rpd": 100},  # inferred
-    "antigravity-preview-latest":         {"rpm": 60, "tpm": 100_000, "rpd": 100},  # inferred
-
+    "antigravity-preview-05-2026": {"rpm": 60, "tpm": 100_000, "rpd": 100},
+    "antigravity-preview-09-2026": {"rpm": 60, "tpm": 100_000, "rpd": 100},  # inferred
+    "antigravity-preview-latest": {"rpm": 60, "tpm": 100_000, "rpd": 100},  # inferred
     # === Gemma open-source models (FREE on Free tier, generous RPD!) ===
     # These are served via the Gemini API catalog but are actually Google's
     # open-source Gemma models. They're chat-capable text LLMs in principle,
     # but UNTESTED via the OpenAI-compat /chat/completions endpoint —
     # they may require the native Gemma/Vertex API. See TODO in
     # _NON_CHAT_PATTERNS comment block.
-    "gemma-4-26b-a4b-it":                 {"rpm": 30, "tpm": 16_000, "rpd": 14_400},
-    "gemma-4-31b-it":                     {"rpm": 30, "tpm": 16_000, "rpd": 14_400},  # inferred (truncated in source)
-
+    "gemma-4-26b-a4b-it": {"rpm": 30, "tpm": 16_000, "rpd": 14_400},
+    "gemma-4-31b-it": {"rpm": 30, "tpm": 16_000, "rpd": 14_400},  # inferred (truncated in source)
     # === NOT on Free tier (0/0/0 — listed for completeness / future ref) ===
-    "gemini-2.0-flash":                   {"rpm": 0, "tpm": 0, "rpd": 0},  # legacy, being shut down
-    "gemini-2.0-flash-lite":              {"rpm": 0, "tpm": 0, "rpd": 0},  # legacy, being shut down
-    "gemini-2.5-pro":                     {"rpm": 0, "tpm": 0, "rpd": 0},  # Pro = paid
-    "gemini-2.5-pro-preview-tts":        {"rpm": 0, "tpm": 0, "rpd": 0},  # Pro TTS = paid
-    "gemini-3.1-pro-preview":            {"rpm": 0, "tpm": 0, "rpd": 0},  # Pro = paid
-    "gemini-3.1-pro-preview-customtools":{"rpm": 0, "tpm": 0, "rpd": 0},  # Pro = paid
-    "deep-research-preview-04-2026":      {"rpm": 0, "tpm": 0, "rpd": 0},  # paid agentic
-    "deep-research-max-preview-04-2026":  {"rpm": 0, "tpm": 0, "rpd": 0},  # paid agentic
-    "deep-research-pro-preview-12-2025":  {"rpm": 0, "tpm": 0, "rpd": 0},  # paid agentic
-    "gemini-2.5-computer-use-preview-10-2025": {"rpm": 0, "tpm": 0, "rpd": 0},  # paid, native API only
-    "gemini-2.5-flash-image":            {"rpm": 0, "tpm": 0, "rpd": 0},  # Nano Banana (image gen = paid)
-    "gemini-3-pro-image":                {"rpm": 0, "tpm": 0, "rpd": 0},  # Nano Banana Pro (image gen = paid)
-    "gemini-3-pro-image-preview":        {"rpm": 0, "tpm": 0, "rpd": 0},
-    "gemini-3.1-flash-image":            {"rpm": 0, "tpm": 0, "rpd": 0},  # Nano Banana 2 (image gen = paid)
-    "gemini-3.1-flash-image-preview":    {"rpm": 0, "tpm": 0, "rpd": 0},
-    "gemini-3.1-flash-lite-image":       {"rpm": 0, "tpm": 0, "rpd": 0},  # Nano Banana 2 Lite (image gen = paid)
+    "gemini-2.0-flash": {"rpm": 0, "tpm": 0, "rpd": 0},  # legacy, being shut down
+    "gemini-2.0-flash-lite": {"rpm": 0, "tpm": 0, "rpd": 0},  # legacy, being shut down
+    "gemini-2.5-pro": {"rpm": 0, "tpm": 0, "rpd": 0},  # Pro = paid
+    "gemini-3.1-pro-preview": {"rpm": 0, "tpm": 0, "rpd": 0},  # Pro = paid
+    "gemini-3.1-pro-preview-customtools": {"rpm": 0, "tpm": 0, "rpd": 0},  # Pro = paid
+    "deep-research-preview-04-2026": {"rpm": 0, "tpm": 0, "rpd": 0},  # paid agentic
+    "deep-research-max-preview-04-2026": {"rpm": 0, "tpm": 0, "rpd": 0},  # paid agentic
+    "deep-research-pro-preview-12-2025": {"rpm": 0, "tpm": 0, "rpd": 0},  # paid agentic
+    "gemini-2.5-computer-use-preview-10-2025": {
+        "rpm": 0,
+        "tpm": 0,
+        "rpd": 0,
+    },  # paid, native API only
+    "gemini-2.5-flash-image": {"rpm": 0, "tpm": 0, "rpd": 0},  # Nano Banana (image gen = paid)
+    "gemini-3-pro-image": {"rpm": 0, "tpm": 0, "rpd": 0},  # Nano Banana Pro (image gen = paid)
+    "gemini-3-pro-image-preview": {"rpm": 0, "tpm": 0, "rpd": 0},
+    "gemini-3.1-flash-image": {"rpm": 0, "tpm": 0, "rpd": 0},  # Nano Banana 2 (image gen = paid)
+    "gemini-3.1-flash-image-preview": {"rpm": 0, "tpm": 0, "rpd": 0},
+    "gemini-3.1-flash-lite-image": {
+        "rpm": 0,
+        "tpm": 0,
+        "rpd": 0,
+    },  # Nano Banana 2 Lite (image gen = paid)
     "gemini-3.1-flash-lite-image-preview": {"rpm": 0, "tpm": 0, "rpd": 0},
-    "veo-3.1-generate-preview":           {"rpm": 0, "tpm": 0, "rpd": 0},  # video gen = paid
-    "veo-3.1-fast-generate-preview":     {"rpm": 0, "tpm": 0, "rpd": 0},
-    "veo-3.1-lite-generate-preview":     {"rpm": 0, "tpm": 0, "rpd": 0},
-    "gemini-omni-1.1-flash":             {"rpm": 0, "tpm": 0, "rpd": 0},  # video gen = paid
-    "gemini-omni-flash-preview":         {"rpm": 0, "tpm": 0, "rpd": 0},
-    "lyria-3.5":                         {"rpm": 0, "tpm": 0, "rpd": 0},  # music gen = paid
-    "lyria-3-pro-preview":               {"rpm": 0, "tpm": 0, "rpd": 0},
-    "lyria-3-clip-preview":              {"rpm": 0, "tpm": 0, "rpd": 0},
-    "lyria-realtime-exp":                {"rpm": 0, "tpm": 0, "rpd": 0},
-    "aqa":                               {"rpm": 0, "tpm": 0, "rpd": 0},  # Answer Quality Assessment
+    "veo-3.1-generate-preview": {"rpm": 0, "tpm": 0, "rpd": 0},  # video gen = paid
+    "veo-3.1-fast-generate-preview": {"rpm": 0, "tpm": 0, "rpd": 0},
+    "veo-3.1-lite-generate-preview": {"rpm": 0, "tpm": 0, "rpd": 0},
+    "gemini-omni-1.1-flash": {"rpm": 0, "tpm": 0, "rpd": 0},  # video gen = paid
+    "gemini-omni-flash-preview": {"rpm": 0, "tpm": 0, "rpd": 0},
+    "lyria-3.5": {"rpm": 0, "tpm": 0, "rpd": 0},  # music gen = paid
+    "lyria-3-pro-preview": {"rpm": 0, "tpm": 0, "rpd": 0},
+    "lyria-3-clip-preview": {"rpm": 0, "tpm": 0, "rpd": 0},
+    "lyria-realtime-exp": {"rpm": 0, "tpm": 0, "rpd": 0},
+    "aqa": {"rpm": 0, "tpm": 0, "rpd": 0},  # Answer Quality Assessment
 }
 
 
@@ -203,7 +200,7 @@ def _is_free_tier_model(model_id: str) -> bool:
         return False
     m = model_id.lower()
     if m.startswith("models/"):
-        m = m[len("models/"):]
+        m = m[len("models/") :]
 
     # 1. Exact match against the FREE_TIER_LIMITS table
     if m in FREE_TIER_LIMITS:
@@ -261,7 +258,7 @@ def _get_free_tier_limits(model_id: str) -> dict[str, int] | None:
         return None
     m = model_id.lower()
     if m.startswith("models/"):
-        m = m[len("models/"):]
+        m = m[len("models/") :]
     return FREE_TIER_LIMITS.get(m)  # None if not in the table (heuristic-only match)
 
 
@@ -344,9 +341,9 @@ GEMINI_MODELS: dict[str, dict] = {
         "description": "Gemini 3.1 Flash-Lite",
     },
     "gemini-3.1-pro-preview": {
-        "context_length": 2_097_152,           # 2M for Pro
+        "context_length": 2_097_152,  # 2M for Pro
         "max_completion_tokens": 65_536,
-        "free_tier": False,                    # Pro is not on free tier
+        "free_tier": False,  # Pro is not on free tier
         "supports_thinking": True,
         "thinking_levels": ["minimal", "low", "medium", "high"],
         "thinking_can_disable": False,
@@ -354,7 +351,6 @@ GEMINI_MODELS: dict[str, dict] = {
         "family": "gemini-3",
         "description": "Gemini 3.1 Pro Preview — 2M context, paid tier only",
     },
-
     # === Gemini 2.5 family — legacy but still served ===
     # Available only to projects that used 2.5 before. For new projects,
     # use gemini-3.5-flash-lite or gemini-3.8-flash.
@@ -489,21 +485,21 @@ def detect_gemini_family(model_name: str) -> dict:
 # against the model ID. Order matters: more specific patterns first
 # (e.g. "nano-banana" before "banana" would matter if we had such a case).
 _NON_CHAT_PATTERNS = (
-    "embedding",            # gemini-embedding-001, gemini-embedding-2-preview → /embeddings endpoint
-    "veo-",                  # veo-3.1-generate-preview, veo-3.1-fast-generate-preview → /videos endpoint
-    "lyria-",                # lyria-3.5, lyria-3-pro-preview, lyria-realtime-exp → music gen endpoint
-    "imagen-",               # imagen-4.0-generate (shut down, but still listed) → /images endpoint
-    "robotics-",             # gemini-robotics-er-2-preview → specialized robotics endpoint
-    "transcribe",            # gemini-3.5-transcribe, gemini-3.5-transcribe-live → /audio/transcriptions
-    "live-translate",        # gemini-3.5-live-translate-preview → Live API (WebSocket)
-    "-tts",                  # gemini-3.8-flash-tts, gemini-2.5-flash-preview-tts → native TTS path
-    "-live",                 # gemini-3.8-live, gemini-3.1-flash-live-preview, gemini-3.8-live-extended-thinking → Live API (WebSocket)
-    "-image",                # gemini-3.1-flash-image (Nano Banana), gemini-3-pro-image → /images endpoint
-    "computer-use",          # gemini-2.5-computer-use-preview → native API only (specialized)
-    "deep-research",         # deep-research-preview, deep-research-max-preview → agentic endpoint
-    "antigravity",           # antigravity-preview-05-2026 → managed agent endpoint
-    "aqa",                   # aqa (Answer Quality Assessment — not a chat model)
-    "omni-",                 # gemini-omni-1.1-flash → /videos endpoint (video gen)
+    "embedding",  # gemini-embedding-001, gemini-embedding-2-preview → /embeddings endpoint
+    "veo-",  # veo-3.1-generate-preview, veo-3.1-fast-generate-preview → /videos endpoint
+    "lyria-",  # lyria-3.5, lyria-3-pro-preview, lyria-realtime-exp → music gen endpoint
+    "imagen-",  # imagen-4.0-generate (shut down, but still listed) → /images endpoint
+    "robotics-",  # gemini-robotics-er-2-preview → specialized robotics endpoint
+    "transcribe",  # gemini-3.5-transcribe, gemini-3.5-transcribe-live → /audio/transcriptions
+    "live-translate",  # gemini-3.5-live-translate-preview → Live API (WebSocket)
+    "-tts",  # gemini-3.8-flash-tts, gemini-2.5-flash-preview-tts → native TTS path
+    "-live",  # gemini-3.8-live, gemini-3.1-flash-live-preview, gemini-3.8-live-extended-thinking → Live API (WebSocket)
+    "-image",  # gemini-3.1-flash-image (Nano Banana), gemini-3-pro-image → /images endpoint
+    "computer-use",  # gemini-2.5-computer-use-preview → native API only (specialized)
+    "deep-research",  # deep-research-preview, deep-research-max-preview → agentic endpoint
+    "antigravity",  # antigravity-preview-05-2026 → managed agent endpoint
+    "aqa",  # aqa (Answer Quality Assessment — not a chat model)
+    "omni-",  # gemini-omni-1.1-flash → /videos endpoint (video gen)
     # NOTE: gemma-* IS chat-capable via /chat/completions — verified on real VM
     # by VTSTech 2026-09-24 (gemma-4-26b-a4b-it responded to a chat-completions
     # request and emitted a thinking + answer response). Kept OUT of
@@ -529,7 +525,7 @@ def _is_chat_capable_model(model_id: str) -> bool:
     # Strip a leading 'models/' prefix if present (defensive — should
     # already be stripped by _parse_gemini_model).
     if m.startswith("models/"):
-        m = m[len("models/"):]
+        m = m[len("models/") :]
     for pattern in _NON_CHAT_PATTERNS:
         if pattern in m:
             return False
@@ -576,7 +572,7 @@ def _uses_thought_tags(model_id: str) -> bool:
         return False
     m = model_id.lower()
     if m.startswith("models/"):
-        m = m[len("models/"):]
+        m = m[len("models/") :]
     return m.startswith("gemma-")
 
 
@@ -657,8 +653,8 @@ class ThoughtTagParser:
                     if partial_len > 0:
                         # Buffer the partial tag for the next feed() call.
                         # Emit content before it now.
-                        content_parts.append(text[i:n - partial_len])
-                        self._buffer = text[n - partial_len:]
+                        content_parts.append(text[i : n - partial_len])
+                        self._buffer = text[n - partial_len :]
                     else:
                         # No partial tag — emit everything as content.
                         content_parts.append(text[i:])
@@ -675,8 +671,8 @@ class ThoughtTagParser:
                     # No closing tag found. Check for partial closing tag.
                     partial_len = self._suffix_is_tag_prefix(text, i, self.CLOSING_TAG)
                     if partial_len > 0:
-                        reasoning_parts.append(text[i:n - partial_len])
-                        self._buffer = text[n - partial_len:]
+                        reasoning_parts.append(text[i : n - partial_len])
+                        self._buffer = text[n - partial_len :]
                     else:
                         reasoning_parts.append(text[i:])
                     break
@@ -835,10 +831,7 @@ class GeminiBackend(OpenAICompatibleBackend):
         # API key is lazy — only required for generation, not model listing.
         # Read FRESH from env (not the module-level constant) so tests that
         # patch.dict(os.environ, ...) before constructing see the right key.
-        self.api_key = (
-            os.environ.get("GEMINI_API_KEY")
-            or os.environ.get("GOOGLE_API_KEY", "")
-        )
+        self.api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY", "")
 
         # ROB-06 parity: persisted safe max_tokens after a context-length 400.
         self._context_safe_max_tokens: int | None = None
@@ -901,7 +894,7 @@ class GeminiBackend(OpenAICompatibleBackend):
         # adds to every ID. Without this, our catalog-merge step sees
         # 'gemini-3.8-flash' (catalog) and 'models/gemini-3.8-flash' (API)
         # as different entries and emits duplicates.
-        model_id = raw_id[len("models/"):] if raw_id.startswith("models/") else raw_id
+        model_id = raw_id[len("models/") :] if raw_id.startswith("models/") else raw_id
 
         # Context length — try API first (rare), fall back to catalog,
         # then to 1M default (the common Gemini Flash context).
@@ -960,8 +953,7 @@ class GeminiBackend(OpenAICompatibleBackend):
         GEMINI_FREE_ONLY filters the result to free-tier models only.
         """
         current_time = time.time()
-        if (self._model_cache is not None and
-                current_time - self._cache_time < self._CACHE_TIMEOUT):
+        if self._model_cache is not None and current_time - self._cache_time < self._CACHE_TIMEOUT:
             return self._model_cache
 
         try:
@@ -990,18 +982,20 @@ class GeminiBackend(OpenAICompatibleBackend):
             catalog_ids = {m["name"] for m in available_models}
             for name, info in GEMINI_MODELS.items():
                 if name not in catalog_ids:
-                    available_models.append({
-                        "name": name,
-                        "size": 0,
-                        "details": {
-                            "family": info.get("family", "gemini"),
-                            "backend": "gemini",
-                            "context_length": info.get("context_length", 1_048_576),
-                            "max_completion_tokens": info.get("max_completion_tokens", 65_536),
-                            "free_tier": info.get("free_tier", False),
-                            "supports_thinking": info.get("supports_thinking", True),
-                        },
-                    })
+                    available_models.append(
+                        {
+                            "name": name,
+                            "size": 0,
+                            "details": {
+                                "family": info.get("family", "gemini"),
+                                "backend": "gemini",
+                                "context_length": info.get("context_length", 1_048_576),
+                                "max_completion_tokens": info.get("max_completion_tokens", 65_536),
+                                "free_tier": info.get("free_tier", False),
+                                "supports_thinking": info.get("supports_thinking", True),
+                            },
+                        }
+                    )
 
             if GEMINI_FREE_ONLY:
                 self._model_cache = sorted(
@@ -1026,18 +1020,20 @@ class GeminiBackend(OpenAICompatibleBackend):
             # Catalog fallback — static list above.
             fallback = []
             for name, info in GEMINI_MODELS.items():
-                fallback.append({
-                    "name": name,
-                    "size": 0,
-                    "details": {
-                        "family": info.get("family", "gemini"),
-                        "backend": "gemini",
-                        "context_length": info.get("context_length", 1_048_576),
-                        "max_completion_tokens": info.get("max_completion_tokens", 65_536),
-                        "free_tier": info.get("free_tier", False),
-                        "supports_thinking": info.get("supports_thinking", True),
-                    },
-                })
+                fallback.append(
+                    {
+                        "name": name,
+                        "size": 0,
+                        "details": {
+                            "family": info.get("family", "gemini"),
+                            "backend": "gemini",
+                            "context_length": info.get("context_length", 1_048_576),
+                            "max_completion_tokens": info.get("max_completion_tokens", 65_536),
+                            "free_tier": info.get("free_tier", False),
+                            "supports_thinking": info.get("supports_thinking", True),
+                        },
+                    }
+                )
 
             if GEMINI_FREE_ONLY:
                 fallback = [m for m in fallback if m["details"].get("free_tier")]
@@ -1083,18 +1079,14 @@ class GeminiBackend(OpenAICompatibleBackend):
                     details = m["details"]
                     max_tokens = details.get("max_completion_tokens", 65_536)
                     context_length = details.get("context_length", 1_048_576)
-                    return self._apply_max_tokens_cap(
-                        max_tokens, context_length, temperature=1.0
-                    )
+                    return self._apply_max_tokens_cap(max_tokens, context_length, temperature=1.0)
 
         # Catalog fallback
         if model in GEMINI_MODELS:
             info = GEMINI_MODELS[model]
             max_tokens = info.get("max_completion_tokens", 65_536)
             context_length = info.get("context_length", 1_048_576)
-            return self._apply_max_tokens_cap(
-                max_tokens, context_length, temperature=1.0
-            )
+            return self._apply_max_tokens_cap(max_tokens, context_length, temperature=1.0)
 
         # Final fallback — sensible defaults for unknown Gemini models.
         # Note: cap is still applied (1M context / 32 = 32K, vs 65K default
@@ -1145,6 +1137,7 @@ class GeminiBackend(OpenAICompatibleBackend):
     def _429_backoff(self, attempt: int) -> float:
         """Exponential back-off with full jitter for the Nth retry."""
         import random
+
         delay = self._429_BACKOFF_BASE * (2 ** max(0, attempt - 1))
         delay = min(delay, self._429_BACKOFF_CAP)
         jitter = delay * 0.2
@@ -1237,8 +1230,10 @@ class GeminiBackend(OpenAICompatibleBackend):
 
             # reasoning_effort would conflict — drop it if the caller set both.
             if reasoning_effort is not None and os.environ.get("AGENTKTHX_DEBUG"):
-                print("  [Gemini] reasoning_effort and thinking_config both set — "
-                      "keeping thinking_config, dropping reasoning_effort")
+                print(
+                    "  [Gemini] reasoning_effort and thinking_config both set — "
+                    "keeping thinking_config, dropping reasoning_effort"
+                )
             body.pop("reasoning_effort", None)
 
         if cached_content is not None:
@@ -1279,7 +1274,6 @@ class GeminiBackend(OpenAICompatibleBackend):
             return self._stream_request(url, data, headers)
 
         max_retries = self._max_429_retries()
-        last_retryable_error: str | None = None
 
         for attempt in range(max_retries + 1):
             req = urllib.request.Request(
@@ -1322,7 +1316,6 @@ class GeminiBackend(OpenAICompatibleBackend):
                         elif err_data.get("message"):
                             error_msg = err_data["message"]
 
-                    last_retryable_error = error_msg
                     retry_after_raw = e.headers.get("Retry-After", "")
                     retry_after = None
                     if retry_after_raw:
@@ -1338,9 +1331,11 @@ class GeminiBackend(OpenAICompatibleBackend):
                     retry_after = min(max(retry_after, 1.0), self._429_BACKOFF_CAP)
 
                     if attempt < max_retries:
-                        print(f"  [Gemini] {status_code} — {error_msg}. "
-                              f"Retrying in {retry_after:.0f}s "
-                              f"(attempt {attempt + 1}/{max_retries + 1})...")
+                        print(
+                            f"  [Gemini] {status_code} — {error_msg}. "
+                            f"Retrying in {retry_after:.0f}s "
+                            f"(attempt {attempt + 1}/{max_retries + 1})..."
+                        )
                         time.sleep(retry_after)
                         continue
                     raise RuntimeError(
@@ -1419,7 +1414,9 @@ class GeminiBackend(OpenAICompatibleBackend):
             for line in response:
                 if not line:
                     continue
-                line_str = line.decode("utf-8", errors="replace") if isinstance(line, bytes) else line
+                line_str = (
+                    line.decode("utf-8", errors="replace") if isinstance(line, bytes) else line
+                )
                 if not line_str.startswith("data: "):
                     continue
                 json_str = line_str[6:].strip()
@@ -1464,8 +1461,10 @@ class GeminiBackend(OpenAICompatibleBackend):
                     old_max = body.get("max_tokens", 4096)
                     if self._handle_context_length_400(error_body, body):
                         new_max = body["max_tokens"]
-                        print(f"  [Gemini-Stream] Context length exceeded — "
-                              f"reducing max_tokens {old_max} → {new_max} and retrying")
+                        print(
+                            f"  [Gemini-Stream] Context length exceeded — "
+                            f"reducing max_tokens {old_max} → {new_max} and retrying"
+                        )
                         continue
                 raise RuntimeError(f"Gemini HTTP error {e.code}: {error_body}")
             except urllib.error.URLError as e:
@@ -1550,10 +1549,12 @@ class GeminiBackend(OpenAICompatibleBackend):
         )
 
         if os.environ.get("AGENTKTHX_DEBUG"):
-            print(f"  [Gemini] POST chat/completions — "
-                  f"tools={len(tools) if tools else 0}, "
-                  f"tool_choice={kwargs.get('tool_choice', 'auto')}, "
-                  f"thinking={'yes' if 'reasoning_effort' in kwargs or 'thinking_config' in kwargs else 'default'}")
+            print(
+                f"  [Gemini] POST chat/completions — "
+                f"tools={len(tools) if tools else 0}, "
+                f"tool_choice={kwargs.get('tool_choice', 'auto')}, "
+                f"thinking={'yes' if 'reasoning_effort' in kwargs or 'thinking_config' in kwargs else 'default'}"
+            )
 
         start_time = time.time()
         try:
@@ -1564,8 +1565,10 @@ class GeminiBackend(OpenAICompatibleBackend):
             # support native tools), but keep the path for safety.
             if tools and self._is_tools_not_supported_error(err_str):
                 if os.environ.get("AGENTKTHX_DEBUG"):
-                    print(f"  [Gemini] Model doesn't support tools — "
-                          f"retrying without tools (ReAct fallback)")
+                    print(
+                        "  [Gemini] Model doesn't support tools — "
+                        "retrying without tools (ReAct fallback)"
+                    )
                 body.pop("tools", None)
                 body.pop("tool_choice", None)
                 raw_response = self._make_api_request("chat/completions", body)
@@ -1574,8 +1577,10 @@ class GeminiBackend(OpenAICompatibleBackend):
                 old_max = body.get("max_tokens", 4096)
                 new_max = max(old_max // 3, 4096)
                 if new_max < old_max:
-                    print(f"  [Gemini] Context length exceeded — "
-                          f"reducing max_tokens {old_max} → {new_max} and retrying")
+                    print(
+                        f"  [Gemini] Context length exceeded — "
+                        f"reducing max_tokens {old_max} → {new_max} and retrying"
+                    )
                     body["max_tokens"] = new_max
                     raw_response = self._make_api_request("chat/completions", body)
                 else:
@@ -1601,9 +1606,11 @@ class GeminiBackend(OpenAICompatibleBackend):
                 parsed["reasoning_content"] = existing_rc + reasoning_text
             parsed["content"] = content_text
             if os.environ.get("AGENTKTHX_DEBUG"):
-                print(f"  [Gemini.ThoughtTags] model={model} → "
-                      f"content_len={len(parsed['content'])}, "
-                      f"reasoning_len={len(parsed.get('reasoning_content', ''))}")
+                print(
+                    f"  [Gemini.ThoughtTags] model={model} → "
+                    f"content_len={len(parsed['content'])}, "
+                    f"reasoning_len={len(parsed.get('reasoning_content', ''))}"
+                )
 
         # Synthesize a finish_reason if missing (Gemini usually includes one).
         if parsed["finish_reason"] is None:
@@ -1627,10 +1634,12 @@ class GeminiBackend(OpenAICompatibleBackend):
             )
 
         if os.environ.get("AGENTKTHX_DEBUG"):
-            print(f"  [Gemini] finish_reason={parsed['finish_reason']}, "
-                  f"tool_calls={len(parsed['tool_calls'])}, "
-                  f"content_len={len(parsed['content'])}, "
-                  f"reasoning_len={len(parsed.get('reasoning_content', ''))}")
+            print(
+                f"  [Gemini] finish_reason={parsed['finish_reason']}, "
+                f"tool_calls={len(parsed['tool_calls'])}, "
+                f"content_len={len(parsed['content'])}, "
+                f"reasoning_len={len(parsed.get('reasoning_content', ''))}"
+            )
 
         return parsed
 
@@ -1683,10 +1692,9 @@ class GeminiBackend(OpenAICompatibleBackend):
                 err_lower = str(e).lower()
                 if "empty response" in err_lower or "no content" in err_lower:
                     if os.environ.get("AGENTKTHX_DEBUG"):
-                        print(f"  [Gemini.JEV] Empty response — retrying with simplified prompt")
+                        print("  [Gemini.JEV] Empty response — retrying with simplified prompt")
                     simplified = [
-                        {"role": "user",
-                         "content": messages[-1]["content"] if messages else ""}
+                        {"role": "user", "content": messages[-1]["content"] if messages else ""}
                     ]
                     return self.generate(
                         model=model,
@@ -1756,8 +1764,7 @@ class GeminiBackend(OpenAICompatibleBackend):
         parser = ThoughtTagParser()
 
         if os.environ.get("AGENTKTHX_DEBUG"):
-            print(f"  [Gemini.ThoughtTags-Stream] model={model} — "
-                  f"thought-tag parser active")
+            print(f"  [Gemini.ThoughtTags-Stream] model={model} — " f"thought-tag parser active")
 
         for chunk in super().generate_completions_stream(
             model=model,

@@ -20,30 +20,28 @@ Written by VTSTech — https://www.vts-tech.org — https://github.com/VTSTech/A
 
 from __future__ import annotations
 
-import os
 import subprocess
-import tempfile
 from dataclasses import dataclass
 from typing import Optional
-
 
 # ================================================================== #
 #  Configuration                                                      #
 # ================================================================== #
+
 
 @dataclass
 class SandboxConfig:
     """Configuration for the sandboxed Python REPL."""
 
     # Resource limits
-    memory_mb: int = 100           # Max memory in MB
-    cpu_seconds: int = 10          # Max CPU time in seconds
-    timeout_seconds: int = 30      # Max wall-clock time in seconds
+    memory_mb: int = 100  # Max memory in MB
+    cpu_seconds: int = 10  # Max CPU time in seconds
+    timeout_seconds: int = 30  # Max wall-clock time in seconds
 
     # Security settings
-    allow_network: bool = False    # Allow network-related modules
-    allow_filesystem: bool = False # Allow filesystem-related modules
-    allow_subprocess: bool = False # Allow subprocess creation
+    allow_network: bool = False  # Allow network-related modules
+    allow_filesystem: bool = False  # Allow filesystem-related modules
+    allow_subprocess: bool = False  # Allow subprocess creation
 
     # Additional allowed modules (beyond defaults)
     extra_modules: set = None
@@ -60,30 +58,82 @@ DEFAULT_CONFIG = SandboxConfig()
 # Safe builtins - functions that are generally safe to use
 SAFE_BUILTINS = {
     # Basic types
-    'bool', 'int', 'float', 'str', 'list', 'dict', 'tuple', 'set', 'frozenset',
-    'bytes', 'bytearray', 'complex',
-
+    "bool",
+    "int",
+    "float",
+    "str",
+    "list",
+    "dict",
+    "tuple",
+    "set",
+    "frozenset",
+    "bytes",
+    "bytearray",
+    "complex",
     # Type checking
-    'type', 'isinstance', 'issubclass', 'hasattr', 'callable',
-
+    "type",
+    "isinstance",
+    "issubclass",
+    "hasattr",
+    "callable",
     # Basic functions
-    'print', 'len', 'range', 'enumerate', 'zip', 'map', 'filter',
-    'sorted', 'reversed', 'slice', 'any', 'all', 'min', 'max', 'sum',
-    'abs', 'round', 'pow', 'divmod', 'hash', 'id', 'repr', 'ascii',
-    'bin', 'hex', 'oct', 'chr', 'ord', 'format',
-
+    "print",
+    "len",
+    "range",
+    "enumerate",
+    "zip",
+    "map",
+    "filter",
+    "sorted",
+    "reversed",
+    "slice",
+    "any",
+    "all",
+    "min",
+    "max",
+    "sum",
+    "abs",
+    "round",
+    "pow",
+    "divmod",
+    "hash",
+    "id",
+    "repr",
+    "ascii",
+    "bin",
+    "hex",
+    "oct",
+    "chr",
+    "ord",
+    "format",
     # Constants
-    'True', 'False', 'None', 'Ellipsis',
-
+    "True",
+    "False",
+    "None",
+    "Ellipsis",
     # Exceptions (for try/except)
-    'Exception', 'BaseException', 'ValueError', 'TypeError', 'KeyError',
-    'IndexError', 'AttributeError', 'RuntimeError', 'StopIteration',
-    'NotImplementedError', 'ImportError', 'NameError', 'ZeroDivisionError',
-    'OverflowError', 'FloatingPointError', 'ArithmeticError',
-
+    "Exception",
+    "BaseException",
+    "ValueError",
+    "TypeError",
+    "KeyError",
+    "IndexError",
+    "AttributeError",
+    "RuntimeError",
+    "StopIteration",
+    "NotImplementedError",
+    "ImportError",
+    "NameError",
+    "ZeroDivisionError",
+    "OverflowError",
+    "FloatingPointError",
+    "ArithmeticError",
     # Iteration
-    'iter', 'next', 'staticmethod', 'classmethod', 'property',
-
+    "iter",
+    "next",
+    "staticmethod",
+    "classmethod",
+    "property",
     # NOTE (SEC-01, closed R07.08): the attribute-traversal primitives
     # `object`, `super`, `getattr`, `setattr`, `delattr` were previously
     # in this set. With `getattr` + `object` available, prompt-injected
@@ -96,65 +146,134 @@ SAFE_BUILTINS = {
     # and does not expose `getattr` to user code). Residual surface
     # (`vars`/`dir` on instances) is documented in audit SEC-01; the
     # classic `object.__subclasses__()` escape is closed.
-    'vars', 'dir',
-
+    "vars",
+    "dir",
     # Import (we'll override this with a safe version)
-    '__import__',
+    "__import__",
 }
 
 # Safe modules - modules that don't pose security risks
 SAFE_MODULES = {
     # Math and numbers
-    'math', 'cmath', 'decimal', 'fractions', 'random', 'statistics',
-
+    "math",
+    "cmath",
+    "decimal",
+    "fractions",
+    "random",
+    "statistics",
     # Data structures
-    'collections', 'collections.abc', 'heapq', 'bisect', 'array',
-    'itertools', 'functools', 'operator',
-
+    "collections",
+    "collections.abc",
+    "heapq",
+    "bisect",
+    "array",
+    "itertools",
+    "functools",
+    "operator",
     # Text processing
-    're', 'string', 'textwrap', 'difflib', 'unicodedata',
-
+    "re",
+    "string",
+    "textwrap",
+    "difflib",
+    "unicodedata",
     # Data formats
-    'json', 'csv', 'configparser', 'html', 'xml.etree.ElementTree',
-
+    "json",
+    "csv",
+    "configparser",
+    "html",
+    "xml.etree.ElementTree",
     # Date and time
-    'datetime', 'time', 'calendar', 'zoneinfo',
-
+    "datetime",
+    "time",
+    "calendar",
+    "zoneinfo",
     # Copy and pickle (limited)
-    'copy', 'pprint',
-
+    "copy",
+    "pprint",
     # Type hints
-    'typing', 'typing_extensions', 'types', 'dataclasses', 'enum',
-
+    "typing",
+    "typing_extensions",
+    "types",
+    "dataclasses",
+    "enum",
     # Other safe modules
-    'contextlib', 'io', 'stringio', 'struct', 'codecs',
-    'inspect', 'dis', 'ast', 'tokenize', 'keyword', 'token',
-    'traceback', 'warnings', 'weakref', 'abc',
+    "contextlib",
+    "io",
+    "stringio",
+    "struct",
+    "codecs",
+    "inspect",
+    "dis",
+    "ast",
+    "tokenize",
+    "keyword",
+    "token",
+    "traceback",
+    "warnings",
+    "weakref",
+    "abc",
 }
 
 # Modules that require explicit permission
 NETWORK_MODULES = {
-    'socket', 'ssl', 'select', 'selectors', 'asyncio', 'urllib',
-    'http', 'ftplib', 'poplib', 'imaplib', 'smtplib', 'telnetlib',
-    'xmlrpc', 'ipaddress', 'socketserver', 'http.server',
+    "socket",
+    "ssl",
+    "select",
+    "selectors",
+    "asyncio",
+    "urllib",
+    "http",
+    "ftplib",
+    "poplib",
+    "imaplib",
+    "smtplib",
+    "telnetlib",
+    "xmlrpc",
+    "ipaddress",
+    "socketserver",
+    "http.server",
 }
 
 FILESYSTEM_MODULES = {
-    'os', 'sys', 'shutil', 'tempfile', 'glob', 'fnmatch',
-    'fileinput', 'linecache', 'pickle', 'shelve', 'dbm',
-    'sqlite3', 'zipfile', 'tarfile', 'gzip', 'bz2', 'lzma',
-    'subprocess', 'spawn', 'multiprocessing',
+    "os",
+    "sys",
+    "shutil",
+    "tempfile",
+    "glob",
+    "fnmatch",
+    "fileinput",
+    "linecache",
+    "pickle",
+    "shelve",
+    "dbm",
+    "sqlite3",
+    "zipfile",
+    "tarfile",
+    "gzip",
+    "bz2",
+    "lzma",
+    "subprocess",
+    "spawn",
+    "multiprocessing",
 }
 
 SUBPROCESS_MODULES = {
-    'subprocess', 'os', 'sys', 'spawn', 'multiprocessing', 'threading',
-    '_thread', 'concurrent', 'concurrent.futures',
+    "subprocess",
+    "os",
+    "sys",
+    "spawn",
+    "multiprocessing",
+    "threading",
+    "_thread",
+    "concurrent",
+    "concurrent.futures",
 }
 
 
 # ================================================================== #
 #  Sandbox Runner Generator                                           #
 # ================================================================== #
+
 
 def _generate_runner_script(code: str, config: SandboxConfig) -> str:
     """
@@ -176,8 +295,8 @@ def _generate_runner_script(code: str, config: SandboxConfig) -> str:
     if config.extra_modules:
         allowed_modules.update(config.extra_modules)
 
-    allowed_modules_str = ', '.join(repr(m) for m in sorted(allowed_modules))
-    safe_builtins_str = ', '.join(repr(k) for k in sorted(SAFE_BUILTINS))
+    allowed_modules_str = ", ".join(repr(m) for m in sorted(allowed_modules))
+    safe_builtins_str = ", ".join(repr(k) for k in sorted(SAFE_BUILTINS))
 
     return f'''
 import sys
@@ -325,10 +444,9 @@ finally:
 #  Main Sandbox Function                                              #
 # ================================================================== #
 
+
 def sandboxed_exec(
-    code: str,
-    config: Optional[SandboxConfig] = None,
-    python_path: str = "python3"
+    code: str, config: Optional[SandboxConfig] = None, python_path: str = "python3"
 ) -> str:
     """
     Execute Python code in a sandboxed subprocess.
@@ -381,14 +499,14 @@ def sandboxed_exec(
     try:
         # Execute in subprocess
         result = subprocess.run(
-            [python_path, '-c', runner_script],
+            [python_path, "-c", runner_script],
             capture_output=True,
             text=True,
             timeout=config.timeout_seconds + 10,  # Extra buffer for subprocess overhead
             env={
-                'PYTHONDONTWRITEBYTECODE': '1',  # Don't create .pyc files
-                'PYTHONUNBUFFERED': '1',          # Unbuffered output
-                'PYTHONDONTMALLOC': '1',          # Don't use malloc for small objects
+                "PYTHONDONTWRITEBYTECODE": "1",  # Don't create .pyc files
+                "PYTHONUNBUFFERED": "1",  # Unbuffered output
+                "PYTHONDONTMALLOC": "1",  # Don't use malloc for small objects
             },
             # Don't allow stdin (prevent interactive prompts)
             stdin=subprocess.DEVNULL,
@@ -400,15 +518,15 @@ def sandboxed_exec(
         if result.stderr:
             # Filter out common warnings
             stderr_lines = []
-            for line in result.stderr.split('\n'):
-                if 'ResourceWarning' in line:
+            for line in result.stderr.split("\n"):
+                if "ResourceWarning" in line:
                     continue
-                if 'unclosed file' in line.lower():
+                if "unclosed file" in line.lower():
                     continue
                 stderr_lines.append(line)
 
             if stderr_lines:
-                output += '\n' + '\n'.join(stderr_lines)
+                output += "\n" + "\n".join(stderr_lines)
 
         return output.strip() or "[No output]"
 
@@ -428,6 +546,7 @@ def sandboxed_exec(
 # ================================================================== #
 #  Convenience Functions                                               #
 # ================================================================== #
+
 
 def create_sandbox_tool(registry, config: Optional[SandboxConfig] = None):
     """
@@ -472,6 +591,7 @@ def create_sandbox_tool(registry, config: Optional[SandboxConfig] = None):
 #  Test Function                                                       #
 # ================================================================== #
 
+
 def test_sandbox():
     """Run basic sandbox tests."""
 
@@ -507,7 +627,9 @@ def test_sandbox():
     result = sandboxed_exec("while True: pass")
     print(f"   Result: {result}")
     # Could be timeout, killed, or no output (process killed by CPU limit)
-    assert any(word in result.lower() for word in ["timeout", "time", "no output", "killed", "exceeded"]), f"Expected timeout but got: {result}"
+    assert any(
+        word in result.lower() for word in ["timeout", "time", "no output", "killed", "exceeded"]
+    ), f"Expected timeout but got: {result}"
 
     # Test 6: Safe modules
     print("\n6. Multiple safe imports:")

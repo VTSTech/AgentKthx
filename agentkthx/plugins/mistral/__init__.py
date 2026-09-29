@@ -27,6 +27,7 @@ def register(manager) -> None:
     backend instances.
     """
     from .mistral import MistralBackend
+
     manager.register_backend("mistral", MistralBackend)
     manager.register_backend("mst", MistralBackend, alias_of="mistral")
 

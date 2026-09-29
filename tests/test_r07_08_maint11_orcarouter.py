@@ -18,9 +18,7 @@ Written by VTSTech — https://www.vts-tech.org
 
 from __future__ import annotations
 
-import os
 import sys
-import time
 from pathlib import Path
 from unittest.mock import patch
 
@@ -29,15 +27,15 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from agentkthx.plugins.orcarouter.orcarouter import (
+    ORCAROUTER_FREE_FALLBACK_MODEL,
     OrcaRouterBackend,
     _HttpErrorAction,
-    ORCAROUTER_FREE_FALLBACK_MODEL,
 )
-
 
 # ------------------------------------------------------------------ #
 #  Test fixture: a minimal OrcaRouterBackend that skips __init__      #
 # ------------------------------------------------------------------ #
+
 
 @pytest.fixture
 def backend():
@@ -52,6 +50,7 @@ def backend():
 # ------------------------------------------------------------------ #
 #  _HttpErrorAction — the action object itself                        #
 # ------------------------------------------------------------------ #
+
 
 class TestHttpErrorAction:
     def test_retry_factory(self):
@@ -84,16 +83,20 @@ class TestHttpErrorAction:
 #  _classify_and_handle_http_error — terminal free-tier → RAISE        #
 # ------------------------------------------------------------------ #
 
+
 class TestTerminalFreeTierRaises:
     """err_free_used / free_quota_exhausted / err_free_access_denied /
     err_free_prompt_cap are terminal — the helper must RAISE, not retry."""
 
-    @pytest.mark.parametrize("reason", [
-        "err_free_used",
-        "free_quota_exhausted",
-        "err_free_access_denied",
-        "err_free_prompt_cap",
-    ])
+    @pytest.mark.parametrize(
+        "reason",
+        [
+            "err_free_used",
+            "free_quota_exhausted",
+            "err_free_access_denied",
+            "err_free_prompt_cap",
+        ],
+    )
     def test_terminal_raises(self, backend, reason):
         body = {"model": "deepseek/deepseek-v4-flash-free"}
         action = backend._classify_and_handle_http_error(
@@ -159,6 +162,7 @@ class TestTerminalFreeTierRaises:
 # ------------------------------------------------------------------ #
 #  _classify_and_handle_http_error — retryable free-tier → RETRY       #
 # ------------------------------------------------------------------ #
+
 
 class TestRetryableFreeTierRetries:
     """err_free_rate / free_rate_limited are retryable — swap to fallback,
@@ -269,6 +273,7 @@ class TestRetryableFreeTierRetries:
 #  _classify_and_handle_http_error — 401/403 access_denied → RAISE     #
 # ------------------------------------------------------------------ #
 
+
 class TestAccessDeniedRaises:
     @pytest.mark.parametrize("code", [401, 403])
     def test_access_denied_raises(self, backend, code):
@@ -305,6 +310,7 @@ class TestAccessDeniedRaises:
 # ------------------------------------------------------------------ #
 #  _classify_and_handle_http_error — fallthrough for everything else   #
 # ------------------------------------------------------------------ #
+
 
 class TestFallthrough:
     def test_generic_500_fallthrough(self, backend):
@@ -354,6 +360,7 @@ class TestFallthrough:
 #  log_tag parameterization (the only caller difference)              #
 # ------------------------------------------------------------------ #
 
+
 class TestLogTag:
     def test_log_tag_appears_in_output(self, backend, capsys):
         """The log_tag must appear in the stderr output so users can tell
@@ -378,6 +385,7 @@ class TestLogTag:
 #  Regression: both call sites use the helper (deduplication check)    #
 # ------------------------------------------------------------------ #
 
+
 class TestDeduplication:
     def test_remedy_strings_live_only_in_helper(self):
         """Before the refactor: the two remedy prose blocks (access_denied
@@ -391,6 +399,7 @@ class TestDeduplication:
         signal is that neither _generate_with_auth nor _iter_sse_lines
         contains the remedy prose anymore."""
         import agentkthx.plugins.orcarouter.orcarouter as mod
+
         src = Path(mod.__file__).read_text()
         # The remedy prose "Either (a) link an established GitHub account"
         # (access_denied branch) + "link an established GitHub account at"
@@ -404,20 +413,20 @@ class TestDeduplication:
         """Before: time.sleep appeared in both duplicated blocks (4 calls:
         2 retry_after + 2 ten-second). After: only in the helper (2 calls)."""
         import agentkthx.plugins.orcarouter.orcarouter as mod
+
         src = Path(mod.__file__).read_text()
-        assert src.count("time.sleep(retry_after)") == 1, (
-            "retry_after sleep must be in helper only (was duplicated)"
-        )
-        assert src.count("time.sleep(10)") == 1, (
-            "10s sleep must be in helper only (was duplicated)"
-        )
+        assert (
+            src.count("time.sleep(retry_after)") == 1
+        ), "retry_after sleep must be in helper only (was duplicated)"
+        assert src.count("time.sleep(10)") == 1, "10s sleep must be in helper only (was duplicated)"
 
     def test_both_call_sites_invoke_helper(self):
         """Both _generate_with_auth and _iter_sse_lines must call
         _classify_and_handle_http_error (the deduplication contract)."""
         import agentkthx.plugins.orcarouter.orcarouter as mod
+
         src = Path(mod.__file__).read_text()
         # The helper is called twice — once per call site.
-        assert src.count("self._classify_and_handle_http_error(") == 2, (
-            "both call sites must invoke the shared helper"
-        )
+        assert (
+            src.count("self._classify_and_handle_http_error(") == 2
+        ), "both call sites must invoke the shared helper"

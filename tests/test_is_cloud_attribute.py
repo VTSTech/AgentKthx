@@ -23,18 +23,16 @@ These tests verify:
    don't have the attribute (defensive fallback used by cli.py).
 """
 
-import pytest
-
-from agentkthx.backends.base import BaseBackend, BackendConfig
-from agentkthx.backends.openai_compat import OpenAICompatibleBackend
-from agentkthx.backends.ollama import OllamaBackend
+from agentkthx.backends.base import BaseBackend
 from agentkthx.backends.llama_server import LlamaServerBackend
+from agentkthx.backends.ollama import OllamaBackend
+from agentkthx.backends.openai_compat import OpenAICompatibleBackend
 from agentkthx.plugins.bitnet.bitnet import BitNetBackend
-from agentkthx.plugins.zai.zai import ZaiBackend
-from agentkthx.plugins.openrouter.openrouter import OpenRouterBackend
 from agentkthx.plugins.gemini.gemini import GeminiBackend
 from agentkthx.plugins.huggingface.huggingface import HuggingFaceBackend
 from agentkthx.plugins.openai.openai import OpenAIBackend
+from agentkthx.plugins.openrouter.openrouter import OpenRouterBackend
+from agentkthx.plugins.zai.zai import ZaiBackend
 
 
 class TestIsCloudAttribute:
@@ -122,10 +120,12 @@ class TestFifthCloudBackend:
 
     def test_fake_cloud_backend_inherits_is_cloud_true(self):
         """A subclass of OpenAICompatibleBackend with no override gets True."""
+
         class FakeCloudBackend(OpenAICompatibleBackend):
             @property
             def backend_type(self):
                 from agentkthx.core.types import BackendType
+
                 return BackendType.OLLAMA  # placeholder, doesn't matter for this test
 
         assert FakeCloudBackend.is_cloud is True
@@ -133,6 +133,7 @@ class TestFifthCloudBackend:
     def test_fake_cloud_backend_explicit_override_to_false(self):
         """If a future local backend extends OpenAICompatibleBackend, it can
         still override to False (mirrors the OllamaBackend pattern)."""
+
         class FakeLocalBackend(OpenAICompatibleBackend):
             is_cloud = False
 
@@ -148,22 +149,33 @@ class TestFifthLocalBackend:
         """A subclass of BaseBackend directly (not OpenAICompatibleBackend)
         defaults to False — safe for unknown backends.
         """
+
         class FakeLocalBackend(BaseBackend):
             @property
             def backend_type(self):
                 from agentkthx.core.types import BackendType
+
                 return BackendType.OLLAMA  # placeholder
 
             # Stub the abstract methods so the class can be referenced
             # without instantiation
-            def generate(self, *args, **kwargs): pass
-            def generate_stream(self, *args, **kwargs): pass
-            def list_models(self, *args, **kwargs): return []
+            def generate(self, *args, **kwargs):
+                pass
+
+            def generate_stream(self, *args, **kwargs):
+                pass
+
+            def list_models(self, *args, **kwargs):
+                return []
+
             def test_tool_support(self, *args, **kwargs):
                 from agentkthx.core.types import ToolSupportLevel
+
                 return ToolSupportLevel.NONE
+
             @property
-            def base_url(self): return "http://localhost:1234"
+            def base_url(self):
+                return "http://localhost:1234"
 
         assert FakeLocalBackend.is_cloud is False
 
@@ -183,7 +195,7 @@ class TestCliDefensiveFallback:
             pass
 
         backend = BareBackend()
-        assert getattr(backend, 'is_cloud', False) is False
+        assert getattr(backend, "is_cloud", False) is False
 
     def test_getattr_returns_true_when_attribute_present(self):
         """A backend with is_cloud=True → getattr returns True."""
@@ -192,7 +204,7 @@ class TestCliDefensiveFallback:
             is_cloud = True
 
         backend = CloudBackend()
-        assert getattr(backend, 'is_cloud', False) is True
+        assert getattr(backend, "is_cloud", False) is True
 
 
 class TestBitNetBackendInstantiation:
@@ -215,6 +227,7 @@ class TestBitNetBackendInstantiation:
         """get_backend('bitnet', api_mode=ApiMode.OPENAI) must not crash."""
         from agentkthx.backends import get_backend
         from agentkthx.core.types import ApiMode
+
         b = get_backend("bitnet", api_mode=ApiMode.OPENAI)
         assert b is not None
         assert b.is_cloud is False  # local backend
@@ -223,12 +236,14 @@ class TestBitNetBackendInstantiation:
         """get_backend('bitnet', api_mode=ApiMode.OPENRE) must not crash."""
         from agentkthx.backends import get_backend
         from agentkthx.core.types import ApiMode
+
         b = get_backend("bitnet", api_mode=ApiMode.OPENRE)
         assert b is not None
 
     def test_bitnet_accepts_api_mode_string(self):
         """get_backend('bitnet', api_mode='openai') must not crash (string form)."""
         from agentkthx.backends import get_backend
+
         b = get_backend("bitnet", api_mode="openai")
         assert b is not None
 
@@ -236,6 +251,7 @@ class TestBitNetBackendInstantiation:
         """Regardless of what's passed, BitNetBackend always runs with bitnet_mode=True."""
         from agentkthx.backends import get_backend
         from agentkthx.core.types import ApiMode
+
         # Even if someone explicitly passes bitnet_mode=False, it's forced True
         b = get_backend("bitnet", api_mode=ApiMode.OPENAI, bitnet_mode=False)
         assert hasattr(b, "_bitnet_mode")
@@ -244,12 +260,14 @@ class TestBitNetBackendInstantiation:
     def test_bitnet_direct_instantiation_with_bitnet_mode_kwarg(self):
         """BitNetBackend(bitnet_mode=True) direct call must not crash either."""
         from agentkthx.plugins.bitnet.bitnet import BitNetBackend
+
         b = BitNetBackend(bitnet_mode=True)
         assert b._bitnet_mode is True
 
     def test_bitnet_direct_instantiation_without_bitnet_mode(self):
         """BitNetBackend() with no bitnet_mode still defaults to True."""
         from agentkthx.plugins.bitnet.bitnet import BitNetBackend
+
         b = BitNetBackend()
         assert b._bitnet_mode is True
 
@@ -273,35 +291,33 @@ class TestUnsupportedParamToolsFallback:
     def test_bitnet_500_error_pattern_matches(self):
         """The exact BitNet error message must trigger the fallback condition."""
         # This is the literal error from the Colab session
-        error_body = '{"error":{"code":500,"message":"Unsupported param: tools","type":"server_error"}}'
+        error_body = (
+            '{"error":{"code":500,"message":"Unsupported param: tools","type":"server_error"}}'
+        )
         error_msg = error_body.lower()
         # The condition used in ollama.py:generate() and generate_completions()
-        matches = ("does not support tools" in error_msg
-                   or "unsupported param: tools" in error_msg)
+        matches = "does not support tools" in error_msg or "unsupported param: tools" in error_msg
         assert matches, f"BitNet 500 error should match the fallback pattern: {error_body}"
 
     def test_ollama_400_error_pattern_still_matches(self):
         """The existing Ollama 400 pattern must still work (no regression)."""
         error_body = "This model does not support tools"
         error_msg = error_body.lower()
-        matches = ("does not support tools" in error_msg
-                   or "unsupported param: tools" in error_msg)
+        matches = "does not support tools" in error_msg or "unsupported param: tools" in error_msg
         assert matches
 
     def test_unrelated_error_does_not_match(self):
         """An unrelated 500 error must NOT trigger the fallback (specificity check)."""
         error_body = '{"error":{"code":500,"message":"Internal server error"}}'
         error_msg = error_body.lower()
-        matches = ("does not support tools" in error_msg
-                   or "unsupported param: tools" in error_msg)
+        matches = "does not support tools" in error_msg or "unsupported param: tools" in error_msg
         assert not matches, "Unrelated 500 errors must not trigger the ReAct fallback"
 
     def test_unrelated_400_does_not_match(self):
         """A 400 that mentions 'tools' but not the exact phrases must not fire."""
         error_body = '{"error":{"code":400,"message":"Invalid tools format"}}'
         error_msg = error_body.lower()
-        matches = ("does not support tools" in error_msg
-                   or "unsupported param: tools" in error_msg)
+        matches = "does not support tools" in error_msg or "unsupported param: tools" in error_msg
         assert not matches, "Generic 'tools' mentions must not trigger the fallback"
 
     def test_test_tool_support_classifies_bitnet_500_as_none(self):
@@ -316,7 +332,6 @@ class TestUnsupportedParamToolsFallback:
         error_lower = error_str.lower()
         # The condition used in ollama.py:test_tool_support()
         is_tools_not_supported = (
-            "does not support tools" in error_lower
-            or "unsupported param: tools" in error_lower
+            "does not support tools" in error_lower or "unsupported param: tools" in error_lower
         )
         assert is_tools_not_supported, "test_tool_support should classify this as NONE"

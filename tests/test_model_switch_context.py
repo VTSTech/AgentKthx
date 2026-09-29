@@ -34,7 +34,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from agentkthx.cli.agent_factory import apply_model_switch
 from agentkthx.core.model_family_config import get_family_config
-from agentkthx.plugins.zai.zai import ZaiBackend, ZAI_MODELS
+from agentkthx.plugins.zai.zai import ZAI_MODELS, ZaiBackend
 
 
 def _make_zai_backend():
@@ -55,8 +55,7 @@ class _LocalBackend:
 class _StubAgent:
     """Minimal agent surface touched by apply_model_switch."""
 
-    def __init__(self, backend, model="glm-5.3", num_ctx=1048576,
-                 num_predict=32768):
+    def __init__(self, backend, model="glm-5.3", num_ctx=1048576, num_predict=32768):
         self.model = model
         self.num_ctx = num_ctx
         self._num_predict = num_predict
@@ -79,34 +78,41 @@ def _glm_predict(name: str) -> int:
 # Catalog-driven switches (ZAI backend, static catalog)
 # ---------------------------------------------------------------------------
 
+
 class TestZaiCatalogSwitch(unittest.TestCase):
     """Switching between ZAI catalog models must follow the catalog."""
 
     def setUp(self):
-        self.agent = _StubAgent(_make_zai_backend(), model="glm-5.3",
-                                num_ctx=_glm_ctx("glm-5.3"),
-                                num_predict=_glm_predict("glm-5.3"))
+        self.agent = _StubAgent(
+            _make_zai_backend(),
+            model="glm-5.3",
+            num_ctx=_glm_ctx("glm-5.3"),
+            num_predict=_glm_predict("glm-5.3"),
+        )
 
     def test_switch_shrinks_num_ctx_to_new_catalog(self):
         """glm-5.3 (1M ctx) → glm-4.7-flash (200K ctx): num_ctx follows."""
         changes = apply_model_switch(self.agent, "glm-4.7-flash")
         self.assertEqual(self.agent.model, "glm-4.7-flash")
         self.assertEqual(self.agent.num_ctx, _glm_ctx("glm-4.7-flash"))
-        self.assertEqual(changes["num_ctx"],
-                         (_glm_ctx("glm-5.3"), _glm_ctx("glm-4.7-flash")))
+        self.assertEqual(changes["num_ctx"], (_glm_ctx("glm-5.3"), _glm_ctx("glm-4.7-flash")))
 
     def test_switch_updates_num_predict_to_new_cap(self):
         """num_predict follows the new model's capped catalog max_tokens."""
         changes = apply_model_switch(self.agent, "glm-4.7-flash")
         self.assertEqual(self.agent._num_predict, _glm_predict("glm-4.7-flash"))
-        self.assertEqual(changes["num_predict"],
-                         (_glm_predict("glm-5.3"), _glm_predict("glm-4.7-flash")))
+        self.assertEqual(
+            changes["num_predict"], (_glm_predict("glm-5.3"), _glm_predict("glm-4.7-flash"))
+        )
 
     def test_switch_to_bigger_model_grows_window(self):
         """The reverse direction: 200K → 1M must GROW num_ctx again."""
-        small = _StubAgent(_make_zai_backend(), model="glm-4.7-flash",
-                           num_ctx=_glm_ctx("glm-4.7-flash"),
-                           num_predict=_glm_predict("glm-4.7-flash"))
+        small = _StubAgent(
+            _make_zai_backend(),
+            model="glm-4.7-flash",
+            num_ctx=_glm_ctx("glm-4.7-flash"),
+            num_predict=_glm_predict("glm-4.7-flash"),
+        )
         apply_model_switch(small, "glm-5.3")
         self.assertEqual(small.num_ctx, _glm_ctx("glm-5.3"))
         self.assertEqual(small._num_predict, _glm_predict("glm-5.3"))
@@ -144,9 +150,12 @@ class TestPinnedValues(unittest.TestCase):
     """Values the user set explicitly must survive model switches."""
 
     def setUp(self):
-        self.agent = _StubAgent(_make_zai_backend(), model="glm-5.3",
-                                num_ctx=_glm_ctx("glm-5.3"),
-                                num_predict=_glm_predict("glm-5.3"))
+        self.agent = _StubAgent(
+            _make_zai_backend(),
+            model="glm-5.3",
+            num_ctx=_glm_ctx("glm-5.3"),
+            num_predict=_glm_predict("glm-5.3"),
+        )
 
     def test_explicit_num_ctx_survives(self):
         """--num-ctx pin: catalog ctx for the new model is ignored."""
@@ -186,8 +195,7 @@ class TestLocalBackend(unittest.TestCase):
     def test_num_ctx_unchanged_and_predict_falls_to_model_default(self):
         """{} catalog defaults: num_ctx stays config-derived; num_predict
         returns to None (model default) exactly like a fresh local start."""
-        agent = _StubAgent(_LocalBackend(), model="qwen2.5:0.5b",
-                           num_ctx=8192, num_predict=512)
+        agent = _StubAgent(_LocalBackend(), model="qwen2.5:0.5b", num_ctx=8192, num_predict=512)
         changes = apply_model_switch(agent, "llama3.2:3b")
         self.assertEqual(agent.num_ctx, 8192)
         self.assertIsNone(agent._num_predict)
@@ -195,8 +203,7 @@ class TestLocalBackend(unittest.TestCase):
         self.assertNotIn("num_ctx", changes)
 
     def test_local_explicit_predict_survives(self):
-        agent = _StubAgent(_LocalBackend(), model="qwen2.5:0.5b",
-                           num_ctx=8192, num_predict=512)
+        agent = _StubAgent(_LocalBackend(), model="qwen2.5:0.5b", num_ctx=8192, num_predict=512)
         agent._num_predict_explicit = True
         apply_model_switch(agent, "llama3.2:3b")
         self.assertEqual(agent._num_predict, 512)
@@ -205,6 +212,7 @@ class TestLocalBackend(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # Derived per-model state: family config + 400-recovery persistence
 # ---------------------------------------------------------------------------
+
 
 class TestDerivedStateRefresh(unittest.TestCase):
     """model_config / model_family / _context_safe_max_tokens follow too."""

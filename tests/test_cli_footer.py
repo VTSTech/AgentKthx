@@ -75,8 +75,11 @@ class TestFooterLine1(unittest.TestCase):
         self.assertIn("4.1k chr 1.0k tok", line)  # chr + //4 tok estimate, k-formatted
 
     def test_derived_defaults_used_when_pinned_unset(self):
-        a = _agent(_num_predict=None, _temperature=None,
-                   model_config=_ModelConfig(max_tokens=8192, temperature=0.55))
+        a = _agent(
+            _num_predict=None,
+            _temperature=None,
+            model_config=_ModelConfig(max_tokens=8192, temperature=0.55),
+        )
         line = footer_line1(a)
         self.assertIn("8K", line)
         self.assertIn("0.55", line)
@@ -161,12 +164,17 @@ class TestFooterDeduplicated(unittest.TestCase):
         cmds_dir = Path(__file__).resolve().parent.parent / "agentkthx" / "cli" / "commands"
         for name in ("agent.py", "chat.py"):
             src = (cmds_dir / name).read_text(encoding="utf-8")
-            self.assertNotIn("def _fmt_tok", src,
-                             f"{name} regressed: carries its own _fmt_tok copy")
-            self.assertNotIn("f\"{{n/1000:.1f}}k\"", src,
-                             f"{name} regressed: carries inline token formatting")
-            self.assertIn("from ..footer import footer_line1, footer_line2", src,
-                          f"{name} must render via the shared cli.footer builder")
+            self.assertNotIn(
+                "def _fmt_tok", src, f"{name} regressed: carries its own _fmt_tok copy"
+            )
+            self.assertNotIn(
+                'f"{{n/1000:.1f}}k"', src, f"{name} regressed: carries inline token formatting"
+            )
+            self.assertIn(
+                "from ..footer import footer_line1, footer_line2",
+                src,
+                f"{name} must render via the shared cli.footer builder",
+            )
 
 
 if __name__ == "__main__":

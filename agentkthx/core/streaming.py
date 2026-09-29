@@ -35,22 +35,26 @@ from typing import Generator
 
 from .api_resilience import (
     backoff_delay,
-    describe_wait,
     describe_terminal,
+    describe_wait,
     is_transient_api_error,
 )
 from .error_recovery import build_enhanced_observation, is_error_result
-from .models import Tool
 from .openresponses import (
-    Response, ResponseStatus, ItemStatus,
-    FunctionCallItem, ReasoningItem,
+    EventType,
+    ItemStatus,
+    OutputItemEvent,
     OutputText,
-    EventType, ResponseEvent, OutputItemEvent,
+    ReasoningItem,
+    Response,
+    ResponseEvent,
+    ResponseStatus,
     ToolChoiceType,
-    create_message_item, create_function_call_item, create_function_call_output,
+    create_function_call_item,
+    create_function_call_output,
+    create_message_item,
     stream_response_events,
 )
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # MAINT-08 (R07.15): StreamAccumulator + StreamRenderer
@@ -75,6 +79,7 @@ from .openresponses import (
 # pick stream method → feed chunks into accumulator + renderer → finalize.
 # Rendered bytes and return-dict shape are unchanged — pinned by
 # tests/test_streaming.py plus the new MAINT-08 tests.
+
 
 class StreamAccumulator:
     """Accumulates streaming deltas into a _generate()-shaped result.
@@ -117,9 +122,14 @@ class StreamAccumulator:
         if isinstance(tc_delta, list):
             for tc_d in tc_delta:
                 idx = tc_d.get("index", 0)
-                slot = self.tool_calls_acc.setdefault(idx, {
-                    "id": "", "name": "", "arguments_str": "",
-                })
+                slot = self.tool_calls_acc.setdefault(
+                    idx,
+                    {
+                        "id": "",
+                        "name": "",
+                        "arguments_str": "",
+                    },
+                )
                 if tc_d.get("id"):
                     slot["id"] = tc_d["id"]
                 func = tc_d.get("function") or {}
@@ -130,9 +140,14 @@ class StreamAccumulator:
         elif isinstance(tc_delta, dict):
             # Single tool call delta
             idx = tc_delta.get("index", 0)
-            slot = self.tool_calls_acc.setdefault(idx, {
-                "id": "", "name": "", "arguments_str": "",
-            })
+            slot = self.tool_calls_acc.setdefault(
+                idx,
+                {
+                    "id": "",
+                    "name": "",
+                    "arguments_str": "",
+                },
+            )
             if tc_delta.get("id"):
                 slot["id"] = tc_delta["id"]
             func = tc_delta.get("function") or {}
@@ -189,11 +204,13 @@ class StreamAccumulator:
                     # Surface the raw string so the agent loop / error
                     # recovery can teach the model about the format.
                     args = {"_raw_arguments": args_str}
-            assembled.append({
-                "id": slot["id"] or f"call_{idx}",
-                "name": slot["name"],
-                "arguments": args,
-            })
+            assembled.append(
+                {
+                    "id": slot["id"] or f"call_{idx}",
+                    "name": slot["name"],
+                    "arguments": args,
+                }
+            )
         return assembled
 
     def finalize(self) -> dict:
@@ -399,7 +416,6 @@ class StreamingMixin:
             for sse_event in agent.run_stream("Hello!"):
                 print(sse_event)  # SSE formatted event
         """
-        start_time = time.time()
 
         # Create OpenResponses Response object
         response = Response(
@@ -464,11 +480,9 @@ class StreamingMixin:
                         # R06.54: surface the terminal outcome to non-debug
                         # users too (mirrors the run() path).
                         if _exhausted:
-                            print(describe_terminal(
-                                e, self.max_api_retries, _api_wait_total))
+                            print(describe_terminal(e, self.max_api_retries, _api_wait_total))
                         elif not _transient:
-                            print(f"  [Resilience] Fatal API error — "
-                                  f"not retrying: {e}")
+                            print(f"  [Resilience] Fatal API error — " f"not retrying: {e}")
                         if self.debug:
                             print(f"  [Stream] ERROR: {e}")
                         # Emit failure event
@@ -490,19 +504,19 @@ class StreamingMixin:
             if full_content:
                 parsed_calls = self._parser.parse(full_content)
                 for call in parsed_calls:
-                    if hasattr(call, 'thought') and call.thought:
-                        reasoning_item = ReasoningItem(
-                            content=[OutputText(text=call.thought)]
-                        )
+                    if hasattr(call, "thought") and call.thought:
+                        reasoning_item = ReasoningItem(content=[OutputText(text=call.thought)])
                         reasoning_item.status = ItemStatus.COMPLETED
                         response.add_output_item(reasoning_item)
 
-                    tool_calls_found.append({
-                        "name": call.name,
-                        "arguments": call.arguments,
-                        "id": "",
-                        "final_answer": getattr(call, 'final_answer', None),
-                    })
+                    tool_calls_found.append(
+                        {
+                            "name": call.name,
+                            "arguments": call.arguments,
+                            "id": "",
+                            "final_answer": getattr(call, "final_answer", None),
+                        }
+                    )
 
             # ---- Execute tool calls if found ----
             if tool_calls_found:
@@ -510,9 +524,14 @@ class StreamingMixin:
                 if _expecting_final_answer and _last_successful_result is not None:
                     text_chunks_gen = iter([_last_successful_result])
                     for sse_event in stream_response_events(
-                        Response(model=self.model, status=ResponseStatus.IN_PROGRESS,
-                                tool_choice=self.tool_choice, allowed_tools=self._allowed_tools or []),
-                        text_chunks_gen, debug=self.debug,
+                        Response(
+                            model=self.model,
+                            status=ResponseStatus.IN_PROGRESS,
+                            tool_choice=self.tool_choice,
+                            allowed_tools=self._allowed_tools or [],
+                        ),
+                        text_chunks_gen,
+                        debug=self.debug,
                     ):
                         yield sse_event
                     return
@@ -529,7 +548,9 @@ class StreamingMixin:
 
                     # Check allowed_tools
                     if self._allowed_tools and tool_name not in self._allowed_tools:
-                        error_msg = f"Tool '{tool_name}' not in allowed_tools: {self._allowed_tools}"
+                        error_msg = (
+                            f"Tool '{tool_name}' not in allowed_tools: {self._allowed_tools}"
+                        )
                         self.memory.add("user", f"Observation: Error: {error_msg}")
                         continue
 
@@ -537,7 +558,9 @@ class StreamingMixin:
                     if self._error_tracker.should_block_repeat(tool_name, tool_args):
                         blocked_msg = self._error_tracker.format_repeat_block(tool_name, tool_args)
                         if self.debug:
-                            print(f"  [ErrorRecovery] Blocking repeated identical call: {tool_name}({tool_args})")
+                            print(
+                                f"  [ErrorRecovery] Blocking repeated identical call: {tool_name}({tool_args})"
+                            )
                         self.memory.add("user", f"Observation: {blocked_msg}")
                         self._error_tracker.record_failure(
                             tool_name=tool_name,
@@ -652,6 +675,7 @@ class StreamingMixin:
                         _last_tool_name = None
                     else:
                         from .error_recovery import _is_simple_result
+
                         if _is_simple_result(str(result), tool_name):
                             _expecting_final_answer = True
                             _last_successful_result = str(result)
@@ -666,9 +690,14 @@ class StreamingMixin:
                 if pending_final_answer:
                     text_chunks_gen = iter([pending_final_answer])
                     for sse_event in stream_response_events(
-                        Response(model=self.model, status=ResponseStatus.IN_PROGRESS,
-                                tool_choice=self.tool_choice, allowed_tools=self._allowed_tools or []),
-                        text_chunks_gen, debug=self.debug,
+                        Response(
+                            model=self.model,
+                            status=ResponseStatus.IN_PROGRESS,
+                            tool_choice=self.tool_choice,
+                            allowed_tools=self._allowed_tools or [],
+                        ),
+                        text_chunks_gen,
+                        debug=self.debug,
                     ):
                         yield sse_event
                     return
@@ -696,7 +725,9 @@ class StreamingMixin:
             final_response.input = response.input
             final_response.usage = response.usage
 
-            for sse_event in stream_response_events(final_response, text_chunks_gen, debug=self.debug):
+            for sse_event in stream_response_events(
+                final_response, text_chunks_gen, debug=self.debug
+            ):
                 yield sse_event
 
             # Only one pass needed when there are no tool calls
@@ -739,6 +770,7 @@ class StreamingMixin:
         think = self._think
         if think is None and self.model_family:
             from .model_family_config import needs_no_think_directive
+
             if needs_no_think_directive(self.model_family):
                 think = False
 
@@ -757,7 +789,7 @@ class StreamingMixin:
         # These are params that don't have a dedicated agent attribute
         # (top_k, seed, n, presence_penalty, frequency_penalty).
         # They're stashed on agent._runtime_kwargs by /param in cli.py.
-        if hasattr(self, '_runtime_kwargs') and self._runtime_kwargs:
+        if hasattr(self, "_runtime_kwargs") and self._runtime_kwargs:
             for k, v in self._runtime_kwargs.items():
                 backend_kwargs[k] = v
 
@@ -771,7 +803,7 @@ class StreamingMixin:
             backend_kwargs["response_format"] = self._response_format
 
         # Check if backend has streaming support
-        if hasattr(self.backend, 'generate_stream'):
+        if hasattr(self.backend, "generate_stream"):
             # Use native Ollama streaming
             for chunk in self.backend.generate_stream(
                 model=self.model,
@@ -782,7 +814,7 @@ class StreamingMixin:
                 **backend_kwargs,
             ):
                 yield chunk
-        elif hasattr(self.backend, 'generate_completions_stream'):
+        elif hasattr(self.backend, "generate_completions_stream"):
             # Use OpenAI-compatible streaming
             for chunk_dict in self.backend.generate_completions_stream(
                 model=self.model,
@@ -809,7 +841,8 @@ class StreamingMixin:
             # Yield content in chunks for consistent behavior
             chunk_size = 20
             for i in range(0, len(content), chunk_size):
-                yield content[i:i + chunk_size]
+                yield content[i : i + chunk_size]
+
     def _generate_stream(self) -> dict:
         """Stream a response from the backend, printing deltas to stdout.
 
@@ -841,7 +874,7 @@ class StreamingMixin:
             # Backend has no streaming — fall back to non-streaming and
             # print the result in one shot. Don't pretend to stream.
             if self.debug:
-                print(f"  [Stream] backend has no streaming method — falling back to _generate()")
+                print("  [Stream] backend has no streaming method — falling back to _generate()")
             response = self.backend.generate(
                 model=self.model,
                 messages=messages,
@@ -971,6 +1004,7 @@ class StreamingMixin:
         think = self._think
         if think is None and self.model_family:
             from .model_family_config import needs_no_think_directive
+
             if needs_no_think_directive(self.model_family):
                 think = False
 
@@ -981,7 +1015,7 @@ class StreamingMixin:
             backend_kwargs["num_ctx"] = self.num_ctx
         if self._num_predict is not None:
             backend_kwargs["num_predict"] = self._num_predict
-        if hasattr(self, '_runtime_kwargs') and self._runtime_kwargs:
+        if hasattr(self, "_runtime_kwargs") and self._runtime_kwargs:
             for k, v in self._runtime_kwargs.items():
                 backend_kwargs[k] = v
         stops = self.model_config.stop_tokens if self.model_config else []
@@ -994,8 +1028,16 @@ class StreamingMixin:
         backend_kwargs["truncation"] = self.truncation
 
         tools_for_backend = self.tools.all() if self.tools and len(self.tools) > 0 else None
-        gen_temperature = self._temperature if self._temperature is not None else self.model_config.default_temperature
-        gen_max_tokens = self._num_predict if self._num_predict is not None else self.model_config.default_max_tokens
+        gen_temperature = (
+            self._temperature
+            if self._temperature is not None
+            else self.model_config.default_temperature
+        )
+        gen_max_tokens = (
+            self._num_predict
+            if self._num_predict is not None
+            else self.model_config.default_max_tokens
+        )
         gen_top_p = self._top_p if self._top_p is not None else self.model_config.default_top_p
 
         # R06.57: Cap max_tokens to num_ctx/32 (same as non-streaming path)
@@ -1008,10 +1050,10 @@ class StreamingMixin:
         # SSE) preferred because it carries tool_calls deltas. The native
         # Ollama generate_stream is text-only.
         stream_method = None
-        if hasattr(self.backend, 'generate_completions_stream'):
-            stream_method = 'openai_compat'
-        elif hasattr(self.backend, 'generate_stream'):
-            stream_method = 'native'
+        if hasattr(self.backend, "generate_completions_stream"):
+            stream_method = "openai_compat"
+        elif hasattr(self.backend, "generate_stream"):
+            stream_method = "native"
 
         return {
             "backend_kwargs": backend_kwargs,
@@ -1021,4 +1063,3 @@ class StreamingMixin:
             "gen_top_p": gen_top_p,
             "stream_method": stream_method,
         }
-

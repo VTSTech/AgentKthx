@@ -35,9 +35,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from agentkthx.backends.cloud_base import CloudBackend
 from agentkthx.backends.openai_compat import OpenAICompatibleBackend
-from agentkthx.backends.base import BackendConfig
 from agentkthx.core.types import ApiMode, BackendType, ToolSupportLevel
-
 
 # ---------------------------------------------------------------------------
 # Test fixtures: a minimal concrete CloudBackend subclass for testing
@@ -76,6 +74,7 @@ class _TestCloudBackend(CloudBackend):
     ``BaseBackend`` are stubbed out — these tests only exercise the
     CloudBackend init/auth/catalog logic, not the actual generation.
     """
+
     MODELS = _TEST_CATALOG
     _api_key_env_var = "TEST_CLOUD_API_KEY"
     _default_base_url = "https://api.test-cloud.example.com"
@@ -94,12 +93,14 @@ class _TestCloudBackend(CloudBackend):
     def _iter_sse_lines(self, url, body, headers):
         raise NotImplementedError("test backend doesn't stream")
 
-    def generate(self, model, messages, tools=None, temperature=None,
-                 max_tokens=None, think=None, **kwargs):
+    def generate(
+        self, model, messages, tools=None, temperature=None, max_tokens=None, think=None, **kwargs
+    ):
         raise NotImplementedError("test backend doesn't generate")
 
-    def generate_stream(self, model, messages, tools=None, temperature=0.7,
-                        max_tokens=2048, **kwargs):
+    def generate_stream(
+        self, model, messages, tools=None, temperature=0.7, max_tokens=2048, **kwargs
+    ):
         raise NotImplementedError("test backend doesn't stream")
 
 
@@ -124,6 +125,7 @@ def test_backend(test_api_key):
 # ---------------------------------------------------------------------------
 # Inheritance and class structure
 # ---------------------------------------------------------------------------
+
 
 class TestCloudBackendInheritance:
     """Verify CloudBackend's inheritance hierarchy and class structure."""
@@ -186,6 +188,7 @@ class TestCloudBackendInheritance:
 # __init__ — base-URL resolution
 # ---------------------------------------------------------------------------
 
+
 class TestCloudBackendInitBaseUrl:
     """Verify __init__ resolves the base URL correctly."""
 
@@ -213,6 +216,7 @@ class TestCloudBackendInitBaseUrl:
 # ---------------------------------------------------------------------------
 # __init__ — API-key validation
 # ---------------------------------------------------------------------------
+
 
 class TestCloudBackendInitApiKey:
     """Verify __init__ validates the API key correctly."""
@@ -264,6 +268,7 @@ class TestCloudBackendInitApiKey:
 # __init__ — API-mode forcing
 # ---------------------------------------------------------------------------
 
+
 class TestCloudBackendInitApiMode:
     """Verify __init__ forces OPENAI/JEV and rejects OPENRE."""
 
@@ -292,13 +297,14 @@ class TestCloudBackendInitApiMode:
         """The AGENTKTHX_API_MODE env var is set so is_openresponses_mode()
         in core/openresponses.py works correctly (ARCH-01)."""
         monkeypatch.delenv("AGENTKTHX_API_MODE", raising=False)
-        b = _TestCloudBackend()
+        _TestCloudBackend()
         assert os.environ.get("AGENTKTHX_API_MODE") == "openai"
 
 
 # ---------------------------------------------------------------------------
 # __init__ — _context_safe_max_tokens initialization
 # ---------------------------------------------------------------------------
+
 
 class TestCloudBackendContextSafeMaxTokens:
     """Verify the R06.57 context-length-400 recovery field is initialized."""
@@ -311,6 +317,7 @@ class TestCloudBackendContextSafeMaxTokens:
 # ---------------------------------------------------------------------------
 # is_running()
 # ---------------------------------------------------------------------------
+
 
 class TestCloudBackendIsRunning:
     """Verify is_running() returns True iff an API key is configured."""
@@ -331,6 +338,7 @@ class TestCloudBackendIsRunning:
 # ---------------------------------------------------------------------------
 # _get_auth_headers()
 # ---------------------------------------------------------------------------
+
 
 class TestCloudBackendAuthHeaders:
     """Verify _get_auth_headers returns the expected Bearer + Content-Type."""
@@ -353,6 +361,7 @@ class TestCloudBackendAuthHeaders:
 # ---------------------------------------------------------------------------
 # _get_model_defaults()
 # ---------------------------------------------------------------------------
+
 
 class TestCloudBackendModelDefaults:
     """Verify _get_model_defaults returns catalog-based defaults with the cap."""
@@ -390,6 +399,7 @@ class TestCloudBackendModelDefaults:
 # get_model_info()
 # ---------------------------------------------------------------------------
 
+
 class TestCloudBackendModelInfo:
     """Verify get_model_info returns catalog-based model info."""
 
@@ -418,6 +428,7 @@ class TestCloudBackendModelInfo:
 # ---------------------------------------------------------------------------
 # list_models() — default catalog-only implementation
 # ---------------------------------------------------------------------------
+
 
 class TestCloudBackendListModels:
     """Verify the default list_models returns the static catalog."""
@@ -450,6 +461,7 @@ class TestCloudBackendListModels:
 # test_tool_support()
 # ---------------------------------------------------------------------------
 
+
 class TestCloudBackendToolSupport:
     """Verify the default test_tool_support returns NATIVE."""
 
@@ -463,6 +475,7 @@ class TestCloudBackendToolSupport:
 # ---------------------------------------------------------------------------
 # _is_free_model()
 # ---------------------------------------------------------------------------
+
 
 class TestCloudBackendFreeModel:
     """Verify the default _is_free_model uses the pricing dict."""
@@ -488,6 +501,7 @@ class TestCloudBackendFreeModel:
 # Regression: ZAI backend now inherits from CloudBackend
 # ---------------------------------------------------------------------------
 
+
 class TestZaiBackendMigration:
     """Verify the ZAI backend (the first plugin migrated to CloudBackend)
     still works correctly after the MAINT-02 refactor."""
@@ -495,17 +509,20 @@ class TestZaiBackendMigration:
     def test_zai_backend_inherits_from_cloud_backend(self):
         """ZaiBackend MUST inherit from CloudBackend (MAINT-02)."""
         from agentkthx.plugins.zai.zai import ZaiBackend
+
         assert issubclass(ZaiBackend, CloudBackend)
 
     def test_zai_backend_still_inherits_from_openai_compatible(self):
         """ZaiBackend MUST still inherit from OpenAICompatibleBackend
         (transitively via CloudBackend) so existing isinstance checks work."""
         from agentkthx.plugins.zai.zai import ZaiBackend
+
         assert issubclass(ZaiBackend, OpenAICompatibleBackend)
 
     def test_zai_backend_class_attributes_set(self):
         """ZaiBackend sets the CloudBackend class attributes correctly."""
         from agentkthx.plugins.zai.zai import ZaiBackend
+
         assert ZaiBackend._api_key_env_var == "ZAI_API_KEY"
         assert ZaiBackend._provider_label == "ZAI"
         assert ZaiBackend._default_model == "glm-5.1"
@@ -519,6 +536,7 @@ class TestZaiBackendMigration:
         (preserving historical catalog entry shape)."""
         monkeypatch.setenv("ZAI_API_KEY", "test-key-1234567890123")
         from agentkthx.plugins.zai.zai import ZaiBackend
+
         b = ZaiBackend()
         assert b._catalog_family_name() == "glm"
         assert b._catalog_backend_name() == "zai"
@@ -527,6 +545,7 @@ class TestZaiBackendMigration:
         """ZaiBackend.__init__ accepts an explicit api_key."""
         monkeypatch.delenv("ZAI_API_KEY", raising=False)
         from agentkthx.plugins.zai.zai import ZaiBackend
+
         b = ZaiBackend(api_key="explicit-zai-key-1234567890")
         assert b.api_key == "explicit-zai-key-1234567890"
         assert b.is_running() is True
@@ -536,6 +555,7 @@ class TestZaiBackendMigration:
         (not overridden in ZaiBackend) and returns catalog-based defaults."""
         monkeypatch.setenv("ZAI_API_KEY", "test-key-1234567890123")
         from agentkthx.plugins.zai.zai import ZaiBackend
+
         b = ZaiBackend()
         defaults = b._get_model_defaults("glm-5.1")
         # Catalog entry: context_length=204800, default_max_tokens=131072

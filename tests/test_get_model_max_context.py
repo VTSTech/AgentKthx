@@ -29,7 +29,6 @@ Test coverage:
 
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
@@ -42,6 +41,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 # CloudBackend.get_model_max_context (the new method)
 # ---------------------------------------------------------------------------
 
+
 class TestCloudBackendGetModelMaxContext:
     """Verify the new CloudBackend.get_model_max_context implementation."""
 
@@ -50,7 +50,8 @@ class TestCloudBackendGetModelMaxContext:
         monkeypatch.setenv("ORCAROUTER_API_KEY", "sk-orca-test1234567890")
         # ZAI's catalog has explicit context_lengths
         monkeypatch.setenv("ZAI_API_KEY", "test-zai-key-1234567890")
-        from agentkthx.plugins.zai.zai import ZaiBackend, ZAI_MODELS
+        from agentkthx.plugins.zai.zai import ZAI_MODELS, ZaiBackend
+
         b = ZaiBackend()
         # glm-5.1 has context_length=204800 in the catalog
         assert ZAI_MODELS["glm-5.1"]["context_length"] == 204800
@@ -60,6 +61,7 @@ class TestCloudBackendGetModelMaxContext:
         """When the model is NOT in the catalog, return 128000 (safe default)."""
         monkeypatch.setenv("ORCAROUTER_API_KEY", "sk-orca-test1234567890")
         from agentkthx.plugins.orcarouter.orcarouter import OrcaRouterBackend
+
         b = OrcaRouterBackend()
         # An unknown model should return 128000
         assert b.get_model_max_context("nonexistent/model-xyz") == 128000
@@ -68,6 +70,7 @@ class TestCloudBackendGetModelMaxContext:
         """Provider prefix (e.g. 'zai/glm-5.1') is stripped before catalog lookup."""
         monkeypatch.setenv("ZAI_API_KEY", "test-zai-key-1234567890")
         from agentkthx.plugins.zai.zai import ZaiBackend
+
         b = ZaiBackend()
         # 'zai/glm-5.1' should resolve to 'glm-5.1' in the catalog
         assert b.get_model_max_context("zai/glm-5.1") == 204800
@@ -77,6 +80,7 @@ class TestCloudBackendGetModelMaxContext:
         ignored — the catalog is authoritative per-model, not per-family."""
         monkeypatch.setenv("ZAI_API_KEY", "test-zai-key-1234567890")
         from agentkthx.plugins.zai.zai import ZaiBackend
+
         b = ZaiBackend()
         # family="anything" should not change the result
         assert b.get_model_max_context("glm-5.1", family="glm") == 204800
@@ -87,6 +91,7 @@ class TestCloudBackendGetModelMaxContext:
         """The return value is always an int (not None, not str)."""
         monkeypatch.setenv("ORCAROUTER_API_KEY", "sk-orca-test1234567890")
         from agentkthx.plugins.orcarouter.orcarouter import OrcaRouterBackend
+
         b = OrcaRouterBackend()
         result = b.get_model_max_context("any-model")
         assert isinstance(result, int)
@@ -97,6 +102,7 @@ class TestCloudBackendGetModelMaxContext:
 # CloudBackend.get_model_runtime_context
 # ---------------------------------------------------------------------------
 
+
 class TestCloudBackendGetModelRuntimeContext:
     """Verify the new CloudBackend.get_model_runtime_context implementation."""
 
@@ -105,6 +111,7 @@ class TestCloudBackendGetModelRuntimeContext:
         runtime context like Ollama's Modelfile num_ctx)."""
         monkeypatch.setenv("ZAI_API_KEY", "test-zai-key-1234567890")
         from agentkthx.plugins.zai.zai import ZaiBackend
+
         b = ZaiBackend()
         # Both should return the same value for the same model
         assert b.get_model_runtime_context("glm-5.1") == b.get_model_max_context("glm-5.1")
@@ -113,6 +120,7 @@ class TestCloudBackendGetModelRuntimeContext:
         """The return value is always an int."""
         monkeypatch.setenv("ORCAROUTER_API_KEY", "sk-orca-test1234567890")
         from agentkthx.plugins.orcarouter.orcarouter import OrcaRouterBackend
+
         b = OrcaRouterBackend()
         result = b.get_model_runtime_context("any-model")
         assert isinstance(result, int)
@@ -123,6 +131,7 @@ class TestCloudBackendGetModelRuntimeContext:
 # Regression: all 5 cloud backends respond without AttributeError
 # ---------------------------------------------------------------------------
 
+
 class TestAllCloudBackendsHaveGetModelMaxContext:
     """Verify all 5 cloud backends respond to get_model_max_context.
 
@@ -131,13 +140,16 @@ class TestAllCloudBackendsHaveGetModelMaxContext:
     of overriding it like OpenRouter/Gemini/OpenAI/HuggingFace do.
     """
 
-    @pytest.mark.parametrize("backend_name,env_var,env_value", [
-        ("zai", "ZAI_API_KEY", "test-zai-key-1234567890"),
-        ("orcarouter", "ORCAROUTER_API_KEY", "sk-orca-test1234567890"),
-        ("openrouter", "OPENROUTER_API_KEY", "sk-or-test1234567890"),
-        ("openai", "OPENAI_API_KEY", "sk-test1234567890"),
-        ("huggingface", "HF_TOKEN", "hf_test1234567890"),
-    ])
+    @pytest.mark.parametrize(
+        "backend_name,env_var,env_value",
+        [
+            ("zai", "ZAI_API_KEY", "test-zai-key-1234567890"),
+            ("orcarouter", "ORCAROUTER_API_KEY", "sk-orca-test1234567890"),
+            ("openrouter", "OPENROUTER_API_KEY", "sk-or-test1234567890"),
+            ("openai", "OPENAI_API_KEY", "sk-test1234567890"),
+            ("huggingface", "HF_TOKEN", "hf_test1234567890"),
+        ],
+    )
     def test_backend_responds_to_get_model_max_context(
         self, monkeypatch, backend_name, env_var, env_value
     ):
@@ -145,19 +157,23 @@ class TestAllCloudBackendsHaveGetModelMaxContext:
         without raising AttributeError."""
         monkeypatch.setenv(env_var, env_value)
         from agentkthx import get_backend
+
         b = get_backend(backend_name)
         # Should NOT raise AttributeError — should return a positive int
         result = b.get_model_max_context("test-model")
         assert isinstance(result, int), f"{backend_name}: expected int, got {type(result)}"
         assert result > 0, f"{backend_name}: expected positive int, got {result}"
 
-    @pytest.mark.parametrize("backend_name,env_var,env_value", [
-        ("zai", "ZAI_API_KEY", "test-zai-key-1234567890"),
-        ("orcarouter", "ORCAROUTER_API_KEY", "sk-orca-test1234567890"),
-        ("openrouter", "OPENROUTER_API_KEY", "sk-or-test1234567890"),
-        ("openai", "OPENAI_API_KEY", "sk-test1234567890"),
-        ("huggingface", "HF_TOKEN", "hf_test1234567890"),
-    ])
+    @pytest.mark.parametrize(
+        "backend_name,env_var,env_value",
+        [
+            ("zai", "ZAI_API_KEY", "test-zai-key-1234567890"),
+            ("orcarouter", "ORCAROUTER_API_KEY", "sk-orca-test1234567890"),
+            ("openrouter", "OPENROUTER_API_KEY", "sk-or-test1234567890"),
+            ("openai", "OPENAI_API_KEY", "sk-test1234567890"),
+            ("huggingface", "HF_TOKEN", "hf_test1234567890"),
+        ],
+    )
     def test_backend_responds_to_get_model_runtime_context(
         self, monkeypatch, backend_name, env_var, env_value
     ):
@@ -165,6 +181,7 @@ class TestAllCloudBackendsHaveGetModelMaxContext:
         without raising AttributeError (the original crash site)."""
         monkeypatch.setenv(env_var, env_value)
         from agentkthx import get_backend
+
         b = get_backend(backend_name)
         # Should NOT raise AttributeError — should return a positive int
         result = b.get_model_runtime_context("test-model")
@@ -175,6 +192,7 @@ class TestAllCloudBackendsHaveGetModelMaxContext:
 # ---------------------------------------------------------------------------
 # Regression: ZAI catalog values are correctly surfaced
 # ---------------------------------------------------------------------------
+
 
 class TestZaiCatalogContextLengths:
     """Verify ZAI's catalog values flow through get_model_max_context.
@@ -189,6 +207,7 @@ class TestZaiCatalogContextLengths:
         """glm-5.1 has context_length=204800 (200K) per the ZAI catalog."""
         monkeypatch.setenv("ZAI_API_KEY", "test-zai-key-1234567890")
         from agentkthx.plugins.zai.zai import ZaiBackend
+
         b = ZaiBackend()
         assert b.get_model_max_context("glm-5.1") == 204800
 
@@ -196,6 +215,7 @@ class TestZaiCatalogContextLengths:
         """glm-5.3 has context_length=1048576 (1M) per the ZAI catalog."""
         monkeypatch.setenv("ZAI_API_KEY", "test-zai-key-1234567890")
         from agentkthx.plugins.zai.zai import ZaiBackend
+
         b = ZaiBackend()
         assert b.get_model_max_context("glm-5.3") == 1048576
 
@@ -203,5 +223,6 @@ class TestZaiCatalogContextLengths:
         """An unknown ZAI model returns the 128K safe default."""
         monkeypatch.setenv("ZAI_API_KEY", "test-zai-key-1234567890")
         from agentkthx.plugins.zai.zai import ZaiBackend
+
         b = ZaiBackend()
         assert b.get_model_max_context("nonexistent-glm") == 128000

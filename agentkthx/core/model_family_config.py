@@ -22,11 +22,12 @@ _PLATFORM_DIR_CMD = "cd" if _IS_WINDOWS else "pwd"
 @dataclass
 class ModelFamilyConfig:
     """Configuration for a specific model family.
-    
+
     Unified configuration combining prompting, formatting, tool handling,
     and generation defaults. Single source of truth for all model-family-
     specific settings.
     """
+
     family: str
     # Prompting & formatting
     start_tokens: dict = field(default_factory=dict)
@@ -50,12 +51,12 @@ class ModelFamilyConfig:
     # Override system prompt for models without tool support (pure reasoning)
     no_tools_system_prompt: str | None = None
 
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # FAMILY CONFIGURATIONS
 # ═══════════════════════════════════════════════════════════════════════════════
 
 FAMILY_CONFIGS: dict[str, ModelFamilyConfig] = {
-    
     # GEMMA3 - Google's Gemma models (270m doesn't support tools)
     "gemma3": ModelFamilyConfig(
         family="gemma3",
@@ -90,7 +91,6 @@ A: Tokyo
 
 Keep answers brief. Show calculation first, then the final number.""",
     ),
-    
     # GRANITE - IBM's Granite models (native tool support with XML format)
     "granite": ModelFamilyConfig(
         family="granite",
@@ -106,7 +106,6 @@ Keep answers brief. Show calculation first, then the final number.""",
         prefers_few_shot=False,  # Native tools don't need few-shot
         few_shot_style="native",
     ),
-    
     # GRANITEMOE - IBM's Granite MoE models
     "granitemoe": ModelFamilyConfig(
         family="granitemoe",
@@ -124,7 +123,6 @@ Keep answers brief. Show calculation first, then the final number.""",
         has_schema_dump_issue=True,
         truncate_json_args=True,
     ),
-    
     # QWEN2 - Alibaba's Qwen 2.x models (ChatML format, native tools)
     "qwen2": ModelFamilyConfig(
         family="qwen2",
@@ -140,7 +138,6 @@ Keep answers brief. Show calculation first, then the final number.""",
         prefers_few_shot=False,  # Native tools don't need few-shot
         few_shot_style="native",
     ),
-    
     # QWEN3 - Alibaba's Qwen 3.x models (ChatML + thinking directives)
     "qwen3": ModelFamilyConfig(
         family="qwen3",
@@ -157,7 +154,6 @@ Keep answers brief. Show calculation first, then the final number.""",
         prefers_few_shot=True,
         few_shot_style="react",
     ),
-    
     # QWEN35 (Qwen 3.5) - Successor to Qwen3, NO thinking mode
     # Note: Unlike Qwen3, Qwen3.5 does NOT have thinking mode (simpler template)
     "qwen35": ModelFamilyConfig(
@@ -175,7 +171,6 @@ Keep answers brief. Show calculation first, then the final number.""",
         prefers_few_shot=False,  # Native models should NOT have few-shot
         few_shot_style="react",
     ),
-    
     # LLAMA - Meta's Llama models
     "llama": ModelFamilyConfig(
         family="llama",
@@ -191,13 +186,12 @@ Keep answers brief. Show calculation first, then the final number.""",
         prefers_few_shot=True,
         few_shot_style="react",
     ),
-    
     # DOLPHIN - Dolphin fine-tunes (ChatML format, no tool support)
     "dolphin": ModelFamilyConfig(
         family="dolphin",
         start_tokens={
             "system": "<|im_start|>system",
-            "user": "<|im_start|>user", 
+            "user": "<|im_start|>user",
             "assistant": "<|im_start|>assistant",
         },
         stop_tokens=["<|im_end|>", "<|im_start|>"],
@@ -229,7 +223,6 @@ A: Tokyo
 
 Keep answers brief. One word when possible.""",
     ),
-    
     # DEEPSEEK-R1 - DeepSeek's reasoning models (thinking mode)
     # These models have extended reasoning capabilities with think tokens
     "deepseek-r1": ModelFamilyConfig(
@@ -247,7 +240,6 @@ Keep answers brief. One word when possible.""",
         prefers_few_shot=True,
         few_shot_style="react",
     ),
-    
     # DEEPSEEK - DeepSeek's standard models (coder, v3, etc.)
     "deepseek": ModelFamilyConfig(
         family="deepseek",
@@ -315,12 +307,21 @@ _FAMILY_ALIASES: dict[str, str] = {
 # MAINT-07: detectable families with NO template-specific config authored.
 # get_family_config() returns the neutral default for these — intentional
 # and pinned by the sweep test so a future rename can't silently change it.
-_DEFAULT_THROUGH_FAMILIES = {"phi3", "phi", "mistral", "mixtral", "codellama", "command-r", "command"}
+_DEFAULT_THROUGH_FAMILIES = {
+    "phi3",
+    "phi",
+    "mistral",
+    "mixtral",
+    "codellama",
+    "command-r",
+    "command",
+}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # HELPER FUNCTIONS
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 def get_family_config(family: str) -> ModelFamilyConfig:
     """Get configuration for a model family.
@@ -381,11 +382,11 @@ def get_preferred_temperature(family: str) -> float:
 def should_use_few_shot(family: str) -> bool:
     """Determine if few-shot prompting should be used."""
     config = get_family_config(family)
-    
+
     # If family explicitly prefers/dislikes few-shot, respect that
     if not config.prefers_few_shot:
         return False
-    
+
     return config.prefers_few_shot
 
 
@@ -411,8 +412,7 @@ def needs_no_think_directive(family: str) -> bool:
 
 def get_react_system_suffix(family: str) -> str:
     """Get family-specific ReAct format instructions."""
-    config = get_family_config(family)
-    
+
     base_suffix = """You have access to tools. Use the following format:
 
 Thought: <your reasoning>
@@ -422,7 +422,7 @@ Observation: <result>
 ... (repeat as needed)
 Thought: I have the answer.
 Final Answer: <your response>"""
-    
+
     # Family-specific modifications
     if family == "granitemoe":
         return base_suffix + """
@@ -430,17 +430,17 @@ Final Answer: <your response>"""
 CRITICAL: Keep Action Input JSON SHORT. Use compact format:
 {"expression": "2**10"}  <- GOOD
 {"expression": "calculate 2 to the power of 10"}  <- BAD, too long"""
-    
+
     return base_suffix
 
 
 def get_native_tool_hints(family: str) -> str:
     """Get hints for models using native tool calling."""
     config = get_family_config(family)
-    
+
     if not config.supports_native_tools:
         return ""
-    
+
     hints = f"""TOOL USAGE RULES - YOU MUST CALL TOOLS:
 
 1. MATH QUESTIONS: Always call calculator tool
@@ -460,7 +460,7 @@ def get_native_tool_hints(family: str) -> str:
    - Power is ** not ^
 
 NEVER respond with empty content. ALWAYS call a tool when asked to compute."""
-    
+
     return hints
 
 
@@ -471,15 +471,31 @@ NEVER respond with empty content. ALWAYS call a tool when asked to compute."""
 # of these strings; get_family_config() resolves every one of them (see
 # the aliases / default-through set above).
 _DETECT_FAMILIES = [
-    "qwen2.5", "qwen2", "qwen35", "qwen3.5", "qwen3", "qwen",
-    "llama3.3", "llama3.2", "llama3.1", "llama3", "llama",
-    "mistral", "mixtral",
-    "gemma3", "gemma2", "gemma",
-    "granitemoe", "granite",
-    "phi3", "phi",
+    "qwen2.5",
+    "qwen2",
+    "qwen35",
+    "qwen3.5",
+    "qwen3",
+    "qwen",
+    "llama3.3",
+    "llama3.2",
+    "llama3.1",
+    "llama3",
+    "llama",
+    "mistral",
+    "mixtral",
+    "gemma3",
+    "gemma2",
+    "gemma",
+    "granitemoe",
+    "granite",
+    "phi3",
+    "phi",
     "codellama",
-    "command-r", "command",
-    "deepseek-r1", "deepseek",  # deepseek-r1 must come before deepseek
+    "command-r",
+    "command",
+    "deepseek-r1",
+    "deepseek",  # deepseek-r1 must come before deepseek
     "dolphin",
     "bitnet",  # BitNet 1.58 (LLaMA 3 tokenizer, 128K vocab)
 ]
@@ -497,18 +513,18 @@ def detect_family(model_name: str) -> str | None:
 def get_model_config(model_name: str) -> ModelFamilyConfig:
     """
     Get unified configuration for a model.
-    
+
     This replaces the separate get_model_config() from model_config.py.
     Uses detect_family() for consistent family resolution, then falls back
     to get_family_config() for partial matching.
-    
+
     detect_family() returns the most specific family string (e.g., "qwen2.5",
     "llama3.2") but FAMILY_CONFIGS only stores base families (e.g., "qwen2",
     "llama"). Partial matching bridges this gap: "qwen2.5" → "qwen2" config.
-    
+
     Args:
         model_name: Name of the model (e.g., "qwen2.5:7b")
-    
+
     Returns:
         ModelFamilyConfig for the model
     """

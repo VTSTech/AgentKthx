@@ -87,6 +87,25 @@ target-version = ["py39", "py310", "py311", "py312"]
 [tool.ruff]
 line-length = 100
 lint.select = ["E", "F", "W", "I"]
+# E501 is delegated to black (same line-length). black reformats code to the
+# limit but never splits long string literals/comments — SSE fixtures, URLs,
+# prompt templates and box-drawing section headers legitimately exceed 100
+# chars, so a hard E501 gate would flag ~300 lines black itself accepts.
+lint.ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# E402 — module-level imports that intentionally follow setup code:
+# the package __init__ resolves the version (git hash) before importing
+# submodules; the ACP plugin imports agentkthx.config after defining its
+# module constants; skill helper scripts mutate sys.path/sys.modules before
+# importing their targets; tests insert REPO_ROOT into sys.path (or set env)
+# before importing backend plugins under test.
+"agentkthx/__init__.py" = ["E402"]
+"agentkthx/plugins/acp/acp_plugin.py" = ["E402"]
+"agentkthx/skills/*" = ["E402"]
+"tests/test_mistral_backend.py" = ["E402"]
+"tests/test_no_bom_in_skills.py" = ["E402"]
+"tests/test_pollinations_backend.py" = ["E402"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

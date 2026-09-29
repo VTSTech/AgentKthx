@@ -55,8 +55,7 @@ import stat
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Optional
-
+from typing import Any, Callable
 
 # ---------------------------------------------------------------------------
 # Constants (spec: docs/PLUGIN_SPEC_v0.2.md)
@@ -67,23 +66,41 @@ EXT_NAMESPACE = "org.vts-tech.agentkthx"
 
 #: Canonical $schema identifier for manifest version targeting.
 CANONICAL_SCHEMA = (
-    "https://raw.githubusercontent.com/VTSTech/AgentKthx/"
-    "main/schemas/v0.2/plugin.schema.json"
+    "https://raw.githubusercontent.com/VTSTech/AgentKthx/" "main/schemas/v0.2/plugin.schema.json"
 )
 
 #: Top-level manifest fields understood by this client (v0.2 dual-form).
 KNOWN_TOP_LEVEL = {
-    "$schema", "name", "version", "description", "author", "license",
-    "extensions", "sha256",
+    "$schema",
+    "name",
+    "version",
+    "description",
+    "author",
+    "license",
+    "extensions",
+    "sha256",
     # legacy v0.1 top-level fields (deprecated, still parsed)
-    "display_name", "type", "entrypoint", "depends", "optional_depends",
-    "config", "provides", "compatibility",
+    "display_name",
+    "type",
+    "entrypoint",
+    "depends",
+    "optional_depends",
+    "config",
+    "provides",
+    "compatibility",
 }
 
 #: AgentKthx-specific fields whose canonical home is the extension namespace.
 EXTENSION_FIELDS = {
-    "display_name", "type", "entrypoint", "depends", "optional_depends",
-    "config", "provides", "compatibility", "sha256",
+    "display_name",
+    "type",
+    "entrypoint",
+    "depends",
+    "optional_depends",
+    "config",
+    "provides",
+    "compatibility",
+    "sha256",
 }
 
 #: Known plugin types.
@@ -125,6 +142,7 @@ def _warn(warnings: list[str] | None, msg: str) -> None:
 # ---------------------------------------------------------------------------
 # Small spec helpers
 # ---------------------------------------------------------------------------
+
 
 def parse_version(value: Any) -> tuple[int, int, int] | None:
     """Extract a (major, minor, patch) tuple from a version-ish string."""
@@ -201,6 +219,7 @@ def valid_plugin_name(name: str) -> bool:
 # Plugin Manifest
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class PluginManifest:
     """Parsed ``plugin.json`` manifest (v0.2)."""
@@ -211,17 +230,19 @@ class PluginManifest:
     description: str
     author: str = ""
     license: str = ""
-    type: str = "feature"                       # backend | feature | tools | hook
-    entrypoint: str = "__init__"                # module inside the plugin dir
+    type: str = "feature"  # backend | feature | tools | hook
+    entrypoint: str = "__init__"  # module inside the plugin dir
     depends: list[str] = field(default_factory=list)
     optional_depends: list[str] = field(default_factory=list)
     config: dict = field(default_factory=dict)  # {env_prefix, defaults}
-    provides: dict = field(default_factory=dict)  # {backends, cli_commands, cli_flags, tools, hooks}
+    provides: dict = field(
+        default_factory=dict
+    )  # {backends, cli_commands, cli_flags, tools, hooks}
     compatibility: dict = field(default_factory=dict)
     # --- v0.2 additions ---
-    schema: str | None = None                   # $schema value (None = legacy form)
-    dir: Path | None = None                     # plugin root directory
-    root_kind: str = "builtin"                  # builtin | user | env
+    schema: str | None = None  # $schema value (None = legacy form)
+    dir: Path | None = None  # plugin root directory
+    root_kind: str = "builtin"  # builtin | user | env
     legacy_fields_used: list[str] = field(default_factory=list)
     # SEC-06 (R07.05): optional integrity pin. str pins the package
     # __init__.py; dict pins relative file paths inside the plugin dir.
@@ -239,8 +260,7 @@ def _normalize_author(raw: Any, plugin_name: str, warnings: list[str]) -> str:
         unknown = set(raw) - allowed
         if unknown or any(not isinstance(v, str) for v in raw.values()):
             raise ValueError(
-                "author object may only contain the string fields "
-                "'name', 'email', 'url'"
+                "author object may only contain the string fields " "'name', 'email', 'url'"
             )
         return raw.get("name") or raw.get("email") or raw.get("url") or ""
     raise ValueError("author must be a string or an object with name/email/url")
@@ -252,6 +272,7 @@ def _check_spdx_license(license_id: str, name: str, warnings: list[str]) -> None
         return
     try:
         from ..skills.loader import validate_spdx_license
+
         ok, _msg = validate_spdx_license(license_id)
         if not ok:
             _warn(
@@ -379,9 +400,7 @@ def _parse_manifest(
     # Name must match the directory (spec §Discovery rule 4)
     dir_name = path.parent.name
     if name != dir_name:
-        raise ValueError(
-            f"manifest name {name!r} does not match directory name {dir_name!r}"
-        )
+        raise ValueError(f"manifest name {name!r} does not match directory name {dir_name!r}")
 
     author = _normalize_author(raw.get("author", ""), name, warnings)
     license_id = raw.get("license", "")
@@ -538,16 +557,17 @@ def _parse_manifest(
 # Plugin Instance
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class Plugin:
     """A loaded plugin with its manifest, module, and state."""
 
     manifest: PluginManifest
-    path: Path                                  # plugin root directory
-    module: Any = None                          # imported entrypoint module
+    path: Path  # plugin root directory
+    module: Any = None  # imported entrypoint module
     loaded: bool = False
-    failed: bool = False                        # load attempted and failed
-    error: str | None = None                    # failure message (if failed)
+    failed: bool = False  # load attempted and failed
+    error: str | None = None  # failure message (if failed)
     # v0.2: PLUGIN_ROOT / PLUGIN_DATA as attributes (spec §Environment)
     root: Path | None = None
     data_dir: Path | None = None
@@ -567,6 +587,7 @@ class Plugin:
 # ---------------------------------------------------------------------------
 # Plugin Manager
 # ---------------------------------------------------------------------------
+
 
 class _PluginTransaction:
     """Per-plugin registration transaction (ROB-11, R07.15).
@@ -673,7 +694,7 @@ class PluginManager:
         self._plugins_dir = self._roots[0][0] if self._roots else None
 
         self._plugins: dict[str, Plugin] = {}
-        self._failed: dict[str, str] = {}       # name -> error message
+        self._failed: dict[str, str] = {}  # name -> error message
         self._manifests: list[PluginManifest] | None = None  # discovery cache
         # PERF-04 (R07.14): mtime cache for force=True rescans —
         # maps str(manifest_path) -> (st_mtime | None, PluginManifest).
@@ -687,15 +708,15 @@ class PluginManager:
 
         # Aggregated registrations (core + plugins)
         self._backend_classes: dict[str, tuple[type, str | None]] = {}
-        self._backend_aliases: dict[str, str] = {}        # alias -> canonical
-        self._cli_commands: dict[str, dict] = {}          # name -> {handler, setup_parser, owner}
+        self._backend_aliases: dict[str, str] = {}  # alias -> canonical
+        self._cli_commands: dict[str, dict] = {}  # name -> {handler, setup_parser, owner}
         self._cli_flag_values: dict[str, list[str]] = {}  # flag -> allowed values
-        self._config_defaults: dict[str, dict] = {}       # env_prefix -> {KEY: value}
-        self._config_owners: dict[str, str] = {}          # env_prefix -> plugin name
-        self._config_env_vars: dict[str, str] = {}        # ENV var -> default value
-        self._config_env_owners: dict[str, str] = {}      # ENV var -> env_prefix
-        self._tools: dict[str, dict] = {}                 # name -> {tool, owner}
-        self._hooks: dict[str, list[dict]] = {}           # event -> [entry]
+        self._config_defaults: dict[str, dict] = {}  # env_prefix -> {KEY: value}
+        self._config_owners: dict[str, str] = {}  # env_prefix -> plugin name
+        self._config_env_vars: dict[str, str] = {}  # ENV var -> default value
+        self._config_env_owners: dict[str, str] = {}  # ENV var -> env_prefix
+        self._tools: dict[str, dict] = {}  # name -> {tool, owner}
+        self._hooks: dict[str, list[dict]] = {}  # event -> [entry]
 
         # ROB-11 (R07.15): stack of active registration transactions.
         # A transaction is pushed while a plugin's register() runs and
@@ -784,8 +805,9 @@ class PluginManager:
         (spec §Environment). Created on demand.
         """
         if os.name == "nt" or sys.platform == "win32":
-            base = Path(os.environ.get("LOCALAPPDATA") or
-                        (PluginManager._user_home() / "AppData" / "Local"))
+            base = Path(
+                os.environ.get("LOCALAPPDATA") or (PluginManager._user_home() / "AppData" / "Local")
+            )
             data_dir = base / "agentkthx" / "plugins" / name
         else:
             xdg = os.environ.get("XDG_STATE_HOME")
@@ -857,11 +879,7 @@ class PluginManager:
                 except OSError:
                     pass  # stat race — fall through to a fresh parse
                 cached_entry = self._manifest_cache.get(path_key)
-                if (
-                    cached_entry is not None
-                    and mtime is not None
-                    and cached_entry[0] == mtime
-                ):
+                if cached_entry is not None and mtime is not None and cached_entry[0] == mtime:
                     manifest = cached_entry[1]
                 else:
                     try:
@@ -904,6 +922,7 @@ class PluginManager:
     def _framework_version(self) -> str:
         try:
             from .. import __version__ as fw_version
+
             return fw_version
         except Exception:
             return "0.0.0"
@@ -1013,9 +1032,7 @@ class PluginManager:
         for rel, expected in pin.items():
             target = (plugin_dir / rel).resolve()
             if not target.is_relative_to(root):
-                raise ValueError(
-                    f"sha256 pin escapes the plugin directory: {rel!r}"
-                )
+                raise ValueError(f"sha256 pin escapes the plugin directory: {rel!r}")
             if not target.is_file():
                 raise ValueError(f"sha256 pin references a missing file: {rel!r}")
             actual = hashlib.sha256(target.read_bytes()).hexdigest()
@@ -1105,9 +1122,7 @@ class PluginManager:
         if name in self._plugins and self._plugins[name].loaded:
             return self._plugins[name]
 
-        manifest = next(
-            (m for m in self.discover() if m.name == name), None
-        )
+        manifest = next((m for m in self.discover() if m.name == name), None)
         if manifest is None:
             _warn(self.warnings, f"plugin not found: {name}")
             return None
@@ -1137,9 +1152,7 @@ class PluginManager:
             existing = self._plugins.get(manifest.name)
             if existing is not None and existing.loaded:
                 continue
-            plugin = self._load_plugin(
-                manifest, manifest.dir or self._plugins_dir / manifest.name
-            )
+            plugin = self._load_plugin(manifest, manifest.dir or self._plugins_dir / manifest.name)
             if plugin is not None:
                 loaded.append(plugin)
 
@@ -1332,9 +1345,7 @@ class PluginManager:
         for event in manifest.provides.get("hooks", {}):
             entries = self._hooks.get(event)
             if entries:
-                self._hooks[event] = [
-                    e for e in entries if e.get("plugin") != manifest.name
-                ]
+                self._hooks[event] = [e for e in entries if e.get("plugin") != manifest.name]
 
     # ------------------------------------------------------------------ #
     #  Config Extension (with expansion + secret guard)                   #
@@ -1347,9 +1358,11 @@ class PluginManager:
         if not env_prefix or not isinstance(defaults, dict):
             return
         expanded = {
-            key: expand_placeholders(val, plugin.root, plugin.data_dir)
-            if isinstance(val, str)
-            else val
+            key: (
+                expand_placeholders(val, plugin.root, plugin.data_dir)
+                if isinstance(val, str)
+                else val
+            )
             for key, val in defaults.items()
         }
         self.register_config_defaults(env_prefix, expanded, plugin=manifest.name)
@@ -1367,11 +1380,7 @@ class PluginManager:
         for key, val in defaults.items():
             self._config_env_vars[key] = val
             self._config_env_owners[key] = env_prefix
-            if (
-                isinstance(val, str)
-                and val
-                and SECRET_SUFFIX_RE.search(key)
-            ):
+            if isinstance(val, str) and val and SECRET_SUFFIX_RE.search(key):
                 _warn(
                     self.warnings,
                     f"{plugin or env_prefix}: config default '{key}' looks like a "
@@ -1404,11 +1413,13 @@ class PluginManager:
         if alias_of:
             prev_alias = self._backend_aliases.get(name)
             self._backend_aliases[name] = alias_of
-            self._record_undo(_restore_dict_entry(
-                self._backend_aliases, name, alias_of, prev_alias))
+            self._record_undo(
+                _restore_dict_entry(self._backend_aliases, name, alias_of, prev_alias)
+            )
             return
         try:
             from ..backends.base import BaseBackend
+
             if not (isinstance(cls, type) and issubclass(cls, BaseBackend)):
                 _warn(
                     self.warnings,
@@ -1424,8 +1435,7 @@ class PluginManager:
         prev_cls = self._backend_classes.get(name)
         entry = (cls, plugin)
         self._backend_classes[name] = entry
-        self._record_undo(_restore_dict_entry(
-            self._backend_classes, name, entry, prev_cls))
+        self._record_undo(_restore_dict_entry(self._backend_classes, name, entry, prev_cls))
 
     def unregister_backend(self, name: str) -> None:
         """Remove a plugin-registered backend."""
@@ -1450,9 +1460,7 @@ class PluginManager:
             # Also check the --backend cli_flags for declared aliases
             # (e.g. the huggingface plugin declares ["huggingface", "hf"]
             # — both should resolve to the "huggingface" plugin name).
-            cli_backend_choices = (
-                manifest.provides.get("cli_flags", {}).get("--backend", [])
-            )
+            cli_backend_choices = manifest.provides.get("cli_flags", {}).get("--backend", [])
             if backend_name in cli_backend_choices:
                 return manifest.name
         return None
@@ -1491,8 +1499,9 @@ class PluginManager:
             "setup_parser": setup_parser,
             "owner": plugin,
         }
-        self._record_undo(_restore_dict_entry(
-            self._cli_commands, name, self._cli_commands[name], prev_cmd))
+        self._record_undo(
+            _restore_dict_entry(self._cli_commands, name, self._cli_commands[name], prev_cmd)
+        )
 
     def unregister_cli_command(self, name: str) -> None:
         """Remove a plugin-registered CLI command."""
@@ -1531,8 +1540,7 @@ class PluginManager:
             )
             return False
         self._tools[name] = {"tool": tool, "owner": plugin}
-        self._record_undo(_restore_dict_entry(
-            self._tools, name, self._tools[name], None))
+        self._record_undo(_restore_dict_entry(self._tools, name, self._tools[name], None))
         return True
 
     def unregister_tool(self, name: str) -> None:
@@ -1609,8 +1617,7 @@ class PluginManager:
                 except Exception as e:
                     _warn(
                         self.warnings,
-                        f"hook '{spec_path}' of '{entry.get('plugin')}' "
-                        f"unresolvable: {e}",
+                        f"hook '{spec_path}' of '{entry.get('plugin')}' " f"unresolvable: {e}",
                     )
             else:
                 fn = getattr(plugin.module, spec_path, None)

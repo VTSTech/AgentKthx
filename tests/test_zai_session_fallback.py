@@ -33,13 +33,13 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from agentkthx.plugins.zai.zai import ZaiBackend, ZAI_FREE_FALLBACK_MODEL
 from agentkthx.cli.agent_factory import register_insufficient_credits_switch
+from agentkthx.plugins.zai.zai import ZAI_FREE_FALLBACK_MODEL, ZaiBackend
 
 SSE_LINES = [
     b'data: {"choices":[{"delta":{"content":"Hello"},"finish_reason":null}]}\n\n',
     b'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n',
-    b'data: [DONE]\n\n',
+    b"data: [DONE]\n\n",
 ]
 
 
@@ -49,10 +49,12 @@ def _make_zai_backend():
     b._base_url = "https://api.z.ai"
     b._api_key = "test-key"
     b._model_switch_callback = None
-    b._get_model_defaults = MagicMock(return_value={
-        "temperature": 0.7,
-        "max_tokens": 4096,
-    })
+    b._get_model_defaults = MagicMock(
+        return_value={
+            "temperature": 0.7,
+            "max_tokens": 4096,
+        }
+    )
     b.config = MagicMock()
     b.config.timeout = 30.0
     return b
@@ -101,6 +103,7 @@ def _completion_payload(model: str = ZAI_FREE_FALLBACK_MODEL) -> dict:
 # Backend side: 429 fires the callback, request still falls back inline
 # ---------------------------------------------------------------------------
 
+
 class TestStreamCreditsCallback(unittest.TestCase):
 
     def test_stream_429_fires_model_switch_callback(self):
@@ -119,10 +122,12 @@ class TestStreamCreditsCallback(unittest.TestCase):
             return _sse_response()
 
         with patch("urllib.request.urlopen", side_effect=_fake_urlopen):
-            chunks = list(b.generate_completions_stream(
-                model="glm-5.1",
-                messages=[{"role": "user", "content": "hi"}],
-            ))
+            chunks = list(
+                b.generate_completions_stream(
+                    model="glm-5.1",
+                    messages=[{"role": "user", "content": "hi"}],
+                )
+            )
 
         self.assertEqual(fired, [("glm-5.1", ZAI_FREE_FALLBACK_MODEL)])
         self.assertEqual(calls[0]["model"], "glm-5.1")
@@ -142,10 +147,12 @@ class TestStreamCreditsCallback(unittest.TestCase):
             return _sse_response()
 
         with patch("urllib.request.urlopen", side_effect=_fake_urlopen):
-            chunks = list(b.generate_completions_stream(
-                model="glm-5.1",
-                messages=[{"role": "user", "content": "hi"}],
-            ))
+            chunks = list(
+                b.generate_completions_stream(
+                    model="glm-5.1",
+                    messages=[{"role": "user", "content": "hi"}],
+                )
+            )
 
         self.assertEqual(calls[1]["model"], ZAI_FREE_FALLBACK_MODEL)
         self.assertEqual("".join(c["delta"] for c in chunks), "Hello")
@@ -167,10 +174,12 @@ class TestStreamCreditsCallback(unittest.TestCase):
             return _sse_response()
 
         with patch("urllib.request.urlopen", side_effect=_fake_urlopen):
-            chunks = list(b.generate_completions_stream(
-                model="glm-5.1",
-                messages=[{"role": "user", "content": "hi"}],
-            ))
+            chunks = list(
+                b.generate_completions_stream(
+                    model="glm-5.1",
+                    messages=[{"role": "user", "content": "hi"}],
+                )
+            )
 
         self.assertEqual("".join(c["delta"] for c in chunks), "Hello")
 
@@ -228,7 +237,9 @@ class TestNonStreamCreditsCallback(unittest.TestCase):
         fired = []
         b.set_model_switch_callback(lambda failed, fb: fired.append((failed, fb)))
 
-        with patch("urllib.request.urlopen", side_effect=lambda *a, **k: (_ for _ in ()).throw(_http_429())):
+        with patch(
+            "urllib.request.urlopen", side_effect=lambda *a, **k: (_ for _ in ()).throw(_http_429())
+        ):
             with self.assertRaises(RuntimeError):
                 b._generate_with_auth(
                     model="glm-4.5-flash",
@@ -242,6 +253,7 @@ class TestNonStreamCreditsCallback(unittest.TestCase):
 # CLI side: the callback runs the proper /model switch path
 # ---------------------------------------------------------------------------
 
+
 def _make_dummy_agent_with_zai():
     """A stand-in Agent wired to a catalog-mocked ZaiBackend."""
     backend = _make_zai_backend()
@@ -249,10 +261,12 @@ def _make_dummy_agent_with_zai():
     backend._context_safe_max_tokens = 12345  # stale value from the OLD model
     backend.get_model_info = MagicMock(return_value=None)
     backend.get_model_max_context = MagicMock(return_value=132000)
-    backend._get_model_defaults = MagicMock(return_value={
-        "temperature": 0.7,
-        "max_tokens": 98304,
-    })
+    backend._get_model_defaults = MagicMock(
+        return_value={
+            "temperature": 0.7,
+            "max_tokens": 98304,
+        }
+    )
 
     agent = SimpleNamespace(
         model="glm-5.1",
@@ -324,16 +338,14 @@ class TestRegisterInsufficientCreditsSwitch(unittest.TestCase):
 # Chat "You:" prompt color
 # ---------------------------------------------------------------------------
 
+
 class TestChatPromptColor(unittest.TestCase):
 
     def test_you_prompt_is_yellow(self):
         """The chat input prompt must render 'You:' in yellow (\\033[33m),
         not the old dim grey (\\033[90m). Source-level pin: the prompt is
         built inside a closure, so grep the module source."""
-        chat_py = (
-            Path(__file__).resolve().parents[1]
-            / "agentkthx" / "cli" / "commands" / "chat.py"
-        )
+        chat_py = Path(__file__).resolve().parents[1] / "agentkthx" / "cli" / "commands" / "chat.py"
         src = chat_py.read_text(encoding="utf-8")
         self.assertIn(
             "\\033[33m\\002You:",

@@ -25,6 +25,7 @@ def register(manager) -> None:
 
     # Register test backend
     from .test_backend import TestBackend
+
     manager.register_backend("test-backend", TestBackend)
 
     # Register CLI command
@@ -77,10 +78,13 @@ def register(manager) -> None:
     manager.register_cli_command("plugin-test", handler)
 
     # Register config defaults explicitly
-    manager.register_config_defaults("TEST_PLUGIN", {
-        "TEST_PLUGIN_VALUE": "hello from plugin",
-        "TEST_PLUGIN_NUMBER": "42",
-    })
+    manager.register_config_defaults(
+        "TEST_PLUGIN",
+        {
+            "TEST_PLUGIN_VALUE": "hello from plugin",
+            "TEST_PLUGIN_NUMBER": "42",
+        },
+    )
 
 
 def unregister(manager) -> None:

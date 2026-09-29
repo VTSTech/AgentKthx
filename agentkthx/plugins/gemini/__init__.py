@@ -18,6 +18,7 @@ from __future__ import annotations
 def register(manager) -> None:
     """Register the Gemini backend with the plugin manager."""
     from .gemini import GeminiBackend
+
     manager.register_backend("gemini", GeminiBackend)
 
 

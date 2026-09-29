@@ -26,39 +26,41 @@ import time
 import warnings
 from typing import Callable, Optional
 
-from .core.models import AgentRun, StepResult, Tool, ToolCall
-from .core.types import StepResultType
-from .core.tool_parse import ToolParser
+from .core.agent_setup import AgentSetupMixin
+from .core.agentic_loop import AgenticLoopMixin, LoopCallbacks
 from .core.api_resilience import (
-    is_transient_api_error,
     backoff_delay,
-    describe_wait,
     describe_terminal,
-)
-from .core.openresponses import (
-    Response, ResponseStatus, ItemStatus,
-    ToolChoiceType,
-    ReasoningItem,
-    OutputText,
-    create_message_item,
+    describe_wait,
+    is_transient_api_error,
 )
 from .core.compaction import CompactionMixin
-from .core.agent_setup import AgentSetupMixin
-from .core.tool_execution import ToolExecutionMixin
+from .core.models import AgentRun, StepResult, Tool, ToolCall
+from .core.openresponses import (
+    ItemStatus,
+    OutputText,
+    ReasoningItem,
+    Response,
+    ResponseStatus,
+    ToolChoiceType,
+    create_message_item,
+)
 from .core.streaming import StreamingMixin
-from .core.agentic_loop import AgenticLoopMixin, LoopCallbacks
+from .core.tool_execution import ToolExecutionMixin
+from .core.tool_parse import ToolParser
+from .core.types import StepResultType
 
 
 class Agent(AgentSetupMixin, CompactionMixin, ToolExecutionMixin, StreamingMixin, AgenticLoopMixin):
     """
     AgentKthx Agent - OpenResponses Agentic Loop Implementation.
-    
+
     This class implements the core agentic loop as defined by OpenResponses:
-    
+
         1. Model samples from input
         2. If tool call: execute tool, return observation, continue
         3. If no tool call: return final output items
-    
+
     OpenResponses Features:
         - tool_choice: Control tool invocation behavior
           - "auto" (default): Model may call tools or respond directly
@@ -69,31 +71,31 @@ class Agent(AgentSetupMixin, CompactionMixin, ToolExecutionMixin, StreamingMixin
         - allowed_tools: Hard constraint on which tools can be invoked
         - Response state machine: queued → in_progress → completed/failed/incomplete
         - Items: Atomic units of context with lifecycle states
-    
+
     Tool Calling:
         All models use ReAct prompting (Action/Action Input format).
         The model must explicitly format tool calls - no fallback synthesis.
-        
+
         Format:
             Action: tool_name
             Action Input: {"arg": "value"}
-    
+
     Example:
         # Basic usage
         agent = Agent(model="qwen2.5:0.5b", tools=["calculator"])
         result = agent.run("What is 15 * 8?")
         print(result.final_answer)
-        
+
         # Force tool usage
         agent = Agent(model="llama3", tools=["calculator"], tool_choice="required")
-        
+
         # Restrict tools
         agent = Agent(
-            model="llama3", 
+            model="llama3",
             tools=["calculator", "shell"],
             allowed_tools=["calculator"]  # shell is blocked
         )
-        
+
         # Force specific tool
         agent = Agent(model="llama3", tools=["calculator"], tool_choice=ToolChoice.specific("calculator"))
     """
@@ -109,6 +111,7 @@ class Agent(AgentSetupMixin, CompactionMixin, ToolExecutionMixin, StreamingMixin
         pm = None
         try:
             from .plugins import get_plugin_manager as _get_pm
+
             pm = _get_pm(init=False)
         except Exception:
             pm = None
@@ -123,12 +126,15 @@ class Agent(AgentSetupMixin, CompactionMixin, ToolExecutionMixin, StreamingMixin
 
         if pm is not None:
             try:
-                pm.emit("on_run_start", {
-                    "prompt": prompt,
-                    "session": session,
-                    "backend": backend_name,
-                    "model": getattr(self, "model", None),
-                })
+                pm.emit(
+                    "on_run_start",
+                    {
+                        "prompt": prompt,
+                        "session": session,
+                        "backend": backend_name,
+                        "model": getattr(self, "model", None),
+                    },
+                )
             except Exception:
                 pass
 
@@ -137,24 +143,30 @@ class Agent(AgentSetupMixin, CompactionMixin, ToolExecutionMixin, StreamingMixin
         except Exception as e:
             if pm is not None:
                 try:
-                    pm.emit("on_error", {
-                        "prompt": prompt,
-                        "session": session,
-                        "error": str(e),
-                        "exception": e,
-                    })
+                    pm.emit(
+                        "on_error",
+                        {
+                            "prompt": prompt,
+                            "session": session,
+                            "error": str(e),
+                            "exception": e,
+                        },
+                    )
                 except Exception:
                     pass
             raise
 
         if pm is not None:
             try:
-                pm.emit("on_run_end", {
-                    "prompt": prompt,
-                    "session": session,
-                    "usage": {"total_tokens": getattr(result, "total_tokens", 0)},
-                    "duration_ms": getattr(result, "total_ms", 0),
-                })
+                pm.emit(
+                    "on_run_end",
+                    {
+                        "prompt": prompt,
+                        "session": session,
+                        "usage": {"total_tokens": getattr(result, "total_tokens", 0)},
+                        "duration_ms": getattr(result, "total_ms", 0),
+                    },
+                )
             except Exception:
                 pass
 
@@ -222,11 +234,12 @@ class Agent(AgentSetupMixin, CompactionMixin, ToolExecutionMixin, StreamingMixin
                         # the footer reflects the post-compaction state.
                         self._snapshot_running_tokens()
                         if compacted > 0:
-                            post_tokens = (self._running_tokens_in
-                                           + self._running_tokens_out)
-                            print(f"  [Context] Input exceeded context "
-                                  f"window — compacted {compacted} messages "
-                                  f"(~{post_tokens // 1000}K tokens remaining)")
+                            post_tokens = self._running_tokens_in + self._running_tokens_out
+                            print(
+                                f"  [Context] Input exceeded context "
+                                f"window — compacted {compacted} messages "
+                                f"(~{post_tokens // 1000}K tokens remaining)"
+                            )
                             _api_failure = 0  # reset retry counter — new state
                             continue  # retry with compacted memory
                         # If compaction freed nothing, the input is already
@@ -241,17 +254,17 @@ class Agent(AgentSetupMixin, CompactionMixin, ToolExecutionMixin, StreamingMixin
                     # the old code stayed silent here (non-debug), so chat
                     # mode showed a bare "(empty response)".
                     if _exhausted:
-                        print(describe_terminal(
-                            e, self.max_api_retries, _api_wait_total))
+                        print(describe_terminal(e, self.max_api_retries, _api_wait_total))
                     elif not _transient:
-                        print(f"  [Resilience] Fatal API error — "
-                              f"not retrying: {e}")
+                        print(f"  [Resilience] Fatal API error — " f"not retrying: {e}")
                     if self.debug:
                         print(f"  ERROR: {e}")
-                    steps.append(StepResult(
-                        type=StepResultType.ERROR,
-                        error=str(e),
-                    ))
+                    steps.append(
+                        StepResult(
+                            type=StepResultType.ERROR,
+                            error=str(e),
+                        )
+                    )
                     response.mark_failed({"message": str(e), "type": "model_error"})
                     _terminated = True
                     break
@@ -300,24 +313,30 @@ class Agent(AgentSetupMixin, CompactionMixin, ToolExecutionMixin, StreamingMixin
         if finish_reason == "length":
             # Token budget exhausted — response is incomplete
             if self.debug:
-                print(f"  [OpenResponses] finish_reason='length' — marking incomplete")
-            steps.append(StepResult(
-                type=StepResultType.MAX_STEPS,
-                content="Response truncated: token limit reached",
-                tokens_used=tokens,
-            ))
+                print("  [OpenResponses] finish_reason='length' — marking incomplete")
+            steps.append(
+                StepResult(
+                    type=StepResultType.MAX_STEPS,
+                    content="Response truncated: token limit reached",
+                    tokens_used=tokens,
+                )
+            )
             response.mark_incomplete()
             return True
         elif finish_reason == "content_filter":
             # Content was filtered — response failed
             if self.debug:
-                print(f"  [OpenResponses] finish_reason='content_filter' — marking failed")
-            steps.append(StepResult(
-                type=StepResultType.ERROR,
-                error="Response blocked by content filter",
-                tokens_used=tokens,
-            ))
-            response.mark_failed({"message": "Content filtered by provider", "type": "content_filter"})
+                print("  [OpenResponses] finish_reason='content_filter' — marking failed")
+            steps.append(
+                StepResult(
+                    type=StepResultType.ERROR,
+                    error="Response blocked by content filter",
+                    tokens_used=tokens,
+                )
+            )
+            response.mark_failed(
+                {"message": "Content filtered by provider", "type": "content_filter"}
+            )
             return True
         return False
 
@@ -344,9 +363,10 @@ class Agent(AgentSetupMixin, CompactionMixin, ToolExecutionMixin, StreamingMixin
         if self.tool_choice.type == ToolChoiceType.REQUIRED and tool_calls == 0:
             return True, "tool_choice='required' but no tool was called"
         if self.tool_choice.type == ToolChoiceType.SPECIFIC and tool_calls == 0:
-            return (True,
-                    f"tool_choice requires '{self.tool_choice.name}' "
-                    f"but no tool was called")
+            return (
+                True,
+                f"tool_choice requires '{self.tool_choice.name}' " f"but no tool was called",
+            )
         return False, ""
 
     # ── MAINT-04 Phase 3b: shared tool-call parser ──────────────────────
@@ -386,11 +406,13 @@ class Agent(AgentSetupMixin, CompactionMixin, ToolExecutionMixin, StreamingMixin
         # Check for native tool calls from backend
         if native_tool_calls:
             for tc in native_tool_calls:
-                tool_calls_found.append({
-                    "name": tc.get("name", ""),
-                    "arguments": tc.get("arguments", {}),
-                    "id": tc.get("id", ""),
-                })
+                tool_calls_found.append(
+                    {
+                        "name": tc.get("name", ""),
+                        "arguments": tc.get("arguments", {}),
+                        "id": tc.get("id", ""),
+                    }
+                )
             return tool_calls_found
 
         # Check for tool calls in model output (ReAct, JSON, or XML format)
@@ -403,30 +425,34 @@ class Agent(AgentSetupMixin, CompactionMixin, ToolExecutionMixin, StreamingMixin
 
         for call in parsed_calls:
             if self.debug and not self._is_comp_mode:
-                print(f"  [OpenResponses] Parsed: name={call.name}, "
-                      f"args={call.arguments}, "
-                      f"final_answer={call.final_answer}")
+                print(
+                    f"  [OpenResponses] Parsed: name={call.name}, "
+                    f"args={call.arguments}, "
+                    f"final_answer={call.final_answer}"
+                )
 
             # OpenResponses: Capture ReasoningItem if thought is present
-            if hasattr(call, 'thought') and call.thought:
+            if hasattr(call, "thought") and call.thought:
                 if self.debug and not self._is_comp_mode:
-                    print(f"  [OpenResponses] Captured thought for "
-                          f"ReasoningItem: {call.thought[:50]}...")
-                reasoning_item = ReasoningItem(
-                    content=[OutputText(text=call.thought)]
-                )
+                    print(
+                        f"  [OpenResponses] Captured thought for "
+                        f"ReasoningItem: {call.thought[:50]}..."
+                    )
+                reasoning_item = ReasoningItem(content=[OutputText(text=call.thought)])
                 reasoning_item.status = ItemStatus.COMPLETED
                 response.add_output_item(
                     reasoning_item,
                     debug=not self._is_comp_mode and self.debug,
                 )
 
-            tool_calls_found.append({
-                "name": call.name,
-                "arguments": call.arguments,
-                "id": "",
-                "final_answer": call.final_answer,  # May be None
-            })
+            tool_calls_found.append(
+                {
+                    "name": call.name,
+                    "arguments": call.arguments,
+                    "id": "",
+                    "final_answer": call.final_answer,  # May be None
+                }
+            )
 
         return tool_calls_found
 
@@ -537,19 +563,23 @@ class Agent(AgentSetupMixin, CompactionMixin, ToolExecutionMixin, StreamingMixin
         """
         if self.debug and not self._is_comp_mode and debug_context:
             print(f"  [OpenResponses] FINAL ANSWER ENFORCEMENT: {debug_context}")
-            print(f"  [OpenResponses] Forcing Final Answer from last result: {_last_successful_result}")
+            print(
+                f"  [OpenResponses] Forcing Final Answer from last result: {_last_successful_result}"
+            )
 
         final_answer = _last_successful_result
         msg_item = create_message_item("assistant", final_answer)
         msg_item.status = ItemStatus.COMPLETED
         response.add_output_item(msg_item, debug=not self._is_comp_mode and self.debug)
 
-        steps.append(StepResult(
-            type=StepResultType.FINAL_ANSWER,
-            content=final_answer,
-            tokens_used=tokens,
-            reasoning_content=reasoning_content,
-        ))
+        steps.append(
+            StepResult(
+                type=StepResultType.FINAL_ANSWER,
+                content=final_answer,
+                tokens_used=tokens,
+                reasoning_content=reasoning_content,
+            )
+        )
 
         return self._finalize_run(
             final_answer=final_answer,
@@ -608,8 +638,9 @@ class Agent(AgentSetupMixin, CompactionMixin, ToolExecutionMixin, StreamingMixin
         """
         blocked_msg = self._error_tracker.format_repeat_block(tool_name, tool_args)
         if self.debug:
-            print(f"  [ErrorRecovery] Blocking repeated identical call: "
-                  f"{tool_name}({tool_args})")
+            print(
+                f"  [ErrorRecovery] Blocking repeated identical call: " f"{tool_name}({tool_args})"
+            )
 
         if native_tool_calls:
             self.memory.add_tool_result(
@@ -629,12 +660,14 @@ class Agent(AgentSetupMixin, CompactionMixin, ToolExecutionMixin, StreamingMixin
             step=step_num,
             arguments=tool_args,
         )
-        steps.append(StepResult(
-            type=StepResultType.ERROR,
-            error=blocked_msg,
-            tool_call=ToolCall(name=tool_name, arguments=tool_args),
-            tokens_used=tokens,
-        ))
+        steps.append(
+            StepResult(
+                type=StepResultType.ERROR,
+                error=blocked_msg,
+                tool_call=ToolCall(name=tool_name, arguments=tool_args),
+                tokens_used=tokens,
+            )
+        )
 
         if self._error_tracker.should_terminate():
             response.mark_failed({"message": "Too many tool failures", "type": "error_recovery"})
@@ -686,15 +719,17 @@ class Agent(AgentSetupMixin, CompactionMixin, ToolExecutionMixin, StreamingMixin
         self.memory.add("assistant", content)
         # Build the qualifier
         qualifier = " before providing a final answer" if is_final_answer_context else ""
-        format_hint = " Use the Action/Action Input format to call a tool." if include_format_hint else ""
+        format_hint = (
+            " Use the Action/Action Input format to call a tool." if include_format_hint else ""
+        )
 
         if self.tool_choice.type == ToolChoiceType.SPECIFIC:
-            self.memory.add("user",
-                f"You must use the '{self.tool_choice.name}' tool"
-                f"{qualifier}.{format_hint}")
+            self.memory.add(
+                "user",
+                f"You must use the '{self.tool_choice.name}' tool" f"{qualifier}.{format_hint}",
+            )
         else:
-            self.memory.add("user",
-                f"You must use at least one tool{qualifier}.{format_hint}")
+            self.memory.add("user", f"You must use at least one tool{qualifier}.{format_hint}")
 
     def _run_core(self, prompt: str, stream: bool = False) -> AgentRun:
         """
@@ -782,7 +817,7 @@ class Agent(AgentSetupMixin, CompactionMixin, ToolExecutionMixin, StreamingMixin
             tokens = gen_response.get("usage", {}).get("total_tokens", 0)
             self._update_running_tokens(content, native_tool_calls, tokens)
             # Refresh the CLI footer if a callback is registered
-            if getattr(self, '_on_step_callback', None):
+            if getattr(self, "_on_step_callback", None):
                 try:
                     self._on_step_callback(
                         step_num + 1,
@@ -792,8 +827,7 @@ class Agent(AgentSetupMixin, CompactionMixin, ToolExecutionMixin, StreamingMixin
                 except Exception:
                     pass  # footer update failure must not break the run
 
-        def _on_tool_executed(call_count: int, tool_name: str,
-                              tool_args: dict, result) -> None:
+        def _on_tool_executed(call_count: int, tool_name: str, tool_args: dict, result) -> None:
             # R06.55: Print tool call + result inline during streaming
             # so the user sees progress as it happens (not just at the
             # post-run summary). Matches the CLI's _print_agent_steps
@@ -814,9 +848,7 @@ class Agent(AgentSetupMixin, CompactionMixin, ToolExecutionMixin, StreamingMixin
                 f"\033[90m{args_str}\033[0m\n"
             )
             if result_str:
-                sys.stdout.write(
-                    f"      \033[90m\u2192 {result_str}\033[0m\n"
-                )
+                sys.stdout.write(f"      \033[90m\u2192 {result_str}\033[0m\n")
             sys.stdout.flush()
 
         def _on_tool_result_committed(calls_this_step: int) -> None:
@@ -841,9 +873,6 @@ class Agent(AgentSetupMixin, CompactionMixin, ToolExecutionMixin, StreamingMixin
                 mark_response_completed=False,
             ),
         )
-
-
-
 
     def create_response(
         self,
@@ -890,25 +919,29 @@ class Agent(AgentSetupMixin, CompactionMixin, ToolExecutionMixin, StreamingMixin
         if self.debug:
             print(f"  [DEBUG] Sending {len(messages)} messages")
             for i, msg in enumerate(messages):
-                role = msg.get('role', '?')
-                content = msg.get('content', '')
-                tc = msg.get('tool_calls', [])
-                tool_call_id = msg.get('tool_call_id', '')
+                role = msg.get("role", "?")
+                content = msg.get("content", "")
+                tc = msg.get("tool_calls", [])
+                tool_call_id = msg.get("tool_call_id", "")
                 # Show just length for system prompts, content for others
-                if role == 'system':
+                if role == "system":
                     content_preview = f"<{len(content)} chars>"
-                elif role == 'tool':
+                elif role == "tool":
                     # Show tool message with tool_call_id
                     if self.truncation == "disabled":
-                        content_preview = f"{content if content else '(empty)'} (tool_call_id={tool_call_id})"
+                        content_preview = (
+                            f"{content if content else '(empty)'} (tool_call_id={tool_call_id})"
+                        )
                     else:
                         content_preview = f"{content[:100] if content else '(empty)'} (tool_call_id={tool_call_id})"
                 else:
                     if self.truncation == "disabled":
-                        content_preview = content if content else '(empty)'
+                        content_preview = content if content else "(empty)"
                     else:
-                        content_preview = content[:200] if content else '(empty)'
-                print(f"  [MSG {i}] role={role}, content={content_preview!r}{' as tool_calls]' if tc else ']'}")
+                        content_preview = content[:200] if content else "(empty)"
+                print(
+                    f"  [MSG {i}] role={role}, content={content_preview!r}{' as tool_calls]' if tc else ']'}"
+                )
             print(f"  [DEBUG] Tools: {[t.name for t in self.tools.all()] if self.tools else None}")
 
         # ── Thinking / reasoning controls (R05.8) ────────────────────────
@@ -921,6 +954,7 @@ class Agent(AgentSetupMixin, CompactionMixin, ToolExecutionMixin, StreamingMixin
         think = self._think
         if think is None and self.model_family:
             from .core.model_family_config import needs_no_think_directive
+
             if needs_no_think_directive(self.model_family):
                 think = False
 
@@ -963,8 +997,16 @@ class Agent(AgentSetupMixin, CompactionMixin, ToolExecutionMixin, StreamingMixin
         backend_kwargs["truncation"] = self.truncation
 
         # Get generation parameters (use overrides or model defaults)
-        gen_temperature = self._temperature if self._temperature is not None else self.model_config.default_temperature
-        gen_max_tokens = self._num_predict if self._num_predict is not None else self.model_config.default_max_tokens
+        gen_temperature = (
+            self._temperature
+            if self._temperature is not None
+            else self.model_config.default_temperature
+        )
+        gen_max_tokens = (
+            self._num_predict
+            if self._num_predict is not None
+            else self.model_config.default_max_tokens
+        )
         gen_top_p = self._top_p if self._top_p is not None else self.model_config.default_top_p
 
         # R06.57: Cap max_tokens to num_ctx/32 so input + output fits the
@@ -1034,9 +1076,6 @@ class Agent(AgentSetupMixin, CompactionMixin, ToolExecutionMixin, StreamingMixin
     # can reuse all of the non-streaming loop's logic (tool dispatch,
     # error recovery, finish_reason handling, memory tracking).
 
-
-
-
     def chat(self, message: str) -> str:
         """
         Send a message in chat mode (maintains conversation).
@@ -1083,8 +1122,9 @@ class Agent(AgentSetupMixin, CompactionMixin, ToolExecutionMixin, StreamingMixin
         # quietly run with debug=False instead of failing loudly).
         # ROB-32 (R07.14): keep the force_react flag on the re-created
         # parser too (same init-order reasoning as ROB-19).
-        self._parser = ToolParser(self.tools.names(), debug=self.debug,
-                                  force_react=self.force_react)
+        self._parser = ToolParser(
+            self.tools.names(), debug=self.debug, force_react=self.force_react
+        )
         self._rebuild_system_prompt_with_tools()
 
     def _rebuild_system_prompt_with_tools(self) -> None:
@@ -1097,13 +1137,17 @@ class Agent(AgentSetupMixin, CompactionMixin, ToolExecutionMixin, StreamingMixin
         has_tools = len(self.tools) > 0
         if has_tools:
             from .soul.loader import _build_tool_section
+
             tool_section = _build_tool_section(self.tools.all(), native_tools=self._is_comp_mode)
             # Find and replace tool section in system prompt
             if "### Tool Reference" in self._custom_system_prompt:
                 # Replace existing tool section
                 import re
-                pattern = r'### Tool Reference.*?(?=\n## |\n\*\*CRITICAL RULE|\Z)'
-                self._custom_system_prompt = re.sub(pattern, tool_section.rstrip(), self._custom_system_prompt, flags=re.DOTALL)
+
+                pattern = r"### Tool Reference.*?(?=\n## |\n\*\*CRITICAL RULE|\Z)"
+                self._custom_system_prompt = re.sub(
+                    pattern, tool_section.rstrip(), self._custom_system_prompt, flags=re.DOTALL
+                )
             else:
                 self._custom_system_prompt = self._custom_system_prompt + "\n\n" + tool_section
 

@@ -25,7 +25,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from agentkthx.agent import Agent
-from agentkthx.core.models import StepResult, StepResultType
 
 
 def _make_agent(max_api_retries: int = 3):
@@ -54,6 +53,7 @@ def _make_response():
 # 1. Happy path
 # ---------------------------------------------------------------------------
 
+
 def test_happy_path_returns_response_no_termination():
     agent = _make_agent()
     response = _make_response()
@@ -61,7 +61,10 @@ def test_happy_path_returns_response_no_termination():
     gen_fn = MagicMock(return_value=expected)
 
     result, terminated = agent._generate_with_retry(
-        gen_fn, step_num=0, steps=[], response=response,
+        gen_fn,
+        step_num=0,
+        steps=[],
+        response=response,
         enable_compaction_recovery=False,
     )
     assert result == expected
@@ -74,21 +77,27 @@ def test_happy_path_returns_response_no_termination():
 # 2. Transient error then success
 # ---------------------------------------------------------------------------
 
+
 def test_transient_error_then_success_retries_once():
     agent = _make_agent()
     response = _make_response()
     expected = {"content": "ok"}
     # First call raises a transient error, second succeeds
-    gen_fn = MagicMock(side_effect=[
-        ConnectionError("connection reset"),
-        expected,
-    ])
+    gen_fn = MagicMock(
+        side_effect=[
+            ConnectionError("connection reset"),
+            expected,
+        ]
+    )
 
-    with patch('agentkthx.agent.is_transient_api_error', return_value=True):
-        with patch('agentkthx.agent.backoff_delay', return_value=0.01):
-            with patch('agentkthx.agent.time.sleep'):
+    with patch("agentkthx.agent.is_transient_api_error", return_value=True):
+        with patch("agentkthx.agent.backoff_delay", return_value=0.01):
+            with patch("agentkthx.agent.time.sleep"):
                 result, terminated = agent._generate_with_retry(
-                    gen_fn, step_num=0, steps=[], response=response,
+                    gen_fn,
+                    step_num=0,
+                    steps=[],
+                    response=response,
                     enable_compaction_recovery=False,
                 )
     assert result == expected
@@ -100,16 +109,20 @@ def test_transient_error_then_success_retries_once():
 # 3. Terminal (non-transient) error → no retry, terminate
 # ---------------------------------------------------------------------------
 
+
 def test_non_transient_error_terminates_without_retry():
     agent = _make_agent()
     response = _make_response()
     err = ValueError("bad request — not transient")
     gen_fn = MagicMock(side_effect=err)
 
-    with patch('agentkthx.agent.is_transient_api_error', return_value=False):
-        with patch('agentkthx.agent.describe_terminal') as mock_describe:
+    with patch("agentkthx.agent.is_transient_api_error", return_value=False):
+        with patch("agentkthx.agent.describe_terminal"):
             result, terminated = agent._generate_with_retry(
-                gen_fn, step_num=0, steps=[], response=response,
+                gen_fn,
+                step_num=0,
+                steps=[],
+                response=response,
                 enable_compaction_recovery=False,
             )
     assert result is None
@@ -122,18 +135,22 @@ def test_non_transient_error_terminates_without_retry():
 # 4. Exhausted retries
 # ---------------------------------------------------------------------------
 
+
 def test_exhausted_retries_terminates():
     agent = _make_agent(max_api_retries=3)
     response = _make_response()
     err = ConnectionError("persistent connection issue")
     gen_fn = MagicMock(side_effect=err)
 
-    with patch('agentkthx.agent.is_transient_api_error', return_value=True):
-        with patch('agentkthx.agent.backoff_delay', return_value=0.001):
-            with patch('agentkthx.agent.time.sleep'):
-                with patch('agentkthx.agent.describe_terminal'):
+    with patch("agentkthx.agent.is_transient_api_error", return_value=True):
+        with patch("agentkthx.agent.backoff_delay", return_value=0.001):
+            with patch("agentkthx.agent.time.sleep"):
+                with patch("agentkthx.agent.describe_terminal"):
                     result, terminated = agent._generate_with_retry(
-                        gen_fn, step_num=0, steps=[], response=response,
+                        gen_fn,
+                        step_num=0,
+                        steps=[],
+                        response=response,
                         enable_compaction_recovery=False,
                     )
     assert result is None
@@ -146,6 +163,7 @@ def test_exhausted_retries_terminates():
 # 5. Context-length 400 + compaction recovery ENABLED → compaction runs, retry succeeds
 # ---------------------------------------------------------------------------
 
+
 def test_context_length_400_with_compaction_recovery_compacts_and_retries():
     agent = _make_agent()
     response = _make_response()
@@ -156,9 +174,12 @@ def test_context_length_400_with_compaction_recovery_compacts_and_retries():
     # Compaction reports it freed 5 messages
     agent.memory.compact_messages = MagicMock(return_value=5)
 
-    with patch('agentkthx.agent.is_transient_api_error', return_value=False):
+    with patch("agentkthx.agent.is_transient_api_error", return_value=False):
         result, terminated = agent._generate_with_retry(
-            gen_fn, step_num=0, steps=[], response=response,
+            gen_fn,
+            step_num=0,
+            steps=[],
+            response=response,
             enable_compaction_recovery=True,
         )
     assert result == expected
@@ -174,6 +195,7 @@ def test_context_length_400_with_compaction_recovery_compacts_and_retries():
 # 6. Context-length 400 + compaction recovery DISABLED → no compaction, terminate
 # ---------------------------------------------------------------------------
 
+
 def test_context_length_400_without_compaction_recovery_does_not_compact():
     """Non-streaming path must NOT trigger compaction on context-length 400.
     The handler is streaming-only (enable_compaction_recovery=True)."""
@@ -183,9 +205,12 @@ def test_context_length_400_without_compaction_recovery_does_not_compact():
     gen_fn = MagicMock(side_effect=ctx_err)
     agent.memory.compact_messages = MagicMock(return_value=5)
 
-    with patch('agentkthx.agent.is_transient_api_error', return_value=False):
+    with patch("agentkthx.agent.is_transient_api_error", return_value=False):
         result, terminated = agent._generate_with_retry(
-            gen_fn, step_num=0, steps=[], response=response,
+            gen_fn,
+            step_num=0,
+            steps=[],
+            response=response,
             enable_compaction_recovery=False,
         )
     assert result is None
@@ -198,6 +223,7 @@ def test_context_length_400_without_compaction_recovery_does_not_compact():
 # 7. KeyboardInterrupt re-raises
 # ---------------------------------------------------------------------------
 
+
 def test_keyboard_interrupt_propagates():
     agent = _make_agent()
     response = _make_response()
@@ -205,7 +231,10 @@ def test_keyboard_interrupt_propagates():
 
     with pytest.raises(KeyboardInterrupt):
         agent._generate_with_retry(
-            gen_fn, step_num=0, steps=[], response=response,
+            gen_fn,
+            step_num=0,
+            steps=[],
+            response=response,
             enable_compaction_recovery=False,
         )
     assert gen_fn.call_count == 1
@@ -214,6 +243,7 @@ def test_keyboard_interrupt_propagates():
 # ---------------------------------------------------------------------------
 # 8. Both _run_core and _run_core_streaming call _generate_with_retry
 # ---------------------------------------------------------------------------
+
 
 def test_run_core_uses_generate_with_retry():
     """The agentic loop's source must call self._generate_with_retry (so a
@@ -235,7 +265,5 @@ def test_run_core_streaming_uses_generate_with_retry():
     enable_compaction_recovery=True (so the context-length compaction
     handler still fires on long streaming runs)."""
     src = inspect.getsource(Agent._run_core_streaming)
-    assert "_generate_stream" in src, (
-        "_run_core_streaming no longer uses the streaming generator"
-    )
+    assert "_generate_stream" in src, "_run_core_streaming no longer uses the streaming generator"
     assert "enable_compaction_recovery=True" in src

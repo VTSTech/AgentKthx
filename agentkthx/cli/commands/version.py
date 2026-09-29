@@ -7,14 +7,14 @@ from __future__ import annotations
 import argparse
 import sys
 
-from ...colors import yellow, dim, green, cyan, bright_green, red, bright_cyan
-
+from ...colors import bright_cyan, bright_green, cyan, dim, green, red, yellow
 from ..banner import print_banner
 from ..utils import _is_externally_managed_error
 
+
 def cmd_version(args: argparse.Namespace) -> int:
     """Show version information."""
-    from ... import __version__, __status__, __author__
+    from ... import __author__, __status__, __version__
 
     print_banner()
     print(f"   {dim('Version:')} {bright_green(__version__)}")
@@ -33,6 +33,7 @@ def cmd_version(args: argparse.Namespace) -> int:
     # so `version --refresh` was retired (nothing left to bypass).
     try:
         from ...update_check import base_version, check_for_update, git_hash, is_newer
+
         _latest_info = check_for_update(timeout=1.0)
     except Exception:
         _latest_info = None
@@ -40,14 +41,18 @@ def cmd_version(args: argparse.Namespace) -> int:
         _latest = str(_latest_info.get("pypi_latest") or "").strip()
         if _latest:
             if is_newer(_latest, base_version(__version__)):
-                print(f"   {dim('Latest on PyPI:')} {bright_green(_latest)} {yellow('(stable update available)')}")
+                print(
+                    f"   {dim('Latest on PyPI:')} {bright_green(_latest)} {yellow('(stable update available)')}"
+                )
             else:
                 print(f"   {dim('Latest on PyPI:')} {_latest} {dim('(up to date)')}")
         _gh = str(_latest_info.get("github_sha") or "").strip().lower()
         _installed = git_hash(__version__)
         if _gh and _installed:
             if not _gh.startswith(_installed):
-                print(f"   {dim('GitHub main:')} {bright_green(_gh[:7])} {yellow('(development release available)')}")
+                print(
+                    f"   {dim('GitHub main:')} {bright_green(_gh[:7])} {yellow('(development release available)')}"
+                )
             else:
                 print(f"   {dim('GitHub main:')} {_gh[:7]} {dim('(up to date)')}")
         # R06.57: pip-installed dev track — version-number comparison
@@ -56,12 +61,15 @@ def cmd_version(args: argparse.Namespace) -> int:
             # Only show this line if the SHA-based path above didn't fire
             # (avoids two "GitHub main:" lines for git checkouts).
             if is_newer(_gh_version, base_version(__version__)):
-                print(f"   {dim('GitHub main:')} {bright_green(_gh_version)} {yellow('(development release available)')}")
+                print(
+                    f"   {dim('GitHub main:')} {bright_green(_gh_version)} {yellow('(development release available)')}"
+                )
             else:
                 print(f"   {dim('GitHub main:')} {_gh_version} {dim('(up to date)')}")
     print()
 
     return 0
+
 
 def cmd_update(args: argparse.Namespace) -> int:
     """Update AgentKthx to the latest version from GitHub.
@@ -73,13 +81,18 @@ def cmd_update(args: argparse.Namespace) -> int:
     """
     print(f"{bright_cyan('\u2696 AgentKthx')} - Updating from GitHub...")
     base_cmd = [
-        sys.executable, "-m", "pip", "install",
-        "git+https://github.com/VTSTech/AgentKthx.git", "--force-reinstall",
+        sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "git+https://github.com/VTSTech/AgentKthx.git",
+        "--force-reinstall",
     ]
     print(f"{dim('Running:')} {' '.join(base_cmd[1:])}")
     print()
 
     import subprocess as sp
+
     result = sp.run(base_cmd, capture_output=True, text=True)
 
     # PEP 668 detection: pip exits non-zero with a stderr mention of
@@ -89,11 +102,17 @@ def cmd_update(args: argparse.Namespace) -> int:
     if result.returncode != 0 and _is_externally_managed_error(result.stderr):
         print(f"{red('\u2717 Update failed.')}")
         print(f"{yellow('This Python environment is externally managed (PEP 668).')}")
-        print(f"{dim('The system Python on Debian/Ubuntu/Fedora blocks pip installs to')} "
-              f"{dim('protect the OS package manager — overriding it risks breaking the OS.')}")
+        print(
+            f"{dim('The system Python on Debian/Ubuntu/Fedora blocks pip installs to')} "
+            f"{dim('protect the OS package manager — overriding it risks breaking the OS.')}"
+        )
         print()
         try:
-            choice = input(f"  {dim('Retry with')} --break-system-packages{dim('? [y/N]')} ").strip().lower()
+            choice = (
+                input(f"  {dim('Retry with')} --break-system-packages{dim('? [y/N]')} ")
+                .strip()
+                .lower()
+            )
         except (EOFError, KeyboardInterrupt):
             choice = ""
         if choice in ("y", "yes"):

@@ -20,11 +20,7 @@ Findings closed in this batch (10 total):
 
 from __future__ import annotations
 
-import json
-import re
-
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Helper: minimal concrete CloudBackend subclass for testing
@@ -170,16 +166,12 @@ class TestMaint14PythonLiteralSubstitution:
         must not be mangled to 'true'."""
         from agentkthx.core.tool_parse import _parse_react
 
-        react = (
-            "Thought: Test\n"
-            "Action: echo\n"
-            'Action Input: {"message": "True Believer"}'
-        )
+        react = "Thought: Test\n" "Action: echo\n" 'Action Input: {"message": "True Believer"}'
         _, tool_name, tool_args, _ = _parse_react(react, ["echo"])
         assert tool_name == "echo"
-        assert tool_args["message"] == "True Believer", (
-            f"MAINT-14 regression: 'True Believer' was mangled to {tool_args['message']!r}"
-        )
+        assert (
+            tool_args["message"] == "True Believer"
+        ), f"MAINT-14 regression: 'True Believer' was mangled to {tool_args['message']!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -423,6 +415,7 @@ class TestMaint16AddToolDeprecationWarning:
 
     def _make_agent(self):
         from unittest.mock import MagicMock
+
         from agentkthx.agent import Agent
         from agentkthx.tools import make_builtin_registry
 
@@ -512,6 +505,7 @@ class TestMaint17SharedUntrustedInstruction:
         """The default system prompt (full ReAct path for local backends)
         includes the shared instruction."""
         from unittest.mock import MagicMock
+
         from agentkthx.agent import Agent
         from agentkthx.tools import make_builtin_registry
 
@@ -557,9 +551,9 @@ class TestMaint13ZaiFamilyNameConsistency:
         models = b.list_models()
         assert len(models) > 0
         for m in models:
-            assert m["details"]["family"] == "glm", (
-                f"Expected 'glm' from _catalog_family_name, got {m['details']['family']!r}"
-            )
+            assert (
+                m["details"]["family"] == "glm"
+            ), f"Expected 'glm' from _catalog_family_name, got {m['details']['family']!r}"
             assert m["details"]["backend"] == "zai"
 
     def test_subclass_override_propagates_to_list_models(self, monkeypatch):

@@ -22,19 +22,41 @@ def test_mixin_provides_constructor_and_prompt_builder():
     assert hasattr(AgentSetupMixin, "_build_default_prompt")
     # __init__ signature still accepts the full public surface
     import inspect
+
     params = inspect.signature(AgentSetupMixin.__init__).parameters
-    for expected in ("model", "tools", "backend", "max_steps", "memory_config",
-                     "debug", "system_prompt", "soul", "soul_level", "num_ctx",
-                     "temperature", "top_p", "num_predict", "tool_choice",
-                     "allowed_tools", "skills_prompt", "retry_on_error",
-                     "max_tool_retries", "max_api_retries", "truncation",
-                     "thinking_level", "think", "reasoning_effort",
-                     "show_reasoning", "kwargs"):
+    for expected in (
+        "model",
+        "tools",
+        "backend",
+        "max_steps",
+        "memory_config",
+        "debug",
+        "system_prompt",
+        "soul",
+        "soul_level",
+        "num_ctx",
+        "temperature",
+        "top_p",
+        "num_predict",
+        "tool_choice",
+        "allowed_tools",
+        "skills_prompt",
+        "retry_on_error",
+        "max_tool_retries",
+        "max_api_retries",
+        "truncation",
+        "thinking_level",
+        "think",
+        "reasoning_effort",
+        "show_reasoning",
+        "kwargs",
+    ):
         assert expected in params, f"constructor lost parameter: {expected}"
 
 
 def test_agent_inherits_from_setup_mixin():
     from agentkthx.agent import Agent
+
     assert issubclass(Agent, AgentSetupMixin)
     # MRO: Agent -> AgentSetupMixin -> CompactionMixin -> object
     mro = [c.__name__ for c in Agent.__mro__]
@@ -49,6 +71,7 @@ def test_agent_does_not_redefine_moved_methods():
     eliminates.
     """
     from agentkthx.agent import Agent
+
     assert "__init__" not in vars(Agent), "Agent still defines its own __init__"
     for name in ("_is_comp_mode", "_build_default_prompt"):
         assert name not in vars(Agent), f"Agent.__dict__ still contains {name}"
@@ -57,8 +80,13 @@ def test_agent_does_not_redefine_moved_methods():
 def test_agent_construction_via_mixin_initializes_attributes():
     from agentkthx.agent import Agent
     from agentkthx.core.openresponses import ToolChoiceType
-    agent = Agent(model="qwen2.5:0.5b", tools=["calculator"],
-                  system_prompt="You are a test agent.", debug=False)
+
+    agent = Agent(
+        model="qwen2.5:0.5b",
+        tools=["calculator"],
+        system_prompt="You are a test agent.",
+        debug=False,
+    )
     # Constructor ran through the mixin and set the full attribute set
     assert agent.model == "qwen2.5:0.5b"
     assert isinstance(agent.session_id, str) and len(agent.session_id) == 12
@@ -86,8 +114,7 @@ def test_build_default_prompt_all_four_variants():
     host = _PromptHost()
     # 1. No tools → direct-answer prompt
     no_tools = host._build_default_prompt(False)
-    assert no_tools == ("You are AI AgentKthx. "
-                        "Answer questions directly and accurately.")
+    assert no_tools == ("You are AI AgentKthx. " "Answer questions directly and accurately.")
     # 2. BitNet → ultra-lean prompt, < 500 chars, no markdown
     bitnet = _PromptHost(is_bitnet=True)._build_default_prompt(True)
     assert len(bitnet) < 500

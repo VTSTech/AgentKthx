@@ -11,12 +11,12 @@ into an evaluatable form.
 
 Written by VTSTech \u2014 https://www.vts-tech.org
 """
+
 from __future__ import annotations
 
 import ast
 import operator
 from typing import Any, Callable
-
 
 # Mapping of allowed ast binary-operator class -> Python operator function.
 _BIN_OPS: dict[type, Callable[[Any, Any], Any]] = {
@@ -91,25 +91,19 @@ class _SafeEvaluator:
             v = node.value
             if isinstance(v, bool) or v is None or isinstance(v, (int, float)):
                 return v
-            raise ValueError(
-                f"Literal of type {type(v).__name__!r} not allowed in safe_eval"
-            )
+            raise ValueError(f"Literal of type {type(v).__name__!r} not allowed in safe_eval")
 
         # Name lookup \u2014 only names in the allowlist resolve.
         if isinstance(node, ast.Name):
             if node.id in self.names:
                 return self.names[node.id]
-            raise NameError(
-                f"Name {node.id!r} is not defined in the safe_eval namespace"
-            )
+            raise NameError(f"Name {node.id!r} is not defined in the safe_eval namespace")
 
         # Binary operations \u2014 all standard math operators.
         if isinstance(node, ast.BinOp):
             op_t = type(node.op)
             if op_t not in _BIN_OPS:
-                raise ValueError(
-                    f"Binary operator {op_t.__name__} not allowed in safe_eval"
-                )
+                raise ValueError(f"Binary operator {op_t.__name__} not allowed in safe_eval")
             left = self.visit(node.left)
             right = self.visit(node.right)
             return _BIN_OPS[op_t](left, right)
@@ -118,9 +112,7 @@ class _SafeEvaluator:
         if isinstance(node, ast.UnaryOp):
             op_t = type(node.op)
             if op_t not in _UNARY_OPS:
-                raise ValueError(
-                    f"Unary operator {op_t.__name__} not allowed in safe_eval"
-                )
+                raise ValueError(f"Unary operator {op_t.__name__} not allowed in safe_eval")
             operand = self.visit(node.operand)
             return _UNARY_OPS[op_t](operand)
 
@@ -141,9 +133,7 @@ class _SafeEvaluator:
                     if last:
                         return last  # short-circuit
                 return last
-            raise ValueError(
-                f"Boolean operator {op_t.__name__} not allowed in safe_eval"
-            )
+            raise ValueError(f"Boolean operator {op_t.__name__} not allowed in safe_eval")
 
         # Comparisons \u2014 chained comparisons (``a < b < c``) work natively.
         if isinstance(node, ast.Compare):
@@ -180,8 +170,7 @@ class _SafeEvaluator:
             func_name = node.func.id
             if func_name not in self.names:
                 raise NameError(
-                    f"Function {func_name!r} is not defined in the safe_eval "
-                    f"namespace"
+                    f"Function {func_name!r} is not defined in the safe_eval " f"namespace"
                 )
             func = self.names[func_name]
             if not callable(func):
@@ -194,11 +183,7 @@ class _SafeEvaluator:
             if any(kw.arg is None for kw in node.keywords):
                 raise ValueError("**kwargs unpacking not allowed in safe_eval")
             args = [self.visit(a) for a in node.args]
-            kwargs = {
-                kw.arg: self.visit(kw.value)
-                for kw in node.keywords
-                if kw.arg is not None
-            }
+            kwargs = {kw.arg: self.visit(kw.value) for kw in node.keywords if kw.arg is not None}
             return func(*args, **kwargs)
 
         # Anything else is rejected. This is the explicit security boundary.

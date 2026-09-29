@@ -53,11 +53,11 @@ from __future__ import annotations
 import json
 import os
 import time
-from typing import Any, Generator, Iterable, Optional
+from typing import Generator, Iterable
 
-from .base import BaseBackend, BackendConfig
-from ..core.types import ApiMode, ToolSupportLevel
 from ..core.models import Tool
+from ..core.types import ApiMode
+from .base import BaseBackend
 
 
 class OpenAICompatibleBackend(BaseBackend):
@@ -217,12 +217,12 @@ class OpenAICompatibleBackend(BaseBackend):
         "Rules:\n"
         "- Respond with valid JSON only. No prose, no markdown fences.\n"
         "- The JSON object MUST have these keys:\n"
-        "    \"decision\": <string>,\n"
-        "    \"probability\": <number 0.0-1.0>,\n"
-        "    \"alternatives\": <array of {\"value\": string, \"probability\": number}>\n"
-        "- If choices are provided, \"decision\" MUST be exactly one of them.\n"
+        '    "decision": <string>,\n'
+        '    "probability": <number 0.0-1.0>,\n'
+        '    "alternatives": <array of {"value": string, "probability": number}>\n'
+        '- If choices are provided, "decision" MUST be exactly one of them.\n'
         "- If no choices are provided, generate a concise decision value.\n"
-        "- \"alternatives\" should contain 0-3 runner-up options, sorted by\n"
+        '- "alternatives" should contain 0-3 runner-up options, sorted by\n'
         "  probability (highest first). Excluding the chosen decision.\n"
         "- The probabilities should sum to ~1.0 across decision + alternatives.\n"
         "- Be calibrated: probability reflects how confident you are that\n"
@@ -256,7 +256,7 @@ class OpenAICompatibleBackend(BaseBackend):
                 user_lines.append(f"  {i}. {c}")
         user_lines += [
             "",
-            "Return JSON now: {\"decision\": ..., \"probability\": ..., \"alternatives\": [...]}",
+            'Return JSON now: {"decision": ..., "probability": ..., "alternatives": [...]}',
         ]
         return [
             {"role": "system", "content": OpenAICompatibleBackend._JEV_SYSTEM_PROMPT},
@@ -306,7 +306,9 @@ class OpenAICompatibleBackend(BaseBackend):
                             except (TypeError, ValueError):
                                 p = 0.0
                             if v:
-                                alternatives.append({"value": v, "probability": max(0.0, min(1.0, p))})
+                                alternatives.append(
+                                    {"value": v, "probability": max(0.0, min(1.0, p))}
+                                )
                         elif isinstance(alt, str):
                             alternatives.append({"value": alt, "probability": 0.0})
                 parse_ok = True
@@ -626,11 +628,13 @@ class OpenAICompatibleBackend(BaseBackend):
                     args = json.loads(args) if args.strip() else {}
                 except json.JSONDecodeError:
                     args = {"_raw_arguments": args}
-            parsed_tool_calls.append({
-                "id": tc.get("id", ""),
-                "name": func.get("name", ""),
-                "arguments": args,
-            })
+            parsed_tool_calls.append(
+                {
+                    "id": tc.get("id", ""),
+                    "name": func.get("name", ""),
+                    "arguments": args,
+                }
+            )
 
         usage = raw_response.get("usage", {}) or {}
 
@@ -728,8 +732,10 @@ class OpenAICompatibleBackend(BaseBackend):
         headers = self._get_auth_headers()
 
         if os.environ.get("AGENTKTHX_DEBUG"):
-            print(f"  [{self.__class__.__name__}-Stream] POST {url} — "
-                  f"tools={len(tools) if tools else 0}, stream=True")
+            print(
+                f"  [{self.__class__.__name__}-Stream] POST {url} — "
+                f"tools={len(tools) if tools else 0}, stream=True"
+            )
 
         # Each backend's _iter_sse_lines handles its own HTTP transport
         # (urllib direct, urllib with retry, etc.) and yields raw SSE
@@ -755,8 +761,12 @@ class OpenAICompatibleBackend(BaseBackend):
                 # stream_options.include_usage=True (PERF-02).
                 chunk_usage = chunk.get("usage")
                 if chunk_usage and isinstance(chunk_usage, dict):
-                    yield {"delta": "", "tool_calls": None,
-                           "finish_reason": None, "_usage": chunk_usage}
+                    yield {
+                        "delta": "",
+                        "tool_calls": None,
+                        "finish_reason": None,
+                        "_usage": chunk_usage,
+                    }
                 continue
             choice = choices[0]
             delta = choice.get("delta", {}) or {}
@@ -799,9 +809,7 @@ class OpenAICompatibleBackend(BaseBackend):
             OpenRouterBackend: ``{"Authorization": "Bearer <key>",
                                  "HTTP-Referer": "...", "X-Title": "..."}``
         """
-        raise NotImplementedError(
-            f"{self.__class__.__name__} must implement _get_auth_headers()"
-        )
+        raise NotImplementedError(f"{self.__class__.__name__} must implement _get_auth_headers()")
 
     def _iter_sse_lines(
         self,
@@ -820,15 +828,11 @@ class OpenAICompatibleBackend(BaseBackend):
         Yields:
             Raw bytes lines from the SSE stream (e.g. ``b'data: {...}\\n'``).
         """
-        raise NotImplementedError(
-            f"{self.__class__.__name__} must implement _iter_sse_lines()"
-        )
+        raise NotImplementedError(f"{self.__class__.__name__} must implement _iter_sse_lines()")
 
     def _get_model_defaults(self, model: str) -> dict:
         """Return per-model defaults: ``{"temperature": float, "max_tokens": int}``."""
-        raise NotImplementedError(
-            f"{self.__class__.__name__} must implement _get_model_defaults()"
-        )
+        raise NotImplementedError(f"{self.__class__.__name__} must implement _get_model_defaults()")
 
     # ─────────────────────────────────────────────────────────────────────
     # ARCH-03 (R06.57): Shared context-length 400 recovery helpers
@@ -907,6 +911,7 @@ class OpenAICompatibleBackend(BaseBackend):
         ARCH-03 (R06.57): Lifted from OpenRouterBackend/GeminiBackend/ZaiBackend.
         """
         import re
+
         text = error_body.lower()
 
         max_match = re.search(self._CONTEXT_LENGTH_MAX_PATTERN, text)

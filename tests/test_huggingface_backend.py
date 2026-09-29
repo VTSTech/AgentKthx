@@ -20,27 +20,24 @@ Written by VTSTech — https://www.vts-tech.org
 import io
 import json
 import os
-import sys
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
-import pytest
+from agentkthx.core.models import Tool, ToolParam
+from agentkthx.core.types import BackendType
 
 # NOTE: We import the backend module directly (not via __init__.py) so
 # the helpers and constants are available without triggering PluginManager
 # discovery in test collection.
 from agentkthx.plugins.huggingface.huggingface import (
-    HuggingFaceBackend,
     HF_FREE_MODEL_WHITELIST,
     HF_MODELS,
+    HuggingFaceBackend,
     _apply_provider_policy,
     _apply_provider_policy_live,
     _has_provider_suffix,
     _is_free_model,
 )
-from agentkthx.core.models import Tool, ToolParam
-from agentkthx.core.types import ApiMode, BackendType, ToolSupportLevel
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Module-level mock for _probe_whoami (R07.02 polish)
@@ -77,6 +74,7 @@ def tearDownModule():
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def _make_tool() -> Tool:
     """Sample tool used in the generate-flow tests below."""
     return Tool(
@@ -89,6 +87,7 @@ def _make_tool() -> Tool:
 # ─────────────────────────────────────────────────────────────────────────────
 # Module-level constants and helpers
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class TestWhitelistAndCatalog:
     """The HF_FREE_MODEL_WHITELIST and HF_MODELS catalog should be
@@ -195,6 +194,7 @@ class TestApplyProviderPolicy:
 # URL / auth / abstract-hook implementation
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestBackendHooks(unittest.TestCase):
     """The 4 abstract hooks from OpenAICompatibleBackend (ARCH-01)
     should be implemented on HuggingFaceBackend."""
@@ -236,6 +236,7 @@ class TestBackendHooks(unittest.TestCase):
 # is_cloud and BackendType
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestIsCloudAndBackendType(unittest.TestCase):
     """Verify HuggingFaceBackend is correctly marked as cloud (R06.57)
     and uses the HUGGINGFACE BackendType enum value."""
@@ -259,6 +260,7 @@ class TestIsCloudAndBackendType(unittest.TestCase):
 # ─────────────────────────────────────────────────────────────────────────────
 # _is_tools_not_supported_error — HF-specific patterns
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class TestIsToolsNotSupportedError(unittest.TestCase):
     """ReAct-fallback error detection — HF-specific patterns added beyond
@@ -311,6 +313,7 @@ class TestIsToolsNotSupportedError(unittest.TestCase):
 # Generate flow — ReAct fallback when partner rejects tools
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestGenerateFlow(unittest.TestCase):
     """Tests for HuggingFaceBackend.generate() — mirrors the OpenRouter
     generate flow tests, but with HF-specific request/response shape."""
@@ -339,19 +342,23 @@ class TestGenerateFlow(unittest.TestCase):
         with the tools field, and parse the response into AgentKthx's
         {content, tool_calls, usage, finish_reason} shape."""
         mock_urlopen.side_effect = [
-            self._mock_urlopen({
-                "id": "chatcmpl-test",
-                "choices": [{
-                    "index": 0,
-                    "message": {
-                        "role": "assistant",
-                        "content": "The result is 120.",
-                        "tool_calls": [],
-                    },
-                    "finish_reason": "stop",
-                }],
-                "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
-            }).return_value,
+            self._mock_urlopen(
+                {
+                    "id": "chatcmpl-test",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": "The result is 120.",
+                                "tool_calls": [],
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+                }
+            ).return_value,
         ]
         # The /v1/models call during __init__ also hits urlopen, but
         # __init__ runs in setUp before this mock is applied — it falls
@@ -377,19 +384,26 @@ class TestGenerateFlow(unittest.TestCase):
         tools (ReAct fallback path)."""
         # First call: tools-not-supported error
         err_response = MagicMock()
-        err_response.read = MagicMock(return_value=b'{"error":{"message":"does not support tools"}}')
+        err_response.read = MagicMock(
+            return_value=b'{"error":{"message":"does not support tools"}}'
+        )
         err_response.__enter__ = MagicMock(return_value=err_response)
         err_response.__exit__ = MagicMock(return_value=False)
         # HTTPError needs .code, .headers, .fp
-        http_err = type("HTTPError", (Exception,), {
-            "code": 400,
-            "headers": {},
-            "fp": True,
-            "read": err_response.read,
-        })()
+        type(
+            "HTTPError",
+            (Exception,),
+            {
+                "code": 400,
+                "headers": {},
+                "fp": True,
+                "read": err_response.read,
+            },
+        )()
         # But urllib.error.HTTPError is a specific class — easier to
         # raise the actual class.
         import urllib.error
+
         real_http_err = urllib.error.HTTPError(
             url="http://test",
             code=400,
@@ -401,19 +415,25 @@ class TestGenerateFlow(unittest.TestCase):
         success_response = MagicMock()
         success_response.__enter__ = MagicMock(return_value=success_response)
         success_response.__exit__ = MagicMock(return_value=False)
-        success_response.read = MagicMock(return_value=json.dumps({
-            "id": "chatcmpl-react",
-            "choices": [{
-                "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": 'I should call shell({"command": "echo 120"})',
-                    "tool_calls": [],
-                },
-                "finish_reason": "stop",
-            }],
-            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
-        }).encode("utf-8"))
+        success_response.read = MagicMock(
+            return_value=json.dumps(
+                {
+                    "id": "chatcmpl-react",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": 'I should call shell({"command": "echo 120"})',
+                                "tool_calls": [],
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+                }
+            ).encode("utf-8")
+        )
         mock_urlopen.side_effect = [real_http_err, success_response]
 
         result = self.backend.generate(
@@ -433,19 +453,23 @@ class TestGenerateFlow(unittest.TestCase):
         RuntimeError so the chat loop can surface a meaningful error
         instead of showing a blank ``AgentKthx: ``."""
         mock_urlopen.side_effect = [
-            self._mock_urlopen({
-                "id": "chatcmpl-empty",
-                "choices": [{
-                    "index": 0,
-                    "message": {
-                        "role": "assistant",
-                        "content": "",
-                        "tool_calls": [],
-                    },
-                    "finish_reason": "stop",
-                }],
-                "usage": {"prompt_tokens": 10, "completion_tokens": 0, "total_tokens": 10},
-            }).return_value,
+            self._mock_urlopen(
+                {
+                    "id": "chatcmpl-empty",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": "",
+                                "tool_calls": [],
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {"prompt_tokens": 10, "completion_tokens": 0, "total_tokens": 10},
+                }
+            ).return_value,
         ]
         with self.assertRaises(RuntimeError) as ctx:
             self.backend.generate(
@@ -459,6 +483,7 @@ class TestGenerateFlow(unittest.TestCase):
 # ─────────────────────────────────────────────────────────────────────────────
 # HF_FREE_ONLY enforcement
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class TestFreeOnlyEnforcement(unittest.TestCase):
     """HF_FREE_ONLY mode should reject non-whitelisted models BEFORE any
@@ -482,6 +507,7 @@ class TestFreeOnlyEnforcement(unittest.TestCase):
         # unreachable (which it is in tests — _probe_whoami is mocked
         # module-wide via setUpModule).
         from agentkthx.plugins.huggingface import huggingface as hf_mod
+
         self._hf_mod = hf_mod
         self._original_free_only = hf_mod.HF_FREE_ONLY
         hf_mod.HF_FREE_ONLY = False
@@ -508,18 +534,22 @@ class TestFreeOnlyEnforcement(unittest.TestCase):
         # but that's a different error than the whitelist rejection).
         # We verify by patching _make_api_request to short-circuit.
         called_with = {}
+
         def fake_request(endpoint, data, stream=False):
             called_with["endpoint"] = endpoint
             called_with["model"] = data.get("model")
             return {
                 "id": "test",
-                "choices": [{
-                    "index": 0,
-                    "message": {"role": "assistant", "content": "ok", "tool_calls": []},
-                    "finish_reason": "stop",
-                }],
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": "ok", "tool_calls": []},
+                        "finish_reason": "stop",
+                    }
+                ],
                 "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
             }
+
         b._make_api_request = fake_request
         result = b.generate(
             model="anthropic/claude-3.5-sonnet",  # not in whitelist
@@ -542,12 +572,14 @@ class TestFreeOnlyEnforcement(unittest.TestCase):
         assert b._free_only_effective is True
         # Verify _make_api_request is NEVER called for a paid model
         called = {"count": 0}
+
         def fail_if_called(endpoint, data, stream=False):
             called["count"] += 1
             raise AssertionError(
                 "_make_api_request should NOT be called when HF_FREE_ONLY "
                 "rejects the model upfront"
             )
+
         b._make_api_request = fail_if_called
         with self.assertRaises(RuntimeError) as ctx:
             b.generate(
@@ -566,17 +598,21 @@ class TestFreeOnlyEnforcement(unittest.TestCase):
         b = HuggingFaceBackend()
         assert b._free_only_effective is True
         called = {"model": None}
+
         def fake_request(endpoint, data, stream=False):
             called["model"] = data.get("model")
             return {
                 "id": "test",
-                "choices": [{
-                    "index": 0,
-                    "message": {"role": "assistant", "content": "ok", "tool_calls": []},
-                    "finish_reason": "stop",
-                }],
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": "ok", "tool_calls": []},
+                        "finish_reason": "stop",
+                    }
+                ],
                 "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
             }
+
         b._make_api_request = fake_request
         result = b.generate(
             model="prism-ml/Ternary-Bonsai-27B-gguf",  # genuinely $0/token
@@ -592,6 +628,7 @@ class TestFreeOnlyEnforcement(unittest.TestCase):
 # HTTP 402 credit-exhaustion fallback
 # ─────────────────────────────────────────────────────────────────────
 
+
 class TestCreditExhaustionFallback(unittest.TestCase):
     """When HF Router returns HTTP 402 (free-tier credit exhausted),
     the backend should swap to HF_FREE_FALLBACK_MODEL and retry once
@@ -604,6 +641,7 @@ class TestCreditExhaustionFallback(unittest.TestCase):
     def setUp(self):
         os.environ["HF_TOKEN"] = "hf_fake_test_token_for_scaffold"
         from agentkthx.plugins.huggingface import huggingface as hf_mod
+
         self._hf_mod = hf_mod
         self._original_free_only = hf_mod.HF_FREE_ONLY
 
@@ -616,6 +654,7 @@ class TestCreditExhaustionFallback(unittest.TestCase):
         (no retry — retrying burns router quota)."""
         self._hf_mod.HF_FREE_ONLY = True
         b = HuggingFaceBackend()
+
         # Patch _make_api_request to raise a 402-shaped RuntimeError
         # The 402 path in _make_api_request itself raises, so we patch
         # _make_api_request to short-circuit.
@@ -624,6 +663,7 @@ class TestCreditExhaustionFallback(unittest.TestCase):
                 "Hugging Face free-tier credit exhausted for "
                 f"'{data.get('model')}'. Set HF_FREE_ONLY=false ..."
             )
+
         b._make_api_request = raise_402
         with self.assertRaises(RuntimeError) as ctx:
             b.generate(
@@ -638,21 +678,25 @@ class TestCreditExhaustionFallback(unittest.TestCase):
 # Plugin manifest validation
 # ─────────────────────────────────────────────────────────────────────
 
+
 class TestPluginManifest(unittest.TestCase):
     """The plugin.json should validate against the v0.2 schema and
     follow the same structure as the OpenRouter / ZAI / Gemini plugins."""
 
     def test_manifest_is_v02_form(self):
-        import json
         from pathlib import Path
+
         from agentkthx.plugins._loader import (
             CANONICAL_SCHEMA,
-            EXT_NAMESPACE,
             _parse_manifest,
         )
+
         manifest_path = (
             Path(__file__).resolve().parents[1]
-            / "agentkthx" / "plugins" / "huggingface" / "plugin.json"
+            / "agentkthx"
+            / "plugins"
+            / "huggingface"
+            / "plugin.json"
         )
         assert manifest_path.exists(), f"Missing {manifest_path}"
         m = _parse_manifest(manifest_path, root_kind="builtin")
@@ -664,9 +708,13 @@ class TestPluginManifest(unittest.TestCase):
     def test_manifest_provides_huggingface_backend(self):
         import json
         from pathlib import Path
+
         manifest_path = (
             Path(__file__).resolve().parents[1]
-            / "agentkthx" / "plugins" / "huggingface" / "plugin.json"
+            / "agentkthx"
+            / "plugins"
+            / "huggingface"
+            / "plugin.json"
         )
         with open(manifest_path) as f:
             m = json.load(f)
@@ -681,9 +729,13 @@ class TestPluginManifest(unittest.TestCase):
         defaults defined in agentkthx/config.py."""
         import json
         from pathlib import Path
+
         manifest_path = (
             Path(__file__).resolve().parents[1]
-            / "agentkthx" / "plugins" / "huggingface" / "plugin.json"
+            / "agentkthx"
+            / "plugins"
+            / "huggingface"
+            / "plugin.json"
         )
         with open(manifest_path) as f:
             m = json.load(f)
@@ -699,6 +751,7 @@ class TestPluginManifest(unittest.TestCase):
 # Plugin discovery & loading integration
 # ─────────────────────────────────────────────────────────────────────
 
+
 class TestPluginDiscovery(unittest.TestCase):
     """The huggingface plugin should be discoverable and loadable
     via PluginManager alongside the other built-in plugins."""
@@ -710,9 +763,8 @@ class TestPluginDiscovery(unittest.TestCase):
         safety net to call out HF explicitly in the test report."""
         import json
         from pathlib import Path
-        plugins_dir = (
-            Path(__file__).resolve().parents[1] / "agentkthx" / "plugins"
-        )
+
+        plugins_dir = Path(__file__).resolve().parents[1] / "agentkthx" / "plugins"
         names = set()
         for entry in sorted(plugins_dir.iterdir()):
             mpath = entry / "plugin.json"
@@ -726,6 +778,7 @@ class TestPluginDiscovery(unittest.TestCase):
 
     def test_plugin_manager_loads_huggingface(self):
         from agentkthx.plugins._loader import PluginManager
+
         os.environ["HF_TOKEN"] = "hf_fake_test_token_for_scaffold"
         try:
             pm = PluginManager()
@@ -748,6 +801,7 @@ class TestPluginDiscovery(unittest.TestCase):
 # R07.02 polish: per-provider parse shape, _is_free_model_live, whoami probe,
 # _resolve_free_only_mode auto-detection
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class TestParseHfModelShape(unittest.TestCase):
     """R07.02 polish: _parse_hf_model() should capture the per-provider
@@ -871,11 +925,13 @@ class TestParseHfModelShape(unittest.TestCase):
         """A model with no providers array should not crash — falls back
         to conservative defaults for context_length and max_completion_tokens."""
         b = HuggingFaceBackend()
-        parsed = b._parse_hf_model({
-            "id": "test/no-providers-model",
-            "object": "model",
-            # no "providers" key at all
-        })
+        parsed = b._parse_hf_model(
+            {
+                "id": "test/no-providers-model",
+                "object": "model",
+                # no "providers" key at all
+            }
+        )
         assert parsed["name"] == "test/no-providers-model"
         assert parsed["details"]["context_length"] == 128_000  # conservative default
         assert parsed["details"]["max_completion_tokens"] == 8192
@@ -942,16 +998,19 @@ class TestIsFreeModelLive(unittest.TestCase):
         # Inject a fake cache entry: non-whitelisted model, but one
         # provider has is_free=true (simulates HF flipping a sponsored
         # combo free).
-        b._model_cache = [{
-            "name": "sponsored/some-paid-model",
-            "providers": [
-                {"provider": "novita", "is_free": False},
-                {"provider": "groq", "is_free": True},  # sponsored free!
-                {"provider": "together", "is_free": False},
-            ],
-        }]
+        b._model_cache = [
+            {
+                "name": "sponsored/some-paid-model",
+                "providers": [
+                    {"provider": "novita", "is_free": False},
+                    {"provider": "groq", "is_free": True},  # sponsored free!
+                    {"provider": "together", "is_free": False},
+                ],
+            }
+        ]
         # Not in static whitelist
         from agentkthx.plugins.huggingface.huggingface import HF_FREE_MODEL_WHITELIST
+
         assert "sponsored/some-paid-model" not in HF_FREE_MODEL_WHITELIST
         # But auto-detected as free via live API cache
         assert b._is_free_model_live("sponsored/some-paid-model") is True
@@ -961,29 +1020,33 @@ class TestIsFreeModelLive(unittest.TestCase):
         should return False (matches live Sept 2026 state for all 336
         combos)."""
         b = HuggingFaceBackend()
-        b._model_cache = [{
-            "name": "paid/some-paid-model",
-            "providers": [
-                {"provider": "novita", "is_free": False},
-                {"provider": "cerebras", "is_free": False},
-                {"provider": "together", "is_free": False},
-            ],
-        }]
+        b._model_cache = [
+            {
+                "name": "paid/some-paid-model",
+                "providers": [
+                    {"provider": "novita", "is_free": False},
+                    {"provider": "cerebras", "is_free": False},
+                    {"provider": "together", "is_free": False},
+                ],
+            }
+        ]
         assert b._is_free_model_live("paid/some-paid-model") is False
 
     def test_live_falls_back_to_model_data_providers(self):
         """When the shortcut 'providers' key is missing (older cache
         shape), the method should fall back to model_data.providers."""
         b = HuggingFaceBackend()
-        b._model_cache = [{
-            "name": "legacy/old-cache-shape-model",
-            # No 'providers' shortcut key — only model_data.providers
-            "model_data": {
-                "providers": [
-                    {"provider": "novita", "is_free": True},
-                ],
-            },
-        }]
+        b._model_cache = [
+            {
+                "name": "legacy/old-cache-shape-model",
+                # No 'providers' shortcut key — only model_data.providers
+                "model_data": {
+                    "providers": [
+                        {"provider": "novita", "is_free": True},
+                    ],
+                },
+            }
+        ]
         assert b._is_free_model_live("legacy/old-cache-shape-model") is True
 
     def test_live_model_not_in_cache_returns_false(self):
@@ -1018,7 +1081,7 @@ class TestProbeWhoami(unittest.TestCase):
         # Manually call _probe_whoami (already mocked module-wide, so
         # we restore the original first)
         from agentkthx.plugins.huggingface.huggingface import HuggingFaceBackend as _Cls
-        original = _Cls._probe_whoami
+
         _Cls._probe_whoami = _orig_probe_whoami  # restore real method
         try:
             b._user_info = "stale-value"
@@ -1031,7 +1094,7 @@ class TestProbeWhoami(unittest.TestCase):
         """A successful whoami-v2 response should populate _user_info
         with the parsed JSON (name, canPay, billingMode, periodEnd)."""
         from agentkthx.plugins.huggingface.huggingface import HuggingFaceBackend as _Cls
-        original = _Cls._probe_whoami
+
         _Cls._probe_whoami = _orig_probe_whoami  # restore real method
         try:
             # Mock urlopen to return a sample whoami-v2 response
@@ -1070,7 +1133,7 @@ class TestProbeWhoami(unittest.TestCase):
         should be swallowed — _user_info stays None, no exception
         propagates."""
         from agentkthx.plugins.huggingface.huggingface import HuggingFaceBackend as _Cls
-        original = _Cls._probe_whoami
+
         _Cls._probe_whoami = _orig_probe_whoami  # restore real method
         try:
             # Mock urlopen to raise (simulates network failure)
@@ -1085,7 +1148,7 @@ class TestProbeWhoami(unittest.TestCase):
         _resolve_free_only_mode then leaves _free_only_effective=False
         (permissive, no auto-enforcement)."""
         from agentkthx.plugins.huggingface.huggingface import HuggingFaceBackend as _Cls
-        original = _Cls._probe_whoami
+
         _Cls._probe_whoami = _orig_probe_whoami
         try:
             sample_response = {
@@ -1125,6 +1188,7 @@ class TestResolveFreeOnlyMode(unittest.TestCase):
         # Patch module-level HF_FREE_ONLY to False so the fallback path
         # returns False (matches the live default when env var is unset).
         from agentkthx.plugins.huggingface import huggingface as hf_mod
+
         self._hf_mod = hf_mod
         self._original_free_only = hf_mod.HF_FREE_ONLY
         hf_mod.HF_FREE_ONLY = False
@@ -1242,14 +1306,16 @@ class TestResolveFreeOnlyMode(unittest.TestCase):
         # Re-resolve now that _user_info is populated (during __init__,
         # _user_info was None because _probe_whoami is mocked to no-op)
         captured = []
-        original_print = __builtins__.print if hasattr(__builtins__, "print") else print
         try:
             # Capture stderr writes via patching builtins.print
             import builtins
+
             original = builtins.print
+
             def capture_print(*args, **kwargs):
                 captured.append(args[0] if args else "")
                 # Don't actually print to keep test output clean
+
             builtins.print = capture_print
             # First call — should emit warning, set flag
             effective1 = b1._resolve_free_only_mode()
@@ -1265,8 +1331,7 @@ class TestResolveFreeOnlyMode(unittest.TestCase):
             effective2 = b2._resolve_free_only_mode()
             assert effective2 is True  # enforcement still active
             assert len(captured) == 0, (
-                f"Second call should NOT emit warning (flag is set), "
-                f"but captured: {captured}"
+                f"Second call should NOT emit warning (flag is set), " f"but captured: {captured}"
             )
         finally:
             builtins.print = original
@@ -1282,9 +1347,12 @@ class TestResolveFreeOnlyMode(unittest.TestCase):
         self._inject_user_info(b1, can_pay=False)
         captured = []
         import builtins
+
         original = builtins.print
+
         def capture_print(*args, **kwargs):
             captured.append(args[0] if args else "")
+
         builtins.print = capture_print
         try:
             effective = b1._resolve_free_only_mode()
@@ -1316,6 +1384,7 @@ class TestApplyProviderPolicyLiveForceCheapest(unittest.TestCase):
         self._saved_free_only = os.environ.get("HF_FREE_ONLY", "")
         os.environ.pop("HF_FREE_ONLY", None)
         from agentkthx.plugins.huggingface import huggingface as hf_mod
+
         self._hf_mod = hf_mod
         self._original_free_only = hf_mod.HF_FREE_ONLY
         hf_mod.HF_FREE_ONLY = False

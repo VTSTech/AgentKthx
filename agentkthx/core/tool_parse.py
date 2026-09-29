@@ -9,11 +9,9 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Optional
 
 # Import canonical ToolCall from models.py (single source of truth)
 from .models import ToolCall
-
 
 # ------------------------------------------------------------------ #
 #  Regex patterns for ReAct parsing                                   #
@@ -22,11 +20,11 @@ from .models import ToolCall
 _THOUGHT_RE = re.compile(r"Thought:\s*(.*?)(?=Action:|Final Answer:|$)", re.DOTALL | re.IGNORECASE)
 _ACTION_RE = re.compile(
     r"Action:\s*[`\"']?(\w+)[`\"']?\s*\n?\s*Action Input:\s*(.*?)(?=\n\s*(?:Observation:|Thought:|Final Answer:|Action:|Example)|$)",
-    re.DOTALL | re.IGNORECASE
+    re.DOTALL | re.IGNORECASE,
 )
 _ACTION_RE_SAMELINE = re.compile(
     r"Action:\s*[`\"']?(\w+)[`\"']?\s+Action Input:\s*(.*?)(?=\n\s*(?:Observation:|Thought:|Final Answer:|Action:|Example)|$)",
-    re.DOTALL | re.IGNORECASE
+    re.DOTALL | re.IGNORECASE,
 )
 _FINAL_RE = re.compile(r"Final Answer:\s*(.*?)$", re.DOTALL | re.IGNORECASE)
 _PYTHON_CODE_RE = re.compile(r"```(?:python)?\s*\n(.*?)```", re.DOTALL | re.IGNORECASE)
@@ -51,9 +49,9 @@ _PYTHON_CODE_RE = re.compile(r"```(?:python)?\s*\n(.*?)```", re.DOTALL | re.IGNO
 # ``"`` and the NEXT ``"``), swallowing the ``True`` keyword that
 # should have been substituted.
 _PY_LITERAL_OR_STR_RE = re.compile(
-    r'"(?:[^"\\]|\\.)*"'       # double-quoted string (with closing quote)
-    r"|'(?:[^'\\]|\\.)*'"      # single-quoted string (with closing quote)
-    r'|\b(True|False|None)\b'  # Python literal keywords (outside strings)
+    r'"(?:[^"\\]|\\.)*"'  # double-quoted string (with closing quote)
+    r"|'(?:[^'\\]|\\.)*'"  # single-quoted string (with closing quote)
+    r"|\b(True|False|None)\b"  # Python literal keywords (outside strings)
 )
 
 
@@ -99,15 +97,15 @@ def _sanitize_model_json(text: str) -> str:
     # ``:\s*True\b`` / ``\[\s*True\b`` context-aware regexes were safer than
     # bare ``\bTrue\b`` but still mangled values like ``"Result: True"``.
     text = _substitute_python_literals(text)
-    text = re.sub(r'("(?:[^"\\]|\\.)*")\s*\+\s*[^,\'"}\]\n]+', r'\1', text)
-    text = re.sub(r',\s*([}\]])', r'\1', text)
-    
+    text = re.sub(r'("(?:[^"\\]|\\.)*")\s*\+\s*[^,\'"}\]\n]+', r"\1", text)
+    text = re.sub(r",\s*([}\]])", r"\1", text)
+
     # Fix over-escaped backslashes in Windows paths
     # Models often output: "C:\\\\Users\\\\..." instead of "C:\\Users\\..."
     # Replace 4+ backslashes with 2
-    text = re.sub(r'\\\\\\\\', r'\\\\', text)
+    text = re.sub(r"\\\\\\\\", r"\\\\", text)
     # Replace 3 backslashes with 2 (odd number issue)
-    text = re.sub(r'\\\\\\(?=[^\\"])', r'\\\\', text)
+    text = re.sub(r'\\\\\\(?=[^\\"])', r"\\\\", text)
 
     return text
 
@@ -122,7 +120,13 @@ def _extract_tool_from_json(obj: dict, debug: bool = False) -> tuple[str | None,
 
     # Try standard keys first
     name = obj.get("name") or obj.get("function") or obj.get("tool") or obj.get("action")
-    args = obj.get("arguments") or obj.get("parameters") or obj.get("args") or obj.get("actionInput") or {}
+    args = (
+        obj.get("arguments")
+        or obj.get("parameters")
+        or obj.get("args")
+        or obj.get("actionInput")
+        or {}
+    )
 
     # Handle JSON-wrapped ReAct format: {"Action": "tool_name", "Action Input": {...}}
     # or {"action": "tool_name", "action_input": {...}}
@@ -159,7 +163,7 @@ def _extract_tool_from_json(obj: dict, debug: bool = False) -> tuple[str | None,
     if not name:
         arg_to_tool = {
             "expression": "calculator",  # Only unambiguous calculator indicator
-            "command": "shell",          # Only unambiguous shell indicator
+            "command": "shell",  # Only unambiguous shell indicator
         }
         # Only map to tool if the object has ONLY tool-related keys (not response/method/etc)
         obj_keys = set(obj.keys())
@@ -173,7 +177,7 @@ def _extract_tool_from_json(obj: dict, debug: bool = False) -> tuple[str | None,
 
     if not name or not isinstance(args, dict):
         if debug:
-            print(f"    _extract_tool_from_json: no name or args")
+            print("    _extract_tool_from_json: no name or args")
         return None, None
 
     # Detect if the 'name' field contains code instead of a tool name
@@ -188,11 +192,14 @@ def _extract_tool_from_json(obj: dict, debug: bool = False) -> tuple[str | None,
 #  ReAct parser                                                       #
 # ------------------------------------------------------------------ #
 
-def _parse_react(text: str, tool_names: list[str] | None = None, debug: bool = False) -> tuple[str | None, str | None, dict | None, str | None]:
+
+def _parse_react(
+    text: str, tool_names: list[str] | None = None, debug: bool = False
+) -> tuple[str | None, str | None, dict | None, str | None]:
     """
     Returns (thought, tool_name, tool_args, final_answer).
     Any field may be None if not present.
-    
+
     Handles multiple format variations from small models.
 
     ROB-13 (R07.06): the JSON fallback chain below has 4 levels; when the
@@ -205,8 +212,9 @@ def _parse_react(text: str, tool_names: list[str] | None = None, debug: bool = F
     """
     # Fix repetition issues from small models (qwen3:0.6b, etc.)
     from .helpers import detect_and_fix_repetition
+
     text = detect_and_fix_repetition(text)
-    
+
     thought = None
     tool_name = None
     tool_args = None
@@ -221,36 +229,36 @@ def _parse_react(text: str, tool_names: list[str] | None = None, debug: bool = F
     m = _ACTION_RE.search(text)
     if not m:
         m = _ACTION_RE_SAMELINE.search(text)
-    
+
     if m:
         tool_name = m.group(1).strip()
         raw_args = m.group(2).strip()
-        
+
         # Strip any trailing backticks or quotes from tool name
-        tool_name = tool_name.strip('`"\'')
-        
+        tool_name = tool_name.strip("`\"'")
+
         # OpenResponses: NO FUZZY MATCHING
         # Tool names must match exactly per spec requirement:
         # "allowed_tools: Hard constraint - Server MUST reject/suppress calls to tools not in this list"
         # Error recovery module will provide hints to guide the model.
-        
+
         # Extract just the JSON object from raw_args (handle extra text after)
-        json_start = raw_args.find('{')
+        json_start = raw_args.find("{")
         if json_start != -1:
             # Find matching closing brace
             depth = 0
             json_end = -1
             for i, ch in enumerate(raw_args[json_start:], json_start):
-                if ch == '{':
+                if ch == "{":
                     depth += 1
-                elif ch == '}':
+                elif ch == "}":
                     depth -= 1
                     if depth == 0:
                         json_end = i
                         break
             if json_end != -1:
-                raw_args = raw_args[json_start:json_end + 1]
-        
+                raw_args = raw_args[json_start : json_end + 1]
+
         # Try to parse JSON args
         # ROB-13 (R07.06): every failed parser appends a reason to
         # ``parse_failures``; the chain is printed when ``debug`` is set.
@@ -269,7 +277,9 @@ def _parse_react(text: str, tool_names: list[str] | None = None, debug: bool = F
                 if not isinstance(tool_args, dict):
                     tool_args = {"input": str(tool_args)}
             except json.JSONDecodeError as _e2:
-                parse_failures.append(f"json.loads after _sanitize_model_json: {_e2.msg} (line {_e2.lineno}, col {_e2.colno})")
+                parse_failures.append(
+                    f"json.loads after _sanitize_model_json: {_e2.msg} (line {_e2.lineno}, col {_e2.colno})"
+                )
                 # SEC-02 (R07.05): the previous fallback used
                 # ``ast.literal_eval`` to accept Python dict literals with
                 # single quotes (``{'expression': '15 + 27'}``) that small
@@ -283,7 +293,7 @@ def _parse_react(text: str, tool_names: list[str] | None = None, debug: bool = F
                 # accepts ``bytes`` for path operations). The fix: convert
                 # Python single-quote dict syntax to JSON before parsing,
                 # instead of using ``ast.literal_eval``.
-                if raw_args.startswith('{') and raw_args.endswith('}'):
+                if raw_args.startswith("{") and raw_args.endswith("}"):
                     py_to_json = raw_args
                     # Single→double quoted strings (avoid already-doubled)
                     py_to_json = re.sub(
@@ -307,7 +317,8 @@ def _parse_react(text: str, tool_names: list[str] | None = None, debug: bool = F
                             tool_args = {"input": str(tool_args)}
                     except json.JSONDecodeError as _e3:
                         parse_failures.append(
-                            f"json.loads after python-dict→JSON conversion: {_e3.msg} (line {_e3.lineno}, col {_e3.colno})")
+                            f"json.loads after python-dict→JSON conversion: {_e3.msg} (line {_e3.lineno}, col {_e3.colno})"
+                        )
                         tool_args = None
 
                 if tool_args is None:
@@ -317,22 +328,30 @@ def _parse_react(text: str, tool_names: list[str] | None = None, debug: bool = F
                     if expr_match:
                         tool_args = {"expression": expr_match.group(1)}
                         parse_failures.append("rescued 'expression' value via regex fallback")
-                    elif raw_args.startswith('{') and '=' in raw_args and 'arguments' not in raw_args.lower():
+                    elif (
+                        raw_args.startswith("{")
+                        and "=" in raw_args
+                        and "arguments" not in raw_args.lower()
+                    ):
                         tool_args = {"input": raw_args}
                         parse_failures.append(
                             "all parsers failed — fell back to {'input': raw_args} "
-                            "(downstream tools may reject these args)")
+                            "(downstream tools may reject these args)"
+                        )
                     else:
                         tool_args = {"input": raw_args}
                         parse_failures.append(
                             "all parsers failed — fell back to {'input': raw_args} "
-                            "(downstream tools may reject these args)")
+                            "(downstream tools may reject these args)"
+                        )
 
         # ROB-13 (R07.06): surface the failure chain instead of silently
         # degrading the args. Truncated to keep a single tool call from
         # flooding the debug console.
         if debug and parse_failures:
-            print("    [tool-parse] ReAct 'Action Input' could not be parsed as JSON — fallback chain:")
+            print(
+                "    [tool-parse] ReAct 'Action Input' could not be parsed as JSON — fallback chain:"
+            )
             for _i, _reason in enumerate(parse_failures, 1):
                 print(f"      {_i}. {_reason}")
             _preview = repr(tool_args)
@@ -352,6 +371,7 @@ def _parse_react(text: str, tool_names: list[str] | None = None, debug: bool = F
 #  ToolParser Class                                                   #
 # ------------------------------------------------------------------ #
 
+
 class ToolParser:
     """
     Parse tool calls from model output.
@@ -363,8 +383,9 @@ class ToolParser:
     - Markdown code blocks with JSON
     """
 
-    def __init__(self, tool_names: list[str] | None = None, debug: bool = False,
-                 force_react: bool = False):
+    def __init__(
+        self, tool_names: list[str] | None = None, debug: bool = False, force_react: bool = False
+    ):
         """
         Initialize parser with known tool names for fuzzy matching.
 
@@ -508,22 +529,19 @@ class ToolParser:
         json_strings = []
 
         # Pattern for markdown code blocks with optional language specifier
-        codeblock_pattern = re.compile(
-            r'```(?:json)?\s*\n(.*?)```',
-            re.DOTALL | re.IGNORECASE
-        )
+        codeblock_pattern = re.compile(r"```(?:json)?\s*\n(.*?)```", re.DOTALL | re.IGNORECASE)
 
         for match in codeblock_pattern.finditer(text):
             content = match.group(1).strip()
             # Check if it looks like JSON
-            if content.startswith('{') or content.startswith('['):
+            if content.startswith("{") or content.startswith("["):
                 json_strings.append(content)
 
         return json_strings
 
     def _extract_tool_from_json(self, data: dict) -> ToolCall | None:
         """Extract ToolCall from JSON object.
-        
+
         OpenResponses: NO FUZZY MATCHING - tool names must match exactly.
         """
         name, args = _extract_tool_from_json(data)
@@ -541,17 +559,19 @@ class ToolParser:
     def _parse_react(self, text: str) -> list[ToolCall]:
         """Parse ReAct format tool calls."""
         thought, name, args, final = _parse_react(text, list(self.tool_names), debug=self.debug)
-        
+
         if name:
-            return [ToolCall(
-                name=name,
-                arguments=args or {},
-                raw=f"Action: {name}\nAction Input: {args}",
-                confidence=0.9 if name in self.tool_names else 0.7,
-                final_answer=final,  # Include final answer if present
-                thought=thought,  # OpenResponses: Include captured thought
-            )]
-        
+            return [
+                ToolCall(
+                    name=name,
+                    arguments=args or {},
+                    raw=f"Action: {name}\nAction Input: {args}",
+                    confidence=0.9 if name in self.tool_names else 0.7,
+                    final_answer=final,  # Include final answer if present
+                    thought=thought,  # OpenResponses: Include captured thought
+                )
+            ]
+
         return []
 
     def _parse_xml(self, text: str) -> list[ToolCall]:
@@ -559,13 +579,10 @@ class ToolParser:
         calls = []
 
         # XML patterns
-        xml_tool_pattern = re.compile(
-            r"<tool>\s*(\w+)\s*</tool>",
-            re.IGNORECASE
-        )
+        xml_tool_pattern = re.compile(r"<tool>\s*(\w+)\s*</tool>", re.IGNORECASE)
         xml_args_pattern = re.compile(
             r"<(?:args|arguments|params)>\s*([\s\S]*?)\s*</(?:args|arguments|params)>",
-            re.IGNORECASE
+            re.IGNORECASE,
         )
 
         tools = list(xml_tool_pattern.finditer(text))
@@ -583,17 +600,19 @@ class ToolParser:
                 except json.JSONDecodeError:
                     args = {"input": args_text}
 
-            calls.append(ToolCall(
-                name=name,
-                arguments=args if isinstance(args, dict) else {},
-                raw=tool_match.group(0),
-            ))
+            calls.append(
+                ToolCall(
+                    name=name,
+                    arguments=args if isinstance(args, dict) else {},
+                    raw=tool_match.group(0),
+                )
+            )
 
         return calls
 
     def is_final_answer(self, text: str) -> bool:
         """Check if text indicates a final answer.
-        
+
         IMPORTANT: This must be conservative - only match explicit ReAct format markers.
         Overly broad patterns like "Result:" or "Therefore," cause small models to
         bypass tool calling when they shouldn't.
@@ -629,4 +648,3 @@ class ToolParser:
 
         # Return entire text as answer
         return text.strip()
-

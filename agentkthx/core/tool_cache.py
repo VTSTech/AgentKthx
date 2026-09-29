@@ -28,7 +28,7 @@ def get_cache_dir() -> Path:
         # Unix: ~/.cache/agentkthx
         base = os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache"))
         cache_dir = Path(base) / "agentkthx"
-    
+
     cache_dir.mkdir(parents=True, exist_ok=True)
     return cache_dir
 
@@ -41,7 +41,7 @@ def get_cache_file() -> Path:
 def load_tool_cache() -> dict:
     """
     Load cached tool support results.
-    
+
     Returns:
         Dict mapping model names to their cached tool support info:
         {
@@ -62,7 +62,7 @@ def load_tool_cache() -> dict:
                     return data
                 # Corrupted - not a dict
                 if os.environ.get("AGENTKTHX_DEBUG"):
-                    print(f"[ToolCache] Warning: Cache file corrupted (not a dict), ignoring")
+                    print("[ToolCache] Warning: Cache file corrupted (not a dict), ignoring")
                 return {}
         except json.JSONDecodeError as e:
             if os.environ.get("AGENTKTHX_DEBUG"):
@@ -81,29 +81,27 @@ def load_tool_cache() -> dict:
 def save_tool_cache(cache: dict) -> None:
     """
     Save tool support results to cache using atomic writes.
-    
+
     Args:
         cache: Dict mapping model names to their tool support info
     """
     import tempfile
-    
+
     cache_dir = get_cache_dir()
     cache_file = get_cache_file()
-    
+
     try:
         # Write to a temp file first, then rename for atomicity
         fd, temp_path = tempfile.mkstemp(
-            dir=str(cache_dir),
-            prefix=".tool_support_",
-            suffix=".json.tmp"
+            dir=str(cache_dir), prefix=".tool_support_", suffix=".json.tmp"
         )
-        
+
         try:
-            with os.fdopen(fd, 'w') as f:
+            with os.fdopen(fd, "w") as f:
                 json.dump(cache, f, indent=2)
                 f.flush()
                 os.fsync(f.fileno())
-            
+
             # Atomic rename (on POSIX systems)
             os.replace(temp_path, str(cache_file))
         except Exception:
@@ -111,10 +109,10 @@ def save_tool_cache(cache: dict) -> None:
             if os.path.exists(temp_path):
                 os.unlink(temp_path)
             raise
-            
+
     except IOError as e:
         # Log the error but don't fail - cache is optional
-        print(f"[ToolCache] Warning: Could not save tool cache: {e}", file=__import__('sys').stderr)
+        print(f"[ToolCache] Warning: Could not save tool cache: {e}", file=__import__("sys").stderr)
 
 
 def _cache_key(model: str, api_mode: str = "openre") -> str:
@@ -134,11 +132,11 @@ def _cache_key(model: str, api_mode: str = "openre") -> str:
 def get_cached_tool_support(model: str, api_mode: str = "openre") -> Optional[ToolSupportLevel]:
     """
     Get cached tool support level for a model.
-    
+
     Args:
         model: Model name (e.g., "qwen2.5:0.5b")
         api_mode: API mode used during testing (default: "openre")
-    
+
     Returns:
         ToolSupportLevel if cached, None if not in cache
     """
@@ -164,10 +162,16 @@ def get_cached_tool_support(model: str, api_mode: str = "openre") -> Optional[To
     return None
 
 
-def cache_tool_support(model: str, support: ToolSupportLevel, family: str = "", error: str = "", api_mode: str = "openre") -> None:
+def cache_tool_support(
+    model: str,
+    support: ToolSupportLevel,
+    family: str = "",
+    error: str = "",
+    api_mode: str = "openre",
+) -> None:
     """
     Cache tool support result for a model.
-    
+
     Args:
         model: Model name
         support: Detected tool support level
@@ -187,5 +191,3 @@ def cache_tool_support(model: str, support: ToolSupportLevel, family: str = "", 
     if error:
         cache[key]["error"] = error[:100]
     save_tool_cache(cache)
-
-

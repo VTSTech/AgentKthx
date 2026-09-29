@@ -81,7 +81,6 @@ from agentkthx.backends.base import BackendConfig
 from agentkthx.backends.openai_compat import OpenAICompatibleBackend
 from agentkthx.config import (
     HF_BASE_URL,
-    HF_DEFAULT_MODEL,
     HF_FREE_FALLBACK_MODEL,
     HF_FREE_ONLY,
     HF_PROVIDER_POLICY,
@@ -89,7 +88,6 @@ from agentkthx.config import (
 )
 from agentkthx.core.models import Tool
 from agentkthx.core.types import ApiMode, BackendType, ToolSupportLevel
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Static model catalog — fallback when /v1/models is unreachable
@@ -103,7 +101,7 @@ from agentkthx.core.types import ApiMode, BackendType, ToolSupportLevel
 # model whitelist)
 HF_MODELS: dict[str, dict] = {
     # OpenAI open-weighted models (free at HF partner providers)
-    "prism-ml/Ternary-Bonsai-27B-gguf": {
+    "openai/gpt-oss-20b": {
         "context_length": 131_072,
         "max_completion_tokens": 8_192,
         "provider": "openai",
@@ -115,7 +113,6 @@ HF_MODELS: dict[str, dict] = {
         "provider": "openai",
         "description": "gpt-oss-120b — flagship open-weight model with tool calling",
     },
-
     # Qwen family — Alibaba
     "Qwen/Qwen3-4B-Thinking-2507": {
         "context_length": 32_768,
@@ -142,7 +139,6 @@ HF_MODELS: dict[str, dict] = {
         "provider": "qwen",
         "description": "Qwen2.5-72B Instruct",
     },
-
     # DeepSeek family — reasoning models
     "deepseek-ai/DeepSeek-R1": {
         "context_length": 65_536,
@@ -163,7 +159,6 @@ HF_MODELS: dict[str, dict] = {
         "provider": "deepseek",
         "description": "DeepSeek-V3.1 — improved chat + tool calling",
     },
-
     # Meta Llama family
     "meta-llama/Llama-3.3-70B-Instruct": {
         "context_length": 131_072,
@@ -177,7 +172,6 @@ HF_MODELS: dict[str, dict] = {
         "provider": "meta",
         "description": "Llama 3.1 8B Instruct",
     },
-
     # Google Gemma family
     "google/gemma-3-4b-it": {
         "context_length": 32_768,
@@ -197,9 +191,7 @@ HF_MODELS: dict[str, dict] = {
         "provider": "google",
         "description": "Gemma 3 27B instruct",
     },
-
     # Mistral family
-
     # zai-org / GLM (also accessible via HF router)
     "zai-org/GLM-4.5": {
         "context_length": 131_072,
@@ -213,11 +205,8 @@ HF_MODELS: dict[str, dict] = {
         "provider": "zai",
         "description": "GLM-4.5-Air — lighter variant",
     },
-
     # Phi family — Microsoft
-
     # Cohere Command R family
-
     # === Genuinely $0/token models (verified via live API probe 2026-09-26) ===
     # These 3 models have pricing: {input: 0, output: 0} on at least one
     # partner provider. is_free=false for all 3 (HF's flag is conservative)
@@ -266,31 +255,54 @@ HF_MODELS: dict[str, dict] = {
 # covers some usage but eventually runs out. FREE_ONLY means $0/token.
 #
 # Re-validate quarterly with: bash scripts/probe_huggingface.sh
-HF_FREE_MODEL_WHITELIST: frozenset[str] = frozenset({
-    "inclusionAI/Ling-3.0-flash-Fin",        # $0 via Novita
-    "prism-ml/Ternary-Bonsai-27B-gguf",       # $0 via Together
-    "prism-ml/Ternary-Bonsai-27B-AWQ-4bit",   # $0 via Together
-})
+HF_FREE_MODEL_WHITELIST: frozenset[str] = frozenset(
+    {
+        "inclusionAI/Ling-3.0-flash-Fin",  # $0 via Novita
+        "prism-ml/Ternary-Bonsai-27B-gguf",  # $0 via Together
+        "prism-ml/Ternary-Bonsai-27B-AWQ-4bit",  # $0 via Together
+    }
+)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Provider-suffix validation — supported partner names (Sept 2026)
 # ─────────────────────────────────────────────────────────────────────────────
-HF_KNOWN_PROVIDERS: frozenset[str] = frozenset({
-    "baseten", "cerebras", "cohere", "deepinfra", "fal-ai", "featherless-ai",
-    "fireworks", "groq", "hf-inference", "novita", "nscale",
-    "ovhcloud", "public-ai", "replicate", "scaleway", "together",
-    "wavespeedai", "z.ai",
-})
+HF_KNOWN_PROVIDERS: frozenset[str] = frozenset(
+    {
+        "baseten",
+        "cerebras",
+        "cohere",
+        "deepinfra",
+        "fal-ai",
+        "featherless-ai",
+        "fireworks",
+        "groq",
+        "hf-inference",
+        "novita",
+        "nscale",
+        "ovhcloud",
+        "public-ai",
+        "replicate",
+        "scaleway",
+        "together",
+        "wavespeedai",
+        "z.ai",
+    }
+)
 
-HF_KNOWN_POLICIES: frozenset[str] = frozenset({
-    "fastest", "cheapest", "preferred",
-})
+HF_KNOWN_POLICIES: frozenset[str] = frozenset(
+    {
+        "fastest",
+        "cheapest",
+        "preferred",
+    }
+)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers (module-level so tests can import them directly)
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def _is_free_model(model_id: str) -> bool:
     """Check whether a model id is in the HF_FREE_MODEL_WHITELIST.
@@ -356,6 +368,7 @@ def _apply_provider_policy_live(backend: "HuggingFaceBackend", model_id: str) ->
 # ─────────────────────────────────────────────────────────────────────────────
 # Backend class
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class HuggingFaceBackend(OpenAICompatibleBackend):
     """Backend for the Hugging Face Inference Router API.
@@ -543,23 +556,16 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
             self._user_info = data
             if os.environ.get("AGENTKTHX_DEBUG"):
                 name = data.get("name", "<unknown>")
-                role = (
-                    data.get("auth", {})
-                    .get("accessToken", {})
-                    .get("role", "?")
-                )
+                role = data.get("auth", {}).get("accessToken", {}).get("role", "?")
                 can_pay = data.get("canPay", True)
                 period_end = data.get("periodEnd")
                 tier = "free" if not can_pay else "paid"
                 period_str = ""
                 if period_end:
                     import datetime as _dt
-                    period_dt = _dt.datetime.fromtimestamp(
-                        period_end, tz=_dt.timezone.utc
-                    )
-                    period_str = (
-                        f", period ends {period_dt.strftime('%Y-%m-%d')}"
-                    )
+
+                    period_dt = _dt.datetime.fromtimestamp(period_end, tz=_dt.timezone.utc)
+                    period_str = f", period ends {period_dt.strftime('%Y-%m-%d')}"
                 print(
                     f"  [HF Debug] Token valid for user '{name}' "
                     f"(role={role}, {tier} tier{period_str})"
@@ -624,17 +630,14 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
                 if not HuggingFaceBackend._free_tier_warning_emitted:
                     HuggingFaceBackend._free_tier_warning_emitted = True
                     import sys
+
                     period_end = self._user_info.get("periodEnd")
                     period_str = ""
                     if period_end:
                         import datetime as _dt
-                        period_dt = _dt.datetime.fromtimestamp(
-                            period_end, tz=_dt.timezone.utc
-                        )
-                        period_str = (
-                            f" Credit refreshes "
-                            f"{period_dt.strftime('%Y-%m-%d')}."
-                        )
+
+                        period_dt = _dt.datetime.fromtimestamp(period_end, tz=_dt.timezone.utc)
+                        period_str = f" Credit refreshes " f"{period_dt.strftime('%Y-%m-%d')}."
                     print(
                         f"\n  \033[33m[HF] Detected free-tier account "
                         f"(no billing card on file, $0.10/mo credit at "
@@ -736,10 +739,7 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
         else:
             # Fall back to top-level field (some legacy models may
             # expose it there). Conservative default if neither.
-            context_length = (
-                model_data.get("context_length")
-                or 128_000
-            )
+            context_length = model_data.get("context_length") or 128_000
 
         # max_completion_tokens is not consistently exposed per-provider
         # in the current /v1/models response. Take the max across
@@ -775,14 +775,10 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
         cheapest_output = min(output_rates) if output_rates else None
 
         # Free-tier signals aggregated across providers
-        any_free_provider = any(
-            bool(p.get("is_free", False)) for p in raw_providers
-        )
+        any_free_provider = any(bool(p.get("is_free", False)) for p in raw_providers)
         # Tool-support signals (any provider supports tools → model is
         # tool-callable via that provider)
-        any_supports_tools = any(
-            bool(p.get("supports_tools", False)) for p in raw_providers
-        )
+        any_supports_tools = any(bool(p.get("supports_tools", False)) for p in raw_providers)
         all_support_tools = bool(raw_providers) and all(
             bool(p.get("supports_tools", False)) for p in raw_providers
         )
@@ -859,9 +855,7 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
             # that don't have the shortcut (defensive).
             providers = cached.get("providers") or []
             if not providers:
-                providers = (
-                    cached.get("model_data", {}).get("providers", [])
-                )
+                providers = cached.get("model_data", {}).get("providers", [])
             return any(bool(p.get("is_free", False)) for p in providers)
 
         # Model not in cache (not in static whitelist, not in live API)
@@ -877,8 +871,7 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
         include models in ``HF_FREE_MODEL_WHITELIST``.
         """
         current_time = time.time()
-        if (self._model_cache is not None
-                and current_time - self._cache_time < self._CACHE_TIMEOUT):
+        if self._model_cache is not None and current_time - self._cache_time < self._CACHE_TIMEOUT:
             return self._model_cache
 
         try:
@@ -909,16 +902,18 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
             cached_names = {m["name"] for m in available_models}
             for name, info in HF_MODELS.items():
                 if name not in cached_names:
-                    available_models.append({
-                        "name": name,
-                        "size": 0,
-                        "details": {
-                            "family": info.get("provider", "unknown"),
-                            "backend": "huggingface",
-                            "context_length": info.get("context_length", 128_000),
-                            "max_completion_tokens": info.get("max_completion_tokens", 4096),
-                        },
-                    })
+                    available_models.append(
+                        {
+                            "name": name,
+                            "size": 0,
+                            "details": {
+                                "family": info.get("provider", "unknown"),
+                                "backend": "huggingface",
+                                "context_length": info.get("context_length", 128_000),
+                                "max_completion_tokens": info.get("max_completion_tokens", 4096),
+                            },
+                        }
+                    )
 
             # HF_FREE_ONLY: filter to whitelist only (R07.02 polish: use
             # self._free_only_effective so auto-detected free-tier mode
@@ -926,12 +921,10 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
             # the live is_free flag from freshly-parsed providers).
             if self._free_only_effective:
                 available_models = [
-                    m for m in available_models
+                    m
+                    for m in available_models
                     if _is_free_model(m["name"])
-                    or any(
-                        bool(p.get("is_free", False))
-                        for p in (m.get("providers") or [])
-                    )
+                    or any(bool(p.get("is_free", False)) for p in (m.get("providers") or []))
                 ]
 
             # MAINT-19 (R07.15): class-level cache via type(self) — see the
@@ -957,16 +950,18 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
 
             catalog_models: list[dict] = []
             for name, info in HF_MODELS.items():
-                catalog_models.append({
-                    "name": name,
-                    "size": 0,
-                    "details": {
-                        "family": info.get("provider", "unknown"),
-                        "backend": "huggingface",
-                        "context_length": info.get("context_length", 128_000),
-                        "max_completion_tokens": info.get("max_completion_tokens", 4096),
-                    },
-                })
+                catalog_models.append(
+                    {
+                        "name": name,
+                        "size": 0,
+                        "details": {
+                            "family": info.get("provider", "unknown"),
+                            "backend": "huggingface",
+                            "context_length": info.get("context_length", 128_000),
+                            "max_completion_tokens": info.get("max_completion_tokens", 4096),
+                        },
+                    }
+                )
 
             if self._free_only_effective:
                 catalog_models = [m for m in catalog_models if _is_free_model(m["name"])]
@@ -1048,17 +1043,13 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
                     details = cached["details"]
                     max_tokens = details.get("max_completion_tokens", 4096)
                     context_length = details.get("context_length", 128_000)
-                    return self._apply_max_tokens_cap(
-                        max_tokens, context_length, temperature=0.7
-                    )
+                    return self._apply_max_tokens_cap(max_tokens, context_length, temperature=0.7)
 
         # Fallback to catalog
         info = self._get_model_info(model)
         max_tokens = info.get("max_tokens", 4096) if info else 4096
         context_length = info.get("context_length", 128_000) if info else 128_000
-        return self._apply_max_tokens_cap(
-            max_tokens, context_length, temperature=0.7
-        )
+        return self._apply_max_tokens_cap(max_tokens, context_length, temperature=0.7)
 
     # ─────────────────────────────────────────────────────────────────────
     # 429 / 5xx retry helpers (mirrors OpenRouterBackend R06.54)
@@ -1189,6 +1180,7 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
                     if not _has_provider_suffix(fallback):
                         fallback = _apply_provider_policy_live(self, fallback)
                     import sys
+
                     print(
                         f"\n  \033[33m[HF] Free-tier credit exhausted for "
                         f"'{current_model}' — falling back to "
@@ -1208,9 +1200,7 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
                         ) as resp2:
                             return json.loads(resp2.read().decode("utf-8"))
                     except urllib.error.HTTPError as e2:
-                        error_body2 = (
-                            e2.read().decode("utf-8") if e2.fp else ""
-                        )
+                        error_body2 = e2.read().decode("utf-8") if e2.fp else ""
                         raise RuntimeError(
                             f"Hugging Face: paid model '{current_model}' "
                             f"failed (HTTP 402, free-tier exhausted) and "
@@ -1219,10 +1209,7 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
                         )
 
                 # ---- 429 Rate Limit / transient 5xx: wait and retry ----
-                retryable = (
-                    status_code == 429
-                    or status_code in (502, 503, 504)
-                )
+                retryable = status_code == 429 or status_code in (502, 503, 504)
                 if retryable:
                     error_msg = (
                         "Rate limit exceeded"
@@ -1235,7 +1222,8 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
                             inner = err_data["error"]
                             error_msg = (
                                 inner.get("message", inner)
-                                if isinstance(inner, dict) else str(inner)
+                                if isinstance(inner, dict)
+                                else str(inner)
                             )
                         elif "message" in err_data:
                             error_msg = err_data["message"]
@@ -1295,17 +1283,13 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
                     if len(upstream_msg) > 500:
                         upstream_msg = upstream_msg[:500] + "..."
 
-                    raise RuntimeError(
-                        f"Hugging Face API error {status_code}: {upstream_msg}"
-                    )
+                    raise RuntimeError(f"Hugging Face API error {status_code}: {upstream_msg}")
 
             except urllib.error.URLError as e:
                 raise RuntimeError(f"Hugging Face connection error: {e.reason}")
 
         # Should not reach here — the loop either returns or raises.
-        raise RuntimeError(
-            f"Hugging Face API request exhausted retries: {last_retryable_error}"
-        )
+        raise RuntimeError(f"Hugging Face API request exhausted retries: {last_retryable_error}")
 
     def _stream_request(
         self,
@@ -1351,6 +1335,7 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
                         f"and fallback '{fallback}' is also a free model."
                     )
                 import sys
+
                 print(
                     f"\n  \033[33m[HF-Stream] Free-tier credit exhausted for "
                     f"'{current}' — falling back to '{fallback}'\033[0m",
@@ -1364,19 +1349,14 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
                     method="POST",
                 )
                 try:
-                    response = urllib.request.urlopen(
-                        fb_req, timeout=self.config.timeout
-                    )
+                    response = urllib.request.urlopen(fb_req, timeout=self.config.timeout)
                 except urllib.error.HTTPError as e2:
                     error_body2 = e2.read().decode("utf-8") if e2.fp else ""
                     raise RuntimeError(
-                        f"Hugging Face HTTP error {e2.code} (stream fallback): "
-                        f"{error_body2}"
+                        f"Hugging Face HTTP error {e2.code} (stream fallback): " f"{error_body2}"
                     )
             else:
-                raise RuntimeError(
-                    f"Hugging Face HTTP error {e.code} (stream): {error_body}"
-                )
+                raise RuntimeError(f"Hugging Face HTTP error {e.code} (stream): {error_body}")
         except urllib.error.URLError as e:
             raise RuntimeError(f"Hugging Face connection error: {e.reason}")
 
@@ -1519,8 +1499,8 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
             if tools and self._is_tools_not_supported_error(err_str):
                 if os.environ.get("AGENTKTHX_DEBUG"):
                     print(
-                        f"  [HF] Partner provider rejected tools — retrying "
-                        f"without tools (ReAct fallback)"
+                        "  [HF] Partner provider rejected tools — retrying "
+                        "without tools (ReAct fallback)"
                     )
                 body.pop("tools", None)
                 body.pop("tool_choice", None)
@@ -1636,10 +1616,7 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
                 err_lower = str(e).lower()
                 if "empty response" in err_lower or "no content" in err_lower:
                     if os.environ.get("AGENTKTHX_DEBUG"):
-                        print(
-                            f"  [HF.JEV] Empty response — retrying with "
-                            f"simplified prompt"
-                        )
+                        print("  [HF.JEV] Empty response — retrying with " "simplified prompt")
                     simplified = [
                         {"role": "user", "content": messages[-1]["content"] if messages else ""}
                     ]
@@ -1676,9 +1653,9 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
             "does not support function calling",
             "function calling is not supported",
             "no tools endpoint",
-            "tool use is not supported",       # HF-specific
+            "tool use is not supported",  # HF-specific
             "tool_calls not supported on this model",  # HF-specific
-            "unsupported param: tools",        # TGI / llama-server
+            "unsupported param: tools",  # TGI / llama-server
         )
         return any(ind in err_lower for ind in indicators)
 
@@ -1752,6 +1729,7 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
                     fallback = _apply_provider_policy_live(self, HF_FREE_FALLBACK_MODEL)
                     if not self._is_free_model_live(current):
                         import sys
+
                         print(
                             f"\n  \033[33m[HF-Stream] Free-tier credit "
                             f"exhausted for '{current}' — falling back "
@@ -1766,21 +1744,17 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
                             method="POST",
                         )
                         try:
-                            response = urllib.request.urlopen(
-                                fb_req, timeout=self.config.timeout
-                            )
+                            response = urllib.request.urlopen(fb_req, timeout=self.config.timeout)
                         except urllib.error.HTTPError as e2:
-                            error_body2 = (
-                                e2.read().decode("utf-8") if e2.fp else ""
-                            )
+                            error_body2 = e2.read().decode("utf-8") if e2.fp else ""
                             raise RuntimeError(
                                 f"Hugging Face HTTP error {e2.code} "
                                 f"(stream 402 fallback): {error_body2}"
                             )
                     else:
                         raise RuntimeError(
-                            f"Hugging Face free-tier credit exhausted "
-                            f"(stream) and fallback is also a free model."
+                            "Hugging Face free-tier credit exhausted "
+                            "(stream) and fallback is also a free model."
                         )
                     # If we got here via fallback path, fall through to
                     # the yield loop below with the new response object.
@@ -1788,6 +1762,7 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
                 # ReAct fallback on streaming 400
                 if "does not support tools" in error_body.lower() and body.get("tools"):
                     import sys
+
                     print(
                         f"\n  \033[33m[HF-Stream] Model "
                         f"'{body.get('model')}' does not support tools "
@@ -1803,21 +1778,15 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
                         method="POST",
                     )
                     try:
-                        response = urllib.request.urlopen(
-                            fb_req, timeout=self.config.timeout
-                        )
+                        response = urllib.request.urlopen(fb_req, timeout=self.config.timeout)
                     except urllib.error.HTTPError as e2:
-                        error_body2 = (
-                            e2.read().decode("utf-8") if e2.fp else ""
-                        )
+                        error_body2 = e2.read().decode("utf-8") if e2.fp else ""
                         raise RuntimeError(
                             f"Hugging Face HTTP error {e2.code} "
                             f"(stream no-tools fallback): {error_body2}"
                         )
                 else:
-                    raise RuntimeError(
-                        f"Hugging Face HTTP error {e.code} (stream): {error_body}"
-                    )
+                    raise RuntimeError(f"Hugging Face HTTP error {e.code} (stream): {error_body}")
             except urllib.error.URLError as e:
                 raise RuntimeError(f"Hugging Face connection error: {e.reason}")
 

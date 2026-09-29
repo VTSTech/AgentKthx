@@ -30,10 +30,10 @@ import pytest
 
 from agentkthx.plugins._loader import PluginManager
 
-
 # ------------------------------------------------------------------ #
 #  _user_home — POSIX (the platform these tests run on)                #
 # ------------------------------------------------------------------ #
+
 
 def test_user_home_posix_uses_HOME():
     """On POSIX, $HOME wins (matches the previous Path.home() behaviour)."""
@@ -43,9 +43,7 @@ def test_user_home_posix_uses_HOME():
     try:
         os.environ["HOME"] = "/tmp/fake-home-xyz"
         result = PluginManager._user_home()
-        assert result == Path("/tmp/fake-home-xyz"), (
-            f"expected $HOME, got {result}"
-        )
+        assert result == Path("/tmp/fake-home-xyz"), f"expected $HOME, got {result}"
     finally:
         if saved is not None:
             os.environ["HOME"] = saved
@@ -72,36 +70,40 @@ def test_user_home_posix_falls_back_to_expanduser():
 #  _user_home — Windows impersonation guard (simulated via mock)       #
 # ------------------------------------------------------------------ #
 
+
 @pytest.fixture
 def fake_windows():
     """Force the Windows code path regardless of host platform."""
-    with patch("agentkthx.plugins._loader.os.name", "nt"), \
-         patch("agentkthx.plugins._loader.sys.platform", "win32"):
+    with (
+        patch("agentkthx.plugins._loader.os.name", "nt"),
+        patch("agentkthx.plugins._loader.sys.platform", "win32"),
+    ):
         yield
 
 
 def test_user_home_windows_prefers_APPDATA(fake_windows):
     """%APPDATA% wins over everything else when set."""
-    with patch.dict(os.environ, {"APPDATA": r"C:\Users\alice\AppData\Roaming",
-                                  "LOCALAPPDATA": r"C:\Users\alice\AppData\Local",
-                                  "USERPROFILE": r"C:\Users\alice"}, clear=False):
+    with patch.dict(
+        os.environ,
+        {
+            "APPDATA": r"C:\Users\alice\AppData\Roaming",
+            "LOCALAPPDATA": r"C:\Users\alice\AppData\Local",
+            "USERPROFILE": r"C:\Users\alice",
+        },
+        clear=False,
+    ):
         result = PluginManager._user_home()
-    assert str(result) == r"C:\Users\alice\AppData\Roaming", (
-        f"expected APPDATA, got {result}"
-    )
+    assert str(result) == r"C:\Users\alice\AppData\Roaming", f"expected APPDATA, got {result}"
 
 
 def test_user_home_windows_falls_back_to_LOCALAPPDATA(fake_windows):
     """If %APPDATA% is unset, %LOCALAPPDATA% wins."""
-    env = {"LOCALAPPDATA": r"C:\Users\alice\AppData\Local",
-           "USERPROFILE": r"C:\Users\alice"}
+    env = {"LOCALAPPDATA": r"C:\Users\alice\AppData\Local", "USERPROFILE": r"C:\Users\alice"}
     # APPDATA intentionally absent
     with patch.dict(os.environ, env, clear=False):
         os.environ.pop("APPDATA", None)
         result = PluginManager._user_home()
-    assert str(result) == r"C:\Users\alice\AppData\Local", (
-        f"expected LOCALAPPDATA, got {result}"
-    )
+    assert str(result) == r"C:\Users\alice\AppData\Local", f"expected LOCALAPPDATA, got {result}"
 
 
 def test_user_home_windows_falls_back_to_USERPROFILE(fake_windows):
@@ -112,9 +114,7 @@ def test_user_home_windows_falls_back_to_USERPROFILE(fake_windows):
         os.environ.pop("APPDATA", None)
         os.environ.pop("LOCALAPPDATA", None)
         result = PluginManager._user_home()
-    assert str(result) == r"C:\Users\alice", (
-        f"expected USERPROFILE, got {result}"
-    )
+    assert str(result) == r"C:\Users\alice", f"expected USERPROFILE, got {result}"
 
 
 def test_user_home_windows_rejects_systemprofile_via_USERPROFILE(fake_windows):
@@ -127,26 +127,29 @@ def test_user_home_windows_rejects_systemprofile_via_USERPROFILE(fake_windows):
         os.environ.pop("LOCALAPPDATA", None)
         result = PluginManager._user_home()
     # Must NOT be the systemprofile path.
-    assert "system32\\config\\systemprofile" not in str(result).lower(), (
-        f"MAINT-11 regression: returned systemprofile path {result}"
-    )
+    assert (
+        "system32\\config\\systemprofile" not in str(result).lower()
+    ), f"MAINT-11 regression: returned systemprofile path {result}"
 
 
 def test_user_home_windows_rejects_systemprofile_via_APPDATA(fake_windows):
     """Even if APPDATA is set, a systemprofile leak through it is rejected."""
-    env = {"APPDATA": r"C:\Windows\System32\config\systemprofile\AppData\Roaming",
-           "LOCALAPPDATA": r"C:\Users\alice\AppData\Local"}
+    env = {
+        "APPDATA": r"C:\Windows\System32\config\systemprofile\AppData\Roaming",
+        "LOCALAPPDATA": r"C:\Users\alice\AppData\Local",
+    }
     with patch.dict(os.environ, env, clear=False):
         result = PluginManager._user_home()
     # Should have fallen through to LOCALAPPDATA, not the systemprofile APPDATA.
-    assert str(result) == r"C:\Users\alice\AppData\Local", (
-        f"MAINT-11 regression: accepted systemprofile via APPDATA: {result}"
-    )
+    assert (
+        str(result) == r"C:\Users\alice\AppData\Local"
+    ), f"MAINT-11 regression: accepted systemprofile via APPDATA: {result}"
 
 
 # ------------------------------------------------------------------ #
 #  _default_roots routes through _user_home                            #
 # ------------------------------------------------------------------ #
+
 
 def test_default_roots_user_root_uses_user_home():
     """The 'user' root must come from _user_home(), not Path.home()."""
@@ -155,9 +158,9 @@ def test_default_roots_user_root_uses_user_home():
         roots = PluginManager._default_roots()
     user_roots = [r for r in roots if r[1] == "user"]
     assert len(user_roots) == 1, f"expected one user root, got {user_roots}"
-    assert user_roots[0][0] == fake_home / ".agentkthx" / "plugins", (
-        f"user root not derived from _user_home(): {user_roots[0][0]}"
-    )
+    assert (
+        user_roots[0][0] == fake_home / ".agentkthx" / "plugins"
+    ), f"user root not derived from _user_home(): {user_roots[0][0]}"
 
 
 def test_default_roots_builtin_root_unchanged():
@@ -167,14 +170,15 @@ def test_default_roots_builtin_root_unchanged():
     assert len(builtin) == 1
     # builtin root is the parent of _loader.py (i.e. agentkthx/plugins/)
     expected = Path(__file__).resolve().parent.parent / "agentkthx" / "plugins"
-    assert builtin[0][0] == expected, (
-        f"builtin root changed: expected {expected}, got {builtin[0][0]}"
-    )
+    assert (
+        builtin[0][0] == expected
+    ), f"builtin root changed: expected {expected}, got {builtin[0][0]}"
 
 
 # ------------------------------------------------------------------ #
 #  plugin_data_dir routes through _user_home (POSIX branch)            #
 # ------------------------------------------------------------------ #
+
 
 def test_plugin_data_dir_posix_uses_user_home():
     """POSIX plugin_data_dir falls back to _user_home() when XDG_STATE_HOME
@@ -182,13 +186,15 @@ def test_plugin_data_dir_posix_uses_user_home():
     if os.name == "nt" or sys.platform == "win32":
         pytest.skip("POSIX-only test")
     fake_home = Path("/tmp/fake-ak-home-xyz2")
-    with patch.dict(os.environ, {}, clear=False), \
-         patch.object(PluginManager, "_user_home", return_value=fake_home):
+    with (
+        patch.dict(os.environ, {}, clear=False),
+        patch.object(PluginManager, "_user_home", return_value=fake_home),
+    ):
         os.environ.pop("XDG_STATE_HOME", None)
         result = PluginManager().plugin_data_dir("myplugin")
-    assert result == fake_home / ".local" / "state" / "agentkthx" / "plugins" / "myplugin", (
-        f"plugin_data_dir not using _user_home(): {result}"
-    )
+    assert (
+        result == fake_home / ".local" / "state" / "agentkthx" / "plugins" / "myplugin"
+    ), f"plugin_data_dir not using _user_home(): {result}"
 
 
 def test_plugin_data_dir_posix_XDG_wins():
@@ -197,9 +203,9 @@ def test_plugin_data_dir_posix_XDG_wins():
         pytest.skip("POSIX-only test")
     with patch.dict(os.environ, {"XDG_STATE_HOME": "/tmp/fake-xdg"}, clear=False):
         result = PluginManager().plugin_data_dir("myplugin")
-    assert result == Path("/tmp/fake-xdg/agentkthx/plugins/myplugin"), (
-        f"XDG_STATE_HOME didn't win: {result}"
-    )
+    assert result == Path(
+        "/tmp/fake-xdg/agentkthx/plugins/myplugin"
+    ), f"XDG_STATE_HOME didn't win: {result}"
 
 
 def test_plugin_data_dir_windows_uses_LOCALAPPDATA():
@@ -213,13 +219,17 @@ def test_plugin_data_dir_windows_uses_LOCALAPPDATA():
     interpreter. The actual Windows runtime uses concrete ``WindowsPath``.
     """
     from pathlib import PureWindowsPath
+
     import agentkthx.plugins._loader as loader_mod
+
     fake_local = r"C:\Users\alice\AppData\Local"
     pm = PluginManager.__new__(PluginManager)
-    with patch("agentkthx.plugins._loader.os.name", "nt"), \
-         patch("agentkthx.plugins._loader.sys.platform", "win32"), \
-         patch.object(loader_mod, "Path", PureWindowsPath), \
-         patch.dict(os.environ, {"LOCALAPPDATA": fake_local}, clear=False):
+    with (
+        patch("agentkthx.plugins._loader.os.name", "nt"),
+        patch("agentkthx.plugins._loader.sys.platform", "win32"),
+        patch.object(loader_mod, "Path", PureWindowsPath),
+        patch.dict(os.environ, {"LOCALAPPDATA": fake_local}, clear=False),
+    ):
         result = pm.plugin_data_dir("myplugin")
     expected = PureWindowsPath(fake_local) / "agentkthx" / "plugins" / "myplugin"
     assert result == expected, f"LOCALAPPDATA not used: {result} (expected {expected})"

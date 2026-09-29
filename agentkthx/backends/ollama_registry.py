@@ -20,10 +20,9 @@ import json
 import mmap
 import os
 import struct
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
-
 
 # Default Ollama model storage paths
 OLLAMA_MODELS_DIR = Path(os.environ.get("OLLAMA_MODELS", os.path.expanduser("~/.ollama/models")))
@@ -41,28 +40,29 @@ _TURBO_D = 128
 @dataclass
 class OllamaModel:
     """Represents a discovered Ollama model."""
-    name: str               # e.g. "qwen2.5:7b"
-    repo: str               # e.g. "qwen2.5"
-    tag: str                # e.g. "7b"
-    blob_path: Path         # absolute path to the GGUF blob
-    size_bytes: int         # model layer size from manifest
-    weight_quant: str       # detected weight quant (e.g. "Q4_K_M", "Q8_0", "F16")
-    manifest_path: Path     # path to the manifest file
-    model_digest: str       # sha256 digest of the model blob
-    architecture: str = "" # e.g. "qwen2", "gemma3", "llama"
-    head_dim: int = 0       # attention head dimension (embed_length / head_count)
-    n_heads: int = 0        # number of attention heads
-    n_layers: int = 0       # number of transformer layers
-    context_length: int = 0 # max context window from model metadata
+
+    name: str  # e.g. "qwen2.5:7b"
+    repo: str  # e.g. "qwen2.5"
+    tag: str  # e.g. "7b"
+    blob_path: Path  # absolute path to the GGUF blob
+    size_bytes: int  # model layer size from manifest
+    weight_quant: str  # detected weight quant (e.g. "Q4_K_M", "Q8_0", "F16")
+    manifest_path: Path  # path to the manifest file
+    model_digest: str  # sha256 digest of the model blob
+    architecture: str = ""  # e.g. "qwen2", "gemma3", "llama"
+    head_dim: int = 0  # attention head dimension (embed_length / head_count)
+    n_heads: int = 0  # number of attention heads
+    n_layers: int = 0  # number of transformer layers
+    context_length: int = 0  # max context window from model metadata
 
     @property
     def size_human(self) -> str:
         """Return human-readable size string."""
         if self.size_bytes < 1024:
             return f"{self.size_bytes} B"
-        elif self.size_bytes < 1024 ** 2:
+        elif self.size_bytes < 1024**2:
             return f"{self.size_bytes / 1024:.1f} KB"
-        elif self.size_bytes < 1024 ** 3:
+        elif self.size_bytes < 1024**3:
             return f"{self.size_bytes / (1024 ** 2):.1f} MB"
         else:
             return f"{self.size_bytes / (1024 ** 3):.1f} GB"
@@ -108,7 +108,7 @@ def _gguf_read_str(mm: mmap.mmap, key: bytes) -> str | None:
     if vtype != 8:  # GGUF_TYPE_STRING
         return None
     val_len = struct.unpack_from("<Q", mm, val_off)[0]
-    return mm[val_off + 8:val_off + 8 + val_len].rstrip(b'\x00').decode("utf-8", errors="replace")
+    return mm[val_off + 8 : val_off + 8 + val_len].rstrip(b"\x00").decode("utf-8", errors="replace")
 
 
 def _detect_weight_quant(blob_path: Path) -> str:
@@ -157,16 +157,16 @@ def _detect_weight_quant(blob_path: Path) -> str:
 # GGUF file_type constants — official ggml_ftype enum from ggml.h
 # https://github.com/ggerganov/llama.cpp/blob/master/ggml/include/ggml.h
 _GGUF_FILE_TYPES = {
-    0:  "F32",
-    1:  "F16",
-    2:  "Q4_0",
-    3:  "Q4_1",
+    0: "F32",
+    1: "F16",
+    2: "Q4_0",
+    3: "Q4_1",
     # 4: Q4_2 (removed)
     # 5: Q4_3 (removed)
-    6:  "Q5_0",
-    7:  "Q5_1",
-    8:  "Q8_0",
-    9:  "Q8_1",
+    6: "Q5_0",
+    7: "Q5_1",
+    8: "Q8_0",
+    9: "Q8_1",
     10: "Q2_K",
     11: "Q3_K_S",
     12: "Q3_K_M",
@@ -209,21 +209,43 @@ def _filename_heuristic(blob_path: Path) -> str:
     name = blob_path.stem.lower().replace("-", "").replace("_", "")
     # Sort by specificity (longer matches first)
     candidates = [
-        ("iq4xs", "IQ4_XS"), ("iq4nl", "IQ4_NL"), ("iq4_nl", "IQ4_NL"),
-        ("iq3xxs", "IQ3_XXS"), ("iq3s", "IQ3_S"), ("iq3_s", "IQ3_S"),
-        ("iq2xxs", "IQ2_XXS"), ("iq2xs", "IQ2_XS"), ("iq2_s", "IQ2_S"),
-        ("iq1m", "IQ1_M"), ("iq1_s", "IQ1_S"),
-        ("q4km", "Q4_K_M"), ("q4_ks", "Q4_K_S"), ("q4_k_m", "Q4_K_M"),
-        ("q5km", "Q5_K_M"), ("q5ks", "Q5_K_S"), ("q5_k_m", "Q5_K_M"),
-        ("q6k", "Q6_K"), ("q6_k", "Q6_K"),
-        ("q3km", "Q3_K_M"), ("q3ks", "Q3_K_S"), ("q3kl", "Q3_K_L"),
-        ("q8_0", "Q8_0"), ("q8_1", "Q8_1"),
-        ("q4_0", "Q4_0"), ("q4_1", "Q4_1"),
-        ("q5_0", "Q5_0"), ("q5_1", "Q5_1"),
-        ("q2_k", "Q2_K"), ("q3_k", "Q3_K"),
-        ("f16", "F16"), ("bf16", "BF16"), ("f32", "F32"),
-        ("tq41s", "TQ4_1S"), ("tq4_1s", "TQ4_1S"),
-        ("tq31s", "TQ3_1S"), ("tq3_1s", "TQ3_1S"),
+        ("iq4xs", "IQ4_XS"),
+        ("iq4nl", "IQ4_NL"),
+        ("iq4_nl", "IQ4_NL"),
+        ("iq3xxs", "IQ3_XXS"),
+        ("iq3s", "IQ3_S"),
+        ("iq3_s", "IQ3_S"),
+        ("iq2xxs", "IQ2_XXS"),
+        ("iq2xs", "IQ2_XS"),
+        ("iq2_s", "IQ2_S"),
+        ("iq1m", "IQ1_M"),
+        ("iq1_s", "IQ1_S"),
+        ("q4km", "Q4_K_M"),
+        ("q4_ks", "Q4_K_S"),
+        ("q4_k_m", "Q4_K_M"),
+        ("q5km", "Q5_K_M"),
+        ("q5ks", "Q5_K_S"),
+        ("q5_k_m", "Q5_K_M"),
+        ("q6k", "Q6_K"),
+        ("q6_k", "Q6_K"),
+        ("q3km", "Q3_K_M"),
+        ("q3ks", "Q3_K_S"),
+        ("q3kl", "Q3_K_L"),
+        ("q8_0", "Q8_0"),
+        ("q8_1", "Q8_1"),
+        ("q4_0", "Q4_0"),
+        ("q4_1", "Q4_1"),
+        ("q5_0", "Q5_0"),
+        ("q5_1", "Q5_1"),
+        ("q2_k", "Q2_K"),
+        ("q3_k", "Q3_K"),
+        ("f16", "F16"),
+        ("bf16", "BF16"),
+        ("f32", "F32"),
+        ("tq41s", "TQ4_1S"),
+        ("tq4_1s", "TQ4_1S"),
+        ("tq31s", "TQ3_1S"),
+        ("tq3_1s", "TQ3_1S"),
     ]
     for pattern, label in candidates:
         if pattern in name:
@@ -340,11 +362,26 @@ def discover_models(
                                     arch = _gguf_read_str(bm, b"general.architecture")
                                     if arch:
                                         architecture = arch
-                                        n_heads = _gguf_read_u32(bm, arch.encode() + b".attention.head_count") or 0
-                                        embed = _gguf_read_u32(bm, arch.encode() + b".embedding_length") or 0
-                                        head_dim = int(embed / n_heads) if n_heads > 0 and embed > 0 else 0
-                                        n_layers = _gguf_read_u32(bm, arch.encode() + b".block_count") or 0
-                                        context_length = _gguf_read_u32(bm, arch.encode() + b".context_length") or 0
+                                        n_heads = (
+                                            _gguf_read_u32(
+                                                bm, arch.encode() + b".attention.head_count"
+                                            )
+                                            or 0
+                                        )
+                                        embed = (
+                                            _gguf_read_u32(bm, arch.encode() + b".embedding_length")
+                                            or 0
+                                        )
+                                        head_dim = (
+                                            int(embed / n_heads) if n_heads > 0 and embed > 0 else 0
+                                        )
+                                        n_layers = (
+                                            _gguf_read_u32(bm, arch.encode() + b".block_count") or 0
+                                        )
+                                        context_length = (
+                                            _gguf_read_u32(bm, arch.encode() + b".context_length")
+                                            or 0
+                                        )
                             finally:
                                 bm.close()
                     except (OSError, struct.error):

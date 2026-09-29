@@ -15,24 +15,29 @@ import json
 import os
 import signal
 import subprocess
-import sys
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
 from agentkthx.backends.ollama_registry import (
+    OLLAMA_BLOBS_DIR,
     OllamaModel,
-    discover_models,
     find_model,
     recommended_turbo_config,
-    OLLAMA_BLOBS_DIR,
 )
 from agentkthx.colors import (
-    bold, green, red, yellow, cyan, dim, bright_cyan, bright_green,
-    bright_yellow, bright_magenta, bright_red, pad_colored,
+    bold,
+    bright_cyan,
+    bright_green,
+    bright_magenta,
+    bright_red,
+    bright_yellow,
+    cyan,
+    dim,
+    pad_colored,
+    yellow,
 )
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # CONFIGURATION
@@ -70,9 +75,11 @@ VALID_CACHE_TYPES = ("q8_0", "q4_0", "turbo2", "turbo3", "turbo4", "f16")
 # SERVER STATE
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 @dataclass
 class TurboState:
     """Tracks the running TurboQuant server state."""
+
     _version: int = 1
     pid: int = 0
     model_name: str = ""
@@ -144,6 +151,7 @@ class TurboState:
 # SERVER MANAGEMENT
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 def _is_process_alive(pid: int) -> bool:
     """Check if a process is running AND not a zombie.
 
@@ -182,11 +190,9 @@ def _free_port(port: int, host: str = "localhost") -> bool:
         True if a process was killed, False if the port was already free.
     """
     import subprocess as _sp
+
     try:
-        result = _sp.run(
-            ["fuser", f"{port}/tcp"],
-            capture_output=True, text=True, timeout=3.0
-        )
+        result = _sp.run(["fuser", f"{port}/tcp"], capture_output=True, text=True, timeout=3.0)
         if result.returncode == 0 and result.stdout.strip():
             # Port is in use — kill the processes
             pids = result.stdout.strip().split()
@@ -220,8 +226,8 @@ def _get_running_state() -> Optional[TurboState]:
 def _check_server_health(host: str, port: int, timeout: float = 3.0) -> bool:
     """Check if the TurboQuant server HTTP endpoint is responding."""
     try:
-        from urllib.request import urlopen, Request
-        from urllib.error import URLError
+        from urllib.request import Request, urlopen
+
         url = f"http://{host}:{port}/health"
         req = Request(url, method="GET")
         urlopen(req, timeout=timeout)
@@ -245,10 +251,14 @@ def _build_command(
     """Build the llama-server command line."""
     cmd = [
         server_path,
-        "-m", model_path,
-        "-c", str(ctx),
-        "--port", str(port),
-        "--host", "0.0.0.0",
+        "-m",
+        model_path,
+        "-c",
+        str(ctx),
+        "--port",
+        str(port),
+        "--host",
+        "0.0.0.0",
     ]
 
     # TurboQuant KV cache types
@@ -472,13 +482,12 @@ def start_server(
 
     # Wait for server to be ready
     if wait_ready:
-        print(f"  Starting... ", end="", flush=True)
+        print("  Starting... ", end="", flush=True)
         start_wait = time.time()
         ready = False
         while time.time() - start_wait < ready_timeout:
             if not _is_process_alive(pid):
                 # Process died — read the last few log lines to show why
-                state_out = ""
                 if TURBOQUANT_STATE_FILE.exists():
                     TURBOQUANT_STATE_FILE.unlink()
                 if TURBOQUANT_PID_FILE.exists():
@@ -596,6 +605,7 @@ def get_status() -> Optional[TurboState]:
 def _find_in_path(name: str) -> bool:
     """Check if a binary exists in PATH."""
     from shutil import which
+
     return which(name) is not None
 
 
@@ -603,7 +613,10 @@ def _find_in_path(name: str) -> bool:
 # FORMATTED OUTPUT
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def print_model_list(models: list[OllamaModel], source: str = "local", backend_url: str | None = None) -> None:
+
+def print_model_list(
+    models: list[OllamaModel], source: str = "local", backend_url: str | None = None
+) -> None:
     """Print a formatted table of discovered Ollama models.
 
     Args:
@@ -635,12 +648,12 @@ def print_model_list(models: list[OllamaModel], source: str = "local", backend_u
     turbo_w = 28
 
     header = (
-        pad_colored(bold("Model"), name_w) +
-        pad_colored(bold("Size"), size_w, "right") +
-        "  " +
-        pad_colored(bold("Weights"), quant_w) +
-        "  " +
-        pad_colored(bold("TurboQuant Config"), turbo_w)
+        pad_colored(bold("Model"), name_w)
+        + pad_colored(bold("Size"), size_w, "right")
+        + "  "
+        + pad_colored(bold("Weights"), quant_w)
+        + "  "
+        + pad_colored(bold("TurboQuant Config"), turbo_w)
     )
     print(header)
     print(dim("  " + "-" * (name_w + size_w + quant_w + turbo_w + 6)))
@@ -667,12 +680,13 @@ def print_model_list(models: list[OllamaModel], source: str = "local", backend_u
             compat_color = dim
 
         line = (
-            pad_colored(name_str, name_w) +
-            pad_colored(size_str, size_w, "right") +
-            "  " +
-            pad_colored(dim(quant_str) if is_not_pulled else cyan(quant_str), quant_w) +
-            "  " +
-            pad_colored(compat_color(turbo_str), quant_w + 2) + mode_str
+            pad_colored(name_str, name_w)
+            + pad_colored(size_str, size_w, "right")
+            + "  "
+            + pad_colored(dim(quant_str) if is_not_pulled else cyan(quant_str), quant_w)
+            + "  "
+            + pad_colored(compat_color(turbo_str), quant_w + 2)
+            + mode_str
         )
         print(line)
 
@@ -712,7 +726,9 @@ def print_status(state: TurboState) -> None:
     print(f"  PID:        {state.pid}")
     print(f"  Port:       {state.port}")
     print(f"  Endpoint:   {cyan(f'http://{state.host}:{state.port}/v1/chat/completions')}")
-    print(f"  KV Cache:   {bright_magenta(f'{state.cache_type_k}/{state.cache_type_v}')} ({state.turbo_mode})")
+    print(
+        f"  KV Cache:   {bright_magenta(f'{state.cache_type_k}/{state.cache_type_v}')} ({state.turbo_mode})"
+    )
     print(f"  Context:    {state.ctx} tokens")
     print(f"  Uptime:     {uptime_str}")
     print(f"  Server:     {dim(state.server_path)}")

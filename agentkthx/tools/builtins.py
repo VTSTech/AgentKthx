@@ -16,16 +16,15 @@ import urllib.request
 from datetime import datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import Any
 
+from ..core.helpers import is_safe_url, sanitize_command, validate_path
 from ..core.models import Tool, ToolParam
-from ..core.helpers import sanitize_command, validate_path, is_safe_url
 from .registry import ToolRegistry
-
 
 # ============================================================================
 # Audit Logging
 # ============================================================================
+
 
 def _get_agentkthx_dir() -> Path:
     """Get the AgentKthx data directory (~/.agentkthx)."""
@@ -37,10 +36,10 @@ def _get_agentkthx_dir() -> Path:
 def _audit_log(tool_name: str, args: dict, outcome: str, detail: str = "") -> None:
     """
     Append an entry to the audit log at ~/.agentkthx/audit.log.
-    
+
     Each line is a JSON object with: timestamp, tool, args, outcome, detail.
     outcome is one of: 'accepted', 'rejected', 'error'.
-    
+
     This is fire-and-forget — failures are silently ignored so they never
     disrupt the agentic loop.
     """
@@ -65,8 +64,8 @@ def _audit_log(tool_name: str, args: dict, outcome: str, detail: str = "") -> No
 
 # Max bytes read from a file or HTTP response before truncating.
 # Prevents OOM / context-window flooding.
-MAX_READ_BYTES = 512 * 1024    # 512 KB
-MAX_HTTP_BYTES = 256 * 1024    # 256 KB
+MAX_READ_BYTES = 512 * 1024  # 512 KB
+MAX_HTTP_BYTES = 256 * 1024  # 256 KB
 
 # Largest exponent allowed in calculator to prevent DoS via 2**9999999.
 MAX_EXPONENT = 10_000
@@ -75,6 +74,7 @@ MAX_EXPONENT = 10_000
 # ============================================================================
 # Calculator Tool
 # ============================================================================
+
 
 def calculator(expression: str) -> str:
     """
@@ -97,11 +97,12 @@ def calculator(expression: str) -> str:
         Result of the calculation
     """
     import re
+
     from ..core.safe_eval import safe_eval
 
     # Guard: block enormous exponents that would exhaust memory/CPU.
     # e.g. 2**9999999 hangs the process before eval() can be interrupted.
-    for m in re.finditer(r'\*\*\s*(\d+)', expression):
+    for m in re.finditer(r"\*\*\s*(\d+)", expression):
         exp_val = int(m.group(1))
         if exp_val > MAX_EXPONENT:
             return (
@@ -171,6 +172,7 @@ def calculator(expression: str) -> str:
 # Shell Tool
 # ============================================================================
 
+
 def shell(command: str, timeout: int = 30) -> str:
     """
     Execute a shell command (with security restrictions).
@@ -183,9 +185,9 @@ def shell(command: str, timeout: int = 30) -> str:
         Command output or error message
     """
     # Fix for tiny models that add a spurious leading '=' (e.g., ="pwd" instead of "pwd")
-    if command.startswith('='):
+    if command.startswith("="):
         command = command[1:].strip()
-    
+
     # sanitize_command validates the command string but returns it unchanged.
     # The third return value is the original command — NOT a sanitised version.
     # The actual security comes from the blocked-command and injection checks
@@ -238,6 +240,7 @@ def shell(command: str, timeout: int = 30) -> str:
 # ============================================================================
 # File Tools
 # ============================================================================
+
 
 def read_file(file_path: str) -> str:
     """
@@ -315,6 +318,7 @@ def write_file(file_path: str, content: str) -> str:
 # Directory Tool
 # ============================================================================
 
+
 def list_directory(path: str = ".") -> str:
     """
     List directory contents with file sizes.
@@ -360,6 +364,7 @@ def list_directory(path: str = ".") -> str:
 # HTTP Tool
 # ============================================================================
 
+
 class _SSRFSafeRedirectHandler(urllib.request.HTTPRedirectHandler):
     """
     Redirect handler that re-runs SSRF validation on every target (SEC-03).
@@ -392,9 +397,7 @@ class _SSRFSafeRedirectHandler(urllib.request.HTTPRedirectHandler):
             )
         is_safe, error = is_safe_url(newurl)
         if not is_safe:
-            raise urllib.error.URLError(
-                f"SSRF protection: redirect to {newurl} blocked: {error}"
-            )
+            raise urllib.error.URLError(f"SSRF protection: redirect to {newurl} blocked: {error}")
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
@@ -413,8 +416,8 @@ def http_get(url: str, headers: dict | None = None, timeout: int = 30) -> str:
     Returns:
         Response body (truncated if large) or error message
     """
-    import urllib.request
     import urllib.error
+    import urllib.request
 
     # FEAT-02: clamp the model-supplied timeout. urlopen with timeout <= 0
     # means non-blocking/forever depending on platform — never let a
@@ -480,6 +483,7 @@ def http_get(url: str, headers: dict | None = None, timeout: int = 30) -> str:
 # Python REPL Tool
 # ============================================================================
 
+
 def python_repl(code: str) -> str:
     """
     Execute Python code in a sandboxed subprocess.
@@ -494,12 +498,14 @@ def python_repl(code: str) -> str:
         stdout output, or an error message
     """
     from .sandboxed_repl import sandboxed_exec
+
     return sandboxed_exec(code)
 
 
 # ============================================================================
 # Time Tools
 # ============================================================================
+
 
 def get_time(timezone: str | None = None) -> str:
     """
@@ -519,6 +525,7 @@ def get_time(timezone: str | None = None) -> str:
 
     try:
         import zoneinfo
+
         tz = zoneinfo.ZoneInfo(timezone)
         now = datetime.now(tz)
         # Include %Z so the caller can confirm which timezone was applied.
@@ -532,7 +539,11 @@ def get_time(timezone: str | None = None) -> str:
         )
     except Exception as e:
         err_str = str(e)
-        if "No time zone found" in err_str or "ZoneInfoNotFoundError" in err_str or "No such" in err_str:
+        if (
+            "No time zone found" in err_str
+            or "ZoneInfoNotFoundError" in err_str
+            or "No such" in err_str
+        ):
             return (
                 f"Error: unknown timezone '{timezone}'. "
                 f"Use an IANA name such as 'America/New_York' or 'UTC'."
@@ -548,6 +559,7 @@ def get_date() -> str:
         Current date string (YYYY-MM-DD)
     """
     from datetime import datetime
+
     return datetime.now().strftime("%Y-%m-%d")
 
 
@@ -576,6 +588,7 @@ def _unwrap_ddg_url(url: str) -> str:
     """Unwrap DuckDuckGo's ``//duckduckgo.com/l/?uddg=URL`` redirect wrapper."""
     if url.startswith("//duckduckgo.com/l/?uddg="):
         from urllib.parse import parse_qs, urlsplit
+
         qs = parse_qs(urlsplit(url).query)
         if "uddg" in qs:
             return qs["uddg"][0]
@@ -701,9 +714,9 @@ def web_search(query: str, num_results: int | None = None, timeout: int = 15) ->
         Formatted search results with titles, URLs, and snippets,
         or an error message if the search fails.
     """
-    import urllib.request
     import urllib.error
     import urllib.parse
+    import urllib.request
 
     if num_results is None:
         num_results = MAX_SEARCH_RESULTS
@@ -719,7 +732,6 @@ def web_search(query: str, num_results: int | None = None, timeout: int = 15) ->
     timeout = max(1, min(timeout, 300))
 
     try:
-        encoded_query = urllib.parse.urlencode({"q": query})
         results: list[dict] = []
 
         # --- Primary: html.duckduckgo.com via POST form data ---
@@ -735,10 +747,12 @@ def web_search(query: str, num_results: int | None = None, timeout: int = 15) ->
             # POST body — same field names as DDG's own search form.
             # ``q`` is the query; the others are optional defaults that
             # match the live form submission (keeps DDG happy).
-            post_body = urllib.parse.urlencode({
-                "q": query,
-                "b": "",  # empty "b" matches DDG's own form
-            }).encode("utf-8")
+            post_body = urllib.parse.urlencode(
+                {
+                    "q": query,
+                    "b": "",  # empty "b" matches DDG's own form
+                }
+            ).encode("utf-8")
             req = urllib.request.Request(html_url, data=post_body, method="POST")
             req.add_header("User-Agent", _BROWSER_USER_AGENT)
             req.add_header("Accept", "text/html,application/xhtml+xml")
@@ -762,7 +776,7 @@ def web_search(query: str, num_results: int | None = None, timeout: int = 15) ->
             parser.feed(html)
             parser.close()
             results.extend(_collect_ddg_results(parser.results, num_results))
-        except (urllib.error.HTTPError, urllib.error.URLError, Exception) as e:
+        except (urllib.error.HTTPError, urllib.error.URLError, Exception):
             # Don't abort — fall through to the lite endpoint below.
             # Real errors will surface if BOTH endpoints fail.
             pass
@@ -771,10 +785,12 @@ def web_search(query: str, num_results: int | None = None, timeout: int = 15) ->
         if not results:
             try:
                 lite_url = "https://lite.duckduckgo.com/lite/"
-                post_body2 = urllib.parse.urlencode({
-                    "q": query,
-                    "kl": "us-en",
-                }).encode("utf-8")
+                post_body2 = urllib.parse.urlencode(
+                    {
+                        "q": query,
+                        "kl": "us-en",
+                    }
+                ).encode("utf-8")
                 req2 = urllib.request.Request(lite_url, data=post_body2, method="POST")
                 req2.add_header("User-Agent", _BROWSER_USER_AGENT)
                 req2.add_header("Accept", "text/html,application/xhtml+xml")
@@ -797,7 +813,7 @@ def web_search(query: str, num_results: int | None = None, timeout: int = 15) ->
                 parser2.feed(html2)
                 parser2.close()
                 results.extend(_collect_ddg_results(parser2.results, num_results))
-            except (urllib.error.HTTPError, urllib.error.URLError, Exception) as e:
+            except (urllib.error.HTTPError, urllib.error.URLError, Exception):
                 # Both endpoints failed — fall through to the no-results return
                 pass
 
@@ -805,7 +821,7 @@ def web_search(query: str, num_results: int | None = None, timeout: int = 15) ->
             return f"No results found for: {query}"
 
         # Format output
-        parts = [f"Web search results for \"{query}\":\n"]
+        parts = [f'Web search results for "{query}":\n']
         for i, r in enumerate(results, 1):
             parts.append(f"{i}. {r['title']}")
             parts.append(f"   URL: {r['url']}")
@@ -826,6 +842,7 @@ def web_search(query: str, num_results: int | None = None, timeout: int = 15) ->
 # ============================================================================
 # JSON Tool
 # ============================================================================
+
 
 def parse_json(json_string: str) -> str:
     """
@@ -849,6 +866,7 @@ def parse_json(json_string: str) -> str:
 # ============================================================================
 # Text Tools
 # ============================================================================
+
 
 def count_words(text: str) -> str:
     """
@@ -879,6 +897,7 @@ def count_chars(text: str) -> str:
 # ============================================================================
 # Read File Lines Tool (read specific line ranges)
 # ============================================================================
+
 
 def read_file_lines(file_path: str, start_line: int = 1, end_line: int | None = None) -> str:
     """
@@ -946,6 +965,7 @@ def read_file_lines(file_path: str, start_line: int = 1, end_line: int | None = 
 # Find Files Tool (recursive file search by glob pattern)
 # ============================================================================
 
+
 def find_files(pattern: str, path: str = ".", max_results: int = 50) -> str:
     """
     Recursively find files matching a glob pattern.
@@ -978,7 +998,7 @@ def find_files(pattern: str, path: str = ".", max_results: int = 50) -> str:
         # Walk directory tree
         for root, dirs, files in os.walk(path):
             # Skip hidden directories and common skips
-            dirs[:] = [d for d in dirs if not d.startswith('.')]
+            dirs[:] = [d for d in dirs if not d.startswith(".")]
 
             for filename in fnmatch.filter(files, pattern):
                 full_path = os.path.join(root, filename)
@@ -1011,6 +1031,7 @@ def find_files(pattern: str, path: str = ".", max_results: int = 50) -> str:
 # ============================================================================
 # Edit File Tool (search-and-replace within files)
 # ============================================================================
+
 
 def edit_file(
     file_path: str,
@@ -1069,7 +1090,9 @@ def edit_file(
         chars_diff = len(new_string) - len(old_string)
         direction = "+" if chars_diff >= 0 else ""
 
-        _audit_log("edit_file", {"file_path": file_path, "replaced": replaced, "of": count}, "accepted")
+        _audit_log(
+            "edit_file", {"file_path": file_path, "replaced": replaced, "of": count}, "accepted"
+        )
         return (
             f"Successfully edited {file_path}: "
             f"replaced {replaced} of {count} occurrence(s), "
@@ -1139,14 +1162,17 @@ def todo_add(content: str, priority: str = "medium") -> str:
         priority = "medium"
 
     import uuid
+
     task_id = uuid.uuid4().hex[:8]
 
-    _get_todo_store(None).append({
-        "id": task_id,
-        "content": content.strip(),
-        "status": "pending",
-        "priority": priority,
-    })
+    _get_todo_store(None).append(
+        {
+            "id": task_id,
+            "content": content.strip(),
+            "status": "pending",
+            "priority": priority,
+        }
+    )
 
     return f"Added todo [{task_id}] (priority: {priority}): {content.strip()}"
 
@@ -1181,7 +1207,7 @@ def todo_list(status: str | None = None) -> str:
 
     pending = sum(1 for t in store if t["status"] == "pending")
     completed = sum(1 for t in store if t["status"] == "completed")
-    lines.append(f"")
+    lines.append("")
     lines.append(f"Total: {len(store)} ({pending} pending, {completed} completed)")
 
     return "\n".join(lines)
@@ -1249,6 +1275,7 @@ def todo_clear() -> str:
 # Todo Dispatch (unified handler for the todo tool)
 # ============================================================================
 
+
 def _todo_dispatch(
     action: str = "list",
     content: str | None = None,
@@ -1285,245 +1312,374 @@ def _todo_dispatch(
 # Build Registry
 # ============================================================================
 
+
 def make_builtin_registry() -> ToolRegistry:
     """Create a registry with all built-in tools."""
     registry = ToolRegistry()
 
     # Calculator
-    registry.register_tool(Tool(
-        name="calculator",
-        description=(
-            "Evaluate mathematical expressions using PYTHON SYNTAX. "
-            "CRITICAL: Use ** for power (NOT ^ or 'to the power of'), sqrt() for roots. "
-            "Correct examples: '15 * 8', '2**10' (for 2^10), 'sqrt(144)', '144**0.5'. "
-            "WRONG: '2 to the power of 10' (causes syntax error). "
-            "Supports: +, -, *, /, **, %, sqrt, floor, ceil, factorial, "
-            "sin, cos, tan, log, log10, exp, pi, e"
-        ),
-        params=[ToolParam(
-            name="expression",
-            type="string",
+    registry.register_tool(
+        Tool(
+            name="calculator",
             description=(
-                "Python math expression. Use ** for power, sqrt() for roots. "
-                "Examples: '15 * 8', '2**10', 'sqrt(144)', '144**0.5'"
+                "Evaluate mathematical expressions using PYTHON SYNTAX. "
+                "CRITICAL: Use ** for power (NOT ^ or 'to the power of'), sqrt() for roots. "
+                "Correct examples: '15 * 8', '2**10' (for 2^10), 'sqrt(144)', '144**0.5'. "
+                "WRONG: '2 to the power of 10' (causes syntax error). "
+                "Supports: +, -, *, /, **, %, sqrt, floor, ceil, factorial, "
+                "sin, cos, tan, log, log10, exp, pi, e"
             ),
-        )],
-        handler=calculator,
-        category="math",
-    ))
+            params=[
+                ToolParam(
+                    name="expression",
+                    type="string",
+                    description=(
+                        "Python math expression. Use ** for power, sqrt() for roots. "
+                        "Examples: '15 * 8', '2**10', 'sqrt(144)', '144**0.5'"
+                    ),
+                )
+            ],
+            handler=calculator,
+            category="math",
+        )
+    )
 
     # Shell
-    registry.register_tool(Tool(
-        name="shell",
-        description="Execute shell commands (with security restrictions)",
-        params=[
-            ToolParam(name="command", type="string", description="Shell command to execute"),
-            ToolParam(name="timeout", type="integer", description="Timeout in seconds", required=False, default=30),
-        ],
-        handler=shell,
-        dangerous=True,
-        category="system",
-    ))
+    registry.register_tool(
+        Tool(
+            name="shell",
+            description="Execute shell commands (with security restrictions)",
+            params=[
+                ToolParam(name="command", type="string", description="Shell command to execute"),
+                ToolParam(
+                    name="timeout",
+                    type="integer",
+                    description="Timeout in seconds",
+                    required=False,
+                    default=30,
+                ),
+            ],
+            handler=shell,
+            dangerous=True,
+            category="system",
+        )
+    )
 
     # File operations
-    registry.register_tool(Tool(
-        name="read_file",
-        description="Read contents of a file (up to 512 KB)",
-        params=[ToolParam(name="file_path", type="string", description="Path to the file")],
-        handler=read_file,
-        category="file",
-    ))
+    registry.register_tool(
+        Tool(
+            name="read_file",
+            description="Read contents of a file (up to 512 KB)",
+            params=[ToolParam(name="file_path", type="string", description="Path to the file")],
+            handler=read_file,
+            category="file",
+        )
+    )
 
-    registry.register_tool(Tool(
-        name="write_file",
-        description="Write content to a file, creating parent directories if needed",
-        params=[
-            ToolParam(name="file_path", type="string", description="Path to write to"),
-            ToolParam(name="content", type="string", description="Content to write"),
-        ],
-        handler=write_file,
-        dangerous=True,
-        category="file",
-    ))
+    registry.register_tool(
+        Tool(
+            name="write_file",
+            description="Write content to a file, creating parent directories if needed",
+            params=[
+                ToolParam(name="file_path", type="string", description="Path to write to"),
+                ToolParam(name="content", type="string", description="Content to write"),
+            ],
+            handler=write_file,
+            dangerous=True,
+            category="file",
+        )
+    )
 
-    registry.register_tool(Tool(
-        name="list_directory",
-        description="List contents of a directory with file sizes",
-        params=[ToolParam(name="path", type="string", description="Directory path to list", required=False, default=".")],
-        handler=list_directory,
-        category="file",
-    ))
+    registry.register_tool(
+        Tool(
+            name="list_directory",
+            description="List contents of a directory with file sizes",
+            params=[
+                ToolParam(
+                    name="path",
+                    type="string",
+                    description="Directory path to list",
+                    required=False,
+                    default=".",
+                )
+            ],
+            handler=list_directory,
+            category="file",
+        )
+    )
 
     # Read file lines — read specific line ranges
-    registry.register_tool(Tool(
-        name="read_file_lines",
-        description=(
-            "Read specific lines from a file by line range. More token-efficient than "
-            "read_file when you only need a section of a large file. "
-            "Returns lines with line numbers. Use start_line and end_line to specify range."
-        ),
-        params=[
-            ToolParam(name="file_path", type="string", description="Path to the file"),
-            ToolParam(name="start_line", type="integer", description="First line to read (1-indexed, default: 1)", required=False, default=1),
-            ToolParam(name="end_line", type="integer", description="Last line to read, inclusive (default: start_line + 99)", required=False),
-        ],
-        handler=read_file_lines,
-        category="file",
-    ))
+    registry.register_tool(
+        Tool(
+            name="read_file_lines",
+            description=(
+                "Read specific lines from a file by line range. More token-efficient than "
+                "read_file when you only need a section of a large file. "
+                "Returns lines with line numbers. Use start_line and end_line to specify range."
+            ),
+            params=[
+                ToolParam(name="file_path", type="string", description="Path to the file"),
+                ToolParam(
+                    name="start_line",
+                    type="integer",
+                    description="First line to read (1-indexed, default: 1)",
+                    required=False,
+                    default=1,
+                ),
+                ToolParam(
+                    name="end_line",
+                    type="integer",
+                    description="Last line to read, inclusive (default: start_line + 99)",
+                    required=False,
+                ),
+            ],
+            handler=read_file_lines,
+            category="file",
+        )
+    )
 
     # Find files — recursive file search by pattern
-    registry.register_tool(Tool(
-        name="find_files",
-        description=(
-            "Recursively find files matching a glob pattern. "
-            "Use to locate files by name (e.g. '*.py', '*.json', 'test_*'). "
-            "Returns file paths with sizes."
-        ),
-        params=[
-            ToolParam(name="pattern", type="string", description="File pattern to match, e.g. '*.py' or 'config.json'"),
-            ToolParam(name="path", type="string", description="Root directory to search (default: current directory)", required=False, default="."),
-            ToolParam(name="max_results", type="integer", description="Max results (default: 50)", required=False, default=50),
-        ],
-        handler=find_files,
-        category="file",
-    ))
+    registry.register_tool(
+        Tool(
+            name="find_files",
+            description=(
+                "Recursively find files matching a glob pattern. "
+                "Use to locate files by name (e.g. '*.py', '*.json', 'test_*'). "
+                "Returns file paths with sizes."
+            ),
+            params=[
+                ToolParam(
+                    name="pattern",
+                    type="string",
+                    description="File pattern to match, e.g. '*.py' or 'config.json'",
+                ),
+                ToolParam(
+                    name="path",
+                    type="string",
+                    description="Root directory to search (default: current directory)",
+                    required=False,
+                    default=".",
+                ),
+                ToolParam(
+                    name="max_results",
+                    type="integer",
+                    description="Max results (default: 50)",
+                    required=False,
+                    default=50,
+                ),
+            ],
+            handler=find_files,
+            category="file",
+        )
+    )
 
     # Edit file — search-and-replace within files
-    registry.register_tool(Tool(
-        name="edit_file",
-        description=(
-            "Edit a file by finding and replacing a specific text segment. "
-            "Unlike write_file (which overwrites the whole file), this performs "
-            "a targeted replacement. The old_string must match EXACTLY. "
-            "Use read_file first to see the current content, then use this to "
-            "make precise changes. Safer and more token-efficient for small edits."
-        ),
-        params=[
-            ToolParam(name="file_path", type="string", description="Path to the file to edit"),
-            ToolParam(name="old_string", type="string", description="The exact text to find and replace (must match exactly, including whitespace)"),
-            ToolParam(name="new_string", type="string", description="The replacement text"),
-            ToolParam(name="replace_all", type="boolean", description="Replace all occurrences (default: false, first only)", required=False, default=False),
-        ],
-        handler=edit_file,
-        dangerous=True,
-        category="file",
-    ))
+    registry.register_tool(
+        Tool(
+            name="edit_file",
+            description=(
+                "Edit a file by finding and replacing a specific text segment. "
+                "Unlike write_file (which overwrites the whole file), this performs "
+                "a targeted replacement. The old_string must match EXACTLY. "
+                "Use read_file first to see the current content, then use this to "
+                "make precise changes. Safer and more token-efficient for small edits."
+            ),
+            params=[
+                ToolParam(name="file_path", type="string", description="Path to the file to edit"),
+                ToolParam(
+                    name="old_string",
+                    type="string",
+                    description="The exact text to find and replace (must match exactly, including whitespace)",
+                ),
+                ToolParam(name="new_string", type="string", description="The replacement text"),
+                ToolParam(
+                    name="replace_all",
+                    type="boolean",
+                    description="Replace all occurrences (default: false, first only)",
+                    required=False,
+                    default=False,
+                ),
+            ],
+            handler=edit_file,
+            dangerous=True,
+            category="file",
+        )
+    )
 
     # Todo — in-memory task tracking
-    registry.register_tool(Tool(
-        name="todo",
-        description=(
-            "Manage a task/todo list to track multi-step work. "
-            "Actions: 'add' (create task), 'list' (show tasks), 'complete' (mark done), "
-            "'remove' (delete task), 'clear' (remove completed). "
-            "Use this to plan and track progress on complex tasks."
-        ),
-        params=[
-            ToolParam(name="action", type="string", description="Action to perform: 'add', 'list', 'complete', 'remove', 'clear'"),
-            ToolParam(name="content", type="string", description="Task description (for 'add' action)", required=False),
-            ToolParam(name="task_id", type="string", description="Task ID from todo list output (for 'complete' and 'remove')", required=False),
-            ToolParam(name="priority", type="string", description="Priority: 'high', 'medium', or 'low' (default: 'medium', for 'add')", required=False, default="medium"),
-        ],
-        handler=_todo_dispatch,
-        category="utility",
-    ))
+    registry.register_tool(
+        Tool(
+            name="todo",
+            description=(
+                "Manage a task/todo list to track multi-step work. "
+                "Actions: 'add' (create task), 'list' (show tasks), 'complete' (mark done), "
+                "'remove' (delete task), 'clear' (remove completed). "
+                "Use this to plan and track progress on complex tasks."
+            ),
+            params=[
+                ToolParam(
+                    name="action",
+                    type="string",
+                    description="Action to perform: 'add', 'list', 'complete', 'remove', 'clear'",
+                ),
+                ToolParam(
+                    name="content",
+                    type="string",
+                    description="Task description (for 'add' action)",
+                    required=False,
+                ),
+                ToolParam(
+                    name="task_id",
+                    type="string",
+                    description="Task ID from todo list output (for 'complete' and 'remove')",
+                    required=False,
+                ),
+                ToolParam(
+                    name="priority",
+                    type="string",
+                    description="Priority: 'high', 'medium', or 'low' (default: 'medium', for 'add')",
+                    required=False,
+                    default="medium",
+                ),
+            ],
+            handler=_todo_dispatch,
+            category="utility",
+        )
+    )
 
     # HTTP
-    registry.register_tool(Tool(
-        name="http_get",
-        description="Make an HTTP GET request to a URL (up to 256 KB response)",
-        params=[
-            ToolParam(name="url", type="string", description="URL to fetch"),
-            ToolParam(name="headers", type="object", description="Optional headers dict", required=False),
-            ToolParam(name="timeout", type="integer", description="Per-call timeout in seconds (default 30, max 300)", required=False, default=30),
-        ],
-        handler=http_get,
-        category="network",
-    ))
+    registry.register_tool(
+        Tool(
+            name="http_get",
+            description="Make an HTTP GET request to a URL (up to 256 KB response)",
+            params=[
+                ToolParam(name="url", type="string", description="URL to fetch"),
+                ToolParam(
+                    name="headers",
+                    type="object",
+                    description="Optional headers dict",
+                    required=False,
+                ),
+                ToolParam(
+                    name="timeout",
+                    type="integer",
+                    description="Per-call timeout in seconds (default 30, max 300)",
+                    required=False,
+                    default=30,
+                ),
+            ],
+            handler=http_get,
+            category="network",
+        )
+    )
 
     # Python REPL
-    registry.register_tool(Tool(
-        name="python_repl",
-        description=(
-            "Execute Python code in a sandboxed subprocess. "
-            "Safe modules: math, json, re, datetime, collections, itertools. "
-            "File system and network access are blocked."
-        ),
-        params=[ToolParam(name="code", type="string", description="Python code to execute")],
-        handler=python_repl,
-        category="code",
-    ))
+    registry.register_tool(
+        Tool(
+            name="python_repl",
+            description=(
+                "Execute Python code in a sandboxed subprocess. "
+                "Safe modules: math, json, re, datetime, collections, itertools. "
+                "File system and network access are blocked."
+            ),
+            params=[ToolParam(name="code", type="string", description="Python code to execute")],
+            handler=python_repl,
+            category="code",
+        )
+    )
 
     # Time
-    registry.register_tool(Tool(
-        name="get_time",
-        description="Get current date and time, optionally in a specific timezone",
-        params=[ToolParam(
-            name="timezone",
-            type="string",
-            description="Optional IANA timezone name, e.g. 'America/New_York'",
-            required=False,
-        )],
-        handler=get_time,
-        category="utility",
-    ))
+    registry.register_tool(
+        Tool(
+            name="get_time",
+            description="Get current date and time, optionally in a specific timezone",
+            params=[
+                ToolParam(
+                    name="timezone",
+                    type="string",
+                    description="Optional IANA timezone name, e.g. 'America/New_York'",
+                    required=False,
+                )
+            ],
+            handler=get_time,
+            category="utility",
+        )
+    )
 
-    registry.register_tool(Tool(
-        name="get_date",
-        description="Get current local date (YYYY-MM-DD)",
-        params=[],
-        handler=get_date,
-        category="utility",
-    ))
+    registry.register_tool(
+        Tool(
+            name="get_date",
+            description="Get current local date (YYYY-MM-DD)",
+            params=[],
+            handler=get_date,
+            category="utility",
+        )
+    )
 
     # JSON
-    registry.register_tool(Tool(
-        name="parse_json",
-        description="Parse and pretty-print a JSON string",
-        params=[ToolParam(name="json_string", type="string", description="JSON string to parse")],
-        handler=parse_json,
-        category="utility",
-    ))
+    registry.register_tool(
+        Tool(
+            name="parse_json",
+            description="Parse and pretty-print a JSON string",
+            params=[
+                ToolParam(name="json_string", type="string", description="JSON string to parse")
+            ],
+            handler=parse_json,
+            category="utility",
+        )
+    )
 
     # Web Search
-    registry.register_tool(Tool(
-        name="web_search",
-        description=(
-            "Search the web for current information using DuckDuckGo. "
-            "Returns titles, URLs, and snippets. Use for news, current events, "
-            "real-time data, or any information that may have changed recently."
-        ),
-        params=[
-            ToolParam(name="query", type="string", description="Search query"),
-            ToolParam(
-                name="num_results",
-                type="integer",
-                description="Max results to return (1-10, default 5)",
-                required=False,
-                default=5,
+    registry.register_tool(
+        Tool(
+            name="web_search",
+            description=(
+                "Search the web for current information using DuckDuckGo. "
+                "Returns titles, URLs, and snippets. Use for news, current events, "
+                "real-time data, or any information that may have changed recently."
             ),
-            ToolParam(name="timeout", type="integer", description="Per-call timeout in seconds (default 15, max 300)", required=False, default=15),
-        ],
-        handler=web_search,
-        category="network",
-    ))
+            params=[
+                ToolParam(name="query", type="string", description="Search query"),
+                ToolParam(
+                    name="num_results",
+                    type="integer",
+                    description="Max results to return (1-10, default 5)",
+                    required=False,
+                    default=5,
+                ),
+                ToolParam(
+                    name="timeout",
+                    type="integer",
+                    description="Per-call timeout in seconds (default 15, max 300)",
+                    required=False,
+                    default=15,
+                ),
+            ],
+            handler=web_search,
+            category="network",
+        )
+    )
 
     # Text
-    registry.register_tool(Tool(
-        name="count_words",
-        description="Count words in text",
-        params=[ToolParam(name="text", type="string", description="Text to count")],
-        handler=count_words,
-        category="text",
-    ))
+    registry.register_tool(
+        Tool(
+            name="count_words",
+            description="Count words in text",
+            params=[ToolParam(name="text", type="string", description="Text to count")],
+            handler=count_words,
+            category="text",
+        )
+    )
 
-    registry.register_tool(Tool(
-        name="count_chars",
-        description="Count characters in text",
-        params=[ToolParam(name="text", type="string", description="Text to count")],
-        handler=count_chars,
-        category="text",
-    ))
+    registry.register_tool(
+        Tool(
+            name="count_chars",
+            description="Count characters in text",
+            params=[ToolParam(name="text", type="string", description="Text to count")],
+            handler=count_chars,
+            category="text",
+        )
+    )
 
     return registry
 

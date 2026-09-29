@@ -11,7 +11,6 @@ Written by VTSTech — https://www.vts-tech.org
 """
 
 import json
-import sys
 from pathlib import Path
 
 import pytest
@@ -19,11 +18,9 @@ import pytest
 from agentkthx.plugins._loader import (
     CANONICAL_SCHEMA,
     EXT_NAMESPACE,
-    Plugin,
     PluginManager,
     _parse_manifest,
     constraint_satisfied,
-    expand_placeholders,
     parse_version,
     valid_plugin_name,
 )
@@ -35,11 +32,12 @@ SCHEMA = CANONICAL_SCHEMA
 # Helpers / fixtures
 # ---------------------------------------------------------------------------
 
+
 def write_plugin(
     root: Path,
     name: str,
     manifest: dict,
-    init_py: str = 'def register(manager):\n    pass\n\ndef unregister(manager):\n    pass\n',
+    init_py: str = "def register(manager):\n    pass\n\ndef unregister(manager):\n    pass\n",
     extra_files: dict | None = None,
 ) -> Path:
     """Create a plugin directory with a manifest and optional extra files."""
@@ -96,6 +94,7 @@ def make_manager(*roots: Path) -> PluginManager:
 # Name constraints (spec §Plugin name constraints)
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize("name", ["my-plugin", "acme.tools", "lint3r", "a", "v2-beta"])
 def test_valid_names(name):
     assert valid_plugin_name(name)
@@ -129,6 +128,7 @@ def test_dotted_name_rejected_in_builtin_root(tmp_path):
 # ---------------------------------------------------------------------------
 # Dual-form parsing + extensions precedence (spec §Extensions)
 # ---------------------------------------------------------------------------
+
 
 def test_v02_form_loads(root):
     write_plugin(root, "alpha", v02_manifest("alpha"))
@@ -191,7 +191,11 @@ def test_unknown_fields_warn_and_ignore(root):
 
 def test_author_object_form(root):
     raw = v02_manifest("auth")
-    raw["author"] = {"name": "VTSTech", "email": "x@vts-tech.org", "url": "https://www.vts-tech.org"}
+    raw["author"] = {
+        "name": "VTSTech",
+        "email": "x@vts-tech.org",
+        "url": "https://www.vts-tech.org",
+    }
     write_plugin(root, "auth", raw)
     m = make_manager(root).discover()[0]
     assert m.author == "VTSTech"
@@ -207,7 +211,9 @@ def test_author_object_invalid_keys_rejected(root):
 
 
 def test_spdx_license_warns_only(root):
-    raw = v02_manifest("lic", )
+    raw = v02_manifest(
+        "lic",
+    )
     raw["license"] = "Not-A-Real-License"
     write_plugin(root, "lic", raw)
     pm = make_manager(root)
@@ -218,6 +224,7 @@ def test_spdx_license_warns_only(root):
 # ---------------------------------------------------------------------------
 # $schema handling (spec §$schema)
 # ---------------------------------------------------------------------------
+
 
 def test_unrecognized_schema_warns_but_loads(root):
     raw = v02_manifest("weirdschema")
@@ -231,6 +238,7 @@ def test_unrecognized_schema_warns_but_loads(root):
 # ---------------------------------------------------------------------------
 # Compatibility: warn-only + agentnova alias (spec §Compatibility)
 # ---------------------------------------------------------------------------
+
 
 def test_compatibility_mismatch_warns_but_loads(root):
     init_py = (
@@ -280,6 +288,7 @@ def test_parse_version():
 # ---------------------------------------------------------------------------
 # Entrypoint honored (spec §Entrypoint contract)
 # ---------------------------------------------------------------------------
+
 
 def test_entrypoint_submodule_is_honored(root):
     custom_init = "# no register here on purpose\n"
@@ -332,6 +341,7 @@ def test_register_raises_cleanup(root):
 # Multi-root discovery + collision priority (spec §Plugin roots)
 # ---------------------------------------------------------------------------
 
+
 def test_multi_root_collision_priority(tmp_path):
     r1 = tmp_path / "r1"
     r2 = tmp_path / "r2"
@@ -378,6 +388,7 @@ def test_underscore_and_hidden_dirs_skipped(root):
 # Config: placeholder expansion + secret guard (spec §Config, §Expansion)
 # ---------------------------------------------------------------------------
 
+
 def test_placeholder_expansion(root):
     config = {
         "env_prefix": "PH",
@@ -391,12 +402,7 @@ def test_placeholder_expansion(root):
         root,
         "ph",
         v02_manifest("ph", config=config),
-        init_py=(
-            "def register(manager):\n"
-            "    pass\n"
-            "def unregister(manager):\n"
-            "    pass\n"
-        ),
+        init_py=("def register(manager):\n" "    pass\n" "def unregister(manager):\n" "    pass\n"),
     )
     pm = make_manager(root)
     assert pm.load("ph") is not None
@@ -423,6 +429,7 @@ def test_secret_shaped_default_warns(root):
 # ---------------------------------------------------------------------------
 # Hooks (spec §Hooks)
 # ---------------------------------------------------------------------------
+
 
 def _hook_plugin(root, name):
     extra = {
@@ -458,6 +465,7 @@ def test_hooks_declarative_and_imperative_with_error_isolation(tmp_path):
     assert pm.load("hooky") is not None
 
     import importlib
+
     mod = importlib.import_module("agentkthx_ext_plugins_hooky.hooks")
     mod.calls.clear()
 
@@ -504,8 +512,9 @@ def test_unload_removes_hooks(root):
 # Tools (spec §Tools)
 # ---------------------------------------------------------------------------
 
+
 def test_tool_registration_ownership_and_collision(root):
-    from agentkthx.core.models import Tool, ToolParam
+    from agentkthx.core.models import Tool
 
     t1 = Tool(name="my-tool", description="d", params=[])
     pm = PluginManager(plugins_dir=[])
@@ -523,6 +532,7 @@ def test_tool_registration_ownership_and_collision(root):
     class FakeRegistry:
         def __init__(self):
             self.names_ = []
+
         def register_tool(self, tool):
             self.names_.append(tool.name)
 
@@ -535,7 +545,6 @@ def test_tool_registration_ownership_and_collision(root):
 
 
 def test_unload_removes_declared_tools(root):
-    from agentkthx.core.models import Tool
 
     init_py = (
         "from agentkthx.core.models import Tool\n"
@@ -561,6 +570,7 @@ def test_unload_removes_declared_tools(root):
 # Unload completeness (spec §Lifecycle / §Migration item 6)
 # ---------------------------------------------------------------------------
 
+
 def test_unload_purges_config(root):
     init_py = (
         "def register(manager):\n"
@@ -581,6 +591,7 @@ def test_unload_purges_config(root):
 # PLUGIN_ROOT / PLUGIN_DATA (spec §Environment)
 # ---------------------------------------------------------------------------
 
+
 def test_plugin_root_and_data_dir_attributes(root):
     write_plugin(root, "paths", v02_manifest("paths"))
     pm = make_manager(root)
@@ -596,6 +607,7 @@ def test_plugin_root_and_data_dir_attributes(root):
 # ---------------------------------------------------------------------------
 # Dependency resolution (spec §Dependency resolution)
 # ---------------------------------------------------------------------------
+
 
 def test_missing_dependency_skips_plugin(root):
     write_plugin(root, "orphan", v02_manifest("orphan"))
@@ -635,6 +647,7 @@ def test_dependency_order_respected(root):
 # on_init emission + failure isolation (spec §Lifecycle)
 # ---------------------------------------------------------------------------
 
+
 def test_on_init_emitted_once_after_load_all(root):
     init_py = (
         "seen = []\n"
@@ -648,6 +661,7 @@ def test_on_init_emitted_once_after_load_all(root):
     pm.load_all()
     pm.load_all()  # second call must not re-emit
     import agentkthx_ext_plugins_initp as mod
+
     assert len(mod.seen) == 1
 
 
@@ -670,6 +684,7 @@ def test_backend_rejection_for_non_basebackend(root):
 # ---------------------------------------------------------------------------
 # Bundled plugins: v0.2 manifests parse and load (integration smoke)
 # ---------------------------------------------------------------------------
+
 
 def test_builtin_manifests_are_v02_form():
     plugins_dir = Path(__file__).resolve().parents[1] / "agentkthx" / "plugins"

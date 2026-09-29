@@ -12,6 +12,7 @@ from __future__ import annotations
 def register(manager) -> None:
     """Register the OpenRouter backend with the plugin manager."""
     from .openrouter import OpenRouterBackend
+
     manager.register_backend("openrouter", OpenRouterBackend)
 
 

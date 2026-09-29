@@ -2,7 +2,7 @@
 ⚛️ AgentKthx — OpenRouter API Backend
 Backend implementation for the OpenRouter API (OpenAI Chat-Completions compatible).
 
-OpenRouter provides access to 500+ models from various providers (Anthropic, OpenAI, 
+OpenRouter provides access to 500+ models from various providers (Anthropic, OpenAI,
 Google, Cohere, local models, etc.) via an OpenAI-compatible API endpoint.
 This backend inherits the OpenAI Chat-Completions logic from OllamaBackend
 and adds API key authentication and OpenRouter-specific defaults.
@@ -34,16 +34,18 @@ from __future__ import annotations
 import json
 import os
 import time
-import urllib.request
 import urllib.error
-from typing import Any, Generator, Optional
+import urllib.request
+from typing import Generator
 
-from agentkthx.backends.base import BaseBackend, BackendConfig
+from agentkthx.backends.base import BackendConfig
 from agentkthx.backends.openai_compat import OpenAICompatibleBackend
-from agentkthx.core.types import BackendType, ToolSupportLevel, ApiMode
-from agentkthx.core.models import Tool, ToolParam
-from agentkthx.config import OPENROUTER_BASE_URL, OPENROUTER_API_KEY, OPENROUTER_DEFAULT_MODEL, OPENROUTER_FREE_ONLY
-
+from agentkthx.config import (
+    OPENROUTER_BASE_URL,
+    OPENROUTER_FREE_ONLY,
+)
+from agentkthx.core.models import Tool
+from agentkthx.core.types import ApiMode, BackendType, ToolSupportLevel
 
 # OpenRouter model catalog with metadata for context sizing and defaults.
 # Keys are model identifiers accepted by the OpenRouter API.
@@ -55,101 +57,70 @@ OPENROUTER_MODELS: dict[str, dict] = {
     # OpenAI
     "openai/gpt-4o": {
         "max_tokens": 128000,
-        "pricing": {
-            "prompt": 2.50,
-            "completion": 10.00
-        },
+        "pricing": {"prompt": 2.50, "completion": 10.00},
         "context_length": 128000,
         "provider": "openai",
-        "description": "GPT-4o - multimodal model"
+        "description": "GPT-4o - multimodal model",
     },
     "openai/gpt-4o-mini": {
         "max_tokens": 128000,
-        "pricing": {
-            "prompt": 0.15,
-            "completion": 0.60
-        },
+        "pricing": {"prompt": 0.15, "completion": 0.60},
         "context_length": 128000,
         "provider": "openai",
-        "description": "GPT-4o mini - fast and affordable"
+        "description": "GPT-4o mini - fast and affordable",
     },
     "openai/gpt-4-turbo": {
         "max_tokens": 128000,
-        "pricing": {
-            "prompt": 10.00,
-            "completion": 30.00
-        },
+        "pricing": {"prompt": 10.00, "completion": 30.00},
         "context_length": 128000,
         "provider": "openai",
-        "description": "GPT-4 Turbo - previous flagship"
+        "description": "GPT-4 Turbo - previous flagship",
     },
     "openai/gpt-4": {
         "max_tokens": 8192,
-        "pricing": {
-            "prompt": 30.00,
-            "completion": 60.00
-        },
+        "pricing": {"prompt": 30.00, "completion": 60.00},
         "context_length": 8192,
         "provider": "openai",
-        "description": "GPT-4 - legacy model"
+        "description": "GPT-4 - legacy model",
     },
-    
     # DeepSeek
     "deepseek/deepseek-chat": {
         "max_tokens": 131072,
-        "pricing": {
-            "prompt": 1.00,
-            "completion": 2.00
-        },
+        "pricing": {"prompt": 1.00, "completion": 2.00},
         "context_length": 131072,
         "provider": "deepseek",
-        "description": "DeepSeek Chat - open-source model"
+        "description": "DeepSeek Chat - open-source model",
     },
     "deepseek/deepseek-coder": {
         "max_tokens": 131072,
-        "pricing": {
-            "prompt": 1.00,
-            "completion": 2.00
-        },
+        "pricing": {"prompt": 1.00, "completion": 2.00},
         "context_length": 131072,
         "provider": "deepseek",
-        "description": "DeepSeek Coder - programming model"
+        "description": "DeepSeek Coder - programming model",
     },
-    
     # Google
     "google/gemini-2.0-flash-exp": {
         "max_tokens": 131072,
-        "pricing": {
-            "prompt": 0.15,
-            "completion": 0.60
-        },
+        "pricing": {"prompt": 0.15, "completion": 0.60},
         "context_length": 131072,
         "provider": "google",
-        "description": "Gemini 2.0 Flash Experimental"
+        "description": "Gemini 2.0 Flash Experimental",
     },
     # Local models (via OpenRouter)
     "meta-llama/llama-3.1-70b-instruct": {
         "max_tokens": 131072,
-        "pricing": {
-            "prompt": 0.88,
-            "completion": 0.88
-        },
+        "pricing": {"prompt": 0.88, "completion": 0.88},
         "context_length": 131072,
         "provider": "meta",
-        "description": "Llama 3.1 70B Instruct"
+        "description": "Llama 3.1 70B Instruct",
     },
     "qwen/qwen-2.5-72b-instruct": {
         "max_tokens": 131072,
-        "pricing": {
-            "prompt": 0.50,
-            "completion": 0.50
-        },
+        "pricing": {"prompt": 0.50, "completion": 0.50},
         "context_length": 131072,
         "provider": "qwen",
-        "description": "Qwen 2.5 72B Instruct"
+        "description": "Qwen 2.5 72B Instruct",
     },
-    
-
 }
 
 
@@ -168,10 +139,12 @@ OPENROUTER_MODELS: dict[str, dict] = {
 #
 # Source: docs/api/OPENROUTER_API_TECHNICAL_REFERENCE.md §Free Tier Models
 # Last verified: 2026-09-28
-OPENROUTER_FREE_MODEL_WHITELIST: frozenset[str] = frozenset({
-    # The named free router — always allowed under FREE_ONLY
-    "openrouter/free",
-})
+OPENROUTER_FREE_MODEL_WHITELIST: frozenset[str] = frozenset(
+    {
+        # The named free router — always allowed under FREE_ONLY
+        "openrouter/free",
+    }
+)
 
 
 def _is_free_model(model_id: str) -> bool:
@@ -231,12 +204,12 @@ def _free_router_entry() -> dict:
 class OpenRouterBackend(OpenAICompatibleBackend):
     """
     Backend for OpenRouter cloud API.
-    
+
     OpenRouter provides access to 500+ models via an OpenAI-compatible API.
     This backend extends OllamaBackend's OpenAI Chat-Completions support
     with OpenRouter-specific authentication and model handling.
     """
-    
+
     # Model cache with 1-hour timeout.
     # MAINT-19 (R07.15): genuinely CLASS-level — live fetches write via
     # ``type(self)`` so instances share one cache per TTL window. The
@@ -294,9 +267,9 @@ class OpenRouterBackend(OpenAICompatibleBackend):
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
             "HTTP-Referer": "https://github.com/VTSTech/AgentKthx",
-            "X-Title": "AgentKthx"
+            "X-Title": "AgentKthx",
         }
-        
+
         # Force model list to be loaded on initialization so cache is populated
         try:
             if os.environ.get("AGENTKTHX_DEBUG"):
@@ -319,7 +292,7 @@ class OpenRouterBackend(OpenAICompatibleBackend):
     def _parse_openrouter_model(self, model_data: dict) -> dict:
         """
         Parse OpenRouter API model data into AgentKthx format.
-        
+
         Uses live API data for context length and max tokens instead of static catalog.
 
         R07.05: sets ``free_tier=True`` when the model ID ends with ``:free``
@@ -333,7 +306,7 @@ class OpenRouterBackend(OpenAICompatibleBackend):
         chat-capable models on the OpenAI-compatible endpoint).
         """
         model_id = model_data["id"]
-        
+
         # Get context length and max tokens from live API data
         context_length = model_data.get("context_length", 128000)
         # R07.10 fix: max_completion_tokens may be explicitly null in the
@@ -343,9 +316,11 @@ class OpenRouterBackend(OpenAICompatibleBackend):
         # so we have to coerce None → 4096 explicitly.
         raw_max = model_data.get("top_provider", {}).get("max_completion_tokens", 4096)
         max_completion_tokens = raw_max if raw_max is not None else 4096
-        
+
         # Determine family from provider or model name
-        provider = model_data.get("top_provider", {}).get("provider", model_data.get("id", "/").split("/")[0])
+        provider = model_data.get("top_provider", {}).get(
+            "provider", model_data.get("id", "/").split("/")[0]
+        )
         family = provider
 
         # R07.05: detect free-tier models. OpenRouter marks genuinely-free
@@ -371,10 +346,10 @@ class OpenRouterBackend(OpenAICompatibleBackend):
         prompt_price = float(pricing.get("prompt", 0) or 0)
         completion_price = float(pricing.get("completion", 0) or 0)
         # A model is genuinely free if both prompt and completion are $0
-        is_zero_pricing = (prompt_price == 0.0 and completion_price == 0.0)
+        is_zero_pricing = prompt_price == 0.0 and completion_price == 0.0
         if is_zero_pricing:
             free_tier = True  # pricing is the ground truth — overrides is_free
-        
+
         return {
             "name": model_id,
             "size": 0,  # OpenRouter doesn't provide size info
@@ -393,32 +368,31 @@ class OpenRouterBackend(OpenAICompatibleBackend):
                     "completion": completion_price,
                 },
             },
-            "model_data": model_data  # Store original data for future reference
+            "model_data": model_data,  # Store original data for future reference
         }
-    
+
     def list_models(self) -> list[dict]:
         """List available models from OpenRouter API with caching.
-        
+
         Cache timeout: 1 hour (3600 seconds)
         Refresh endpoint: GET /v1/models (automatic refresh when cache expires)
         """
         import time
-        
+
         # Check cache first
         current_time = time.time()
-        if (self._model_cache is not None and 
-            current_time - self._cache_time < self._CACHE_TIMEOUT):
+        if self._model_cache is not None and current_time - self._cache_time < self._CACHE_TIMEOUT:
             return self._model_cache
-        
+
         try:
             # Use proper headers for API call
             headers = {
                 "HTTP-Referer": "https://github.com/VTSTech/AgentKthx",
-                "X-Title": "AgentKthx"
+                "X-Title": "AgentKthx",
             }
             if self.api_key:
                 headers["Authorization"] = f"Bearer {self.api_key}"
-            
+
             req = urllib.request.Request(
                 f"{self.base_url}/models",
                 headers=headers,
@@ -427,7 +401,7 @@ class OpenRouterBackend(OpenAICompatibleBackend):
             with urllib.request.urlopen(req, timeout=10) as resp:
                 models_data = json.loads(resp.read().decode("utf-8"))
             available_models = []
-            
+
             # Parse API response using live data
             for model in models_data.get("data", []):
                 model_id = model.get("id")
@@ -435,22 +409,24 @@ class OpenRouterBackend(OpenAICompatibleBackend):
                     # Use live API data instead of static catalog
                     parsed_model = self._parse_openrouter_model(model)
                     available_models.append(parsed_model)
-            
+
             # Add catalog-only models (not returned by API)
             catalog_models = list(OPENROUTER_MODELS.keys())
             for name in catalog_models:
                 if not any(m["name"] == name for m in available_models):
                     model_info = OPENROUTER_MODELS[name]
-                    available_models.append({
-                        "name": name,
-                        "size": 0,
-                        "details": {
-                            "family": model_info.get("provider", "unknown"),
-                            "backend": "openrouter",
-                            "context_length": model_info.get("context_length", 128000),
+                    available_models.append(
+                        {
+                            "name": name,
+                            "size": 0,
+                            "details": {
+                                "family": model_info.get("provider", "unknown"),
+                                "backend": "openrouter",
+                                "context_length": model_info.get("context_length", 128000),
+                            },
                         }
-                    })
-            
+                    )
+
             # R07.15: guarantee the named Free Models Router appears in
             # listings. The /models endpoint does not reliably return
             # ``openrouter/free`` — it is the plugin's default model and
@@ -459,7 +435,7 @@ class OpenRouterBackend(OpenAICompatibleBackend):
             # whitelists the router, so the entry survives both layers).
             if not any(m["name"] == "openrouter/free" for m in available_models):
                 available_models.append(_free_router_entry())
-            
+
             # Filter models if OPENROUTER_FREE_ONLY is enabled
             if OPENROUTER_FREE_ONLY:
                 # R07.09 fix: use the shared _is_free_model() helper so the
@@ -480,8 +456,8 @@ class OpenRouterBackend(OpenAICompatibleBackend):
 
             type(self)._cache_time = current_time
             return sorted_models
-            
-        except Exception as e:
+
+        except Exception:
             # Fallback to catalog if API fails
             catalog_models = []
             for name, model_info in OPENROUTER_MODELS.items():
@@ -489,19 +465,17 @@ class OpenRouterBackend(OpenAICompatibleBackend):
                 mock_model_data = {
                     "id": name,
                     "context_length": model_info.get("context_length", 128000),
-                    "top_provider": {
-                        "max_completion_tokens": model_info.get("max_tokens", 4096)
-                    }
+                    "top_provider": {"max_completion_tokens": model_info.get("max_tokens", 4096)},
                 }
                 parsed_model = self._parse_openrouter_model(mock_model_data)
                 catalog_models.append(parsed_model)
-            
+
             # R07.15: the static catalog contains no free models at all, so
             # without the router a FREE_ONLY fallback list would be empty.
             # Same guarantee as the live path above.
             if not any(m["name"] == "openrouter/free" for m in catalog_models):
                 catalog_models.append(_free_router_entry())
-            
+
             if OPENROUTER_FREE_ONLY:
                 # R07.09 fix: replaced the prior substring hack ("free" in
                 # name OR flash/mini/haiku/tiny) with the proper
@@ -515,20 +489,20 @@ class OpenRouterBackend(OpenAICompatibleBackend):
             else:
                 # MAINT-19: failure fallback stays INSTANCE-level.
                 self._model_cache = sorted(catalog_models, key=lambda x: x["name"])
-            
+
             self._cache_time = current_time
             return self._model_cache
 
     def is_running(self) -> bool:
         """OpenRouter is a cloud API, so it's always 'running'."""
         return True
-    
+
     def _get_model_info(self, model_name: str) -> dict | None:
         """Get model metadata from catalog, cache, or API."""
         # Check catalog first
         if model_name in OPENROUTER_MODELS:
             return OPENROUTER_MODELS[model_name]
-        
+
         # Check cache if available
         if self._model_cache:
             for cached_model in self._model_cache:
@@ -539,7 +513,7 @@ class OpenRouterBackend(OpenAICompatibleBackend):
                         "max_tokens": details.get("max_completion_tokens") or 4096,
                         "context_length": details.get("context_length") or 128000,
                     }
-        
+
         # Try to get from API (future enhancement)
         # For now, return None to let OllamaBackend handle defaults
         return None
@@ -547,7 +521,7 @@ class OpenRouterBackend(OpenAICompatibleBackend):
     def get_model_max_context(self, model: str, family: str | None = None) -> int:
         """
         Get the model's maximum trained context window size.
-        
+
         Uses live OpenRouter API data for accurate context lengths.
         """
         # Try to get model from cache first
@@ -555,32 +529,34 @@ class OpenRouterBackend(OpenAICompatibleBackend):
             for cached_model in self._model_cache:
                 if cached_model["name"] == model:
                     return cached_model["details"].get("context_length", 128000)
-        
+
         # Fallback to catalog if not in cache
         model_info = self._get_model_info(model)
         if model_info and "context_length" in model_info:
             return model_info["context_length"]
-        
+
         # Fallback to family-based defaults from OllamaBackend
         if family:
             ctx = self.get_context_by_family(family)
             if ctx:
                 return ctx
-        
+
         # Default fallback
         return 128000
 
     def _get_model_defaults(self, model: str) -> dict:
         """
         Get model-specific defaults from live API data.
-        
+
         Returns:
             dict: temperature, max_tokens, and other model defaults
         """
         # Try to get model from cache first
         if self._model_cache:
             if os.environ.get("AGENTKTHX_DEBUG"):
-                print(f"  [OpenRouter Debug] Looking for model '{model}' in cache with {len(self._model_cache)} models")
+                print(
+                    f"  [OpenRouter Debug] Looking for model '{model}' in cache with {len(self._model_cache)} models"
+                )
                 for cached_model in self._model_cache:
                     cached_name = cached_model["name"]
                     print(f"    Cache entry: '{cached_name}'")
@@ -594,16 +570,16 @@ class OpenRouterBackend(OpenAICompatibleBackend):
                     context_length = details.get("context_length") or 128000
                     # ARCH-03 (R06.57): cap + persisted-safe-value logic now
                     # inherited from OpenAICompatibleBackend._apply_max_tokens_cap
-                    return self._apply_max_tokens_cap(
-                        max_tokens, context_length, temperature=0.7
-                    )
+                    return self._apply_max_tokens_cap(max_tokens, context_length, temperature=0.7)
                 elif model in cached_name or cached_name in model:
                     if os.environ.get("AGENTKTHX_DEBUG"):
-                        print(f"  [OpenRouter Debug] Partial match: '{cached_name}' (searching for '{model}')")
+                        print(
+                            f"  [OpenRouter Debug] Partial match: '{cached_name}' (searching for '{model}')"
+                        )
 
         # Fallback to catalog if not in cache
         if os.environ.get("AGENTKTHX_DEBUG"):
-            print(f"  [OpenRouter Debug] Model not found in cache, falling back to catalog")
+            print("  [OpenRouter Debug] Model not found in cache, falling back to catalog")
         model_info = self._get_model_info(model)
 
         max_tokens = model_info.get("max_tokens", 4096) if model_info else 4096
@@ -615,9 +591,7 @@ class OpenRouterBackend(OpenAICompatibleBackend):
         # Note: catalog fallback also gets the cap — previously it returned the
         # raw max_tokens without capping, which was inconsistent with the cache
         # hit path. Now both paths cap consistently.
-        return self._apply_max_tokens_cap(
-            max_tokens, context_length, temperature=0.7
-        )
+        return self._apply_max_tokens_cap(max_tokens, context_length, temperature=0.7)
 
     # R06.54: maximum retries for rate-limit (429) and transient server
     # (502/503/504) responses before giving up. Free-tier models on
@@ -645,12 +619,15 @@ class OpenRouterBackend(OpenAICompatibleBackend):
     def _429_backoff(self, attempt: int) -> float:
         """Back-off wait for the Nth (1-based) rate-limit retry."""
         import random
+
         delay = self._429_BACKOFF_BASE * (2 ** max(0, attempt - 1))
         delay = min(delay, self._429_BACKOFF_CAP)
         jitter = delay * 0.2
         return max(1.0, delay + random.uniform(-jitter, jitter))
 
-    def _make_api_request(self, endpoint: str, data: dict, stream: bool = False) -> dict | Generator:
+    def _make_api_request(
+        self, endpoint: str, data: dict, stream: bool = False
+    ) -> dict | Generator:
         """Make request to OpenRouter API with automatic 429/5xx retry.
 
         On HTTP 429 (rate limit) or transient server errors (502/503/504),
@@ -672,7 +649,7 @@ class OpenRouterBackend(OpenAICompatibleBackend):
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
             "HTTP-Referer": "https://github.com/VTSTech/AgentKthx",
-            "X-Title": "AgentKthx"
+            "X-Title": "AgentKthx",
         }
 
         if stream:
@@ -692,7 +669,6 @@ class OpenRouterBackend(OpenAICompatibleBackend):
         # status / headers / body the same way requests gave us
         # .status_code / .headers / .json() / .text.
         max_retries = self._max_429_retries()
-        last_retryable_error = None
         for attempt in range(max_retries + 1):
             req = urllib.request.Request(
                 url,
@@ -718,10 +694,7 @@ class OpenRouterBackend(OpenAICompatibleBackend):
                     pass
 
                 # ---- 429 Rate Limit / transient 5xx: wait and retry ----
-                retryable = (
-                    status_code == 429
-                    or status_code in (502, 503, 504)
-                )
+                retryable = status_code == 429 or status_code in (502, 503, 504)
                 if retryable:
                     error_msg = (
                         "Rate limit exceeded"
@@ -732,11 +705,13 @@ class OpenRouterBackend(OpenAICompatibleBackend):
                     if isinstance(err_data, dict):
                         if "error" in err_data:
                             inner = err_data["error"]
-                            error_msg = (inner.get("message", inner)
-                                         if isinstance(inner, dict) else str(inner))
+                            error_msg = (
+                                inner.get("message", inner)
+                                if isinstance(inner, dict)
+                                else str(inner)
+                            )
                         elif "message" in err_data:
                             error_msg = err_data["message"]
-                    last_retryable_error = error_msg
 
                     # Honor Retry-After when parseable; otherwise back off
                     # exponentially (5s → 10s → 20s → 40s → 80s → 90s cap).
@@ -753,9 +728,11 @@ class OpenRouterBackend(OpenAICompatibleBackend):
                     if attempt < max_retries:
                         # R06.54: always visible — the user must SEE that the
                         # harness is patiently waiting instead of silently dying.
-                        print(f"  [OpenRouter] {status_code} — {error_msg}. "
-                              f"Retrying in {retry_after:.0f}s "
-                              f"(attempt {attempt + 1}/{max_retries + 1})...")
+                        print(
+                            f"  [OpenRouter] {status_code} — {error_msg}. "
+                            f"Retrying in {retry_after:.0f}s "
+                            f"(attempt {attempt + 1}/{max_retries + 1})..."
+                        )
                         time.sleep(retry_after)
                         continue
                     else:
@@ -792,9 +769,7 @@ class OpenRouterBackend(OpenAICompatibleBackend):
                     if len(upstream_msg) > 500:
                         upstream_msg = upstream_msg[:500] + "..."
 
-                    raise RuntimeError(
-                        f"OpenRouter API error {status_code}: {upstream_msg}"
-                    )
+                    raise RuntimeError(f"OpenRouter API error {status_code}: {upstream_msg}")
 
             except urllib.error.URLError as e:
                 # Network-level error (DNS, connection refused, timeout)
@@ -935,9 +910,11 @@ class OpenRouterBackend(OpenAICompatibleBackend):
         )
 
         if os.environ.get("AGENTKTHX_DEBUG"):
-            print(f"  [OpenRouter] POST chat/completions — "
-                  f"tools={len(tools) if tools else 0}, "
-                  f"tool_choice={kwargs.get('tool_choice', 'auto')}")
+            print(
+                f"  [OpenRouter] POST chat/completions — "
+                f"tools={len(tools) if tools else 0}, "
+                f"tool_choice={kwargs.get('tool_choice', 'auto')}"
+            )
 
         start_time = time.time()
         try:
@@ -949,8 +926,10 @@ class OpenRouterBackend(OpenAICompatibleBackend):
             # emit text-format tool calls that the ToolParser handles.
             if tools and self._is_tools_not_supported_error(err_str):
                 if os.environ.get("AGENTKTHX_DEBUG"):
-                    print(f"  [OpenRouter] Model doesn't support tools — "
-                          f"retrying without tools (ReAct fallback)")
+                    print(
+                        "  [OpenRouter] Model doesn't support tools — "
+                        "retrying without tools (ReAct fallback)"
+                    )
                 body.pop("tools", None)
                 body.pop("tool_choice", None)
                 raw_response = self._make_api_request("chat/completions", body)
@@ -967,8 +946,10 @@ class OpenRouterBackend(OpenAICompatibleBackend):
                 old_max = body.get("max_tokens", 4096)
                 new_max = max(old_max // 3, 4096)
                 if new_max < old_max:
-                    print(f"  [OpenRouter] Context length exceeded — "
-                          f"reducing max_tokens {old_max} → {new_max} and retrying")
+                    print(
+                        f"  [OpenRouter] Context length exceeded — "
+                        f"reducing max_tokens {old_max} → {new_max} and retrying"
+                    )
                     body["max_tokens"] = new_max
                     raw_response = self._make_api_request("chat/completions", body)
                 else:
@@ -1002,9 +983,11 @@ class OpenRouterBackend(OpenAICompatibleBackend):
             )
 
         if os.environ.get("AGENTKTHX_DEBUG"):
-            print(f"  [OpenRouter] finish_reason={parsed['finish_reason']}, "
-                  f"tool_calls={len(parsed['tool_calls'])}, "
-                  f"content_len={len(parsed['content'])}")
+            print(
+                f"  [OpenRouter] finish_reason={parsed['finish_reason']}, "
+                f"tool_calls={len(parsed['tool_calls'])}, "
+                f"content_len={len(parsed['content'])}"
+            )
 
         return parsed
 
@@ -1062,6 +1045,7 @@ class OpenRouterBackend(OpenAICompatibleBackend):
         # returns None and we proceed to the actual API call.
         original_api_mode = self._api_mode
         from agentkthx.core.types import ApiMode
+
         self._api_mode = ApiMode.OPENAI
         try:
             try:
@@ -1081,7 +1065,7 @@ class OpenRouterBackend(OpenAICompatibleBackend):
                 err_lower = str(e).lower()
                 if "empty response" in err_lower or "no content" in err_lower:
                     if os.environ.get("AGENTKTHX_DEBUG"):
-                        print(f"  [OpenRouter.JEV] Empty response — retrying with simplified prompt")
+                        print("  [OpenRouter.JEV] Empty response — retrying with simplified prompt")
                     # Simplify: strip the JEV system prompt, just send raw
                     simplified_messages = [
                         {"role": "user", "content": messages[-1]["content"] if messages else ""}
@@ -1162,8 +1146,10 @@ class OpenRouterBackend(OpenAICompatibleBackend):
                     old_max = body.get("max_tokens", 4096)
                     if self._handle_context_length_400(error_body, body):
                         new_max = body["max_tokens"]
-                        print(f"  [OpenRouter-Stream] Context length exceeded — "
-                              f"reducing max_tokens {old_max} → {new_max} and retrying")
+                        print(
+                            f"  [OpenRouter-Stream] Context length exceeded — "
+                            f"reducing max_tokens {old_max} → {new_max} and retrying"
+                        )
                         continue
                 raise RuntimeError(f"OpenRouter HTTP error {e.code}: {error_body}")
             except urllib.error.URLError as e:

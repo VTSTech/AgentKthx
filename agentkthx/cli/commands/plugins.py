@@ -6,9 +6,7 @@ from __future__ import annotations
 
 import argparse
 
-from ...colors import bold, yellow, dim, pad_colored, green, cyan, red, bright_cyan
-
-
+from ...colors import bold, bright_cyan, cyan, dim, green, pad_colored, red, yellow
 
 
 def cmd_plugins(args: argparse.Namespace) -> int:
@@ -18,9 +16,14 @@ def cmd_plugins(args: argparse.Namespace) -> int:
     pm = get_plugin_manager()
 
     # --- Management actions (--load / --unload / --reload) ---
-    action = getattr(args, "load", None) and ("load", args.load) \
-        or getattr(args, "unload", None) and ("unload", args.unload) \
-        or getattr(args, "reload", None) and ("reload", args.reload)
+    action = (
+        getattr(args, "load", None)
+        and ("load", args.load)
+        or getattr(args, "unload", None)
+        and ("unload", args.unload)
+        or getattr(args, "reload", None)
+        and ("reload", args.reload)
+    )
     if action:
         verb, name = action
         if verb == "load":
@@ -42,29 +45,32 @@ def cmd_plugins(args: argparse.Namespace) -> int:
     # --- Machine-readable listing (--json) ---
     if getattr(args, "json", False):
         import json as _json
+
         manifests = pm.discover()
         out = []
         for m in sorted(manifests, key=lambda x: x.name):
-            out.append({
-                "name": m.name,
-                "version": m.version,
-                "display_name": m.display_name,
-                "description": m.description,
-                "author": m.author,
-                "license": m.license,
-                "type": m.type,
-                "entrypoint": m.entrypoint,
-                "depends": m.depends,
-                "optional_depends": m.optional_depends,
-                "config": m.config,
-                "provides": m.provides,
-                "compatibility": m.compatibility,
-                "schema": m.schema,
-                "root": str(m.dir) if m.dir else None,
-                "root_kind": m.root_kind,
-                "legacy_fields_used": m.legacy_fields_used,
-                "state": pm.get_plugin_state(m.name),
-            })
+            out.append(
+                {
+                    "name": m.name,
+                    "version": m.version,
+                    "display_name": m.display_name,
+                    "description": m.description,
+                    "author": m.author,
+                    "license": m.license,
+                    "type": m.type,
+                    "entrypoint": m.entrypoint,
+                    "depends": m.depends,
+                    "optional_depends": m.optional_depends,
+                    "config": m.config,
+                    "provides": m.provides,
+                    "compatibility": m.compatibility,
+                    "schema": m.schema,
+                    "root": str(m.dir) if m.dir else None,
+                    "root_kind": m.root_kind,
+                    "legacy_fields_used": m.legacy_fields_used,
+                    "state": pm.get_plugin_state(m.name),
+                }
+            )
         print(_json.dumps(out, indent=2))
         return 0
 
@@ -74,7 +80,7 @@ def cmd_plugins(args: argparse.Namespace) -> int:
     if not manifests:
         print(yellow("No plugins found."))
         print(dim("  Plugins should be in agentkthx/plugins/<name>/plugin.json,"))
-        print(dim(f"  ~/.agentkthx/plugins/, or $AGENTKTHX_PLUGIN_PATH"))
+        print(dim("  ~/.agentkthx/plugins/, or $AGENTKTHX_PLUGIN_PATH"))
         return 0
 
     print(bold(bright_cyan("PLUGINS")))
@@ -87,10 +93,10 @@ def cmd_plugins(args: argparse.Namespace) -> int:
     ver_w = 10
 
     header = (
-        pad_colored(bold("Name"), name_w) +
-        pad_colored(bold("Type"), type_w) +
-        pad_colored(bold("Version"), ver_w) +
-        bold("Description")
+        pad_colored(bold("Name"), name_w)
+        + pad_colored(bold("Type"), type_w)
+        + pad_colored(bold("Version"), ver_w)
+        + bold("Description")
     )
     print(header)
     print(dim("  " + "-" * (name_w + type_w + ver_w + 40)))
@@ -106,10 +112,10 @@ def cmd_plugins(args: argparse.Namespace) -> int:
         desc = m.description[:60] + ("..." if len(m.description) > 60 else "")
 
         line = (
-            pad_colored(f"{status} {m.name}", name_w) +
-            pad_colored(cyan(m.type), type_w) +
-            pad_colored(dim(m.version), ver_w) +
-            desc
+            pad_colored(f"{status} {m.name}", name_w)
+            + pad_colored(cyan(m.type), type_w)
+            + pad_colored(dim(m.version), ver_w)
+            + desc
         )
         print(line)
 
@@ -129,7 +135,9 @@ def cmd_plugins(args: argparse.Namespace) -> int:
             if m.dir:
                 print(f"    {dim('root:')} {m.dir} ({m.root_kind})")
             if m.legacy_fields_used:
-                print(f"    {yellow('deprecated top-level fields:')} {', '.join(m.legacy_fields_used)}")
+                print(
+                    f"    {yellow('deprecated top-level fields:')} {', '.join(m.legacy_fields_used)}"
+                )
             if state == "failed":
                 print(f"    {red('error:')} {pm._failed.get(m.name, 'unknown')}")
 

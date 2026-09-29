@@ -9,15 +9,16 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Generator, Optional
+from typing import Generator
 
-from ..core.types import BackendType, ToolSupportLevel
 from ..core.models import Tool
+from ..core.types import BackendType, ToolSupportLevel
 
 
 @dataclass
 class BackendConfig:
     """Configuration for a backend."""
+
     host: str = "localhost"
     port: int = 11434
     timeout: int = 120
@@ -142,7 +143,9 @@ class BaseBackend(ABC):
         pass
 
     @abstractmethod
-    def test_tool_support(self, model: str, family: str | None = None, force_test: bool = False) -> ToolSupportLevel:
+    def test_tool_support(
+        self, model: str, family: str | None = None, force_test: bool = False
+    ) -> ToolSupportLevel:
         """
         Test a model's tool support capability.
 
@@ -240,8 +243,8 @@ class BaseBackend(ABC):
     def is_running(self) -> bool:
         """Check if the backend is running."""
         try:
-            import urllib.request
             import urllib.error
+            import urllib.request
 
             url = f"{self.base_url}/api/version"
             req = urllib.request.Request(url, method="GET")

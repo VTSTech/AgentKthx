@@ -8,13 +8,19 @@ import argparse
 import shutil
 import sys
 
-from ... import __version__
 from ...agent_mode import AgentMode
-from ...colors import bright_yellow, yellow, dim, green, cyan, bright_green, bright_red, red, bright_cyan
+from ...colors import (
+    bright_cyan,
+    bright_green,
+    bright_red,
+    bright_yellow,
+    cyan,
+    green,
+    red,
+    yellow,
+)
 from ...config import get_config
 from ..footer import footer_line1, footer_line2
-
-
 
 
 def cmd_agent(args: argparse.Namespace) -> int:
@@ -38,8 +44,8 @@ def cmd_agent(args: argparse.Namespace) -> int:
     # (ZAI, OpenRouter, Gemini) and non-streaming for local (Ollama).
     # Previously cmd_agent hardcoded verbose=True but never passed stream
     # to AgentMode, so --stream was silently ignored in agent mode.
-    _is_cloud = getattr(agent.backend, 'is_cloud', False)
-    _explicit_stream = getattr(args, 'stream', None)
+    _is_cloud = getattr(agent.backend, "is_cloud", False)
+    _explicit_stream = getattr(args, "stream", None)
     if _explicit_stream is True:
         _agent_stream = True
     elif _explicit_stream is False:
@@ -51,7 +57,9 @@ def cmd_agent(args: argparse.Namespace) -> int:
 
     _cli._print_session_header(agent, args, config, "Agent Mode")
     print("Give the agent a goal to accomplish autonomously.")
-    print(f"Commands: {cyan('/status')}, {cyan('/pause')}, {cyan('/resume')}, {cyan('/stop')}, {cyan('/quit')}\n")
+    print(
+        f"Commands: {cyan('/status')}, {cyan('/pause')}, {cyan('/resume')}, {cyan('/stop')}, {cyan('/quit')}\n"
+    )
 
     # ── Persistent footer (R06.58): ported from cmd_chat ────────────────
     # Same 2-line scroll-region footer as chat mode: shows version, model,
@@ -77,9 +85,7 @@ def cmd_agent(args: argparse.Namespace) -> int:
     _FOOTER_LINES = 2
     _is_tty = sys.stdout.isatty()
     _term_size = shutil.get_terminal_size() if _is_tty else None
-    _use_persistent_footer = bool(
-        _is_tty and _term_size and _term_size.lines >= 6
-    )
+    _use_persistent_footer = bool(_is_tty and _term_size and _term_size.lines >= 6)
 
     def _setup_footer_region():
         if not _use_persistent_footer:
@@ -105,8 +111,7 @@ def cmd_agent(args: argparse.Namespace) -> int:
         if not _use_persistent_footer:
             return
         new_size = shutil.get_terminal_size()
-        if (new_size.lines != _term_size.lines or
-            new_size.columns != _term_size.columns):
+        if new_size.lines != _term_size.lines or new_size.columns != _term_size.columns:
             _term_size = new_size
             bottom = _term_size.lines - _FOOTER_LINES
             sys.stdout.write(f"\033[1;{bottom}r")
@@ -145,71 +150,71 @@ def cmd_agent(args: argparse.Namespace) -> int:
     agent._on_step_callback = lambda step, tin, tout: _update_footer()
 
     try:
-      while True:
-        _update_footer()
-        _position_for_input()
-        try:
-            user_input = input("Goal: ").strip()
-        except (EOFError, KeyboardInterrupt):
-            # Ensure persistent memory is flushed and closed
-            if getattr(agent, '_is_persistent', False) and hasattr(agent.memory, 'close'):
-                agent.memory.close()
-            print("\n👋 Goodbye!")
-            break
-
-        if not user_input:
-            continue
-
-        if user_input.startswith("/"):
-            cmd = user_input.split()[0]
-
-            if cmd == "/quit":
-                if acp:
-                    acp.log_chat("user", "/quit")
-                    acp.a2a_unregister()
+        while True:
+            _update_footer()
+            _position_for_input()
+            try:
+                user_input = input("Goal: ").strip()
+            except (EOFError, KeyboardInterrupt):
                 # Ensure persistent memory is flushed and closed
-                if getattr(agent, '_is_persistent', False) and hasattr(agent.memory, 'close'):
+                if getattr(agent, "_is_persistent", False) and hasattr(agent.memory, "close"):
                     agent.memory.close()
-                print(bright_cyan("👋 Goodbye!"))
+                print("\n👋 Goodbye!")
                 break
-            elif cmd == "/status":
-                status = agent_mode.get_status()
-                print(f"State: {cyan(status['state'])}")
-                if "goal" in status and status["goal"]:
-                    print(f"Goal: {bright_yellow(status['goal'])}")
-                    if "progress_percent" in status:
-                        pct = status['progress_percent']
-                        pct_str = green(f"{pct:.0f}%") if pct >= 50 else yellow(f"{pct:.0f}%")
-                        print(f"Progress: {pct_str}")
-                continue
-            elif cmd == "/pause":
-                success, msg = agent_mode.pause()
-                print(yellow(msg) if success else red(msg))
-                continue
-            elif cmd == "/resume":
-                success, msg = agent_mode.resume()
-                print(green(msg) if success else red(msg))
-                continue
-            elif cmd == "/stop":
-                success, msg = agent_mode.stop(rollback=True)
-                print(red(msg))
+
+            if not user_input:
                 continue
 
-        # Log goal to ACP
-        if acp:
-            acp.log_chat("user", f"Goal: {user_input}")
+            if user_input.startswith("/"):
+                cmd = user_input.split()[0]
 
-        try:
-            success, result = agent_mode.run_task(user_input)
-        except KeyboardInterrupt:
-            print(f"\n{yellow('Cancelled.')}\n")
-            continue
-        icon = bright_green("✅") if success else bright_red("❌")
-        print(f"\n{icon} {result}\n")
+                if cmd == "/quit":
+                    if acp:
+                        acp.log_chat("user", "/quit")
+                        acp.a2a_unregister()
+                    # Ensure persistent memory is flushed and closed
+                    if getattr(agent, "_is_persistent", False) and hasattr(agent.memory, "close"):
+                        agent.memory.close()
+                    print(bright_cyan("👋 Goodbye!"))
+                    break
+                elif cmd == "/status":
+                    status = agent_mode.get_status()
+                    print(f"State: {cyan(status['state'])}")
+                    if "goal" in status and status["goal"]:
+                        print(f"Goal: {bright_yellow(status['goal'])}")
+                        if "progress_percent" in status:
+                            pct = status["progress_percent"]
+                            pct_str = green(f"{pct:.0f}%") if pct >= 50 else yellow(f"{pct:.0f}%")
+                            print(f"Progress: {pct_str}")
+                    continue
+                elif cmd == "/pause":
+                    success, msg = agent_mode.pause()
+                    print(yellow(msg) if success else red(msg))
+                    continue
+                elif cmd == "/resume":
+                    success, msg = agent_mode.resume()
+                    print(green(msg) if success else red(msg))
+                    continue
+                elif cmd == "/stop":
+                    success, msg = agent_mode.stop(rollback=True)
+                    print(red(msg))
+                    continue
 
-        # Log result to ACP
-        if acp:
-            acp.log_chat("assistant", f"Result: {result}")
+            # Log goal to ACP
+            if acp:
+                acp.log_chat("user", f"Goal: {user_input}")
+
+            try:
+                success, result = agent_mode.run_task(user_input)
+            except KeyboardInterrupt:
+                print(f"\n{yellow('Cancelled.')}\n")
+                continue
+            icon = bright_green("✅") if success else bright_red("❌")
+            print(f"\n{icon} {result}\n")
+
+            # Log result to ACP
+            if acp:
+                acp.log_chat("assistant", f"Result: {result}")
     finally:
         # R06.58: tear down the scroll region on every exit path (quit,
         # EOF, Ctrl+C, unexpected exception) so the terminal is never

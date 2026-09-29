@@ -151,6 +151,7 @@ def is_transient_api_error(exc: BaseException, body: str | None = None) -> bool:
             # Extract all quoted strings from the body and check if the marker
             # appears inside any of them
             import re as _re
+
             for quoted in _re.findall(r'"([^"]*)"', body_text):
                 if marker in quoted:
                     return False
@@ -166,8 +167,9 @@ def is_transient_api_error(exc: BaseException, body: str | None = None) -> bool:
     return False
 
 
-def backoff_delay(attempt: int, base: float = DEFAULT_API_BACKOFF_BASE,
-                  cap: float = DEFAULT_API_BACKOFF_CAP) -> float:
+def backoff_delay(
+    attempt: int, base: float = DEFAULT_API_BACKOFF_BASE, cap: float = DEFAULT_API_BACKOFF_CAP
+) -> float:
     """
     Exponential back-off with jitter for the Nth retry attempt (1-based).
 

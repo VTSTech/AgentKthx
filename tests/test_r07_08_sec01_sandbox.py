@@ -20,7 +20,6 @@ and assert the runner blocks the classic PoC attempts.
 Written by VTSTech — https://www.vts-tech.org
 """
 
-import sys
 import textwrap
 
 import pytest
@@ -30,7 +29,6 @@ from agentkthx.tools.sandboxed_repl import (
     SandboxConfig,
     sandboxed_exec,
 )
-
 
 # ------------------------------------------------------------------ #
 #  Unit: the unsafe builtins are no longer in SAFE_BUILTINS          #
@@ -69,10 +67,26 @@ def test_safe_builtins_still_has_hasattr_and_vars():
 def test_safe_builtins_still_has_basics():
     """Legitimate REPL primitives are untouched."""
     for name in (
-        "print", "len", "range", "sum", "min", "max", "sorted",
-        "int", "str", "list", "dict", "tuple", "set",
-        "isinstance", "callable", "iter", "next",
-        "True", "False", "None",
+        "print",
+        "len",
+        "range",
+        "sum",
+        "min",
+        "max",
+        "sorted",
+        "int",
+        "str",
+        "list",
+        "dict",
+        "tuple",
+        "set",
+        "isinstance",
+        "callable",
+        "iter",
+        "next",
+        "True",
+        "False",
+        "None",
     ):
         assert name in SAFE_BUILTINS, f"regression: `{name}` was dropped"
 
@@ -85,6 +99,7 @@ def test_safe_builtins_still_has_basics():
 # builds ``_safe_builtins`` from the real ``__builtins__`` filtered by
 # the ``SAFE_BUILTINS`` set, so a dropped name is unreachable as a bare
 # global. Each PoC below is the canonical SEC-01 escape; all must fail.
+
 
 def _run(code: str) -> str:
     """Run code in the sandbox with a short timeout (keeps the suite fast)."""
@@ -99,9 +114,7 @@ def test_escape_object_subclasses_blocked():
     """)
     assert "ESCAPED" not in out, f"SEC-01 escape succeeded:\n{out}"
     # NameError is the expected failure mode — `object` is not in scope.
-    assert "NameError" in out or "not defined" in out, (
-        f"expected NameError, got:\n{out}"
-    )
+    assert "NameError" in out or "not defined" in out, f"expected NameError, got:\n{out}"
 
 
 def test_escape_getattr_object_blocked():
@@ -112,9 +125,7 @@ def test_escape_getattr_object_blocked():
     """)
     assert "ESCAPED" not in out, f"SEC-01 escape succeeded:\n{out}"
     # getattr is gone too, so one of the two names triggers the NameError.
-    assert "NameError" in out or "not defined" in out, (
-        f"expected NameError, got:\n{out}"
-    )
+    assert "NameError" in out or "not defined" in out, f"expected NameError, got:\n{out}"
 
 
 def test_escape_super_mro_traversal_blocked():
@@ -126,9 +137,7 @@ def test_escape_super_mro_traversal_blocked():
         print("ESCAPED via super:", len(subs))
     """)
     assert "ESCAPED" not in out, f"SEC-01 escape succeeded:\n{out}"
-    assert "NameError" in out or "not defined" in out, (
-        f"expected NameError, got:\n{out}"
-    )
+    assert "NameError" in out or "not defined" in out, f"expected NameError, got:\n{out}"
 
 
 def test_escape_setattr_class_attribute_blocked():
@@ -145,9 +154,7 @@ def test_escape_setattr_class_attribute_blocked():
         print("ESCAPED via setattr:", math.sqrt(16))
     """)
     assert "ESCAPED" not in out, f"SEC-01 escape succeeded:\n{out}"
-    assert "NameError" in out or "not defined" in out, (
-        f"expected NameError on setattr, got:\n{out}"
-    )
+    assert "NameError" in out or "not defined" in out, f"expected NameError on setattr, got:\n{out}"
 
 
 def test_escape_delattr_blocked():
@@ -158,9 +165,7 @@ def test_escape_delattr_blocked():
         print("ESCAPED via delattr")
     """)
     assert "ESCAPED" not in out, f"SEC-01 escape succeeded:\n{out}"
-    assert "NameError" in out or "not defined" in out, (
-        f"expected NameError on delattr, got:\n{out}"
-    )
+    assert "NameError" in out or "not defined" in out, f"expected NameError on delattr, got:\n{out}"
 
 
 def test_escape_full_classic_poc_blocked():
@@ -190,6 +195,7 @@ def test_escape_full_classic_poc_blocked():
 # ------------------------------------------------------------------ #
 #  Regression: legitimate REPL code still works                       #
 # ------------------------------------------------------------------ #
+
 
 def test_legit_arithmetic_works():
     out = _run("print(sum([1, 2, 3, 4]))")
@@ -222,9 +228,9 @@ def test_legit_class_definition_documented_gap():
         print("class defined")
     """)
     assert "class defined" not in out, "unexpected: class def worked"
-    assert "__build_class__" in out or "NameError" in out, (
-        f"expected __build_class__ NameError, got:\n{out}"
-    )
+    assert (
+        "__build_class__" in out or "NameError" in out
+    ), f"expected __build_class__ NameError, got:\n{out}"
 
 
 def test_legit_hasattr_works():
@@ -238,11 +244,10 @@ def test_legit_hasattr_works():
 #  Regression: import restrictions are unchanged                       #
 # ------------------------------------------------------------------ #
 
+
 def test_os_import_still_blocked():
     """SEC-01 is about attribute traversal, not import restrictions —
     the existing import block (os/subprocess/etc.) must still hold."""
     out = _run("import os; os.system('echo pwned')")
-    assert "Import blocked" in out or "not allowed" in out, (
-        f"os import was not blocked:\n{out}"
-    )
+    assert "Import blocked" in out or "not allowed" in out, f"os import was not blocked:\n{out}"
     assert "pwned" not in out

@@ -49,7 +49,6 @@ from agentkthx.core.helpers import (
 )
 from agentkthx.tools.builtins import _SSRFSafeRedirectHandler
 
-
 # ---------------------------------------------------------------------------
 # ROB-27 — bounded DNS resolution
 # ---------------------------------------------------------------------------
@@ -95,16 +94,12 @@ class TestBoundedDnsResolution:
     def test_record_cap_truncates(self, monkeypatch):
         """_iter_hostname_ips examines at most _MAX_DNS_RECORDS records."""
         hundred_public = [f"93.184.{i // 256}.{i % 256}" for i in range(100)]
-        monkeypatch.setattr(
-            core_helpers, "_resolve_hostname_bounded", lambda host: hundred_public
-        )
+        monkeypatch.setattr(core_helpers, "_resolve_hostname_bounded", lambda host: hundred_public)
         assert len(_iter_hostname_ips("big-record-set.example.com")) == _MAX_DNS_RECORDS
 
     def test_dns_timeout_fails_closed_in_is_safe_url(self, monkeypatch):
         """The __DNS_TIMEOUT__ sentinel makes is_safe_url fail CLOSED."""
-        monkeypatch.setattr(
-            core_helpers, "_iter_hostname_ips", lambda host: ["__DNS_TIMEOUT__"]
-        )
+        monkeypatch.setattr(core_helpers, "_iter_hostname_ips", lambda host: ["__DNS_TIMEOUT__"])
         safe, error = is_safe_url("http://stalled-resolver.example.com/")
         assert safe is False
         assert "timed out" in error
@@ -145,9 +140,7 @@ class TestRedirectHopCap:
     """_SSRFSafeRedirectHandler: explicit per-request hop budget."""
 
     def test_five_hops_allowed_then_sixth_rejected(self, monkeypatch):
-        monkeypatch.setattr(
-            "agentkthx.tools.builtins.is_safe_url", lambda url: (True, "")
-        )
+        monkeypatch.setattr("agentkthx.tools.builtins.is_safe_url", lambda url: (True, ""))
         handler = _SSRFSafeRedirectHandler()
         for i in range(5):
             out = handler.redirect_request(
@@ -155,25 +148,17 @@ class TestRedirectHopCap:
             )
             assert isinstance(out, urllib.request.Request)
         with pytest.raises(urllib.error.URLError, match="exceeded 5 hops"):
-            handler.redirect_request(
-                _fake_req(), None, 302, "Found", {}, "http://example.com/hop5"
-            )
+            handler.redirect_request(_fake_req(), None, 302, "Found", {}, "http://example.com/hop5")
 
     def test_budget_is_per_handler_instance(self, monkeypatch):
         """Each request builds a fresh handler — budgets don't leak across."""
-        monkeypatch.setattr(
-            "agentkthx.tools.builtins.is_safe_url", lambda url: (True, "")
-        )
+        monkeypatch.setattr("agentkthx.tools.builtins.is_safe_url", lambda url: (True, ""))
         first = _SSRFSafeRedirectHandler()
         for _ in range(5):
-            first.redirect_request(
-                _fake_req(), None, 302, "Found", {}, "http://example.com/a"
-            )
+            first.redirect_request(_fake_req(), None, 302, "Found", {}, "http://example.com/a")
         # New handler (new request): budget resets
         second = _SSRFSafeRedirectHandler()
-        out = second.redirect_request(
-            _fake_req(), None, 302, "Found", {}, "http://example.com/b"
-        )
+        out = second.redirect_request(_fake_req(), None, 302, "Found", {}, "http://example.com/b")
         assert isinstance(out, urllib.request.Request)
 
     def test_unsafe_target_still_blocked_first_hop(self, monkeypatch):
@@ -184,9 +169,7 @@ class TestRedirectHopCap:
         )
         handler = _SSRFSafeRedirectHandler()
         with pytest.raises(urllib.error.URLError, match="blocked"):
-            handler.redirect_request(
-                _fake_req(), None, 302, "Found", {}, "http://127.0.0.1/evil"
-            )
+            handler.redirect_request(_fake_req(), None, 302, "Found", {}, "http://127.0.0.1/evil")
 
     def test_max_hops_constant_is_tight(self):
         """The explicit budget stays tighter than urllib's own 10."""
@@ -247,9 +230,7 @@ class TestOrcaRouterLiveFreeDetection:
         mock_response.__exit__ = MagicMock(return_value=False)
         return MagicMock(return_value=mock_response)
 
-    def test_free_only_listing_includes_new_live_free_model(
-        self, orca_free_env, monkeypatch
-    ):
+    def test_free_only_listing_includes_new_live_free_model(self, orca_free_env, monkeypatch):
         """FREE_ONLY over a live feed surfaces NEW -free models (ROB-23)."""
         feed = {
             "object": "list",
@@ -260,9 +241,7 @@ class TestOrcaRouterLiveFreeDetection:
                 {"id": "qwen/qwen4-free", "owned_by": "qwen"},
             ],
         }
-        monkeypatch.setattr(
-            urllib.request, "urlopen", self._fake_urlopen(feed)
-        )
+        monkeypatch.setattr(urllib.request, "urlopen", self._fake_urlopen(feed))
         models = orca_free_env.list_models()
         names = {m["name"] for m in models}
         assert "qwen/qwen4-free" in names  # the ROB-23 assertion

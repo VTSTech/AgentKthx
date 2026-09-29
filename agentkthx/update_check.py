@@ -56,7 +56,9 @@ GITHUB_COMMITS_URL = "https://api.github.com/repos/VTSTech/AgentKthx/commits/HEA
 # baseline, so we compare the installed version number directly against the
 # version number declared in __init__.py on main. This surfaces dev releases
 # (R06.55, R06.56, R06.57, ...) that haven't been pushed to PyPI yet.
-GITHUB_RAW_INIT_URL = "https://raw.githubusercontent.com/VTSTech/AgentKthx/main/agentkthx/__init__.py"
+GITHUB_RAW_INIT_URL = (
+    "https://raw.githubusercontent.com/VTSTech/AgentKthx/main/agentkthx/__init__.py"
+)
 
 #: indirection so tests can monkeypatch the network call
 _urlopen = urllib.request.urlopen
@@ -65,6 +67,7 @@ _urlopen = urllib.request.urlopen
 # ----------------------------------------------------------------------------
 # Version string helpers
 # ----------------------------------------------------------------------------
+
 
 def base_version(version: str = "") -> str:
     """
@@ -136,10 +139,14 @@ def is_newer(latest: str, current: str) -> bool:
 # Opt-out + network fetches
 # ----------------------------------------------------------------------------
 
+
 def _opted_out() -> bool:
     """True if AGENTKTHX_NO_UPDATE_CHECK is truthy (1/true/yes/on)."""
     return os.environ.get("AGENTKTHX_NO_UPDATE_CHECK", "").strip().lower() in (
-        "1", "true", "yes", "on",
+        "1",
+        "true",
+        "yes",
+        "on",
     )
 
 
@@ -208,6 +215,7 @@ def _fetch_github_latest_version(timeout: float) -> str:
     Raises on any network / parse problem — caller caches the failure.
     """
     import re
+
     req = urllib.request.Request(
         GITHUB_RAW_INIT_URL,
         headers={
@@ -239,6 +247,7 @@ def _fetch_github_latest_version(timeout: float) -> str:
 # ----------------------------------------------------------------------------
 # The check — always live (R07.00: on-disk cache removed)
 # ----------------------------------------------------------------------------
+
 
 def check_for_update(timeout: float = 1.0) -> Optional[dict]:
     """
@@ -316,6 +325,7 @@ def check_for_update(timeout: float = 1.0) -> Optional[dict]:
 # Notice formatting
 # ----------------------------------------------------------------------------
 
+
 def format_notice(result: Optional[dict], current: str = "") -> Optional[str]:
     """
     Build the pip-style "updates available" text, or None if nothing to say.
@@ -371,15 +381,16 @@ def format_notice(result: Optional[dict], current: str = "") -> Optional[str]:
         # we still want to surface the dev track because it's newer.)
         pypi_already_covers_dev = (
             pypi_latest
-            and is_newer(pypi_latest, cur)            # PyPI is firing an upgrade notice
+            and is_newer(pypi_latest, cur)  # PyPI is firing an upgrade notice
             and not is_newer(gh_version, pypi_latest)  # gh_version <= pypi_latest
         )
         if not pypi_already_covers_dev:
-            cmd = "agentkthx update" if installed else \
-                  "pip install --force-reinstall git+https://github.com/VTSTech/AgentKthx.git"
-            lines.append(
-                f"Development: {cur} \u2192 {gh_version} on GitHub main \u2014 Run: {cmd}"
+            cmd = (
+                "agentkthx update"
+                if installed
+                else "pip install --force-reinstall git+https://github.com/VTSTech/AgentKthx.git"
             )
+            lines.append(f"Development: {cur} \u2192 {gh_version} on GitHub main \u2014 Run: {cmd}")
 
     if not lines:
         return None

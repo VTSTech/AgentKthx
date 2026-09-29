@@ -32,11 +32,7 @@ def _python_files_under_skills() -> list[Path]:
     if not SKILLS_ROOT.exists():
         # Should not happen in a normal install, but fail loudly if it does.
         return []
-    return [
-        p
-        for p in SKILLS_ROOT.rglob("*.py")
-        if "__pycache__" not in p.parts
-    ]
+    return [p for p in SKILLS_ROOT.rglob("*.py") if "__pycache__" not in p.parts]
 
 
 def test_skills_root_exists():

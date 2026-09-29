@@ -49,8 +49,14 @@ _spec.loader.exec_module(sa)
 
 
 def _detail(heading, sev, cat, files, prose, impact, status=None):
-    lines = [f"#### {heading}", "", "| Property | Value |", "|----------|-------|",
-             f"| **Severity** | {sev} |", f"| **Category** | {cat} |"]
+    lines = [
+        f"#### {heading}",
+        "",
+        "| Property | Value |",
+        "|----------|-------|",
+        f"| **Severity** | {sev} |",
+        f"| **Category** | {cat} |",
+    ]
     if files:
         lines.append(f"| **File(s)** | `{files}` |")
     lines += ["", prose, ""]
@@ -67,146 +73,201 @@ def make_audit_md(with_deltas=False):
     with_deltas=True adds per-release delta blockquotes to the header
     (newest first, one of them a multi-line blockquote run) — the format
     that accumulated in the real audit.md through R07.12."""
-    delta_lines = ([
-        "> **R07.13 delta (unit-test fixture release):** DELTA-PROSE-R07.13 "
-        "first line with **bold** and `code` — must move verbatim.",
-        "> continued delta prose for R07.13 (multi-line blockquote run).",
-        "",
-        "> **R07.12 delta (feature release):** DELTA-PROSE-R07.12 single-line note.",
-        "",
-    ] if with_deltas else [])
-    return "\n".join([
-        "# Improvement & Enhancement Audit",
-        "",
-        "**AgentKthx v0.7.13 (R07.13 — unit-test fixture)**",
-        "",
-        "**Repository:** https://github.com/VTSTech/AgentKthx  ",
-        "**Author:** VTSTech | **License:** MIT | **Date:** 2026-09-28  ",
-        "**Commit:** `abc1234` | **Test Suite:** 42 passed / 0 skipped  ",
-        "4 Open Findings | 7 Categories | SEC, ROB, MAINT, PERF, FEAT, ARCH, TEST  ",
-        "Severity: 0 High | 3 Medium | 1 Low  ",
-        "4 OPEN (CLOSED + WONTFIX archived in deltas.md — generate_audit_dash.py merges both for the dashboard)",
-        "",
-        *delta_lines,
-        "> **Split:** 2 CLOSED/WONTFIX findings moved to `deltas.md`. "
-        "`generate_audit_dash.py` reads both `audit.md` (open) and `deltas.md` "
-        "(closed/wontfix) and merges them into the full register. "
-        "The dashboard shows all 6 findings (4 open + 2 closed/wontfix).",
-        "",
-        "---",
-        "",
-        "## Executive Summary",
-        "",
-        "PROSE-MARKER-EXEC-SUMMARY which must survive the split byte-for-byte.",
-        "",
-        "---",
-        "",
-        "## Findings Summary",
-        "",
-        "| ID | Severity | Category | Status | Title |",
-        "|----|----------|----------|--------|-------|",
-        "| SEC-01 | Medium | Security | OPEN | open sec one |",
-        "| SEC-02 | Medium | Security | ✓ CLOSED R07.13 | closed sec two |",
-        "| SEC-03 | High | Security | ✓ CLOSED R07.13 | closed sec three no detail |",
-        "| ROB-01 | Low | Robustness | ⊘ WONTFIX (R07.13, owner decision) | wontfix rob one |",
-        "",
-        "---",
-        "",
-        "## R07.13 New Findings",
-        "",
-        "| ID | Severity | Category | File(s) | Title |",
-        "|----|----------|----------|---------|-------|",
-        "| SEC-02 | Medium | Security | `agentkthx/core/x.py` | closed sec two |",
-        "| FEAT-09 | Low | New Features | `agentkthx/tools/y.py` | still open feat nine |",
-        "",
-        "---",
-        "",
-        "## Detailed Findings",
-        "",
-        "### Security",
-        "",
-        _detail("SEC-01: open sec one", "Medium", "Security", "agentkthx/core/a.py",
-                "PROSE-SEC-01 open finding body.", "impact one"),
-        _detail("SEC-02: closed sec two", "Medium", "Security", "agentkthx/core/x.py",
-                "PROSE-SEC-02 closure body.", "impact two"),
-        "",
-        "### Robustness",
-        "",
-        _detail("ROB-01: wontfix rob one", "Low", "Robustness", "agentkthx/core/r.py",
-                "PROSE-ROB-01 wontfix body.", "impact rob"),
-        "",
-        "---",
-        "",
-        "## Priority Matrix",
-        "",
-        "PROSE-MARKER-PRIORITY-MATRIX must survive too.",
-        "",
-    ]) + "\n"
+    delta_lines = (
+        [
+            "> **R07.13 delta (unit-test fixture release):** DELTA-PROSE-R07.13 "
+            "first line with **bold** and `code` — must move verbatim.",
+            "> continued delta prose for R07.13 (multi-line blockquote run).",
+            "",
+            "> **R07.12 delta (feature release):** DELTA-PROSE-R07.12 single-line note.",
+            "",
+        ]
+        if with_deltas
+        else []
+    )
+    return (
+        "\n".join(
+            [
+                "# Improvement & Enhancement Audit",
+                "",
+                "**AgentKthx v0.7.13 (R07.13 — unit-test fixture)**",
+                "",
+                "**Repository:** https://github.com/VTSTech/AgentKthx  ",
+                "**Author:** VTSTech | **License:** MIT | **Date:** 2026-09-28  ",
+                "**Commit:** `abc1234` | **Test Suite:** 42 passed / 0 skipped  ",
+                "4 Open Findings | 7 Categories | SEC, ROB, MAINT, PERF, FEAT, ARCH, TEST  ",
+                "Severity: 0 High | 3 Medium | 1 Low  ",
+                "4 OPEN (CLOSED + WONTFIX archived in deltas.md — generate_audit_dash.py merges both for the dashboard)",
+                "",
+                *delta_lines,
+                "> **Split:** 2 CLOSED/WONTFIX findings moved to `deltas.md`. "
+                "`generate_audit_dash.py` reads both `audit.md` (open) and `deltas.md` "
+                "(closed/wontfix) and merges them into the full register. "
+                "The dashboard shows all 6 findings (4 open + 2 closed/wontfix).",
+                "",
+                "---",
+                "",
+                "## Executive Summary",
+                "",
+                "PROSE-MARKER-EXEC-SUMMARY which must survive the split byte-for-byte.",
+                "",
+                "---",
+                "",
+                "## Findings Summary",
+                "",
+                "| ID | Severity | Category | Status | Title |",
+                "|----|----------|----------|--------|-------|",
+                "| SEC-01 | Medium | Security | OPEN | open sec one |",
+                "| SEC-02 | Medium | Security | ✓ CLOSED R07.13 | closed sec two |",
+                "| SEC-03 | High | Security | ✓ CLOSED R07.13 | closed sec three no detail |",
+                "| ROB-01 | Low | Robustness | ⊘ WONTFIX (R07.13, owner decision) | wontfix rob one |",
+                "",
+                "---",
+                "",
+                "## R07.13 New Findings",
+                "",
+                "| ID | Severity | Category | File(s) | Title |",
+                "|----|----------|----------|---------|-------|",
+                "| SEC-02 | Medium | Security | `agentkthx/core/x.py` | closed sec two |",
+                "| FEAT-09 | Low | New Features | `agentkthx/tools/y.py` | still open feat nine |",
+                "",
+                "---",
+                "",
+                "## Detailed Findings",
+                "",
+                "### Security",
+                "",
+                _detail(
+                    "SEC-01: open sec one",
+                    "Medium",
+                    "Security",
+                    "agentkthx/core/a.py",
+                    "PROSE-SEC-01 open finding body.",
+                    "impact one",
+                ),
+                _detail(
+                    "SEC-02: closed sec two",
+                    "Medium",
+                    "Security",
+                    "agentkthx/core/x.py",
+                    "PROSE-SEC-02 closure body.",
+                    "impact two",
+                ),
+                "",
+                "### Robustness",
+                "",
+                _detail(
+                    "ROB-01: wontfix rob one",
+                    "Low",
+                    "Robustness",
+                    "agentkthx/core/r.py",
+                    "PROSE-ROB-01 wontfix body.",
+                    "impact rob",
+                ),
+                "",
+                "---",
+                "",
+                "## Priority Matrix",
+                "",
+                "PROSE-MARKER-PRIORITY-MATRIX must survive too.",
+                "",
+            ]
+        )
+        + "\n"
+    )
 
 
 def make_deltas_md(with_sec02=False):
     """A pre-split deltas.md: 2 archived findings (SEC-05 High, ROB-02 Low)
     with one closure-timeline section."""
-    counts = "3 CLOSED · 1 WONTFIX · 4 total" if with_sec02 else \
-        "2 CLOSED · 0 WONTFIX · 2 total"
-    sec02_detail = _detail("SEC-02: closed sec two", "Medium", "Security",
-                           "agentkthx/core/x.py", "PROSE-SEC-02 closure body.",
-                           "impact two") if with_sec02 else ""
-    sec02_row = ("| SEC-02 | Medium | Security | ✓ CLOSED R07.13 | closed sec two |"
-                 if with_sec02 else "")
-    return "\n".join([
-        "# Audit Deltas — Closed & Wontfix Archive",
-        "",
-        "**Project:** AgentKthx  ",
-        "**Release:** R07.08  ",
-        "**Date:** 2026-09-27  ",
-        "**Archived:** 2026-09-27 17:59 UTC+0  ",
-        f"**Counts:** {counts}",
-        "",
-        "This file is the archive of CLOSED and WONTFIX findings moved out of",
-        "`audit.md` to keep the active audit focused on OPEN findings.",
-        "`generate_audit_dash.py` reads BOTH `audit.md` (open) and `deltas.md`",
-        "(closed/wontfix) and merges them into the full register for the dashboard.",
-        "",
-        "---",
-        "",
-        "## Findings Summary (Archived)",
-        "",
-        "| ID | Severity | Category | Status | Title |",
-        "|----|----------|----------|--------|-------|",
-        "| SEC-05 | **High** | Security | ✓ CLOSED R07.06 | archived sec five |",
-        "| ROB-02 | Low | Robustness | ✓ CLOSED R07.07 | archived rob two |",
-        sec02_row,
-        "",
-        "---",
-        "",
-        "## Detailed Findings (Archived)",
-        "",
-        "<!-- Closed + WONTFIX detail sections. -->",
-        "",
-        "### Security",
-        "",
-        _detail("SEC-05: archived sec five", "High", "Security", "agentkthx/core/old.py",
-                "old closure body.", "old impact", status="✓ CLOSED R07.06"),
-        sec02_detail,
-        "### Robustness",
-        "",
-        _detail("ROB-02: archived rob two", "Low", "Robustness", "agentkthx/core/old2.py",
-                "old rob body.", "old rob impact", status="✓ CLOSED R07.07"),
-        "",
-        "---",
-        "",
-        "## Closure Timeline",
-        "",
-        "<!-- The dashboard's closure-timeline cards parse these sections. -->",
-        "",
-        "## R07.07 Closures (Old Batch)",
-        "",
-        "| ID | Severity | Status | Notes |",
-        "|----|----------|--------|-------|",
-        "| ~~ROB-02~~ | Low | ✓ CLOSED R07.07 | old notes |",
-        "",
-    ]) + "\n"
+    counts = "3 CLOSED · 1 WONTFIX · 4 total" if with_sec02 else "2 CLOSED · 0 WONTFIX · 2 total"
+    sec02_detail = (
+        _detail(
+            "SEC-02: closed sec two",
+            "Medium",
+            "Security",
+            "agentkthx/core/x.py",
+            "PROSE-SEC-02 closure body.",
+            "impact two",
+        )
+        if with_sec02
+        else ""
+    )
+    sec02_row = (
+        "| SEC-02 | Medium | Security | ✓ CLOSED R07.13 | closed sec two |" if with_sec02 else ""
+    )
+    return (
+        "\n".join(
+            [
+                "# Audit Deltas — Closed & Wontfix Archive",
+                "",
+                "**Project:** AgentKthx  ",
+                "**Release:** R07.08  ",
+                "**Date:** 2026-09-27  ",
+                "**Archived:** 2026-09-27 17:59 UTC+0  ",
+                f"**Counts:** {counts}",
+                "",
+                "This file is the archive of CLOSED and WONTFIX findings moved out of",
+                "`audit.md` to keep the active audit focused on OPEN findings.",
+                "`generate_audit_dash.py` reads BOTH `audit.md` (open) and `deltas.md`",
+                "(closed/wontfix) and merges them into the full register for the dashboard.",
+                "",
+                "---",
+                "",
+                "## Findings Summary (Archived)",
+                "",
+                "| ID | Severity | Category | Status | Title |",
+                "|----|----------|----------|--------|-------|",
+                "| SEC-05 | **High** | Security | ✓ CLOSED R07.06 | archived sec five |",
+                "| ROB-02 | Low | Robustness | ✓ CLOSED R07.07 | archived rob two |",
+                sec02_row,
+                "",
+                "---",
+                "",
+                "## Detailed Findings (Archived)",
+                "",
+                "<!-- Closed + WONTFIX detail sections. -->",
+                "",
+                "### Security",
+                "",
+                _detail(
+                    "SEC-05: archived sec five",
+                    "High",
+                    "Security",
+                    "agentkthx/core/old.py",
+                    "old closure body.",
+                    "old impact",
+                    status="✓ CLOSED R07.06",
+                ),
+                sec02_detail,
+                "### Robustness",
+                "",
+                _detail(
+                    "ROB-02: archived rob two",
+                    "Low",
+                    "Robustness",
+                    "agentkthx/core/old2.py",
+                    "old rob body.",
+                    "old rob impact",
+                    status="✓ CLOSED R07.07",
+                ),
+                "",
+                "---",
+                "",
+                "## Closure Timeline",
+                "",
+                "<!-- The dashboard's closure-timeline cards parse these sections. -->",
+                "",
+                "## R07.07 Closures (Old Batch)",
+                "",
+                "| ID | Severity | Status | Notes |",
+                "|----|----------|--------|-------|",
+                "| ~~ROB-02~~ | Low | ✓ CLOSED R07.07 | old notes |",
+                "",
+            ]
+        )
+        + "\n"
+    )
 
 
 def _sha(path):
@@ -236,13 +297,22 @@ class TestNoopAndGuards:
     def test_noop_when_already_split(self, tmp_path):
         audit = tmp_path / "audit.md"
         deltas = tmp_path / "deltas.md"
-        audit.write_text(make_audit_md().replace(
-            "| SEC-02 | Medium | Security | ✓ CLOSED R07.13 |",
-            "| SEC-02 | Medium | Security | OPEN |").replace(
-            "| SEC-03 | High | Security | ✓ CLOSED R07.13 |",
-            "| SEC-03 | High | Security | OPEN |").replace(
-            "| ROB-01 | Low | Robustness | ⊘ WONTFIX (R07.13, owner decision) |",
-            "| ROB-01 | Low | Robustness | OPEN |"), encoding="utf-8")
+        audit.write_text(
+            make_audit_md()
+            .replace(
+                "| SEC-02 | Medium | Security | ✓ CLOSED R07.13 |",
+                "| SEC-02 | Medium | Security | OPEN |",
+            )
+            .replace(
+                "| SEC-03 | High | Security | ✓ CLOSED R07.13 |",
+                "| SEC-03 | High | Security | OPEN |",
+            )
+            .replace(
+                "| ROB-01 | Low | Robustness | ⊘ WONTFIX (R07.13, owner decision) |",
+                "| ROB-01 | Low | Robustness | OPEN |",
+            ),
+            encoding="utf-8",
+        )
         deltas.write_text(make_deltas_md(), encoding="utf-8")
         before = (_sha(audit), _sha(deltas))
         rc = sa.split(str(audit), str(deltas))
@@ -290,8 +360,10 @@ class TestMovement:
         d, a = _read(deltas), _read(audit)
         assert "| SEC-02 | Medium | Security | ✓ CLOSED R07.13 | closed sec two |" in d
         assert "| SEC-03 | High | Security | ✓ CLOSED R07.13 | closed sec three no detail |" in d
-        assert ("| ROB-01 | Low | Robustness | ⊘ WONTFIX (R07.13, owner decision) |"
-                " wontfix rob one |") in d
+        assert (
+            "| ROB-01 | Low | Robustness | ⊘ WONTFIX (R07.13, owner decision) |"
+            " wontfix rob one |"
+        ) in d
         for row in ("SEC-02", "SEC-03", "ROB-01"):
             assert f"| {row} |" not in a.split("## Detailed Findings")[0]
         assert "| SEC-01 | Medium | Security | OPEN | open sec one |" in a
@@ -301,8 +373,11 @@ class TestMovement:
         sa.split(str(audit), str(deltas))
         section = _read(deltas).split("## Findings Summary (Archived)")[1]
         table = section.split("## Detailed Findings")[0]
-        order = [ln.split("|")[1].strip() for ln in table.splitlines()
-                 if ln.startswith("| SEC") or ln.startswith("| ROB")]
+        order = [
+            ln.split("|")[1].strip()
+            for ln in table.splitlines()
+            if ln.startswith("| SEC") or ln.startswith("| ROB")
+        ]
         # canonical order: High first (SEC-03 < SEC-05 by ID), then Medium
         # Security inserted before the Low Robustness block, ROB-01 < ROB-02
         assert order == ["SEC-03", "SEC-05", "SEC-02", "ROB-01", "ROB-02"]
@@ -312,13 +387,13 @@ class TestMovement:
         sa.split(str(audit), str(deltas))
         d = _read(deltas)
         # SEC-02 moved with File(s) row + inserted Status + verbatim prose
-        sec02 = d[d.index("#### SEC-02:"):d.index("### Robustness")]
+        sec02 = d[d.index("#### SEC-02:") : d.index("### Robustness")]
         assert "| **File(s)** | `agentkthx/core/x.py` |" in sec02
         assert "**Status:** ✓ CLOSED R07.13" in sec02
         assert "PROSE-SEC-02 closure body." in sec02
         assert "**Impact:** impact two" in sec02
         # WONTFIX status text carried verbatim — the v1 flattening bug
-        rob = d[d.index("#### ROB-01:"):]
+        rob = d[d.index("#### ROB-01:") :]
         assert "**Status:** ⊘ WONTFIX (R07.13, owner decision)" in rob
         assert "PROSE-ROB-01 wontfix body." in rob
 
@@ -347,8 +422,8 @@ class TestMovement:
         audit, deltas = files
         sa.split(str(audit), str(deltas))
         a = _read(audit)
-        assert "### Security" in a          # SEC-01 still open
-        assert "### Robustness" not in a    # ROB-01 was its only member
+        assert "### Security" in a  # SEC-01 still open
+        assert "### Robustness" not in a  # ROB-01 was its only member
 
 
 # ─── New Findings tables ────────────────────────────────────────────────────
@@ -363,21 +438,23 @@ class TestNewFindingsTables:
         assert "## R07.13 New Findings" not in a
         assert "## R07.13 New Findings" in d
         # still-open member rides along, row intact
-        assert ("| FEAT-09 | Low | New Features | `agentkthx/tools/y.py` |"
-                " still open feat nine |") in d
+        assert (
+            "| FEAT-09 | Low | New Features | `agentkthx/tools/y.py` |" " still open feat nine |"
+        ) in d
         # placed between the detail groups and EOF (after the legacy
         # Closure Timeline in this fixture — the Timeline is retired and
         # New Findings tables anchor before the Release Delta Log when
         # that section exists, else append at EOF)
-        assert (d.index("#### ROB-01:") < d.index("## R07.13 New Findings"))
-        assert (d.index("## Closure Timeline") < d.index("## R07.13 New Findings"))
+        assert d.index("#### ROB-01:") < d.index("## R07.13 New Findings")
+        assert d.index("## Closure Timeline") < d.index("## R07.13 New Findings")
 
     def test_table_stays_when_no_member_archives(self, tmp_path):
         audit = tmp_path / "audit.md"
         deltas = tmp_path / "deltas.md"
         content = make_audit_md().replace(
             "| SEC-02 | Medium | Security | `agentkthx/core/x.py` | closed sec two |",
-            "| FEAT-08 | Low | New Features | `agentkthx/tools/z.py` | also open |")
+            "| FEAT-08 | Low | New Features | `agentkthx/tools/z.py` | also open |",
+        )
         audit.write_text(content, encoding="utf-8")
         deltas.write_text(make_deltas_md(), encoding="utf-8")
         sa.split(str(audit), str(deltas))
@@ -451,7 +528,8 @@ class TestFromScratchAndClosures:
             "## R07.13 Closures (Unit Test)\n\n| ID | Severity | Status | Notes |\n"
             "|----|----------|--------|-------|\n"
             "| ~~SEC-02~~ | Medium | ✓ CLOSED R07.13 | notes prose |\n\n"
-            "## Priority Matrix")
+            "## Priority Matrix",
+        )
         audit.write_text(content, encoding="utf-8")
         deltas.write_text(make_deltas_md(), encoding="utf-8")
         sa.split(str(audit), str(deltas))
@@ -471,21 +549,33 @@ class TestFromScratchAndClosures:
 
     def test_cli_exit_codes(self, files):
         audit, deltas = files
-        run = lambda *extra: subprocess.run(
-            [sys.executable, SCRIPT, "--audit", str(audit), "--deltas", str(deltas),
-             *extra], capture_output=True, text=True)
+
+        def run(*extra):
+            return subprocess.run(
+                [sys.executable, SCRIPT, "--audit", str(audit), "--deltas", str(deltas), *extra],
+                capture_output=True,
+                text=True,
+            )
+
         assert run().returncode == 0
-        assert run().returncode == 2                      # already split
-        assert run("--dry-run").returncode == 2           # still nothing to do
-        assert subprocess.run(
-            [sys.executable, SCRIPT, "--audit", str(audit.parent / "gone.md")],
-            capture_output=True).returncode == 1
+        assert run().returncode == 2  # already split
+        assert run("--dry-run").returncode == 2  # still nothing to do
+        assert (
+            subprocess.run(
+                [sys.executable, SCRIPT, "--audit", str(audit.parent / "gone.md")],
+                capture_output=True,
+            ).returncode
+            == 1
+        )
 
     def test_trailing_newline_count_preserved(self, files):
         # regression: the write path used to append an unconditional extra
         # "\n" on top of the roundtrip join, doubling the file ending
         audit, deltas = files
-        ends = lambda p: len(_read(p)) - len(_read(p).rstrip("\n"))
+
+        def ends(p):
+            return len(_read(p)) - len(_read(p).rstrip("\n"))
+
         before = (ends(audit), ends(deltas))
         assert sa.split(str(audit), str(deltas)) == 0
         assert (ends(audit), ends(deltas)) == before
@@ -505,14 +595,16 @@ class TestDeltaBlockMigration:
         # gone from audit.md — no delta blockquote line remains anywhere
         assert not [ln for ln in a.splitlines() if sa.DELTA_BLOCK_RE.match(ln)]
         assert "DELTA-PROSE-R07.12" not in a and "DELTA-PROSE-R07.13" not in a
-        assert "PROSE-MARKER-EXEC-SUMMARY" in a      # rest of the file intact
-        assert "> **Split:** 5 CLOSED/WONTFIX" in a   # counts refreshed too
+        assert "PROSE-MARKER-EXEC-SUMMARY" in a  # rest of the file intact
+        assert "> **Split:** 5 CLOSED/WONTFIX" in a  # counts refreshed too
         # deltas.md: Release Delta Log, release order, blocks byte-verbatim
-        log = d[d.index("## Release Delta Log"):]
+        log = d[d.index("## Release Delta Log") :]
         assert "DELTA-PROSE-R07.12 single-line note." in log
-        assert ("> **R07.13 delta (unit-test fixture release):** "
-                "DELTA-PROSE-R07.13 first line with **bold** and `code` — "
-                "must move verbatim.") in log
+        assert (
+            "> **R07.13 delta (unit-test fixture release):** "
+            "DELTA-PROSE-R07.13 first line with **bold** and `code` — "
+            "must move verbatim."
+        ) in log
         assert "> continued delta prose for R07.13 (multi-line blockquote run)." in log
         assert log.index("R07.12 delta") < log.index("R07.13 delta")
         # the findings split still happened in the same run
@@ -522,17 +614,29 @@ class TestDeltaBlockMigration:
         # the user's actual scenario: register already open-only, a page of
         # delta blockquotes still in audit.md → must NOT be a no-op exit
         audit, deltas = tmp_path / "audit.md", tmp_path / "deltas.md"
-        content = make_audit_md(with_deltas=True).replace(
-            "| SEC-02 | Medium | Security | ✓ CLOSED R07.13 |",
-            "| SEC-02 | Medium | Security | OPEN |").replace(
-            "| SEC-03 | High | Security | ✓ CLOSED R07.13 |",
-            "| SEC-03 | High | Security | OPEN |").replace(
-            "| ROB-01 | Low | Robustness | ⊘ WONTFIX (R07.13, owner decision) |",
-            "| ROB-01 | Low | Robustness | OPEN |").replace(
-            "> **Split:** 2 CLOSED/WONTFIX findings moved",
-            "> **Split:** 1 CLOSED/WONTFIX findings moved").replace(
-            "The dashboard shows all 6 findings (4 open + 2 closed/wontfix).",
-            "The dashboard shows all 5 findings (4 open + 1 closed/wontfix).")
+        content = (
+            make_audit_md(with_deltas=True)
+            .replace(
+                "| SEC-02 | Medium | Security | ✓ CLOSED R07.13 |",
+                "| SEC-02 | Medium | Security | OPEN |",
+            )
+            .replace(
+                "| SEC-03 | High | Security | ✓ CLOSED R07.13 |",
+                "| SEC-03 | High | Security | OPEN |",
+            )
+            .replace(
+                "| ROB-01 | Low | Robustness | ⊘ WONTFIX (R07.13, owner decision) |",
+                "| ROB-01 | Low | Robustness | OPEN |",
+            )
+            .replace(
+                "> **Split:** 2 CLOSED/WONTFIX findings moved",
+                "> **Split:** 1 CLOSED/WONTFIX findings moved",
+            )
+            .replace(
+                "The dashboard shows all 6 findings (4 open + 2 closed/wontfix).",
+                "The dashboard shows all 5 findings (4 open + 1 closed/wontfix).",
+            )
+        )
         audit.write_text(content, encoding="utf-8")
         deltas.write_text(make_deltas_md(), encoding="utf-8")
         assert sa.split(str(audit), str(deltas)) == 0
@@ -546,7 +650,7 @@ class TestDeltaBlockMigration:
         assert "> **Split:** 2 CLOSED/WONTFIX findings moved" in a
         assert "The dashboard shows all 6 findings (4 open + 2 closed/wontfix)." in a
         # deltas.md: log section added; table + counts untouched
-        log = d[d.index("## Release Delta Log"):]
+        log = d[d.index("## Release Delta Log") :]
         assert "DELTA-PROSE-R07.12" in log and "DELTA-PROSE-R07.13" in log
         assert "**Counts:** 2 CLOSED · 0 WONTFIX · 2 total" in d
 
@@ -554,29 +658,37 @@ class TestDeltaBlockMigration:
         # deltas.md already logs R07.12 → audit.md's R07.12 block is skipped
         audit, deltas = tmp_path / "audit.md", tmp_path / "deltas.md"
         audit.write_text(make_audit_md(with_deltas=True), encoding="utf-8")
-        deltas.write_text(make_deltas_md() + "## Release Delta Log\n\n"
-                          "> **R07.12 delta (feature release):** "
-                          "EXISTING-R07.12 hand-curated note.\n", encoding="utf-8")
+        deltas.write_text(
+            make_deltas_md() + "## Release Delta Log\n\n"
+            "> **R07.12 delta (feature release):** "
+            "EXISTING-R07.12 hand-curated note.\n",
+            encoding="utf-8",
+        )
         sa.split(str(audit), str(deltas))
         a, d = _read(audit), _read(deltas)
-        assert "DELTA-PROSE-R07.12" not in d               # deduped, not duplicated
-        log = d[d.index("## Release Delta Log"):]
+        assert "DELTA-PROSE-R07.12" not in d  # deduped, not duplicated
+        log = d[d.index("## Release Delta Log") :]
         assert "EXISTING-R07.12 hand-curated note." in log
-        assert "DELTA-PROSE-R07.13" in log                 # the new one appended
+        assert "DELTA-PROSE-R07.13" in log  # the new one appended
         assert log.index("EXISTING-R07.12") < log.index("DELTA-PROSE-R07.13")
         assert "DELTA-PROSE-R07.12" not in a and "DELTA-PROSE-R07.13" not in a
 
     def test_delta_log_inserts_before_newer_existing_block(self, tmp_path):
         audit, deltas = tmp_path / "audit.md", tmp_path / "deltas.md"
         audit.write_text(make_audit_md(with_deltas=True), encoding="utf-8")
-        deltas.write_text(make_deltas_md() + "## Release Delta Log\n\n"
-                          "> **R07.14 delta (future release):** "
-                          "EXISTING-R07.14 note.\n", encoding="utf-8")
+        deltas.write_text(
+            make_deltas_md() + "## Release Delta Log\n\n"
+            "> **R07.14 delta (future release):** "
+            "EXISTING-R07.14 note.\n",
+            encoding="utf-8",
+        )
         sa.split(str(audit), str(deltas))
-        log = _read(deltas)[_read(deltas).index("## Release Delta Log"):]
-        assert (log.index("DELTA-PROSE-R07.12")
-                < log.index("DELTA-PROSE-R07.13")
-                < log.index("EXISTING-R07.14"))
+        log = _read(deltas)[_read(deltas).index("## Release Delta Log") :]
+        assert (
+            log.index("DELTA-PROSE-R07.12")
+            < log.index("DELTA-PROSE-R07.13")
+            < log.index("EXISTING-R07.14")
+        )
 
     def test_idempotent_after_delta_move(self, tmp_path):
         audit, deltas = tmp_path / "audit.md", tmp_path / "deltas.md"

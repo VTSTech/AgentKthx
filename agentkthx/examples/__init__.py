@@ -12,7 +12,7 @@ These are example scripts that also serve as tests:
 Usage:
   python examples/00_basic_agent.py
   python examples/01_quick_diagnostic.py --model qwen2.5:0.5b
-  
+
 Environment Variables:
   OLLAMA_BASE_URL     - Ollama server URL (default: http://localhost:11434)
   BITNET_BASE_URL     - BitNet server URL (default: http://localhost:8765)

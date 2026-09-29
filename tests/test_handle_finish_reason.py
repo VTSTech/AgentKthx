@@ -19,10 +19,8 @@ from __future__ import annotations
 import inspect
 from unittest.mock import MagicMock
 
-import pytest
-
 from agentkthx.agent import Agent
-from agentkthx.core.models import StepResult, StepResultType
+from agentkthx.core.models import StepResultType
 
 
 def _make_agent(debug: bool = False):
@@ -44,6 +42,7 @@ def _make_response():
 # 1. "stop" → continue
 # ---------------------------------------------------------------------------
 
+
 def test_stop_finish_reason_returns_false():
     agent = _make_agent()
     response = _make_response()
@@ -58,6 +57,7 @@ def test_stop_finish_reason_returns_false():
 # ---------------------------------------------------------------------------
 # 2. "length" → mark incomplete, return True
 # ---------------------------------------------------------------------------
+
 
 def test_length_finish_reason_marks_incomplete_and_breaks():
     agent = _make_agent()
@@ -80,6 +80,7 @@ def test_length_finish_reason_marks_incomplete_and_breaks():
 # 3. "content_filter" → mark failed, return True
 # ---------------------------------------------------------------------------
 
+
 def test_content_filter_finish_reason_marks_failed_and_breaks():
     agent = _make_agent()
     response = _make_response()
@@ -100,6 +101,7 @@ def test_content_filter_finish_reason_marks_failed_and_breaks():
 # 4. Unknown finish_reason → continue (same as "stop")
 # ---------------------------------------------------------------------------
 
+
 def test_unknown_finish_reason_returns_false():
     agent = _make_agent()
     response = _make_response()
@@ -115,6 +117,7 @@ def test_unknown_finish_reason_returns_false():
 # 5. Missing finish_reason → defaults to "stop" → continue
 # ---------------------------------------------------------------------------
 
+
 def test_missing_finish_reason_defaults_to_stop():
     agent = _make_agent()
     response = _make_response()
@@ -127,6 +130,7 @@ def test_missing_finish_reason_defaults_to_stop():
 # ---------------------------------------------------------------------------
 # 6. Both call sites actually use the helper
 # ---------------------------------------------------------------------------
+
 
 def test_run_core_uses_handle_finish_reason():
     """The agentic loop's source must call self._handle_finish_reason.
@@ -151,6 +155,7 @@ def test_run_core_streaming_uses_handle_finish_reason():
 # ---------------------------------------------------------------------------
 # 7. Debug output — verify the debug print fires when debug=True
 # ---------------------------------------------------------------------------
+
 
 def test_length_finish_reason_emits_debug_when_debug_true(capsys):
     agent = _make_agent(debug=True)

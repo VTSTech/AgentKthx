@@ -25,7 +25,7 @@ import sys
 import unittest
 import urllib.error
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -34,22 +34,21 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from agentkthx.plugins.pollinations.pollinations import (
-    PollinationsBackend,
-    POLLINATIONS_MODELS,
-    POLLINATIONS_FALLBACK_MODEL,
-    _expand_safe_flag,
-    _pollen_to_per_million,
-    _card_is_free,
-)
-from agentkthx.plugins.pollinations import register, unregister
-from agentkthx.core.types import BackendType, ApiMode
 from agentkthx.core.models import Tool, ToolParam
-
+from agentkthx.core.types import BackendType
+from agentkthx.plugins.pollinations import register, unregister
+from agentkthx.plugins.pollinations.pollinations import (
+    POLLINATIONS_FALLBACK_MODEL,
+    POLLINATIONS_MODELS,
+    PollinationsBackend,
+    _card_is_free,
+    _pollen_to_per_million,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_tool(name: str = "shell") -> Tool:
     return Tool(
@@ -157,20 +156,16 @@ def _ok_response(payload: dict) -> MagicMock:
 # Manifest compliance (v0.2 form)
 # ---------------------------------------------------------------------------
 
+
 class TestManifestCompliance(unittest.TestCase):
     """The plugin.json must parse as a v0.2 manifest."""
 
     def setUp(self):
         self.plugin_dir = (
-            Path(__file__).resolve().parents[1]
-            / "agentkthx"
-            / "plugins"
-            / "pollinations"
+            Path(__file__).resolve().parents[1] / "agentkthx" / "plugins" / "pollinations"
         )
         self.manifest_path = self.plugin_dir / "plugin.json"
-        self.manifest = json.loads(
-            self.manifest_path.read_text(encoding="utf-8")
-        )
+        self.manifest = json.loads(self.manifest_path.read_text(encoding="utf-8"))
 
     def test_manifest_has_v02_schema(self):
         """The $schema field must point at the v0.2 schema."""
@@ -191,21 +186,22 @@ class TestManifestCompliance(unittest.TestCase):
         """Manifest declares the 'pollinations' backend."""
         ext = self.manifest["extensions"]["org.vts-tech.agentkthx"]
         assert "pollinations" in ext["provides"]["backends"]
-        assert (
-            ext["provides"]["backends"]["pollinations"]
-            == "pollinations.PollinationsBackend"
-        )
+        assert ext["provides"]["backends"]["pollinations"] == "pollinations.PollinationsBackend"
 
     def test_manifest_does_not_use_legacy_top_level_fields(self):
         """v0.2 form: type/entrypoint/provides/etc. live under extensions."""
         legacy_fields = {
-            "display_name", "type", "entrypoint", "depends",
-            "optional_depends", "config", "provides", "compatibility",
+            "display_name",
+            "type",
+            "entrypoint",
+            "depends",
+            "optional_depends",
+            "config",
+            "provides",
+            "compatibility",
         }
         used_legacy = legacy_fields & set(self.manifest.keys())
-        assert not used_legacy, (
-            f"manifest still uses legacy top-level fields: {used_legacy}"
-        )
+        assert not used_legacy, f"manifest still uses legacy top-level fields: {used_legacy}"
 
     def test_manifest_does_not_use_agentnova_compat_key(self):
         """Compatibility block must use 'agentkthx', not the legacy
@@ -229,14 +225,15 @@ class TestManifestCompliance(unittest.TestCase):
         assert defaults["POLLINATIONS_BASE_URL"] == "https://gen.pollinations.ai/v1"
         assert defaults["POLLINATIONS_DEFAULT_MODEL"] == "openai/gpt-5.4-nano"
         assert defaults["POLLINATIONS_API_KEY"] == ""
-        assert defaults["POLLINATIONS_ANON_CATALOG"] == "false", (
-            "v0.1.1 browse-public toggle must be declared in the manifest"
-        )
+        assert (
+            defaults["POLLINATIONS_ANON_CATALOG"] == "false"
+        ), "v0.1.1 browse-public toggle must be declared in the manifest"
 
 
 # ---------------------------------------------------------------------------
 # Catalog integrity
 # ---------------------------------------------------------------------------
+
 
 class TestCatalog(unittest.TestCase):
     """The POLLINATIONS_MODELS catalog must satisfy CloudBackend's contract."""
@@ -244,13 +241,13 @@ class TestCatalog(unittest.TestCase):
     def test_catalog_has_required_default_models(self):
         """Default/fallback pair plus representative families must be present."""
         required = {
-            "openai/gpt-5.4-nano",      # platform default
-            "z-ai/glm-5.3-flash",       # fallback chain anchor
-            "z-ai/glm-5.3-flashx",      # 1M-context tier
+            "openai/gpt-5.4-nano",  # platform default
+            "z-ai/glm-5.3-flash",  # fallback chain anchor
+            "z-ai/glm-5.3-flashx",  # 1M-context tier
         }
-        assert required <= set(POLLINATIONS_MODELS.keys()), (
-            f"missing required models: {required - set(POLLINATIONS_MODELS.keys())}"
-        )
+        assert required <= set(
+            POLLINATIONS_MODELS.keys()
+        ), f"missing required models: {required - set(POLLINATIONS_MODELS.keys())}"
 
     def test_every_catalog_entry_has_required_fields(self):
         """CloudBackend requires context_length, default_max_tokens,
@@ -284,6 +281,7 @@ class TestCatalog(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # Keyless init — the contract unique to Pollinations
 # ---------------------------------------------------------------------------
+
 
 class TestKeylessInit(unittest.TestCase):
     """Pollinations is the ONLY backend that constructs with no key."""
@@ -331,6 +329,7 @@ class TestKeylessInit(unittest.TestCase):
 # URLs & identity
 # ---------------------------------------------------------------------------
 
+
 class TestURLsAndIdentity(unittest.TestCase):
 
     def test_backend_type(self):
@@ -342,9 +341,7 @@ class TestURLsAndIdentity(unittest.TestCase):
         )
 
     def test_models_url_is_public(self):
-        assert _make_backend()._get_models_url() == (
-            "https://gen.pollinations.ai/v1/models"
-        )
+        assert _make_backend()._get_models_url() == ("https://gen.pollinations.ai/v1/models")
 
     def test_balance_url(self):
         assert _make_backend()._get_balance_url() == (
@@ -366,6 +363,7 @@ class TestURLsAndIdentity(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # Model-id normalization & alias resolution
 # ---------------------------------------------------------------------------
+
 
 class TestNormalizeModelId(unittest.TestCase):
 
@@ -404,6 +402,7 @@ class TestNormalizeModelId(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # Request-body construction (Pollinations deltas)
 # ---------------------------------------------------------------------------
+
 
 class TestBodyConstruction(unittest.TestCase):
 
@@ -502,20 +501,23 @@ class TestBodyConstruction(unittest.TestCase):
 # Error envelope parsing
 # ---------------------------------------------------------------------------
 
+
 class TestErrorEnvelope(unittest.TestCase):
 
     def test_pollinations_envelope_parsed(self):
         """The canonical envelope: code + message + requestId extracted."""
-        body = json.dumps({
-            "status": 402,
-            "success": False,
-            "error": {
-                "code": "PAYMENT_REQUIRED",
-                "message": "Insufficient pollen balance",
-                "timestamp": "2026-01-01T00:00:00.000Z",
-                "requestId": "req_abc123",
-            },
-        }).encode()
+        body = json.dumps(
+            {
+                "status": 402,
+                "success": False,
+                "error": {
+                    "code": "PAYMENT_REQUIRED",
+                    "message": "Insufficient pollen balance",
+                    "timestamp": "2026-01-01T00:00:00.000Z",
+                    "requestId": "req_abc123",
+                },
+            }
+        ).encode()
         msg, code, rid = PollinationsBackend._parse_error_envelope(body, 402)
         assert msg == "Insufficient pollen balance"
         assert code == "PAYMENT_REQUIRED"
@@ -533,9 +535,7 @@ class TestErrorEnvelope(unittest.TestCase):
         assert msg == "flat message"
 
     def test_non_json_body_falls_back(self):
-        msg, code, rid = PollinationsBackend._parse_error_envelope(
-            "<html>oops</html>", 502
-        )
+        msg, code, rid = PollinationsBackend._parse_error_envelope("<html>oops</html>", 502)
         assert "oops" in msg
         assert code is None and rid is None
 
@@ -548,6 +548,7 @@ class TestErrorEnvelope(unittest.TestCase):
 # Error mapping via _make_api_request (mocked urlopen)
 # ---------------------------------------------------------------------------
 
+
 class TestErrorMapping(unittest.TestCase):
 
     def test_402_budget_exhausted_never_retried(self):
@@ -557,12 +558,20 @@ class TestErrorMapping(unittest.TestCase):
         backend._BACKOFF_BASE = 0.01
         backend._BACKOFF_CAP = 0.05
 
-        err = _http_error(402, json.dumps({
-            "status": 402, "success": False,
-            "error": {"code": "PAYMENT_REQUIRED",
-                      "message": "Insufficient pollen balance",
-                      "requestId": "req_402xyz"},
-        }).encode())
+        err = _http_error(
+            402,
+            json.dumps(
+                {
+                    "status": 402,
+                    "success": False,
+                    "error": {
+                        "code": "PAYMENT_REQUIRED",
+                        "message": "Insufficient pollen balance",
+                        "requestId": "req_402xyz",
+                    },
+                }
+            ).encode(),
+        )
 
         with patch("urllib.request.urlopen", side_effect=err) as m:
             with pytest.raises(RuntimeError) as exc_info:
@@ -578,10 +587,18 @@ class TestErrorMapping(unittest.TestCase):
     def test_401_auth_error_mentions_env_var(self):
         backend = _make_backend()
         backend._BACKOFF_BASE = 0.01
-        err = _http_error(401, json.dumps({
-            "error": {"code": "UNAUTHORIZED", "message": "invalid key",
-                      "requestId": "req_1"},
-        }).encode())
+        err = _http_error(
+            401,
+            json.dumps(
+                {
+                    "error": {
+                        "code": "UNAUTHORIZED",
+                        "message": "invalid key",
+                        "requestId": "req_1",
+                    },
+                }
+            ).encode(),
+        )
         with patch("urllib.request.urlopen", side_effect=err):
             with pytest.raises(RuntimeError, match="POLLINATIONS_API_KEY"):
                 backend._make_api_request(
@@ -590,10 +607,18 @@ class TestErrorMapping(unittest.TestCase):
 
     def test_404_model_not_found_mentions_catalog(self):
         backend = _make_backend()
-        err = _http_error(404, json.dumps({
-            "error": {"code": "NOT_FOUND", "message": "unknown model",
-                      "requestId": "req_4"},
-        }).encode())
+        err = _http_error(
+            404,
+            json.dumps(
+                {
+                    "error": {
+                        "code": "NOT_FOUND",
+                        "message": "unknown model",
+                        "requestId": "req_4",
+                    },
+                }
+            ).encode(),
+        )
         with patch("urllib.request.urlopen", side_effect=err):
             with pytest.raises(RuntimeError, match="/v1/models"):
                 backend._make_api_request(
@@ -602,10 +627,18 @@ class TestErrorMapping(unittest.TestCase):
 
     def test_422_content_policy_mentions_rephrase(self):
         backend = _make_backend()
-        err = _http_error(422, json.dumps({
-            "error": {"code": "content_policy_violation",
-                      "message": "blocked", "requestId": "req_9"},
-        }).encode())
+        err = _http_error(
+            422,
+            json.dumps(
+                {
+                    "error": {
+                        "code": "content_policy_violation",
+                        "message": "blocked",
+                        "requestId": "req_9",
+                    },
+                }
+            ).encode(),
+        )
         with patch("urllib.request.urlopen", side_effect=err):
             with pytest.raises(RuntimeError, match="content_policy_violation"):
                 backend._make_api_request(
@@ -618,15 +651,26 @@ class TestErrorMapping(unittest.TestCase):
         backend._BACKOFF_BASE = 0.01
         backend._BACKOFF_CAP = 0.05
 
-        err = _http_error(429, json.dumps({
-            "error": {"code": "RATE_LIMITED", "message": "slow down",
-                      "requestId": "req_429"},
-        }).encode(), headers={"Retry-After": "0"})
+        err = _http_error(
+            429,
+            json.dumps(
+                {
+                    "error": {
+                        "code": "RATE_LIMITED",
+                        "message": "slow down",
+                        "requestId": "req_429",
+                    },
+                }
+            ).encode(),
+            headers={"Retry-After": "0"},
+        )
 
-        ok = _ok_response({
-            "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
-            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
-        })
+        ok = _ok_response(
+            {
+                "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            }
+        )
 
         with patch("urllib.request.urlopen", side_effect=[err, ok]) as m:
             result = backend._make_api_request(
@@ -643,44 +687,50 @@ class TestErrorMapping(unittest.TestCase):
         def fake_sleep(seconds):
             slept_values.append(seconds)
 
-        err = _http_error(429, b'{"error": {"message": "slow"}}',
-                          headers={"Retry-After": "3600"})
-        ok = _ok_response({
-            "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
-            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
-        })
+        err = _http_error(429, b'{"error": {"message": "slow"}}', headers={"Retry-After": "3600"})
+        ok = _ok_response(
+            {
+                "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            }
+        )
 
         with patch("urllib.request.urlopen", side_effect=[err, ok]):
-            with patch("agentkthx.plugins.pollinations.pollinations.time.sleep",
-                       side_effect=fake_sleep):
+            with patch(
+                "agentkthx.plugins.pollinations.pollinations.time.sleep", side_effect=fake_sleep
+            ):
                 backend._make_api_request(
                     {"model": "openai/gpt-5.4-nano", "messages": [], "max_tokens": 100}
                 )
 
         assert slept_values, "expected at least one sleep call"
         for s in slept_values:
-            assert s <= backend._BACKOFF_CAP + 1e-9, (
-                f"Retry-After exceeded cap: slept {s}s"
-            )
+            assert s <= backend._BACKOFF_CAP + 1e-9, f"Retry-After exceeded cap: slept {s}s"
 
     def test_400_context_length_recovery_retries(self):
         """ARCH-03: a context-length 400 reduces max_tokens and retries."""
         backend = _make_backend()
         backend._BACKOFF_BASE = 0.01
 
-        ctx_msg = json.dumps({
-            "error": {"code": "BAD_REQUEST",
-                      "message": "maximum context length is 8192 tokens "
-                                 "(8541 of text input) — reduce max_tokens"},
-        }).encode()
+        ctx_msg = json.dumps(
+            {
+                "error": {
+                    "code": "BAD_REQUEST",
+                    "message": "maximum context length is 8192 tokens "
+                    "(8541 of text input) — reduce max_tokens",
+                },
+            }
+        ).encode()
         err = _http_error(400, ctx_msg)
 
         captured_bodies: list[dict] = []
 
-        ok = _ok_response({
-            "choices": [{"message": {"content": "recovered"}, "finish_reason": "stop"}],
-            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
-        })
+        ok = _ok_response(
+            {
+                "choices": [{"message": {"content": "recovered"}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            }
+        )
 
         def capturing_urlopen(req, timeout=None):
             if len(captured_bodies) == 0:
@@ -691,8 +741,7 @@ class TestErrorMapping(unittest.TestCase):
 
         with patch("urllib.request.urlopen", side_effect=capturing_urlopen):
             result = backend._make_api_request(
-                {"model": "openai/gpt-5.4-nano", "messages": [],
-                 "max_tokens": 8192}
+                {"model": "openai/gpt-5.4-nano", "messages": [], "max_tokens": 8192}
             )
 
         assert result["content"] == "recovered"
@@ -703,15 +752,18 @@ class TestErrorMapping(unittest.TestCase):
 # Response parsing
 # ---------------------------------------------------------------------------
 
+
 class TestParseResponse(unittest.TestCase):
 
     def test_success_shape(self):
         raw = {
             "id": "chatcmpl-1",
-            "choices": [{
-                "message": {"role": "assistant", "content": "Hello!"},
-                "finish_reason": "stop",
-            }],
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": "Hello!"},
+                    "finish_reason": "stop",
+                }
+            ],
             "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
         }
         parsed = PollinationsBackend._parse_pollinations_response(raw)
@@ -722,18 +774,24 @@ class TestParseResponse(unittest.TestCase):
 
     def test_tool_calls_parsed(self):
         raw = {
-            "choices": [{
-                "message": {
-                    "content": None,
-                    "tool_calls": [{
-                        "id": "call_abc",
-                        "type": "function",
-                        "function": {"name": "get_weather",
-                                     "arguments": "{\"city\": \"Toronto\"}"},
-                    }],
-                },
-                "finish_reason": "tool_calls",
-            }],
+            "choices": [
+                {
+                    "message": {
+                        "content": None,
+                        "tool_calls": [
+                            {
+                                "id": "call_abc",
+                                "type": "function",
+                                "function": {
+                                    "name": "get_weather",
+                                    "arguments": '{"city": "Toronto"}',
+                                },
+                            }
+                        ],
+                    },
+                    "finish_reason": "tool_calls",
+                }
+            ],
             "usage": {"prompt_tokens": 9, "completion_tokens": 4, "total_tokens": 13},
         }
         parsed = PollinationsBackend._parse_pollinations_response(raw)
@@ -743,12 +801,18 @@ class TestParseResponse(unittest.TestCase):
 
     def test_malformed_tool_arguments_tolerated(self):
         raw = {
-            "choices": [{
-                "message": {"tool_calls": [{
-                    "id": "call_x",
-                    "function": {"name": "t", "arguments": "{not json"},
-                }]},
-            }],
+            "choices": [
+                {
+                    "message": {
+                        "tool_calls": [
+                            {
+                                "id": "call_x",
+                                "function": {"name": "t", "arguments": "{not json"},
+                            }
+                        ]
+                    },
+                }
+            ],
             "usage": None,
         }
         parsed = PollinationsBackend._parse_pollinations_response(raw)
@@ -757,10 +821,12 @@ class TestParseResponse(unittest.TestCase):
     def test_usage_null_normalized_to_zeros(self):
         """Media-model chat responses carry usage: null — must not crash."""
         raw = {
-            "choices": [{
-                "message": {"content": "![image](https://media.pollinations.ai/x)"},
-                "finish_reason": "stop",
-            }],
+            "choices": [
+                {
+                    "message": {"content": "![image](https://media.pollinations.ai/x)"},
+                    "finish_reason": "stop",
+                }
+            ],
             "usage": None,
         }
         parsed = PollinationsBackend._parse_pollinations_response(raw)
@@ -779,6 +845,7 @@ class TestParseResponse(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # Health-aware fallback ordering (Pollinations-exclusive)
 # ---------------------------------------------------------------------------
+
 
 class TestHealthyFallbacks(unittest.TestCase):
 
@@ -814,6 +881,7 @@ class TestHealthyFallbacks(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # list_models with injected live cards
 # ---------------------------------------------------------------------------
+
 
 class TestListModels(unittest.TestCase):
 
@@ -888,28 +956,22 @@ class TestAnonCatalog(unittest.TestCase):
 
     def test_flag_strips_authorization_header(self):
         backend = _make_backend(api_key="sk_" + "z" * 32)
-        req = self._captured_request(
-            backend, {"POLLINATIONS_ANON_CATALOG": "true"}
-        )
-        assert "Authorization" not in req.headers, (
-            "ANON_CATALOG must fetch the public catalog without the key"
-        )
+        req = self._captured_request(backend, {"POLLINATIONS_ANON_CATALOG": "true"})
+        assert (
+            "Authorization" not in req.headers
+        ), "ANON_CATALOG must fetch the public catalog without the key"
 
     def test_default_sends_authorization_header(self):
         key = "sk_" + "z" * 32
         backend = _make_backend(api_key=key)
-        req = self._captured_request(
-            backend, {"POLLINATIONS_ANON_CATALOG": ""}
-        )
-        assert req.headers.get("Authorization") == f"Bearer {key}", (
-            "default (flag off) keeps the entitlement-scoped keyed catalog"
-        )
+        req = self._captured_request(backend, {"POLLINATIONS_ANON_CATALOG": ""})
+        assert (
+            req.headers.get("Authorization") == f"Bearer {key}"
+        ), "default (flag off) keeps the entitlement-scoped keyed catalog"
 
     def test_keyless_fetch_never_has_auth(self):
         backend = _make_keyless_backend()
-        req = self._captured_request(
-            backend, {"POLLINATIONS_ANON_CATALOG": ""}
-        )
+        req = self._captured_request(backend, {"POLLINATIONS_ANON_CATALOG": ""})
         assert "Authorization" not in req.headers
 
 
@@ -931,17 +993,15 @@ class TestFreeOnlyGenerate(unittest.TestCase):
         backend = _make_backend()
         backend._model_cards = _fake_cards()
         body = self._generate_body(backend, "openai/gpt-5.4-nano")
-        assert body["model"] == "community/someone/free-model", (
-            "FREE_ONLY must land on a zero-priced card, not the priced fallback"
-        )
+        assert (
+            body["model"] == "community/someone/free-model"
+        ), "FREE_ONLY must land on a zero-priced card, not the priced fallback"
 
     def test_no_free_cards_uses_configured_fallback(self):
         """Keyed catalog shape (0 zero-priced cards): degrade to the cheap
         configured fallback rather than failing the call."""
         backend = _make_backend()
-        backend._model_cards = {
-            "openai/gpt-5.4-nano": _fake_cards()["openai/gpt-5.4-nano"]
-        }
+        backend._model_cards = {"openai/gpt-5.4-nano": _fake_cards()["openai/gpt-5.4-nano"]}
         body = self._generate_body(backend, "openai/gpt-5.4-nano")
         assert body["model"] == POLLINATIONS_FALLBACK_MODEL
 
@@ -1001,24 +1061,28 @@ class TestZeroCostEncoding(unittest.TestCase):
 
     def test_zero_valued_string_prices_still_free(self):
         """Regression: explicit "0" prices (test-fixture shape)."""
-        assert _card_is_free({
-            "pricing": {"promptTextTokens": "0", "completionTextTokens": "0"}
-        }) is True
+        assert (
+            _card_is_free({"pricing": {"promptTextTokens": "0", "completionTextTokens": "0"}})
+            is True
+        )
 
     def test_priced_card_not_free(self):
-        assert _card_is_free({
-            "pricing": {
-                "currency": "pollen",
-                "promptTextTokens": "0.00000015",
-                "completionTextTokens": "0.0000009375",
-            }
-        }) is False
+        assert (
+            _card_is_free(
+                {
+                    "pricing": {
+                        "currency": "pollen",
+                        "promptTextTokens": "0.00000015",
+                        "completionTextTokens": "0.0000009375",
+                    }
+                }
+            )
+            is False
+        )
 
     def test_partial_zero_not_free(self):
         """prompt=0 but completion missing → conservative not-free."""
-        assert _card_is_free({
-            "pricing": {"currency": "pollen", "promptTextTokens": "0"}
-        }) is False
+        assert _card_is_free({"pricing": {"currency": "pollen", "promptTextTokens": "0"}}) is False
 
     def test_empty_pricing_not_free(self):
         assert _card_is_free({"pricing": {}}) is False
@@ -1075,6 +1139,7 @@ class TestZeroCostEncoding(unittest.TestCase):
 # Model defaults & info
 # ---------------------------------------------------------------------------
 
+
 class TestModelDefaults(unittest.TestCase):
 
     def test_catalog_context_used_for_nano(self):
@@ -1109,6 +1174,7 @@ class TestModelDefaults(unittest.TestCase):
 # Streaming (SSE path through the inherited base + our wrapper)
 # ---------------------------------------------------------------------------
 
+
 class TestStreaming(unittest.TestCase):
 
     def test_stream_yields_deltas(self):
@@ -1120,17 +1186,19 @@ class TestStreaming(unittest.TestCase):
             b'data: {"choices":[{"delta":{"content":"lo"}}]}\n\n',
             b'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n',
             b'data: {"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}\n\n',
-            b'data: [DONE]\n\n',
+            b"data: [DONE]\n\n",
         ]
         fake = MagicMock()
         fake.__iter__ = MagicMock(return_value=iter(chunks))
         fake.close = MagicMock()
 
         with patch("urllib.request.urlopen", return_value=fake):
-            out = list(backend.generate_completions_stream(
-                model="openai/gpt-5.4-nano",
-                messages=[{"role": "user", "content": "hi"}],
-            ))
+            out = list(
+                backend.generate_completions_stream(
+                    model="openai/gpt-5.4-nano",
+                    messages=[{"role": "user", "content": "hi"}],
+                )
+            )
 
         deltas = [c["delta"] for c in out if c.get("delta")]
         assert deltas == ["Hel", "lo"]
@@ -1141,40 +1209,53 @@ class TestStreaming(unittest.TestCase):
         backend = _make_backend()
         chunks = [
             b'data: {"choices":[{"delta":{"content":"ok"}}]}\n\n',
-            b'data: [DONE]\n\n',
+            b"data: [DONE]\n\n",
         ]
         fake = MagicMock()
         fake.__iter__ = MagicMock(return_value=iter(chunks))
         fake.close = MagicMock()
 
         with patch("urllib.request.urlopen", return_value=fake):
-            out = list(backend.generate_stream(
-                model="openai/gpt-5.4-nano",
-                messages=[{"role": "user", "content": "hi"}],
-            ))
+            out = list(
+                backend.generate_stream(
+                    model="openai/gpt-5.4-nano",
+                    messages=[{"role": "user", "content": "hi"}],
+                )
+            )
         assert out == ["ok"]
 
     def test_stream_402_raises_budget_error(self):
         """Streaming 402 surfaces immediately — never retried."""
         backend = _make_backend()
         backend._BACKOFF_BASE = 0.01
-        err = _http_error(402, json.dumps({
-            "error": {"code": "PAYMENT_REQUIRED",
-                      "message": "no pollen", "requestId": "req_s402"},
-        }).encode())
+        err = _http_error(
+            402,
+            json.dumps(
+                {
+                    "error": {
+                        "code": "PAYMENT_REQUIRED",
+                        "message": "no pollen",
+                        "requestId": "req_s402",
+                    },
+                }
+            ).encode(),
+        )
         with patch("urllib.request.urlopen", side_effect=err) as m:
             with pytest.raises(RuntimeError, match="req_s402"):
-                list(backend._iter_sse_lines(
-                    url="https://gen.pollinations.ai/v1/chat/completions",
-                    body={"model": "openai/gpt-5.4-nano", "messages": []},
-                    headers={"Authorization": "Bearer x"},
-                ))
+                list(
+                    backend._iter_sse_lines(
+                        url="https://gen.pollinations.ai/v1/chat/completions",
+                        body={"model": "openai/gpt-5.4-nano", "messages": []},
+                        headers={"Authorization": "Bearer x"},
+                    )
+                )
         assert m.call_count == 1
 
 
 # ---------------------------------------------------------------------------
 # Plugin registration smoke (PluginManager)
 # ---------------------------------------------------------------------------
+
 
 class TestPluginRegistration(unittest.TestCase):
 
@@ -1205,6 +1286,7 @@ class TestPluginRegistration(unittest.TestCase):
 
 LIVE_KEY = os.environ.get("POLLINATIONS_API_KEY", "")
 
+
 @pytest.mark.skipif(not LIVE_KEY, reason="POLLINATIONS_API_KEY not set")
 class TestLiveAPI(unittest.TestCase):
     """Live gateway probes — skipped without a key."""
@@ -1233,4 +1315,3 @@ class TestLiveAPI(unittest.TestCase):
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
-

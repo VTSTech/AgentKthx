@@ -28,19 +28,17 @@ corrected in the register instead: DDG has no JSON web-search API.)
 import json
 from pathlib import Path
 
-import pytest
-
 import agentkthx.core.compaction as compaction_module
+from agentkthx import update_check
 from agentkthx.core.compaction import CompactionMixin
 from agentkthx.core.memory import Memory
 from agentkthx.plugins import _loader as loader_module
 from agentkthx.plugins._loader import PluginManager
-from agentkthx import update_check
-
 
 # ---------------------------------------------------------------------------
 # PERF-01 — sanitize_history runs once per mutation, not once per call
 # ---------------------------------------------------------------------------
+
 
 class TestPerf01SanitizeCache:
     def _counting_sanitize(self, monkeypatch):
@@ -97,9 +95,9 @@ class TestPerf01SanitizeCache:
         mem.get_messages()
         first = calls["n"]
 
-        mem.add_tool_call("assistant", "", [
-            {"id": "call_9", "name": "shell", "arguments": {"command": "ls"}}
-        ])
+        mem.add_tool_call(
+            "assistant", "", [{"id": "call_9", "name": "shell", "arguments": {"command": "ls"}}]
+        )
         out = mem.get_messages()
         assert calls["n"] == first + 1
         tool_msgs = [m for m in out if m["role"] == "tool"]
@@ -123,6 +121,7 @@ class TestPerf01SanitizeCache:
 # ---------------------------------------------------------------------------
 # PERF-02 — cached size estimate for the compaction heuristic
 # ---------------------------------------------------------------------------
+
 
 class _Msg:
     """Minimal message stand-in matching the compaction host contract."""
@@ -166,9 +165,9 @@ class TestPerf02EstimatedChars:
     def test_estimated_chars_matches_manual_scan(self):
         mem = Memory()
         mem.add("user", "abcd" * 10)  # 40 chars
-        mem.add_tool_call("assistant", "ok", [
-            {"id": "c1", "name": "shell", "arguments": {"command": "ls"}}
-        ])
+        mem.add_tool_call(
+            "assistant", "ok", [{"id": "c1", "name": "shell", "arguments": {"command": "ls"}}]
+        )
         mem.add_tool_result("c1", "shell", "out")
         manual = 0
         for m in mem:
@@ -187,8 +186,7 @@ class TestPerf02EstimatedChars:
         assert mem.estimated_chars() == first  # warm hit
 
         mem._messages[0].content = "x" * 10_000  # in-place poke
-        assert mem.estimated_chars() == first, (
-            "cache must hold until an invalidating mutation")
+        assert mem.estimated_chars() == first, "cache must hold until an invalidating mutation"
 
         mem.add("user", "more")
         assert mem.estimated_chars() > first, "add() must invalidate"
@@ -209,9 +207,9 @@ class TestPerf02EstimatedChars:
 
         mem = Memory()
         mem.add("user", "x" * 100)
-        mem.add_tool_call("assistant", "ok", [
-            {"id": "c1", "name": "shell", "arguments": {"command": "ls"}}
-        ])
+        mem.add_tool_call(
+            "assistant", "ok", [{"id": "c1", "name": "shell", "arguments": {"command": "ls"}}]
+        )
         mem.add_tool_result("c1", "shell", "out")
         host = _MemoryHost(mem)
         mem.estimated_chars()  # warm the cache
@@ -219,8 +217,7 @@ class TestPerf02EstimatedChars:
 
         assert host._check_compaction() == 0
         host._snapshot_running_tokens()
-        assert dumps_calls["n"] == 0, (
-            "warm-cache compaction check must not rescan (no json.dumps)")
+        assert dumps_calls["n"] == 0, "warm-cache compaction check must not rescan (no json.dumps)"
 
     def test_check_compaction_recomputes_once_after_mutation(self, monkeypatch):
         """One mutation → exactly ONE recompute (json.dumps once per
@@ -239,14 +236,14 @@ class TestPerf02EstimatedChars:
         mem.estimated_chars()  # warm on empty
         dumps_calls["n"] = 0
 
-        mem.add_tool_call("assistant", "", [
-            {"id": "c1", "name": "shell", "arguments": {"command": "ls"}}
-        ])
-        host._check_compaction()   # recomputes (1 dumps call)
+        mem.add_tool_call(
+            "assistant", "", [{"id": "c1", "name": "shell", "arguments": {"command": "ls"}}]
+        )
+        host._check_compaction()  # recomputes (1 dumps call)
         host._snapshot_running_tokens()  # warm hit (0)
         assert dumps_calls["n"] == 1, (
-            f"one mutation must cost exactly one recompute, "
-            f"got {dumps_calls['n']}")
+            f"one mutation must cost exactly one recompute, " f"got {dumps_calls['n']}"
+        )
 
     def test_foreign_memory_falls_back_to_scan(self):
         """Duck-typed memories without estimated_chars keep working — the
@@ -278,16 +275,19 @@ class TestPerf02EstimatedChars:
 # PERF-04 — discover(force=True) mtime-aware rescan
 # ---------------------------------------------------------------------------
 
+
 def _write_plugin(root: Path, name: str, description: str = "demo") -> Path:
     plugin_dir = root / name
     plugin_dir.mkdir(parents=True, exist_ok=True)
     (plugin_dir / "plugin.json").write_text(
-        json.dumps({
-            "name": name,
-            "version": "0.1.0",
-            "description": description,
-            "compatibility": {"agentkthx": ">=0.7.0"},
-        }),
+        json.dumps(
+            {
+                "name": name,
+                "version": "0.1.0",
+                "description": description,
+                "compatibility": {"agentkthx": ">=0.7.0"},
+            }
+        ),
         encoding="utf-8",
     )
     return plugin_dir
@@ -314,14 +314,14 @@ class TestPerf04DiscoverMtime:
         monkeypatch.setattr(loader_module, "_parse_manifest", counting_parse)
 
         again = pm.discover(force=True)
-        assert parse_calls["n"] == 0, (
-            "unchanged plugin.json files must not be re-parsed")
+        assert parse_calls["n"] == 0, "unchanged plugin.json files must not be re-parsed"
         # Identity pin: the SAME manifest objects are reused, not clones.
         assert again[0] is first[0]
         assert again[1] is first[1]
 
     def test_force_rediscover_reparses_only_changed(self, tmp_path, monkeypatch):
         import os
+
         root = tmp_path / "plugins"
         root.mkdir()
         _write_plugin(root, "alpha")
@@ -334,12 +334,14 @@ class TestPerf04DiscoverMtime:
         # tick granularity makes a same-tick rewrite unreliable).
         manifest_path = plugin_dir / "plugin.json"
         manifest_path.write_text(
-            json.dumps({
-                "name": "beta",
-                "version": "0.2.0",
-                "description": "changed",
-                "compatibility": {"agentkthx": ">=0.7.0"},
-            }),
+            json.dumps(
+                {
+                    "name": "beta",
+                    "version": "0.2.0",
+                    "description": "changed",
+                    "compatibility": {"agentkthx": ">=0.7.0"},
+                }
+            ),
             encoding="utf-8",
         )
         st = manifest_path.stat()
@@ -363,6 +365,7 @@ class TestPerf04DiscoverMtime:
 
     def test_removed_plugin_drops_from_results_and_cache(self, tmp_path):
         import shutil
+
         root = tmp_path / "plugins"
         root.mkdir()
         plugin_dir = _write_plugin(root, "gone")
@@ -388,13 +391,15 @@ class TestPerf04DiscoverMtime:
         pm = PluginManager(plugins_dir=root)
         pm.discover()
         _write_plugin(root, "newkid")
-        assert [m.name for m in pm.discover()] == ["alpha"], (
-            "unforced discover() must keep returning the cached list")
+        assert [m.name for m in pm.discover()] == [
+            "alpha"
+        ], "unforced discover() must keep returning the cached list"
 
 
 # ---------------------------------------------------------------------------
 # PERF-06 — bounded, bytes-direct _fetch_json
 # ---------------------------------------------------------------------------
+
 
 class _FakeResp:
     """urllib-response stand-in recording the read() cap argument."""
@@ -422,17 +427,20 @@ class TestPerf06BoundedFetch:
 
         payload = update_check._fetch_json("https://example.test/json", timeout=1.0)
         assert payload["info"]["version"] == "0.7.13"
-        assert resp.read_caps == [update_check._MAX_UPDATE_JSON_BYTES], (
-            "the bounded read must request exactly _MAX_UPDATE_JSON_BYTES")
+        assert resp.read_caps == [
+            update_check._MAX_UPDATE_JSON_BYTES
+        ], "the bounded read must request exactly _MAX_UPDATE_JSON_BYTES"
         assert resp.closed
 
     def test_pypi_track_still_parses_normal_document(self, monkeypatch):
         """Behavior pin: a well-formed body (smaller than the cap) parses
         byte-identically to the old read-all + decode path."""
-        body = json.dumps({
-            "info": {"version": "0.7.13"},
-            "releases": {"0.7.12": [], "0.7.13": []},
-        }).encode("utf-8")
+        body = json.dumps(
+            {
+                "info": {"version": "0.7.13"},
+                "releases": {"0.7.12": [], "0.7.13": []},
+            }
+        ).encode("utf-8")
         resp = _FakeResp(body)
         monkeypatch.setattr(update_check, "_urlopen", lambda req, timeout: resp)
 
@@ -443,7 +451,9 @@ class TestPerf06BoundedFetch:
         check_for_update's per-source except swallows it (the check is
         best-effort and retried next invocation). No raise escapes, and
         the other tracks are unaffected by the failure."""
-        huge_garbage = b'{"info": {"version": "' + b"x" * (update_check._MAX_UPDATE_JSON_BYTES + 1024)
+        huge_garbage = b'{"info": {"version": "' + b"x" * (
+            update_check._MAX_UPDATE_JSON_BYTES + 1024
+        )
         resp = _FakeResp(huge_garbage)
         monkeypatch.setattr(update_check, "_urlopen", lambda req, timeout: resp)
         monkeypatch.setattr(update_check, "git_hash", lambda: None)  # pip mode

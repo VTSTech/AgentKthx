@@ -9,16 +9,15 @@ Written by VTSTech — https://www.vts-tech.org
 """
 
 import io
-import json
 import sys
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 
-from agentkthx.plugins.openrouter.openrouter import OpenRouterBackend
 from agentkthx.core.models import Tool, ToolParam
-from agentkthx.core.types import ToolSupportLevel, ApiMode
+from agentkthx.core.types import ApiMode, ToolSupportLevel
+from agentkthx.plugins.openrouter.openrouter import OpenRouterBackend
 
 
 def _make_tool() -> Tool:
@@ -35,20 +34,24 @@ class TestParseOpenAiResponse(unittest.TestCase):
     def test_parses_native_tool_calls(self):
         """OpenAI-format tool_calls are extracted and arguments JSON-decoded."""
         raw = {
-            "choices": [{
-                "message": {
-                    "content": None,
-                    "tool_calls": [{
-                        "id": "call_abc",
-                        "type": "function",
-                        "function": {
-                            "name": "shell",
-                            "arguments": '{"command": "echo hi"}',
-                        },
-                    }],
-                },
-                "finish_reason": "tool_calls",
-            }],
+            "choices": [
+                {
+                    "message": {
+                        "content": None,
+                        "tool_calls": [
+                            {
+                                "id": "call_abc",
+                                "type": "function",
+                                "function": {
+                                    "name": "shell",
+                                    "arguments": '{"command": "echo hi"}',
+                                },
+                            }
+                        ],
+                    },
+                    "finish_reason": "tool_calls",
+                }
+            ],
             "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
         }
         out = OpenRouterBackend._parse_openai_response(raw)
@@ -64,20 +67,24 @@ class TestParseOpenAiResponse(unittest.TestCase):
     def test_handles_arguments_as_object(self):
         """Some providers return arguments as an object, not a JSON string."""
         raw = {
-            "choices": [{
-                "message": {
-                    "content": "",
-                    "tool_calls": [{
-                        "id": "x",
-                        "type": "function",
-                        "function": {
-                            "name": "calc",
-                            "arguments": {"expression": "2+2"},
-                        },
-                    }],
-                },
-                "finish_reason": "tool_calls",
-            }],
+            "choices": [
+                {
+                    "message": {
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "id": "x",
+                                "type": "function",
+                                "function": {
+                                    "name": "calc",
+                                    "arguments": {"expression": "2+2"},
+                                },
+                            }
+                        ],
+                    },
+                    "finish_reason": "tool_calls",
+                }
+            ],
         }
         out = OpenRouterBackend._parse_openai_response(raw)
         self.assertEqual(out["tool_calls"][0]["arguments"], {"expression": "2+2"})
@@ -85,20 +92,24 @@ class TestParseOpenAiResponse(unittest.TestCase):
     def test_handles_malformed_arguments_gracefully(self):
         """Malformed JSON arguments don't crash — wrapped in _raw_arguments."""
         raw = {
-            "choices": [{
-                "message": {
-                    "content": "",
-                    "tool_calls": [{
-                        "id": "x",
-                        "type": "function",
-                        "function": {
-                            "name": "shell",
-                            "arguments": "not-valid-json{",
-                        },
-                    }],
-                },
-                "finish_reason": "tool_calls",
-            }],
+            "choices": [
+                {
+                    "message": {
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "id": "x",
+                                "type": "function",
+                                "function": {
+                                    "name": "shell",
+                                    "arguments": "not-valid-json{",
+                                },
+                            }
+                        ],
+                    },
+                    "finish_reason": "tool_calls",
+                }
+            ],
         }
         out = OpenRouterBackend._parse_openai_response(raw)
         # Should NOT crash; _raw_arguments fallback surfaces the bad payload.
@@ -119,33 +130,41 @@ class TestParseOpenAiResponse(unittest.TestCase):
         """
         # Format 1: error as dict with message
         with self.assertRaises(RuntimeError) as ctx:
-            OpenRouterBackend._parse_openai_response({
-                "error": {"message": "Provider rate limited", "code": 429},
-            })
+            OpenRouterBackend._parse_openai_response(
+                {
+                    "error": {"message": "Provider rate limited", "code": 429},
+                }
+            )
         self.assertIn("Provider rate limited", str(ctx.exception))
 
         # Format 2: error as string
         with self.assertRaises(RuntimeError) as ctx:
-            OpenRouterBackend._parse_openai_response({
-                "error": "Upstream connection error",
-            })
+            OpenRouterBackend._parse_openai_response(
+                {
+                    "error": "Upstream connection error",
+                }
+            )
         self.assertIn("Upstream connection error", str(ctx.exception))
 
     def test_provider_error_takes_precedence_over_choices(self):
         """If both `error` and `choices` exist, the error wins."""
         with self.assertRaises(RuntimeError):
-            OpenRouterBackend._parse_openai_response({
-                "error": {"message": "Provider failed mid-stream"},
-                "choices": [{"message": {"content": "hi"}, "finish_reason": "stop"}],
-            })
+            OpenRouterBackend._parse_openai_response(
+                {
+                    "error": {"message": "Provider failed mid-stream"},
+                    "choices": [{"message": {"content": "hi"}, "finish_reason": "stop"}],
+                }
+            )
 
     def test_text_only_response(self):
         """Plain text response (no tool_calls) parsed correctly."""
         raw = {
-            "choices": [{
-                "message": {"content": "Hello!"},
-                "finish_reason": "stop",
-            }],
+            "choices": [
+                {
+                    "message": {"content": "Hello!"},
+                    "finish_reason": "stop",
+                }
+            ],
             "usage": {"total_tokens": 4},
         }
         out = OpenRouterBackend._parse_openai_response(raw)
@@ -212,7 +231,11 @@ class TestBuildOpenAiBody(unittest.TestCase):
         """Compatibility: max_tokens is universally supported by free providers."""
         b = self._backend()
         body = b._build_openai_body(
-            model="m", messages=[], tools=None, temperature=0.7, max_tokens=512,
+            model="m",
+            messages=[],
+            tools=None,
+            temperature=0.7,
+            max_tokens=512,
         )
         self.assertIn("max_tokens", body)
         self.assertNotIn("max_completion_tokens", body)
@@ -221,7 +244,11 @@ class TestBuildOpenAiBody(unittest.TestCase):
         """PERF-02: non-streaming requests must not send stream_options."""
         b = self._backend()
         body = b._build_openai_body(
-            model="m", messages=[], tools=None, temperature=0.7, max_tokens=128,
+            model="m",
+            messages=[],
+            tools=None,
+            temperature=0.7,
+            max_tokens=128,
             stream=False,
         )
         self.assertEqual(body["stream"], False)
@@ -231,7 +258,11 @@ class TestBuildOpenAiBody(unittest.TestCase):
         """PERF-02: streaming requests must send stream_options.include_usage."""
         b = self._backend()
         body = b._build_openai_body(
-            model="m", messages=[], tools=None, temperature=0.7, max_tokens=128,
+            model="m",
+            messages=[],
+            tools=None,
+            temperature=0.7,
+            max_tokens=128,
             stream=True,
         )
         self.assertEqual(body["stream"], True)
@@ -244,7 +275,11 @@ class TestBuildOpenAiBody(unittest.TestCase):
         """Default stream value (False) must not emit stream_options."""
         b = self._backend()
         body = b._build_openai_body(
-            model="m", messages=[], tools=None, temperature=0.7, max_tokens=128,
+            model="m",
+            messages=[],
+            tools=None,
+            temperature=0.7,
+            max_tokens=128,
         )
         self.assertEqual(body["stream"], False)
         self.assertNotIn("stream_options", body)
@@ -324,6 +359,7 @@ class TestGenerateFlow(unittest.TestCase):
         b = OpenRouterBackend.__new__(OpenRouterBackend)
         b.api_key = "test-key"
         from agentkthx.backends.base import BackendConfig
+
         b.config = BackendConfig()
 
         b._api_mode = ApiMode.OPENAI  # bypassed __init__ needs explicit init
@@ -333,20 +369,24 @@ class TestGenerateFlow(unittest.TestCase):
     def test_generate_sends_tools_and_parses_response(self, mock_req):
         """Happy path: tools sent, native tool_calls returned."""
         mock_req.return_value = {
-            "choices": [{
-                "message": {
-                    "content": "",
-                    "tool_calls": [{
-                        "id": "call_1",
-                        "type": "function",
-                        "function": {
-                            "name": "shell",
-                            "arguments": '{"command": "echo hi"}',
-                        },
-                    }],
-                },
-                "finish_reason": "tool_calls",
-            }],
+            "choices": [
+                {
+                    "message": {
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "id": "call_1",
+                                "type": "function",
+                                "function": {
+                                    "name": "shell",
+                                    "arguments": '{"command": "echo hi"}',
+                                },
+                            }
+                        ],
+                    },
+                    "finish_reason": "tool_calls",
+                }
+            ],
             "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8},
         }
         b = self._backend()
@@ -378,11 +418,13 @@ class TestGenerateFlow(unittest.TestCase):
         mock_req.side_effect = [
             RuntimeError("OpenRouter API error 400: Model does not support tools"),
             {
-                "choices": [{
-                    "message": {"content": "I'll help with that."},
-                    "tool_calls": [],
-                    "finish_reason": "stop",
-                }],
+                "choices": [
+                    {
+                        "message": {"content": "I'll help with that."},
+                        "tool_calls": [],
+                        "finish_reason": "stop",
+                    }
+                ],
                 "usage": {"total_tokens": 10},
             },
         ]
@@ -427,10 +469,12 @@ class TestGenerateFlow(unittest.TestCase):
     def test_generate_synthesizes_finish_reason_when_missing(self, mock_req):
         """Some providers omit finish_reason — synthesize one."""
         mock_req.return_value = {
-            "choices": [{
-                "message": {"content": "hello"},
-                # no finish_reason
-            }],
+            "choices": [
+                {
+                    "message": {"content": "hello"},
+                    # no finish_reason
+                }
+            ],
         }
         b = self._backend()
         result = b.generate(model="m", messages=[], tools=None, max_tokens=10)
@@ -440,10 +484,12 @@ class TestGenerateFlow(unittest.TestCase):
     def test_generate_raises_on_empty_response(self, mock_req):
         """Empty content + no tool_calls should raise, not silently return."""
         mock_req.return_value = {
-            "choices": [{
-                "message": {"content": "", "tool_calls": []},
-                "finish_reason": "stop",
-            }],
+            "choices": [
+                {
+                    "message": {"content": "", "tool_calls": []},
+                    "finish_reason": "stop",
+                }
+            ],
         }
         b = self._backend()
         with self.assertRaises(RuntimeError) as ctx:
@@ -454,10 +500,12 @@ class TestGenerateFlow(unittest.TestCase):
     def test_generate_raises_on_whitespace_only_response(self, mock_req):
         """Whitespace-only content + no tool_calls should also raise."""
         mock_req.return_value = {
-            "choices": [{
-                "message": {"content": "   \n  \n  ", "tool_calls": []},
-                "finish_reason": "stop",
-            }],
+            "choices": [
+                {
+                    "message": {"content": "   \n  \n  ", "tool_calls": []},
+                    "finish_reason": "stop",
+                }
+            ],
         }
         b = self._backend()
         with self.assertRaises(RuntimeError) as ctx:
@@ -468,16 +516,21 @@ class TestGenerateFlow(unittest.TestCase):
     def test_generate_does_not_raise_on_empty_content_with_tool_calls(self, mock_req):
         """Empty content WITH tool_calls is valid (model called a tool)."""
         mock_req.return_value = {
-            "choices": [{
-                "message": {
-                    "content": "",
-                    "tool_calls": [{
-                        "id": "x", "type": "function",
-                        "function": {"name": "shell", "arguments": "{}"},
-                    }],
-                },
-                "finish_reason": "tool_calls",
-            }],
+            "choices": [
+                {
+                    "message": {
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "id": "x",
+                                "type": "function",
+                                "function": {"name": "shell", "arguments": "{}"},
+                            }
+                        ],
+                    },
+                    "finish_reason": "tool_calls",
+                }
+            ],
         }
         b = self._backend()
         result = b.generate(model="m", messages=[], tools=None, max_tokens=10)
@@ -496,43 +549,51 @@ class TestSecurityMode(unittest.TestCase):
     def setUp(self):
         """Reset to 'max' before each test so tests don't bleed into each other."""
         from agentkthx.core.helpers import set_security_mode
+
         set_security_mode("max")
 
     def tearDown(self):
         """Reset to 'max' after each test for safety."""
         from agentkthx.core.helpers import set_security_mode
+
         set_security_mode("max")
 
     def test_default_mode_is_max(self):
         from agentkthx.core.helpers import get_security_mode
+
         self.assertEqual(get_security_mode(), "max")
 
     def test_set_mode_off(self):
-        from agentkthx.core.helpers import set_security_mode, get_security_mode
+        from agentkthx.core.helpers import get_security_mode, set_security_mode
+
         set_security_mode("off")
         self.assertEqual(get_security_mode(), "off")
 
     def test_set_mode_max(self):
-        from agentkthx.core.helpers import set_security_mode, get_security_mode
+        from agentkthx.core.helpers import get_security_mode, set_security_mode
+
         set_security_mode("off")
         set_security_mode("max")
         self.assertEqual(get_security_mode(), "max")
 
     def test_invalid_mode_raises(self):
         from agentkthx.core.helpers import set_security_mode
+
         with self.assertRaises(ValueError):
             set_security_mode("strict")  # not a valid mode
 
     def test_sanitize_command_max_mode_rejects_injection(self):
         """In max mode, && is rejected as a shell injection pattern."""
         from agentkthx.core.helpers import sanitize_command
+
         safe, err, _ = sanitize_command("echo hi && pwd")
         self.assertFalse(safe)
         self.assertIn("injection", err.lower())
 
     def test_sanitize_command_off_mode_allows_injection(self):
         """In off mode, && is allowed (no checks performed)."""
-        from agentkthx.core.helpers import set_security_mode, sanitize_command
+        from agentkthx.core.helpers import sanitize_command, set_security_mode
+
         set_security_mode("off")
         safe, err, cmd = sanitize_command("echo hi && pwd")
         self.assertTrue(safe)
@@ -541,7 +602,8 @@ class TestSecurityMode(unittest.TestCase):
 
     def test_sanitize_command_off_mode_allows_pipes(self):
         """In off mode, pipe | is allowed."""
-        from agentkthx.core.helpers import set_security_mode, sanitize_command
+        from agentkthx.core.helpers import sanitize_command, set_security_mode
+
         set_security_mode("off")
         safe, _, cmd = sanitize_command("ls -la | grep test")
         self.assertTrue(safe)
@@ -549,7 +611,8 @@ class TestSecurityMode(unittest.TestCase):
 
     def test_sanitize_command_off_mode_still_rejects_empty(self):
         """Empty command is rejected even in off mode (it's not a security check)."""
-        from agentkthx.core.helpers import set_security_mode, sanitize_command
+        from agentkthx.core.helpers import sanitize_command, set_security_mode
+
         set_security_mode("off")
         safe, err, _ = sanitize_command("")
         self.assertFalse(safe)
@@ -558,6 +621,7 @@ class TestSecurityMode(unittest.TestCase):
     def test_validate_path_max_mode_rejects_traversal(self):
         """In max mode, path traversal (../) is rejected."""
         from agentkthx.core.helpers import validate_path
+
         safe, err = validate_path("../../../etc/passwd")
         self.assertFalse(safe)
         self.assertIn("traversal", err.lower())
@@ -565,6 +629,7 @@ class TestSecurityMode(unittest.TestCase):
     def test_validate_path_off_mode_allows_traversal(self):
         """In off mode, path traversal is allowed."""
         from agentkthx.core.helpers import set_security_mode, validate_path
+
         set_security_mode("off")
         safe, err = validate_path("../../../etc/passwd")
         self.assertTrue(safe)
@@ -573,13 +638,15 @@ class TestSecurityMode(unittest.TestCase):
     def test_is_safe_url_max_mode_rejects_localhost(self):
         """In max mode, localhost is blocked by SSRF protection."""
         from agentkthx.core.helpers import is_safe_url
+
         safe, err = is_safe_url("http://127.0.0.1:8080/admin")
         self.assertFalse(safe)
         self.assertIn("ssrf", err.lower())
 
     def test_is_safe_url_off_mode_allows_localhost(self):
         """In off mode, localhost is allowed."""
-        from agentkthx.core.helpers import set_security_mode, is_safe_url
+        from agentkthx.core.helpers import is_safe_url, set_security_mode
+
         set_security_mode("off")
         safe, _ = is_safe_url("http://127.0.0.1:8080/admin")
         self.assertTrue(safe)
@@ -592,6 +659,7 @@ class TestTestToolSupport(unittest.TestCase):
         b = OpenRouterBackend.__new__(OpenRouterBackend)
         b.api_key = "test-key"
         from agentkthx.backends.base import BackendConfig
+
         b.config = BackendConfig()
 
         b._api_mode = ApiMode.OPENAI  # bypassed __init__ needs explicit init
@@ -621,8 +689,8 @@ class TestPrintAgentSteps(unittest.TestCase):
 
     def _make_run(self, steps):
         """Build a minimal AgentRun-like object with the given steps."""
-        from agentkthx.core.models import AgentRun, StepResult, ToolCall
-        from agentkthx.core.types import StepResultType
+        from agentkthx.core.models import AgentRun
+
         return AgentRun(
             final_answer="done",
             steps=steps,
@@ -635,6 +703,7 @@ class TestPrintAgentSteps(unittest.TestCase):
     def _make_tool_step(self, name, args, result):
         from agentkthx.core.models import StepResult, ToolCall
         from agentkthx.core.types import StepResultType
+
         return StepResult(
             type=StepResultType.TOOL_CALL,
             tool_call=ToolCall(name=name, arguments=args),
@@ -655,10 +724,13 @@ class TestPrintAgentSteps(unittest.TestCase):
     def test_prints_tool_calls_when_present(self):
         """A run with tool calls should print each call + truncated result."""
         from agentkthx.cli import _print_agent_steps
-        run = self._make_run([
-            self._make_tool_step("shell", {"command": "echo hi"}, "hi\n"),
-            self._make_tool_step("read_file", {"file_path": "/tmp/x"}, "file contents"),
-        ])
+
+        run = self._make_run(
+            [
+                self._make_tool_step("shell", {"command": "echo hi"}, "hi\n"),
+                self._make_tool_step("read_file", {"file_path": "/tmp/x"}, "file contents"),
+            ]
+        )
         out = self._capture_stdout(lambda: _print_agent_steps(run, debug=False))
         self.assertIn("shell", out)
         self.assertIn("echo hi", out)
@@ -669,9 +741,12 @@ class TestPrintAgentSteps(unittest.TestCase):
     def test_prints_nothing_in_debug_mode(self):
         """In debug mode the agent already prints verbose output — skip."""
         from agentkthx.cli import _print_agent_steps
-        run = self._make_run([
-            self._make_tool_step("shell", {"command": "echo hi"}, "hi"),
-        ])
+
+        run = self._make_run(
+            [
+                self._make_tool_step("shell", {"command": "echo hi"}, "hi"),
+            ]
+        )
         out = self._capture_stdout(lambda: _print_agent_steps(run, debug=True))
         self.assertEqual(out, "")
 
@@ -680,25 +755,31 @@ class TestPrintAgentSteps(unittest.TestCase):
         from agentkthx.cli import _print_agent_steps
         from agentkthx.core.models import StepResult
         from agentkthx.core.types import StepResultType
-        run = self._make_run([
-            StepResult(type=StepResultType.FINAL_ANSWER, content="answer"),
-        ])
+
+        run = self._make_run(
+            [
+                StepResult(type=StepResultType.FINAL_ANSWER, content="answer"),
+            ]
+        )
         out = self._capture_stdout(lambda: _print_agent_steps(run, debug=False))
         self.assertEqual(out, "")
 
     @pytest.mark.skip(
         reason="R06.41: _print_agent_steps output capture is broken — likely "
-               "writes via stderr or rich.Console instead of plain print(). "
-               "Functionality works in interactive use; capture mechanism "
-               "needs investigation. Tracked as separate finding."
+        "writes via stderr or rich.Console instead of plain print(). "
+        "Functionality works in interactive use; capture mechanism "
+        "needs investigation. Tracked as separate finding."
     )
     def test_truncates_long_tool_results(self):
         """Tool results longer than 200 chars are truncated for display."""
         from agentkthx.cli import _print_agent_steps
+
         long_result = "x" * 500
-        run = self._make_run([
-            self._make_tool_step("shell", {"command": "cat big"}, long_result),
-        ])
+        run = self._make_run(
+            [
+                self._make_tool_step("shell", {"command": "cat big"}, long_result),
+            ]
+        )
         out = self._capture_stdout(lambda: _print_agent_steps(run, debug=False))
         # Should be truncated to ~200 chars + ellipsis
         # (the full 500-char result should NOT be in the output)
@@ -711,10 +792,13 @@ class TestPrintAgentSteps(unittest.TestCase):
     def test_truncates_long_args(self):
         """Tool args JSON longer than 120 chars are truncated."""
         from agentkthx.cli import _print_agent_steps
+
         long_arg = "y" * 200
-        run = self._make_run([
-            self._make_tool_step("shell", {"command": long_arg}, "ok"),
-        ])
+        run = self._make_run(
+            [
+                self._make_tool_step("shell", {"command": long_arg}, "ok"),
+            ]
+        )
         out = self._capture_stdout(lambda: _print_agent_steps(run, debug=False))
         self.assertIn("...", out)
         # Full arg should NOT be in output

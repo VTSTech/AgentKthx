@@ -6,9 +6,7 @@ from __future__ import annotations
 
 import argparse
 
-from ...colors import dim, green, cyan, bright_green, red, bright_cyan
-
-
+from ...colors import bright_cyan, bright_green, cyan, dim, green, red
 
 
 def cmd_sessions(args: argparse.Namespace) -> int:
@@ -46,7 +44,9 @@ def cmd_sessions(args: argparse.Namespace) -> int:
         print(f"{bright_cyan('⚛ AgentKthx')} - Saved Sessions")
         print(f"{dim('  DB:')} ~/.agentkthx/memory.db")
         print(dim("-" * (4 + ID_W + MSGS_W + CREATED_W + UPDATED_W)))
-        print(f"  {'Session':<{ID_W}} {'Msgs':>{MSGS_W}}  {'Created':<{CREATED_W}}  {'Updated':<{UPDATED_W}}")
+        print(
+            f"  {'Session':<{ID_W}} {'Msgs':>{MSGS_W}}  {'Created':<{CREATED_W}}  {'Updated':<{UPDATED_W}}"
+        )
         print(dim("-" * (4 + ID_W + MSGS_W + CREATED_W + UPDATED_W)))
 
         for s in sessions:
@@ -54,7 +54,9 @@ def cmd_sessions(args: argparse.Namespace) -> int:
             msgs = s["message_count"]
             created = s["created_at"][:19].replace("T", " ")
             updated = s["updated_at"][:19].replace("T", " ")
-            print(f"  {cyan(sid):<{ID_W}} {msgs:>{MSGS_W}}  {dim(created):<{CREATED_W}}  {dim(updated):<{UPDATED_W}}")
+            print(
+                f"  {cyan(sid):<{ID_W}} {msgs:>{MSGS_W}}  {dim(created):<{CREATED_W}}  {dim(updated):<{UPDATED_W}}"
+            )
 
         print(dim("-" * (4 + ID_W + MSGS_W + CREATED_W + UPDATED_W)))
         print(f"Total: {bright_green(str(len(sessions)))} sessions")

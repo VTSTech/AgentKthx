@@ -17,15 +17,16 @@ def register(manager) -> None:
     on the manager for later access by the agent runtime.
     """
     from .acp_plugin import ACPPlugin
+
     manager.acp_plugin = ACPPlugin()
 
 
 def unregister(manager) -> None:
     """Unregister the ACP plugin from the plugin manager."""
-    if hasattr(manager, 'acp_plugin'):
-        if hasattr(manager.acp_plugin, 'shutdown'):
+    if hasattr(manager, "acp_plugin"):
+        if hasattr(manager.acp_plugin, "shutdown"):
             try:
                 manager.acp_plugin.shutdown("Plugin unloaded")
             except Exception:
                 pass
-        delattr(manager, 'acp_plugin')
+        delattr(manager, "acp_plugin")

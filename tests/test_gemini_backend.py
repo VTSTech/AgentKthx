@@ -16,28 +16,24 @@ Written by VTSTech — https://www.vts-tech.org
 
 from __future__ import annotations
 
-import json
 import os
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 
-from agentkthx.plugins.gemini.gemini import (
-    GeminiBackend,
-    GEMINI_MODELS,
-    FREE_TIER_LIMITS,
-    detect_gemini_family,
-    _is_free_tier_model,
-    _get_free_tier_limits,
-    _is_chat_capable_model,
-    _uses_thought_tags,
-    ThoughtTagParser,
-    _parse_thought_tags_from_complete_text,
-)
 from agentkthx.core.models import Tool, ToolParam
-from agentkthx.core.types import BackendType, ToolSupportLevel, ApiMode
-
+from agentkthx.core.types import ApiMode, BackendType, ToolSupportLevel
+from agentkthx.plugins.gemini.gemini import (
+    GEMINI_MODELS,
+    GeminiBackend,
+    ThoughtTagParser,
+    _get_free_tier_limits,
+    _is_free_tier_model,
+    _parse_thought_tags_from_complete_text,
+    _uses_thought_tags,
+    detect_gemini_family,
+)
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
 
@@ -61,25 +57,30 @@ def _make_tool() -> Tool:
 # Static / unit tests — no network, no API key required
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestParseOpenAiResponse(unittest.TestCase):
     """Direct tests for the inherited _parse_openai_response helper."""
 
     def test_parses_native_tool_calls(self):
         raw = {
-            "choices": [{
-                "message": {
-                    "content": None,
-                    "tool_calls": [{
-                        "id": "call_abc",
-                        "type": "function",
-                        "function": {
-                            "name": "shell",
-                            "arguments": '{"command": "echo hi"}',
-                        },
-                    }],
-                },
-                "finish_reason": "tool_calls",
-            }],
+            "choices": [
+                {
+                    "message": {
+                        "content": None,
+                        "tool_calls": [
+                            {
+                                "id": "call_abc",
+                                "type": "function",
+                                "function": {
+                                    "name": "shell",
+                                    "arguments": '{"command": "echo hi"}',
+                                },
+                            }
+                        ],
+                    },
+                    "finish_reason": "tool_calls",
+                }
+            ],
             "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
         }
         out = GeminiBackend._parse_openai_response(raw)
@@ -95,40 +96,48 @@ class TestParseOpenAiResponse(unittest.TestCase):
     def test_handles_arguments_as_object(self):
         """Some Gemini responses return arguments as object, not JSON string."""
         raw = {
-            "choices": [{
-                "message": {
-                    "content": "",
-                    "tool_calls": [{
-                        "id": "x",
-                        "type": "function",
-                        "function": {
-                            "name": "calc",
-                            "arguments": {"expression": "2+2"},
-                        },
-                    }],
-                },
-                "finish_reason": "tool_calls",
-            }],
+            "choices": [
+                {
+                    "message": {
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "id": "x",
+                                "type": "function",
+                                "function": {
+                                    "name": "calc",
+                                    "arguments": {"expression": "2+2"},
+                                },
+                            }
+                        ],
+                    },
+                    "finish_reason": "tool_calls",
+                }
+            ],
         }
         out = GeminiBackend._parse_openai_response(raw)
         self.assertEqual(out["tool_calls"][0]["arguments"], {"expression": "2+2"})
 
     def test_handles_malformed_arguments_gracefully(self):
         raw = {
-            "choices": [{
-                "message": {
-                    "content": "",
-                    "tool_calls": [{
-                        "id": "x",
-                        "type": "function",
-                        "function": {
-                            "name": "shell",
-                            "arguments": "not-valid-json{",
-                        },
-                    }],
-                },
-                "finish_reason": "tool_calls",
-            }],
+            "choices": [
+                {
+                    "message": {
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "id": "x",
+                                "type": "function",
+                                "function": {
+                                    "name": "shell",
+                                    "arguments": "not-valid-json{",
+                                },
+                            }
+                        ],
+                    },
+                    "finish_reason": "tool_calls",
+                }
+            ],
         }
         out = GeminiBackend._parse_openai_response(raw)
         self.assertEqual(out["tool_calls"][0]["arguments"], {"_raw_arguments": "not-valid-json{"})
@@ -141,17 +150,21 @@ class TestParseOpenAiResponse(unittest.TestCase):
     def test_provider_error_field_raises(self):
         """HTTP 200 + top-level `error` field raises with the provider message."""
         with self.assertRaises(RuntimeError) as ctx:
-            GeminiBackend._parse_openai_response({
-                "error": {"message": "Resource has been exhausted", "code": 429},
-            })
+            GeminiBackend._parse_openai_response(
+                {
+                    "error": {"message": "Resource has been exhausted", "code": 429},
+                }
+            )
         self.assertIn("Resource has been exhausted", str(ctx.exception))
 
     def test_text_only_response(self):
         raw = {
-            "choices": [{
-                "message": {"content": "Hello!"},
-                "finish_reason": "stop",
-            }],
+            "choices": [
+                {
+                    "message": {"content": "Hello!"},
+                    "finish_reason": "stop",
+                }
+            ],
             "usage": {"total_tokens": 4},
         }
         out = GeminiBackend._parse_openai_response(raw)
@@ -161,15 +174,20 @@ class TestParseOpenAiResponse(unittest.TestCase):
     def test_reasoning_content_extracted(self):
         """Gemini thinking models emit reasoning_content when include_thoughts=true."""
         raw = {
-            "choices": [{
-                "message": {
-                    "content": "120",
-                    "reasoning_content": "15 * 8 = 120",
-                },
-                "finish_reason": "stop",
-            }],
-            "usage": {"total_tokens": 100, "completion_tokens": 50,
-                      "completion_tokens_details": {"reasoning_tokens": 40}},
+            "choices": [
+                {
+                    "message": {
+                        "content": "120",
+                        "reasoning_content": "15 * 8 = 120",
+                    },
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {
+                "total_tokens": 100,
+                "completion_tokens": 50,
+                "completion_tokens_details": {"reasoning_tokens": 40},
+            },
         }
         out = GeminiBackend._parse_openai_response(raw)
         self.assertEqual(out["content"], "120")
@@ -308,6 +326,7 @@ class TestModelIdPrefixStripping(unittest.TestCase):
 
     def setUp(self):
         from unittest.mock import patch
+
         with patch.object(GeminiBackend, "list_models", return_value=[]):
             with patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}, clear=False):
                 self.backend = GeminiBackend()
@@ -343,18 +362,24 @@ class TestChatCapabilityClassification(unittest.TestCase):
 
     def setUp(self):
         from unittest.mock import patch
+
         with patch.object(GeminiBackend, "list_models", return_value=[]):
             with patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}, clear=False):
                 self.backend = GeminiBackend()
 
     # Chat models → NATIVE
     def test_chat_flash_models_are_native(self):
-        for name in ("gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.5-flash",
-                     "gemini-2.5-flash", "gemini-2.5-flash-lite"):
+        for name in (
+            "gemini-3.8-flash",
+            "gemini-3.7-flash",
+            "gemini-3.5-flash",
+            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
+        ):
             self.assertEqual(
                 self.backend.test_tool_support(name),
                 ToolSupportLevel.NATIVE,
-                f"{name} should be NATIVE (chat model)"
+                f"{name} should be NATIVE (chat model)",
             )
 
     def test_chat_pro_models_are_native(self):
@@ -362,7 +387,7 @@ class TestChatCapabilityClassification(unittest.TestCase):
             self.assertEqual(
                 self.backend.test_tool_support(name),
                 ToolSupportLevel.NATIVE,
-                f"{name} should be NATIVE (chat model)"
+                f"{name} should be NATIVE (chat model)",
             )
 
     # Non-chat models → NONE
@@ -371,64 +396,85 @@ class TestChatCapabilityClassification(unittest.TestCase):
             self.assertEqual(
                 self.backend.test_tool_support(name),
                 ToolSupportLevel.NONE,
-                f"{name} should be NONE (embedding, not chat)"
+                f"{name} should be NONE (embedding, not chat)",
             )
 
     def test_video_gen_models_are_none(self):
-        for name in ("veo-3.1-generate-preview", "veo-3.1-fast-generate-preview",
-                     "veo-3.1-lite-generate-preview", "gemini-omni-1.1-flash"):
+        for name in (
+            "veo-3.1-generate-preview",
+            "veo-3.1-fast-generate-preview",
+            "veo-3.1-lite-generate-preview",
+            "gemini-omni-1.1-flash",
+        ):
             self.assertEqual(
                 self.backend.test_tool_support(name),
                 ToolSupportLevel.NONE,
-                f"{name} should be NONE (video gen, not chat)"
+                f"{name} should be NONE (video gen, not chat)",
             )
 
     def test_music_gen_models_are_none(self):
-        for name in ("lyria-3.5", "lyria-3-pro-preview", "lyria-3-clip-preview",
-                     "lyria-realtime-exp"):
+        for name in (
+            "lyria-3.5",
+            "lyria-3-pro-preview",
+            "lyria-3-clip-preview",
+            "lyria-realtime-exp",
+        ):
             self.assertEqual(
                 self.backend.test_tool_support(name),
                 ToolSupportLevel.NONE,
-                f"{name} should be NONE (music gen, not chat)"
+                f"{name} should be NONE (music gen, not chat)",
             )
 
     def test_tts_models_are_none(self):
-        for name in ("gemini-3.8-flash-tts", "gemini-3.8-flash-lite-tts",
-                     "gemini-2.5-flash-preview-tts"):
+        for name in (
+            "gemini-3.8-flash-tts",
+            "gemini-3.8-flash-lite-tts",
+            "gemini-2.5-flash-preview-tts",
+        ):
             self.assertEqual(
                 self.backend.test_tool_support(name),
                 ToolSupportLevel.NONE,
-                f"{name} should be NONE (TTS, not chat)"
+                f"{name} should be NONE (TTS, not chat)",
             )
 
     def test_live_api_models_are_none(self):
         """Live API audio-to-audio models — including the tricky 'gemini-3.8-live'
         that has no trailing dash after 'live'."""
-        for name in ("gemini-3.8-live", "gemini-3.8-live-extended-thinking",
-                     "gemini-3.1-flash-live-preview", "gemini-3.5-live-translate-preview"):
+        for name in (
+            "gemini-3.8-live",
+            "gemini-3.8-live-extended-thinking",
+            "gemini-3.1-flash-live-preview",
+            "gemini-3.5-live-translate-preview",
+        ):
             self.assertEqual(
                 self.backend.test_tool_support(name),
                 ToolSupportLevel.NONE,
-                f"{name} should be NONE (Live API, not chat)"
+                f"{name} should be NONE (Live API, not chat)",
             )
 
     def test_image_gen_models_are_none(self):
-        for name in ("gemini-3.1-flash-image", "gemini-3-pro-image",
-                     "gemini-3-pro-image-preview", "gemini-3.1-flash-lite-image"):
+        for name in (
+            "gemini-3.1-flash-image",
+            "gemini-3-pro-image",
+            "gemini-3-pro-image-preview",
+            "gemini-3.1-flash-lite-image",
+        ):
             self.assertEqual(
                 self.backend.test_tool_support(name),
                 ToolSupportLevel.NONE,
-                f"{name} should be NONE (image gen, not chat)"
+                f"{name} should be NONE (image gen, not chat)",
             )
 
     def test_robotics_models_are_none(self):
-        for name in ("gemini-robotics-er-2-preview",
-                     "gemini-robotics-er-2-streaming-preview",
-                     "gemini-robotics-er-1.6-preview"):
+        for name in (
+            "gemini-robotics-er-2-preview",
+            "gemini-robotics-er-2-streaming-preview",
+            "gemini-robotics-er-1.6-preview",
+        ):
             self.assertEqual(
                 self.backend.test_tool_support(name),
                 ToolSupportLevel.NONE,
-                f"{name} should be NONE (robotics, not chat)"
+                f"{name} should be NONE (robotics, not chat)",
             )
 
     def test_transcribe_models_are_none(self):
@@ -436,19 +482,21 @@ class TestChatCapabilityClassification(unittest.TestCase):
             self.assertEqual(
                 self.backend.test_tool_support(name),
                 ToolSupportLevel.NONE,
-                f"{name} should be NONE (transcribe, not chat)"
+                f"{name} should be NONE (transcribe, not chat)",
             )
 
     def test_misc_non_chat_models_are_none(self):
-        for name in ("gemini-2.5-computer-use-preview-10-2025",
-                     "deep-research-preview-04-2026",
-                     "deep-research-max-preview-04-2026",
-                     "antigravity-preview-09-2026",
-                     "aqa"):
+        for name in (
+            "gemini-2.5-computer-use-preview-10-2025",
+            "deep-research-preview-04-2026",
+            "deep-research-max-preview-04-2026",
+            "antigravity-preview-09-2026",
+            "aqa",
+        ):
             self.assertEqual(
                 self.backend.test_tool_support(name),
                 ToolSupportLevel.NONE,
-                f"{name} should be NONE (not a chat model)"
+                f"{name} should be NONE (not a chat model)",
             )
 
     def test_gemma_models_are_chat_capable(self):
@@ -460,7 +508,7 @@ class TestChatCapabilityClassification(unittest.TestCase):
             self.assertEqual(
                 self.backend.test_tool_support(name),
                 ToolSupportLevel.NATIVE,
-                f"{name} should be NATIVE (verified chat-capable on real VM)"
+                f"{name} should be NATIVE (verified chat-capable on real VM)",
             )
 
     def test_models_prefix_stripped_in_classification(self):
@@ -469,12 +517,12 @@ class TestChatCapabilityClassification(unittest.TestCase):
         self.assertEqual(
             self.backend.test_tool_support("models/gemini-embedding-001"),
             ToolSupportLevel.NONE,
-            "Prefixed 'models/gemini-embedding-001' should still be NONE"
+            "Prefixed 'models/gemini-embedding-001' should still be NONE",
         )
         self.assertEqual(
             self.backend.test_tool_support("models/gemini-3.8-flash"),
             ToolSupportLevel.NATIVE,
-            "Prefixed 'models/gemini-3.8-flash' should still be NATIVE"
+            "Prefixed 'models/gemini-3.8-flash' should still be NATIVE",
         )
 
 
@@ -510,10 +558,18 @@ class TestFreeTierClassification(unittest.TestCase):
     # ── Confirmed FREE (from AI Studio data, in FREE_TIER_LIMITS table) ──
 
     def test_chat_flash_models_are_free(self):
-        for name in ("gemini-2.5-flash", "gemini-3.5-flash", "gemini-3.6-flash",
-                     "gemini-3.7-flash", "gemini-3.8-flash", "gemini-3-flash-preview"):
-            self.assertTrue(_is_free_tier_model(name),
-                            f"{name} should be FREE (5 RPM / 250K TPM / 20 RPD per AI Studio)")
+        for name in (
+            "gemini-2.5-flash",
+            "gemini-3.5-flash",
+            "gemini-3.6-flash",
+            "gemini-3.7-flash",
+            "gemini-3.8-flash",
+            "gemini-3-flash-preview",
+        ):
+            self.assertTrue(
+                _is_free_tier_model(name),
+                f"{name} should be FREE (5 RPM / 250K TPM / 20 RPD per AI Studio)",
+            )
 
     def test_chat_flash_lite_models_are_free_with_higher_rpd(self):
         # Flash-Lite has 15 RPM / 500 RPD — actually more generous than regular Flash
@@ -528,25 +584,37 @@ class TestFreeTierClassification(unittest.TestCase):
         Earlier catalog had them marked non-chat for /chat/completions
         unverified — but free-tier eligibility is separate from chat capability."""
         for name in ("gemma-4-26b-a4b-it", "gemma-4-31b-it"):
-            self.assertTrue(_is_free_tier_model(name),
-                            f"{name} should be FREE (30 RPM / 16K TPM / 14.4K RPD per AI Studio)")
+            self.assertTrue(
+                _is_free_tier_model(name),
+                f"{name} should be FREE (30 RPM / 16K TPM / 14.4K RPD per AI Studio)",
+            )
             limits = _get_free_tier_limits(name)
             self.assertEqual(limits["rpd"], 14_400)
 
     def test_embeddings_are_free(self):
         for name in ("gemini-embedding-001", "gemini-embedding-2-preview", "gemini-embedding-2"):
-            self.assertTrue(_is_free_tier_model(name),
-                            f"{name} should be FREE (100 RPM / 30K TPM / 1K RPD per AI Studio)")
+            self.assertTrue(
+                _is_free_tier_model(name),
+                f"{name} should be FREE (100 RPM / 30K TPM / 1K RPD per AI Studio)",
+            )
 
     def test_antigravity_is_free(self):
-        for name in ("antigravity-preview-05-2026", "antigravity-preview-09-2026", "antigravity-preview-latest"):
-            self.assertTrue(_is_free_tier_model(name),
-                            f"{name} should be FREE (60 RPM / 100K TPM / 100 RPD per AI Studio)")
+        for name in (
+            "antigravity-preview-05-2026",
+            "antigravity-preview-09-2026",
+            "antigravity-preview-latest",
+        ):
+            self.assertTrue(
+                _is_free_tier_model(name),
+                f"{name} should be FREE (60 RPM / 100K TPM / 100 RPD per AI Studio)",
+            )
 
     def test_robotics_is_free(self):
         for name in ("gemini-robotics-er-2-preview",):
-            self.assertTrue(_is_free_tier_model(name),
-                            f"{name} should be FREE (5 RPM / 250K TPM / 20 RPD per AI Studio)")
+            self.assertTrue(
+                _is_free_tier_model(name),
+                f"{name} should be FREE (5 RPM / 250K TPM / 20 RPD per AI Studio)",
+            )
 
     def test_transcribe_is_free(self):
         self.assertTrue(_is_free_tier_model("gemini-3.5-transcribe"))
@@ -554,47 +622,77 @@ class TestFreeTierClassification(unittest.TestCase):
         self.assertEqual(limits["rpd"], 25)
 
     def test_tts_variants_are_free(self):
-        for name in ("gemini-2.5-flash-preview-tts", "gemini-3.1-flash-tts-preview",
-                     "gemini-3.8-flash-tts", "gemini-3.8-flash-lite-tts"):
-            self.assertTrue(_is_free_tier_model(name),
-                            f"{name} should be FREE (3 RPM / 10K TPM / 10 RPD per AI Studio)")
+        for name in (
+            "gemini-2.5-flash-preview-tts",
+            "gemini-3.1-flash-tts-preview",
+            "gemini-3.8-flash-tts",
+            "gemini-3.8-flash-lite-tts",
+        ):
+            self.assertTrue(
+                _is_free_tier_model(name),
+                f"{name} should be FREE (3 RPM / 10K TPM / 10 RPD per AI Studio)",
+            )
 
     # ── Confirmed NOT FREE (from AI Studio data, rpd=0 in table) ──
 
     def test_pro_models_are_not_free(self):
-        for name in ("gemini-2.5-pro", "gemini-3.1-pro-preview",
-                     "gemini-3.1-pro-preview-customtools", "gemini-2.5-pro-preview-tts"):
-            self.assertFalse(_is_free_tier_model(name),
-                             f"{name} should NOT be free (Pro = paid per AI Studio)")
+        for name in (
+            "gemini-2.5-pro",
+            "gemini-3.1-pro-preview",
+            "gemini-3.1-pro-preview-customtools",
+            "gemini-2.5-pro-preview-tts",
+        ):
+            self.assertFalse(
+                _is_free_tier_model(name), f"{name} should NOT be free (Pro = paid per AI Studio)"
+            )
 
     def test_image_gen_models_are_not_free(self):
         """Nano Banana / image gen variants show 0/0/0 in AI Studio."""
-        for name in ("gemini-2.5-flash-image", "gemini-3-pro-image",
-                     "gemini-3-pro-image-preview", "gemini-3.1-flash-image",
-                     "gemini-3.1-flash-image-preview", "gemini-3.1-flash-lite-image",
-                     "nano-banana-pro-preview"):
-            self.assertFalse(_is_free_tier_model(name),
-                             f"{name} should NOT be free (image gen = paid)")
+        for name in (
+            "gemini-2.5-flash-image",
+            "gemini-3-pro-image",
+            "gemini-3-pro-image-preview",
+            "gemini-3.1-flash-image",
+            "gemini-3.1-flash-image-preview",
+            "gemini-3.1-flash-lite-image",
+            "nano-banana-pro-preview",
+        ):
+            self.assertFalse(
+                _is_free_tier_model(name), f"{name} should NOT be free (image gen = paid)"
+            )
 
     def test_video_gen_models_are_not_free(self):
-        for name in ("veo-3.1-generate-preview", "veo-3.1-fast-generate-preview",
-                     "veo-3.1-lite-generate-preview", "gemini-omni-1.1-flash",
-                     "gemini-omni-flash-preview"):
-            self.assertFalse(_is_free_tier_model(name),
-                             f"{name} should NOT be free (video gen = paid)")
+        for name in (
+            "veo-3.1-generate-preview",
+            "veo-3.1-fast-generate-preview",
+            "veo-3.1-lite-generate-preview",
+            "gemini-omni-1.1-flash",
+            "gemini-omni-flash-preview",
+        ):
+            self.assertFalse(
+                _is_free_tier_model(name), f"{name} should NOT be free (video gen = paid)"
+            )
 
     def test_music_gen_models_are_not_free(self):
-        for name in ("lyria-3.5", "lyria-3-pro-preview", "lyria-3-clip-preview",
-                     "lyria-realtime-exp"):
-            self.assertFalse(_is_free_tier_model(name),
-                             f"{name} should NOT be free (music gen = paid)")
+        for name in (
+            "lyria-3.5",
+            "lyria-3-pro-preview",
+            "lyria-3-clip-preview",
+            "lyria-realtime-exp",
+        ):
+            self.assertFalse(
+                _is_free_tier_model(name), f"{name} should NOT be free (music gen = paid)"
+            )
 
     def test_deep_research_is_not_free(self):
-        for name in ("deep-research-preview-04-2026",
-                     "deep-research-max-preview-04-2026",
-                     "deep-research-pro-preview-12-2025"):
-            self.assertFalse(_is_free_tier_model(name),
-                             f"{name} should NOT be free (agentic = paid)")
+        for name in (
+            "deep-research-preview-04-2026",
+            "deep-research-max-preview-04-2026",
+            "deep-research-pro-preview-12-2025",
+        ):
+            self.assertFalse(
+                _is_free_tier_model(name), f"{name} should NOT be free (agentic = paid)"
+            )
 
     def test_computer_use_is_not_free(self):
         self.assertFalse(_is_free_tier_model("gemini-2.5-computer-use-preview-10-2025"))
@@ -612,10 +710,16 @@ class TestFreeTierClassification(unittest.TestCase):
         """Only gemini-3.5-transcribe and -live are explicitly free per AI Studio.
         Other Live API variants (-live, live-translate) are NOT in the table
         and should be marked NOT free."""
-        for name in ("gemini-3.8-live", "gemini-3.8-live-extended-thinking",
-                     "gemini-3.1-flash-live-preview", "gemini-3.5-live-translate-preview"):
-            self.assertFalse(_is_free_tier_model(name),
-                             f"{name} should NOT be free (not in AI Studio free-tier table)")
+        for name in (
+            "gemini-3.8-live",
+            "gemini-3.8-live-extended-thinking",
+            "gemini-3.1-flash-live-preview",
+            "gemini-3.5-live-translate-preview",
+        ):
+            self.assertFalse(
+                _is_free_tier_model(name),
+                f"{name} should NOT be free (not in AI Studio free-tier table)",
+            )
 
     def test_transcribe_in_table_is_free(self):
         """gemini-3.5-transcribe and gemini-3.5-transcribe-live are in the table."""
@@ -637,8 +741,11 @@ class TestFreeTierClassification(unittest.TestCase):
         for name, info in GEMINI_MODELS.items():
             catalog_says_free = info.get("free_tier", False)
             table_says_free = _is_free_tier_model(name)
-            self.assertEqual(catalog_says_free, table_says_free,
-                             f"{name}: catalog={catalog_says_free} but table={table_says_free}")
+            self.assertEqual(
+                catalog_says_free,
+                table_says_free,
+                f"{name}: catalog={catalog_says_free} but table={table_says_free}",
+            )
 
 
 class TestUsesThoughtTags(unittest.TestCase):
@@ -646,16 +753,23 @@ class TestUsesThoughtTags(unittest.TestCase):
 
     def test_gemma_models_use_thought_tags(self):
         for name in ("gemma-4-26b-a4b-it", "gemma-4-31b-it"):
-            self.assertTrue(_uses_thought_tags(name),
-                            f"{name} should use <thought> tags for reasoning")
+            self.assertTrue(
+                _uses_thought_tags(name), f"{name} should use <thought> tags for reasoning"
+            )
 
     def test_gemini_models_do_not_use_thought_tags(self):
         """Gemini 3.x / 2.5 use the native OpenAI reasoning_content field,
         not inline <thought> tags."""
-        for name in ("gemini-3.8-flash", "gemini-3.1-pro-preview",
-                     "gemini-2.5-flash", "gemini-2.5-pro"):
-            self.assertFalse(_uses_thought_tags(name),
-                            f"{name} should NOT use <thought> tags (uses native reasoning_content)")
+        for name in (
+            "gemini-3.8-flash",
+            "gemini-3.1-pro-preview",
+            "gemini-2.5-flash",
+            "gemini-2.5-pro",
+        ):
+            self.assertFalse(
+                _uses_thought_tags(name),
+                f"{name} should NOT use <thought> tags (uses native reasoning_content)",
+            )
 
     def test_models_prefix_stripped(self):
         """If 'models/' prefix slips through, detector still works."""
@@ -765,11 +879,15 @@ class TestThoughtTagParser(unittest.TestCase):
         reasoning_parts = []
         for chunk in chunks:
             c, r = parser.feed(chunk)
-            if c: content_parts.append(c)
-            if r: reasoning_parts.append(r)
+            if c:
+                content_parts.append(c)
+            if r:
+                reasoning_parts.append(r)
         c, r = parser.flush()
-        if c: content_parts.append(c)
-        if r: reasoning_parts.append(r)
+        if c:
+            content_parts.append(c)
+        if r:
+            reasoning_parts.append(r)
         self.assertEqual("".join(content_parts), "actual answer")
         self.assertEqual("".join(reasoning_parts), "reasoning here")
 
@@ -781,11 +899,15 @@ class TestThoughtTagParser(unittest.TestCase):
         reasoning_parts = []
         for chunk in chunks:
             c, r = parser.feed(chunk)
-            if c: content_parts.append(c)
-            if r: reasoning_parts.append(r)
+            if c:
+                content_parts.append(c)
+            if r:
+                reasoning_parts.append(r)
         c, r = parser.flush()
-        if c: content_parts.append(c)
-        if r: reasoning_parts.append(r)
+        if c:
+            content_parts.append(c)
+        if r:
+            reasoning_parts.append(r)
         # The partial "<tho" should NOT leak into content — it's buffered
         # until the rest of the tag arrives.
         self.assertNotIn("<tho", "".join(content_parts))
@@ -801,11 +923,15 @@ class TestThoughtTagParser(unittest.TestCase):
         reasoning_parts = []
         for chunk in chunks:
             c, r = parser.feed(chunk)
-            if c: content_parts.append(c)
-            if r: reasoning_parts.append(r)
+            if c:
+                content_parts.append(c)
+            if r:
+                reasoning_parts.append(r)
         c, r = parser.flush()
-        if c: content_parts.append(c)
-        if r: reasoning_parts.append(r)
+        if c:
+            content_parts.append(c)
+        if r:
+            reasoning_parts.append(r)
         self.assertNotIn("</th", "".join(content_parts))
         self.assertNotIn("ought>", "".join(content_parts))
         self.assertEqual("".join(content_parts), "final answer")
@@ -820,13 +946,17 @@ class TestThoughtTagParser(unittest.TestCase):
         reasoning_parts = []
         # Simulate streaming in 10-char chunks
         for i in range(0, len(text), 10):
-            chunk = text[i:i+10]
+            chunk = text[i : i + 10]
             c, r = parser.feed(chunk)
-            if c: content_parts.append(c)
-            if r: reasoning_parts.append(r)
+            if c:
+                content_parts.append(c)
+            if r:
+                reasoning_parts.append(r)
         c, r = parser.flush()
-        if c: content_parts.append(c)
-        if r: reasoning_parts.append(r)
+        if c:
+            content_parts.append(c)
+        if r:
+            reasoning_parts.append(r)
         self.assertEqual("".join(content_parts), text)
         self.assertEqual("".join(reasoning_parts), "")
 
@@ -839,11 +969,15 @@ class TestThoughtTagParser(unittest.TestCase):
         reasoning_parts = []
         for chunk in chunks:
             c, r = parser.feed(chunk)
-            if c: content_parts.append(c)
-            if r: reasoning_parts.append(r)
+            if c:
+                content_parts.append(c)
+            if r:
+                reasoning_parts.append(r)
         c, r = parser.flush()
-        if c: content_parts.append(c)
-        if r: reasoning_parts.append(r)
+        if c:
+            content_parts.append(c)
+        if r:
+            reasoning_parts.append(r)
         # All the reasoning was buffered — flush emits it
         self.assertEqual("".join(content_parts), "")
         self.assertEqual("".join(reasoning_parts), "ongoing reasoning that never closes")
@@ -1047,26 +1181,29 @@ class TestToolsNotSupportedError(unittest.TestCase):
     """ReAct-fallback detector — rare on Gemini but defensive."""
 
     def test_detects_canonical_message(self):
-        self.assertTrue(GeminiBackend._is_tools_not_supported_error(
-            "This model does not support tools."
-        ))
+        self.assertTrue(
+            GeminiBackend._is_tools_not_supported_error("This model does not support tools.")
+        )
 
     def test_detects_function_calling_message(self):
-        self.assertTrue(GeminiBackend._is_tools_not_supported_error(
-            "Function calling is not supported on gemini-1.0-flash"
-        ))
+        self.assertTrue(
+            GeminiBackend._is_tools_not_supported_error(
+                "Function calling is not supported on gemini-1.0-flash"
+            )
+        )
 
     def test_ignores_unrelated_errors(self):
-        self.assertFalse(GeminiBackend._is_tools_not_supported_error(
-            "Rate limit exceeded"
-        ))
+        self.assertFalse(GeminiBackend._is_tools_not_supported_error("Rate limit exceeded"))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Live API tests — skipped unless GEMINI_API_KEY is set
 # ─────────────────────────────────────────────────────────────────────────────
 
-@pytest.mark.skipif(not _RUN_LIVE, reason="live-API tests need GEMINI_API_KEY=<real_key> + GEMINI_RUN_LIVE_TESTS=1")
+
+@pytest.mark.skipif(
+    not _RUN_LIVE, reason="live-API tests need GEMINI_API_KEY=<real_key> + GEMINI_RUN_LIVE_TESTS=1"
+)
 class TestLiveGeminiAPI:
     """Live integration tests against the real Gemini endpoint.
 
@@ -1092,6 +1229,7 @@ class TestLiveGeminiAPI:
 
     def test_function_calling(self):
         from agentkthx.core.models import Tool, ToolParam
+
         tool = Tool(
             name="echo",
             description="Echo back the input string",

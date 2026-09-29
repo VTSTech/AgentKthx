@@ -20,6 +20,7 @@ def register(manager) -> None:
     identical backend instances.
     """
     from .huggingface import HuggingFaceBackend
+
     manager.register_backend("huggingface", HuggingFaceBackend)
     manager.register_backend("hf", HuggingFaceBackend, alias_of="huggingface")
 

@@ -29,16 +29,13 @@ These tests verify:
 6. The fallback (1/3 reduction) fires when the regex can't parse
 """
 
-import pytest
-
+from agentkthx.backends.base import BackendConfig
 from agentkthx.backends.openai_compat import OpenAICompatibleBackend
-from agentkthx.backends.base import BaseBackend, BackendConfig
-from agentkthx.core.types import ApiMode
-
 
 # ----------------------------------------------------------------------------
 # Test fixtures — minimal concrete backends that exercise the shared helpers
 # ----------------------------------------------------------------------------
+
 
 class _DefaultPatternsBackend(OpenAICompatibleBackend):
     """Test double using the default regex patterns (OpenRouter/ZAI format).
@@ -58,22 +55,38 @@ class _DefaultPatternsBackend(OpenAICompatibleBackend):
     @property
     def backend_type(self):
         from agentkthx.core.types import BackendType
+
         return BackendType.OLLAMA  # placeholder
 
     @property
     def base_url(self):
         return "http://localhost:1234"
 
-    def generate(self, *args, **kwargs): pass
-    def generate_stream(self, *args, **kwargs): pass
-    def list_models(self, *args, **kwargs): return []
+    def generate(self, *args, **kwargs):
+        pass
+
+    def generate_stream(self, *args, **kwargs):
+        pass
+
+    def list_models(self, *args, **kwargs):
+        return []
+
     def test_tool_support(self, *args, **kwargs):
         from agentkthx.core.types import ToolSupportLevel
+
         return ToolSupportLevel.NONE
-    def _get_chat_completions_url(self): return "http://localhost/v1/chat/completions"
-    def _get_auth_headers(self): return {}
-    def _iter_sse_lines(self, url, body, headers): return iter([])
-    def _get_model_defaults(self, model): return {}
+
+    def _get_chat_completions_url(self):
+        return "http://localhost/v1/chat/completions"
+
+    def _get_auth_headers(self):
+        return {}
+
+    def _iter_sse_lines(self, url, body, headers):
+        return iter([])
+
+    def _get_model_defaults(self, model):
+        return {}
 
 
 class _GeminiPatternsBackend(_DefaultPatternsBackend):
@@ -91,12 +104,14 @@ class _FakeFifthCloudBackend(_DefaultPatternsBackend):
     the default patterns automatically (proving ARCH-03's value: a 5th
     cloud backend gets context-length 400 recovery for free).
     """
+
     pass
 
 
 # ----------------------------------------------------------------------------
 # _apply_max_tokens_cap
 # ----------------------------------------------------------------------------
+
 
 class TestApplyMaxTokensCap:
     """R06.57 (ARCH-03): The ``num_ctx / 32`` cap + persisted-safe-value logic."""
@@ -137,8 +152,10 @@ class TestApplyMaxTokensCap:
 
     def test_custom_divisor_via_class_attribute(self):
         """A backend can override _MAX_TOKENS_CAP_DIVISOR for a different cap."""
+
         class _TightCapBackend(_DefaultPatternsBackend):
             _MAX_TOKENS_CAP_DIVISOR = 8  # more aggressive cap
+
         b = _TightCapBackend()
         # 128K context, 128K max_tokens, divisor=8 → cap to 128000//8 = 16000
         result = b._apply_max_tokens_cap(131072, 128000, temperature=0.7)
@@ -149,15 +166,18 @@ class TestApplyMaxTokensCap:
 # _calculate_safe_max_tokens — default patterns (OpenRouter/ZAI format)
 # ----------------------------------------------------------------------------
 
+
 class TestCalculateSafeMaxTokensDefaultPatterns:
     """R06.57 (ARCH-03): Default regex patterns parse OpenRouter/ZAI errors."""
 
     def test_parses_openrouter_error_format(self):
         """OpenRouter: 'maximum context length is 262144 tokens ... 85421 of text input ... 305 of tool input ... 196608 in the output'"""
         b = _DefaultPatternsBackend()
-        error = ('This endpoint\'s maximum context length is 262144 tokens. '
-                 'However, you requested about 282334 tokens (85421 of text input, '
-                 '305 of tool input, 196608 in the output).')
+        error = (
+            "This endpoint's maximum context length is 262144 tokens. "
+            "However, you requested about 282334 tokens (85421 of text input, "
+            "305 of tool input, 196608 in the output)."
+        )
         body = {"max_tokens": 196608}
         # safe = 262144 - 85421 - 305 - 2048 = 174370
         result = b._calculate_safe_max_tokens(error, body)
@@ -167,9 +187,11 @@ class TestCalculateSafeMaxTokensDefaultPatterns:
     def test_parses_zai_error_format(self):
         """ZAI: 'maximum context length is 131072 tokens ... 120000 of text input ... 20000 in the output'"""
         b = _DefaultPatternsBackend()
-        error = ("This model's maximum context length is 131072 tokens. "
-                 "However, you requested 140000 tokens (120000 of text input, "
-                 "20000 in the output).")
+        error = (
+            "This model's maximum context length is 131072 tokens. "
+            "However, you requested 140000 tokens (120000 of text input, "
+            "20000 in the output)."
+        )
         body = {"max_tokens": 20000}
         # safe = 131072 - 120000 - 2048 = 9024
         result = b._calculate_safe_max_tokens(error, body)
@@ -178,8 +200,9 @@ class TestCalculateSafeMaxTokensDefaultPatterns:
     def test_returns_none_when_safe_max_exceeds_original(self):
         """If computed safe_max >= original max_tokens, returns None (already safe)."""
         b = _DefaultPatternsBackend()
-        error = ('maximum context length is 262144 tokens. '
-                 '85421 of text input, 196608 in the output.')
+        error = (
+            "maximum context length is 262144 tokens. " "85421 of text input, 196608 in the output."
+        )
         body = {"max_tokens": 1000}  # already very small
         # safe = 262144 - 85421 - 2048 = 174675, which is > 1000 → return None
         result = b._calculate_safe_max_tokens(error, body)
@@ -189,8 +212,9 @@ class TestCalculateSafeMaxTokensDefaultPatterns:
         """If safe_max < 1024, it's floored to 1024."""
         b = _DefaultPatternsBackend()
         # Input is so large that even 1K output doesn't fit
-        error = ('maximum context length is 131072 tokens. '
-                 '131000 of text input, 20000 in the output.')
+        error = (
+            "maximum context length is 131072 tokens. " "131000 of text input, 20000 in the output."
+        )
         body = {"max_tokens": 20000}
         # safe = 131072 - 131000 - 2048 = -1976 → floored to 1024
         result = b._calculate_safe_max_tokens(error, body)
@@ -222,14 +246,17 @@ class TestCalculateSafeMaxTokensDefaultPatterns:
 # _calculate_safe_max_tokens — Gemini patterns (overridden)
 # ----------------------------------------------------------------------------
 
+
 class TestCalculateSafeMaxTokensGeminiPatterns:
     """R06.57 (ARCH-03): Gemini's overridden regex patterns parse Gemini errors."""
 
     def test_parses_gemini_error_format(self):
         """Gemini: 'maximum context length of 1048576 tokens ... 1000000 in the input ... 100000 in the output'"""
         b = _GeminiPatternsBackend()
-        error = ('Request exceeds the maximum context length of 1048576 tokens. '
-                 'You requested 1100000 tokens (1000000 in the input, 100000 in the output).')
+        error = (
+            "Request exceeds the maximum context length of 1048576 tokens. "
+            "You requested 1100000 tokens (1000000 in the input, 100000 in the output)."
+        )
         body = {"max_tokens": 100000}
         # safe = 1048576 - 1000000 - 2048 = 46528
         result = b._calculate_safe_max_tokens(error, body)
@@ -245,8 +272,10 @@ class TestCalculateSafeMaxTokensGeminiPatterns:
         # OpenRouter format: "maximum context length is N tokens" + "N of text input"
         # Gemini patterns: "maximum context length of N" + "N in the input"
         # → Gemini patterns won't match → falls back to 1/3 reduction
-        error = ('maximum context length is 262144 tokens. '
-                 '85421 of text input, 305 of tool input, 196608 in the output.')
+        error = (
+            "maximum context length is 262144 tokens. "
+            "85421 of text input, 305 of tool input, 196608 in the output."
+        )
         body = {"max_tokens": 196608}
         result = b._calculate_safe_max_tokens(error, body)
         # Should fall back to 1/3 reduction, not parse correctly
@@ -266,14 +295,16 @@ class TestCalculateSafeMaxTokensGeminiPatterns:
 # _handle_context_length_400
 # ----------------------------------------------------------------------------
 
+
 class TestHandleContextLength400:
     """R06.57 (ARCH-03): The orchestration helper."""
 
     def test_returns_true_and_mutates_body_on_context_length_400(self):
         """On a context-length 400, returns True + mutates body['max_tokens'] + persists."""
         b = _DefaultPatternsBackend()
-        error = ('maximum context length is 131072 tokens. '
-                 '120000 of text input, 20000 in the output.')
+        error = (
+            "maximum context length is 131072 tokens. " "120000 of text input, 20000 in the output."
+        )
         body = {"max_tokens": 20000}
         result = b._handle_context_length_400(error, body)
         assert result is True
@@ -294,8 +325,9 @@ class TestHandleContextLength400:
         """If _calculate_safe_max_tokens returns None (already safe), returns False."""
         b = _DefaultPatternsBackend()
         # Construct an error where the computed safe_max >= original max_tokens
-        error = ('maximum context length is 262144 tokens. '
-                 '85421 of text input, 196608 in the output.')
+        error = (
+            "maximum context length is 262144 tokens. " "85421 of text input, 196608 in the output."
+        )
         body = {"max_tokens": 1000}  # already tiny → safe_max (174675) >= 1000 → None
         result = b._handle_context_length_400(error, body)
         assert result is False
@@ -305,8 +337,9 @@ class TestHandleContextLength400:
     def test_case_insensitive_context_length_match(self):
         """The 'context length' substring check is case-insensitive."""
         b = _DefaultPatternsBackend()
-        error = ('MAXIMUM CONTEXT LENGTH IS 131072 TOKENS. '
-                 '120000 of text input, 20000 in the output.')
+        error = (
+            "MAXIMUM CONTEXT LENGTH IS 131072 TOKENS. " "120000 of text input, 20000 in the output."
+        )
         body = {"max_tokens": 20000}
         result = b._handle_context_length_400(error, body)
         assert result is True
@@ -315,6 +348,7 @@ class TestHandleContextLength400:
 # ----------------------------------------------------------------------------
 # 5th cloud backend inheritance
 # ----------------------------------------------------------------------------
+
 
 class TestFifthCloudBackendInheritance:
     """R06.57 (ARCH-03): A hypothetical 5th cloud backend inherits everything."""
@@ -330,8 +364,10 @@ class TestFifthCloudBackendInheritance:
     def test_fake_5th_cloud_backend_can_parse_openrouter_errors(self):
         """The inherited default patterns parse OpenRouter-format errors correctly."""
         b = _FakeFifthCloudBackend()
-        error = ('maximum context length is 262144 tokens. '
-                 '85421 of text input, 305 of tool input, 196608 in the output.')
+        error = (
+            "maximum context length is 262144 tokens. "
+            "85421 of text input, 305 of tool input, 196608 in the output."
+        )
         body = {"max_tokens": 196608}
         result = b._calculate_safe_max_tokens(error, body)
         assert result == 262144 - 85421 - 305 - 2048
@@ -339,8 +375,9 @@ class TestFifthCloudBackendInheritance:
     def test_fake_5th_cloud_backend_gets_context_length_400_recovery(self):
         """The inherited _handle_context_length_400 works for a 5th backend."""
         b = _FakeFifthCloudBackend()
-        error = ('maximum context length is 131072 tokens. '
-                 '120000 of text input, 20000 in the output.')
+        error = (
+            "maximum context length is 131072 tokens. " "120000 of text input, 20000 in the output."
+        )
         body = {"max_tokens": 20000}
         result = b._handle_context_length_400(error, body)
         assert result is True

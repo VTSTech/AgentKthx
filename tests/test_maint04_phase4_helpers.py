@@ -17,19 +17,16 @@ import inspect
 import time
 from unittest.mock import MagicMock
 
-import pytest
-
 from agentkthx.agent import Agent
-from agentkthx.core.models import StepResult, StepResultType
+from agentkthx.core.models import StepResultType
 from agentkthx.core.openresponses import ResponseStatus, ToolChoiceType
-
 
 # ---------------------------------------------------------------------------
 # Helper factories (shared with test_maint04_phase3_helpers.py pattern)
 # ---------------------------------------------------------------------------
 
-def _make_agent(tool_choice_type=ToolChoiceType.AUTO, tool_choice_name=None,
-                debug=False):
+
+def _make_agent(tool_choice_type=ToolChoiceType.AUTO, tool_choice_name=None, debug=False):
     agent = Agent.__new__(Agent)
     agent.debug = debug
     agent.backend = MagicMock()
@@ -60,6 +57,7 @@ def _make_response():
 # ===========================================================================
 # Phase 4a: _enforce_final_answer
 # ===========================================================================
+
 
 class TestEnforceFinalAnswer:
 
@@ -104,9 +102,12 @@ class TestEnforceFinalAnswer:
         response = _make_response()
         agent._enforce_final_answer(
             _last_successful_result="42",
-            tokens=0, reasoning_content="",
-            steps=[], total_tokens=0,
-            start_time=time.time(), tool_calls=0,
+            tokens=0,
+            reasoning_content="",
+            steps=[],
+            total_tokens=0,
+            start_time=time.time(),
+            tool_calls=0,
             response=response,
         )
         assert response.id in agent._response_history
@@ -116,9 +117,12 @@ class TestEnforceFinalAnswer:
         response = _make_response()
         agent._enforce_final_answer(
             _last_successful_result="42",
-            tokens=0, reasoning_content="",
-            steps=[], total_tokens=0,
-            start_time=time.time(), tool_calls=0,
+            tokens=0,
+            reasoning_content="",
+            steps=[],
+            total_tokens=0,
+            start_time=time.time(),
+            tool_calls=0,
             response=response,
             debug_context="Model tried to call tools",
         )
@@ -132,9 +136,12 @@ class TestEnforceFinalAnswer:
         response = _make_response()
         agent._enforce_final_answer(
             _last_successful_result="42",
-            tokens=0, reasoning_content="",
-            steps=[], total_tokens=0,
-            start_time=time.time(), tool_calls=0,
+            tokens=0,
+            reasoning_content="",
+            steps=[],
+            total_tokens=0,
+            start_time=time.time(),
+            tool_calls=0,
             response=response,
             debug_context="",  # streaming path
         )
@@ -145,6 +152,7 @@ class TestEnforceFinalAnswer:
 # ===========================================================================
 # Phase 4b: _handle_blocked_tool_call
 # ===========================================================================
+
 
 class TestHandleBlockedToolCall:
 
@@ -171,10 +179,15 @@ class TestHandleBlockedToolCall:
         agent = _make_agent()
         response = _make_response()
         agent._handle_blocked_tool_call(
-            tool_name="shell", tool_args={"cmd": "x"},
-            tool_call_id="c1", native_tool_calls=[],
-            step_num=0, tool_calls=0, tokens=10,
-            steps=[], response=response,
+            tool_name="shell",
+            tool_args={"cmd": "x"},
+            tool_call_id="c1",
+            native_tool_calls=[],
+            step_num=0,
+            tool_calls=0,
+            tokens=10,
+            steps=[],
+            response=response,
         )
         agent._error_tracker.record_failure.assert_called_once()
 
@@ -183,10 +196,15 @@ class TestHandleBlockedToolCall:
         response = _make_response()
         steps = []
         agent._handle_blocked_tool_call(
-            tool_name="shell", tool_args={"cmd": "x"},
-            tool_call_id="c1", native_tool_calls=[],
-            step_num=0, tool_calls=0, tokens=10,
-            steps=steps, response=response,
+            tool_name="shell",
+            tool_args={"cmd": "x"},
+            tool_call_id="c1",
+            native_tool_calls=[],
+            step_num=0,
+            tool_calls=0,
+            tokens=10,
+            steps=steps,
+            response=response,
         )
         assert len(steps) == 1
         assert steps[0].type == StepResultType.ERROR
@@ -195,11 +213,15 @@ class TestHandleBlockedToolCall:
         agent = _make_agent()
         response = _make_response()
         agent._handle_blocked_tool_call(
-            tool_name="shell", tool_args={},
+            tool_name="shell",
+            tool_args={},
             tool_call_id="c1",
             native_tool_calls=[{"name": "shell"}],  # truthy
-            step_num=0, tool_calls=0, tokens=10,
-            steps=[], response=response,
+            step_num=0,
+            tool_calls=0,
+            tokens=10,
+            steps=[],
+            response=response,
         )
         agent.memory.add_tool_result.assert_called_once()
 
@@ -207,11 +229,15 @@ class TestHandleBlockedToolCall:
         agent = _make_agent()
         response = _make_response()
         agent._handle_blocked_tool_call(
-            tool_name="shell", tool_args={},
+            tool_name="shell",
+            tool_args={},
             tool_call_id="c1",
             native_tool_calls=[],  # falsy → ReAct path
-            step_num=0, tool_calls=0, tokens=10,
-            steps=[], response=response,
+            step_num=0,
+            tool_calls=0,
+            tokens=10,
+            steps=[],
+            response=response,
         )
         agent.memory.add.assert_called_once_with("user", "Observation: blocked: repeat")
 
@@ -220,10 +246,15 @@ class TestHandleBlockedToolCall:
         agent._error_tracker.should_terminate = MagicMock(return_value=True)
         response = _make_response()
         _, should_term = agent._handle_blocked_tool_call(
-            tool_name="shell", tool_args={},
-            tool_call_id="c1", native_tool_calls=[],
-            step_num=0, tool_calls=0, tokens=10,
-            steps=[], response=response,
+            tool_name="shell",
+            tool_args={},
+            tool_call_id="c1",
+            native_tool_calls=[],
+            step_num=0,
+            tool_calls=0,
+            tokens=10,
+            steps=[],
+            response=response,
         )
         assert should_term is True
         response.mark_failed.assert_called_once()
@@ -232,10 +263,15 @@ class TestHandleBlockedToolCall:
         agent = _make_agent()
         response = _make_response()
         _, should_term = agent._handle_blocked_tool_call(
-            tool_name="shell", tool_args={},
-            tool_call_id="c1", native_tool_calls=[],
-            step_num=0, tool_calls=0, tokens=10,
-            steps=[], response=response,
+            tool_name="shell",
+            tool_args={},
+            tool_call_id="c1",
+            native_tool_calls=[],
+            step_num=0,
+            tool_calls=0,
+            tokens=10,
+            steps=[],
+            response=response,
         )
         assert should_term is False
 
@@ -243,6 +279,7 @@ class TestHandleBlockedToolCall:
 # ===========================================================================
 # Phase 4c: _reject_for_tool_choice
 # ===========================================================================
+
 
 class TestRejectForToolChoice:
 
@@ -252,8 +289,7 @@ class TestRejectForToolChoice:
         agent.memory.add.assert_any_call("assistant", "I will answer directly")
 
     def test_specific_tool_choice_mentions_tool_name(self):
-        agent = _make_agent(tool_choice_type=ToolChoiceType.SPECIFIC,
-                            tool_choice_name="calculator")
+        agent = _make_agent(tool_choice_type=ToolChoiceType.SPECIFIC, tool_choice_name="calculator")
         agent._reject_for_tool_choice("some content")
         # The user message should mention "calculator"
         calls = [c.args[1] for c in agent.memory.add.call_args_list if c.args[0] == "user"]
@@ -293,6 +329,7 @@ class TestRejectForToolChoice:
 # ===========================================================================
 # Source-level verification: no duplicated blocks remain
 # ===========================================================================
+
 
 class TestNoRemainingDuplication:
 
@@ -358,8 +395,7 @@ class TestNoRemainingDuplication:
         # The helper itself has this call, but the methods should not
         # (they delegate to the helper)
         assert "self._error_tracker.format_repeat_block" not in src, (
-            "_run_core still calls format_repeat_block directly — Phase 4b "
-            "missed an instance"
+            "_run_core still calls format_repeat_block directly — Phase 4b " "missed an instance"
         )
 
     def test_no_remaining_duplicated_blocked_msg_blocks_in_streaming(self):
@@ -371,8 +407,7 @@ class TestNoRemainingDuplication:
         only calls to _reject_for_tool_choice."""
         src = inspect.getsource(Agent._run_core)
         assert "You must use the '{self.tool_choice.name}'" not in src, (
-            "_run_core still has inline rejection messages — Phase 4c "
-            "missed an instance"
+            "_run_core still has inline rejection messages — Phase 4c " "missed an instance"
         )
 
     def test_no_remaining_duplicated_rejection_messages_in_streaming(self):

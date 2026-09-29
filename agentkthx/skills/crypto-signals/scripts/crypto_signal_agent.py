@@ -19,8 +19,8 @@ import math
 import os
 import sys
 import time
-import urllib.request
 import urllib.error
+import urllib.request
 
 USER_AGENT = "AgentKthx-CryptoSignals/1.0"
 COINGECKO = "https://api.coingecko.com/api/v3"
@@ -32,12 +32,12 @@ LOG_FILE = os.path.join(os.getcwd(), "crypto_signals_log.json")
 
 # ─── HTTP ────────────────────────────────────────────────────────────────────
 
+
 def fetch_json(url, timeout=15):
     """Fetch JSON from URL. Returns dict with _error key on failure."""
-    req = urllib.request.Request(url, headers={
-        "User-Agent": USER_AGENT,
-        "Accept": "application/json"
-    })
+    req = urllib.request.Request(
+        url, headers={"User-Agent": USER_AGENT, "Accept": "application/json"}
+    )
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode())
@@ -46,7 +46,9 @@ def fetch_json(url, timeout=15):
     except Exception as e:
         return {"_error": True, "_status": 0, "_message": str(e)}
 
+
 # ─── Data Fetching ──────────────────────────────────────────────────────────
+
 
 def fetch_crypto_prices():
     """Fetch current BTC + ETH prices. CoinGecko primary, CoinCap fallback."""
@@ -71,7 +73,7 @@ def fetch_crypto_prices():
                     "usd_24h_change": _float(asset.get("changePercent24Hr", 0)),
                     "usd_24h_vol": _float(asset.get("volumeUsd24Hr", 0)),
                     "usd_market_cap": _float(asset.get("marketCapUsd", 0)),
-                    "_source": "coincap"
+                    "_source": "coincap",
                 }
             return result
         return data
@@ -85,10 +87,7 @@ def fetch_crypto_prices():
 
 def fetch_history(coin_id, days=30):
     """Fetch 30-day price history from CoinGecko."""
-    url = (
-        f"{COINGECKO}/coins/{coin_id}/market_chart"
-        f"?vs_currency=usd&days={days}&interval=daily"
-    )
+    url = f"{COINGECKO}/coins/{coin_id}/market_chart" f"?vs_currency=usd&days={days}&interval=daily"
     data = fetch_json(url)
     if data.get("_error"):
         return data
@@ -115,12 +114,14 @@ def fetch_stock(ticker):
             "price": _round2(current),
             "change_pct": change,
             "market_cap": meta.get("marketCap"),
-            "_source": "yahoo"
+            "_source": "yahoo",
         }
     except (KeyError, IndexError, TypeError) as e:
         return {"_error": True, "_message": f"Parse error: {e}"}
 
+
 # ─── Technical Indicators ──────────────────────────────────────────────────
+
 
 def compute_rsi(prices, period=14):
     if len(prices) < period + 1:
@@ -211,7 +212,9 @@ def full_analysis(prices):
         "bb_position": bb_pos,
     }
 
+
 # ─── Signal Generation ──────────────────────────────────────────────────────
+
 
 def generate_signal(analysis):
     """Score-based signal: STRONG BUY / BUY / HOLD / SELL / STRONG SELL."""
@@ -228,44 +231,60 @@ def generate_signal(analysis):
     sell = 0
 
     # RSI
-    if rsi < 25: buy += 3
-    elif rsi < 30: buy += 2
-    elif rsi < 35: buy += 1
-    elif rsi > 75: sell += 3
-    elif rsi > 70: sell += 2
-    elif rsi > 65: sell += 1
+    if rsi < 25:
+        buy += 3
+    elif rsi < 30:
+        buy += 2
+    elif rsi < 35:
+        buy += 1
+    elif rsi > 75:
+        sell += 3
+    elif rsi > 70:
+        sell += 2
+    elif rsi > 65:
+        sell += 1
 
     # Bollinger position
     if bb_pos is not None:
-        if bb_pos < 0.1: buy += 2
-        elif bb_pos < 0.2: buy += 1
-        elif bb_pos > 0.9: sell += 2
-        elif bb_pos > 0.8: sell += 1
+        if bb_pos < 0.1:
+            buy += 2
+        elif bb_pos < 0.2:
+            buy += 1
+        elif bb_pos > 0.9:
+            sell += 2
+        elif bb_pos > 0.8:
+            sell += 1
 
     # MACD histogram
     if macd_hist is not None:
-        if macd_hist > 0: buy += 1
-        elif macd_hist < 0: sell += 1
+        if macd_hist > 0:
+            buy += 1
+        elif macd_hist < 0:
+            sell += 1
 
     # Price vs SMA
     if sma and price:
-        if price < sma * 0.98: buy += 1
-        elif price > sma * 1.02: sell += 1
+        if price < sma * 0.98:
+            buy += 1
+        elif price > sma * 1.02:
+            sell += 1
 
-    if buy >= 4: sig, conf = "STRONG BUY", "HIGH"
-    elif buy >= 2: sig, conf = "BUY", "MEDIUM"
-    elif sell >= 4: sig, conf = "STRONG SELL", "HIGH"
-    elif sell >= 2: sig, conf = "SELL", "MEDIUM"
-    else: sig, conf = "HOLD", "MEDIUM"
+    if buy >= 4:
+        sig, conf = "STRONG BUY", "HIGH"
+    elif buy >= 2:
+        sig, conf = "BUY", "MEDIUM"
+    elif sell >= 4:
+        sig, conf = "STRONG SELL", "HIGH"
+    elif sell >= 2:
+        sig, conf = "SELL", "MEDIUM"
+    else:
+        sig, conf = "HOLD", "MEDIUM"
 
-    return {
-        "signal": sig,
-        "confidence": conf,
-        "buy_score": buy,
-        "sell_score": sell
-    }
+    return {"signal": sig, "confidence": conf, "buy_score": buy, "sell_score": sell}
+
 
 # ─── Logging ────────────────────────────────────────────────────────────────
+
 
 def append_log(signals_dict, portfolio_value):
     """Append signal entry to crypto_signals_log.json."""
@@ -286,6 +305,7 @@ def append_log(signals_dict, portfolio_value):
     with open(LOG_FILE, "w") as f:
         json.dump(existing, f, indent=2)
 
+
 def read_log():
     """Read signal history from crypto_signals_log.json."""
     if not os.path.exists(LOG_FILE):
@@ -296,7 +316,9 @@ def read_log():
     except (json.JSONDecodeError, IOError):
         return []
 
+
 # ─── Main Commands ──────────────────────────────────────────────────────────
+
 
 def cmd_run():
     """Full analysis: fetch → compute → signal → write crypto_report.json"""
@@ -322,10 +344,6 @@ def cmd_run():
             analysis[coin_id] = {"error": "Failed to fetch history"}
 
     # Build the report
-    btc_price = prices.get("BTC", {}).get("usd", 0)
-    eth_price = prices.get("ETH", {}).get("usd", 0)
-    btc_change = prices.get("BTC", {}).get("usd_24h_change", 0)
-    eth_change = prices.get("ETH", {}).get("usd_24h_change", 0)
 
     # Estimate portfolio value ($5 each at purchase, track current)
     # We don't know purchase price, so show allocation as $5 flat
@@ -340,8 +358,8 @@ def cmd_run():
         "portfolio": {
             "BTC": {"allocated": 5.00, "signal": btc_signal},
             "ETH": {"allocated": 5.00, "signal": eth_signal},
-            "total_allocated": 10.00
-        }
+            "total_allocated": 10.00,
+        },
     }
 
     # Write report
@@ -376,7 +394,9 @@ def cmd_history():
     log = read_log()
     print(json.dumps(log, indent=2))
 
+
 # ─── Helpers ────────────────────────────────────────────────────────────────
+
 
 def _float(v):
     try:
@@ -384,19 +404,24 @@ def _float(v):
     except (TypeError, ValueError):
         return 0.0
 
+
 def _round2(v):
     return round(float(v), 2) if v is not None else None
+
 
 def _round3(v):
     return round(float(v), 3) if v is not None else None
 
+
 def _round4(v):
     return round(float(v), 4) if v is not None else None
+
 
 def _pct_change(current, previous):
     if not previous:
         return 0.0
     return round((current - previous) / previous * 100, 2)
+
 
 # ─── Entry Point ────────────────────────────────────────────────────────────
 
@@ -408,18 +433,19 @@ COMMANDS = {
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print(json.dumps({
-            "error": "Usage: python crypto_signal_agent.py <command>",
-            "commands": list(COMMANDS.keys())
-        }))
+        print(
+            json.dumps(
+                {
+                    "error": "Usage: python crypto_signal_agent.py <command>",
+                    "commands": list(COMMANDS.keys()),
+                }
+            )
+        )
         sys.exit(1)
 
     cmd = sys.argv[1]
     if cmd in COMMANDS:
         COMMANDS[cmd]()
     else:
-        print(json.dumps({
-            "error": f"Unknown command: {cmd}",
-            "available": list(COMMANDS.keys())
-        }))
+        print(json.dumps({"error": f"Unknown command: {cmd}", "available": list(COMMANDS.keys())}))
         sys.exit(1)

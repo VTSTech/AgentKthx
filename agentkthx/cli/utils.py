@@ -12,19 +12,16 @@ from __future__ import annotations
 
 import json
 import os
-import sys
-
-from ..backends import get_backend
-from ..colors import yellow, dim, green, cyan, bright_green, red
-from ..model_discovery import match_models, get_models
 from pathlib import Path
 
-
-
+from ..backends import get_backend
+from ..colors import bright_green, cyan, dim, green, red, yellow
+from ..model_discovery import get_models, match_models
 
 # ============================================================================
 # Model Matching
 # ============================================================================
+
 
 def resolve_model_pattern(
     pattern: str,
@@ -33,9 +30,9 @@ def resolve_model_pattern(
 ) -> str | list[str]:
     """
     Resolve a model pattern to actual model name(s).
-    
+
     Shows helpful output when multiple models match.
-    
+
     Parameters
     ----------
     pattern : str
@@ -44,7 +41,7 @@ def resolve_model_pattern(
         Backend to use for model discovery
     allow_multiple : bool
         If True, return all matches; if False, return first match
-    
+
     Returns
     -------
     str or list[str]
@@ -52,7 +49,7 @@ def resolve_model_pattern(
     """
     backend = get_backend(backend_name)
     matches = match_models(pattern, backend=backend)
-    
+
     if not matches:
         print(f"{red('Error:')} No models found matching '{pattern}'")
         available = get_models(client=backend)
@@ -63,15 +60,15 @@ def resolve_model_pattern(
             if len(available) > 10:
                 print(f"  {dim(f'... and {len(available) - 10} more')}")
         return [] if allow_multiple else ""
-    
+
     # If allow_multiple, always return a list
     if allow_multiple:
         return matches
-    
+
     # Single match - return as string
     if len(matches) == 1:
         return matches[0]
-    
+
     # Multiple matches - show and use first
     print(f"{yellow('Multiple models match')} '{pattern}':")
     for i, m in enumerate(matches[:5]):
@@ -81,8 +78,6 @@ def resolve_model_pattern(
         print(f"    {dim(f'... and {len(matches) - 5} more')}")
     print(f"{dim('Using first match:')} {cyan(matches[0])}")
     return matches[0]
-
-
 
 
 def _print_agent_steps(result, debug: bool = False, show_reasoning: bool = False) -> None:
@@ -131,24 +126,31 @@ def _print_agent_steps(result, debug: bool = False, show_reasoning: bool = False
             if len(result_str) > 200:
                 result_str = result_str[:197] + "..."
 
-            print(f"  {dim(f'[{i}]')} {cyan('tool')} {yellow(name)}"
-                  f" {dim(args_str)}")
+            print(f"  {dim(f'[{i}]')} {cyan('tool')} {yellow(name)}" f" {dim(args_str)}")
             if result_str:
                 print(f"      {dim('→')} {dim(result_str)}")
         elif step.type == StepResultType.FINAL_ANSWER:
             content = step.content[:100] + "..." if len(step.content) > 100 else step.content
             print(f"  {dim(f'[{i}]')} {cyan('answer')} {dim(content)}")
         elif step.type == StepResultType.ERROR:
-            error_msg = step.error[:100] + "..." if step.error and len(step.error) > 100 else step.error or "Error"
+            error_msg = (
+                step.error[:100] + "..."
+                if step.error and len(step.error) > 100
+                else step.error or "Error"
+            )
             print(f"  {dim(f'[{i}]')} {red('error')} {dim(error_msg)}")
         elif step.type == StepResultType.MAX_STEPS:
-            content = step.content[:100] + "..." if step.content and len(step.content) > 100 else step.content or "Max steps reached"
+            content = (
+                step.content[:100] + "..."
+                if step.content and len(step.content) > 100
+                else step.content or "Max steps reached"
+            )
             print(f"  {dim(f'[{i}]')} {yellow('max-steps')} {dim(content)}")
 
         # R05.8: Display reasoning_content (chain-of-thought) when --think is set.
         # The model emits this before its final answer on thinking-capable
         # backends (GLM-4.5+, o-series, deepseek-r1, qwen3 in thinking mode).
-        if show_reasoning and getattr(step, 'reasoning_content', ''):
+        if show_reasoning and getattr(step, "reasoning_content", ""):
             rc = step.reasoning_content
             # Indent and dim the reasoning so it's visually distinct from
             # the actual step content.
@@ -159,8 +161,6 @@ def _print_agent_steps(result, debug: bool = False, show_reasoning: bool = False
                     line = line[:197] + "..."
                 print(f"        {dim(line)}")
     print()  # blank line before final answer
-
-
 
 
 def _get_cache_dir() -> Path:
@@ -174,7 +174,7 @@ def _get_cache_dir() -> Path:
         # Unix: ~/.cache/agentkthx
         base = os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache"))
         cache_dir = Path(base) / "agentkthx"
-    
+
     cache_dir.mkdir(parents=True, exist_ok=True)
     return cache_dir
 
@@ -190,8 +190,6 @@ def _tool_status(status: str) -> str:
     elif status == "error":
         return red("✗ error")
     return dim("? untested")
-
-
 
 
 def _is_externally_managed_error(stderr: str) -> bool:

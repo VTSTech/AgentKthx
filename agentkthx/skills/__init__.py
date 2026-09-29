@@ -8,10 +8,10 @@ Specification: https://agentskills.io/
 
 Usage:
     from agentkthx.skills import SkillLoader, SkillRegistry
-    
+
     loader = SkillLoader()
     skill = loader.load("calculator")
-    
+
     registry = SkillRegistry()
     registry.add(skill)
     system_prompt += registry.to_system_prompt_addition()
@@ -20,12 +20,12 @@ Written by VTSTech — https://www.vts-tech.org — https://github.com/VTSTech/A
 """
 
 from .loader import (
-    SkillLoader,
-    Skill,
-    SkillRegistry,
     SPDX_LICENSES,
-    validate_spdx_license,
+    Skill,
+    SkillLoader,
+    SkillRegistry,
     parse_compatibility,
+    validate_spdx_license,
 )
 
 __all__ = [

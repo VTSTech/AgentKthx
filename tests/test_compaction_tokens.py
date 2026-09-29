@@ -18,21 +18,17 @@ compaction not firing" on long agentic runs:
 
 from __future__ import annotations
 
-import json
-from unittest.mock import MagicMock
-
-import pytest
-
 from agentkthx.agent import Agent
 from agentkthx.core.memory import Memory, MemoryConfig
-
 
 # ---------------------------------------------------------------------------
 # Bug 1: token estimation must snapshot, not accumulate
 # ---------------------------------------------------------------------------
 
+
 class _StubBackend:
     """Minimal backend stub returning zero usage (the :free case)."""
+
     backend_type = "stub"
     base_url = "stub://"
 
@@ -76,6 +72,7 @@ def test_snapshot_running_tokens_is_a_snapshot_not_cumulative():
 # Bug 2: _check_compaction must reset totals even when nothing was compacted
 # ---------------------------------------------------------------------------
 
+
 def test_check_compaction_resets_totals_even_when_nothing_compacted():
     """If _running_tokens_in was inflated externally (e.g., by the old
     cumulative += bug), calling _check_compaction on a small memory must
@@ -88,14 +85,15 @@ def test_check_compaction_resets_totals_even_when_nothing_compacted():
 
     agent._check_compaction()
     # After check on small memory, totals should reflect actual memory size
-    assert agent._running_tokens_in < 100, (
-        f"expected reset to small snapshot, got {agent._running_tokens_in}"
-    )
+    assert (
+        agent._running_tokens_in < 100
+    ), f"expected reset to small snapshot, got {agent._running_tokens_in}"
 
 
 # ---------------------------------------------------------------------------
 # Bug 3: compact_messages must truncate oversized messages in the recent window
 # ---------------------------------------------------------------------------
+
 
 def test_compact_messages_truncates_oversized_recent_messages():
     """A 200KB read_file result in the last 10 messages must be truncated
@@ -116,9 +114,9 @@ def test_compact_messages_truncates_oversized_recent_messages():
     # by more than the head+marker+tail overhead.
     for msg in mem._messages:
         if msg.role != "system":
-            assert len(msg.content or "") < 12_000, (
-                f"message still oversized: {len(msg.content)} chars"
-            )
+            assert (
+                len(msg.content or "") < 12_000
+            ), f"message still oversized: {len(msg.content)} chars"
 
 
 def test_compact_messages_leaves_normal_messages_intact():
@@ -150,9 +148,9 @@ def test_compact_messages_is_idempotent_on_truncated_messages():
 
     assert first >= 1
     assert second == 0, "second call should not re-truncate"
-    assert "[truncated " in mem._messages[0].content, (
-        "first call should have left a truncation marker"
-    )
+    assert (
+        "[truncated " in mem._messages[0].content
+    ), "first call should have left a truncation marker"
 
 
 # ---------------------------------------------------------------------------
@@ -161,6 +159,7 @@ def test_compact_messages_is_idempotent_on_truncated_messages():
 # path invokes _check_compaction at least once when multiple tool calls
 # are present in one assistant message.
 # ---------------------------------------------------------------------------
+
 
 def test_check_compaction_returns_int_and_does_not_raise_on_empty_memory():
     """Sanity: _check_compaction on an empty memory must not raise and
@@ -177,6 +176,7 @@ def test_check_compaction_returns_int_and_does_not_raise_on_empty_memory():
 # Integration: end-to-end memory-pressure scenario
 # ---------------------------------------------------------------------------
 
+
 def test_repeated_compaction_passes_do_not_grow_running_totals():
     """Simulate the audit-run scenario: many tool results added to memory,
     repeated _check_compaction calls. Running totals must track actual
@@ -188,9 +188,7 @@ def test_repeated_compaction_passes_do_not_grow_running_totals():
     # Add 20 large tool results — simulates a long agentic run
     for i in range(20):
         agent.memory.add("user", f"step {i}")
-        agent.memory.add_tool_result(
-            f"call_{i}", "shell", "X" * 2000  # ~500 tokens each
-        )
+        agent.memory.add_tool_result(f"call_{i}", "shell", "X" * 2000)  # ~500 tokens each
         agent._check_compaction()  # what the streaming loop does each step
 
     # After all this, running_tokens_in should be bounded — well under

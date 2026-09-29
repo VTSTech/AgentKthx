@@ -8,9 +8,7 @@ Written by VTSTech — https://www.vts-tech.org
 from __future__ import annotations
 
 import json
-
-from dataclasses import dataclass, field
-from typing import Any, Optional
+from dataclasses import dataclass
 
 
 @dataclass
@@ -32,6 +30,7 @@ class MemoryConfig:
     so the tier ships opt-in. Set it explicitly to enable (e.g.
     ``MemoryConfig(max_messages=200, max_tokens=100000)``).
     """
+
     max_messages: int = 50
     max_tokens: int = 0
     summarization_threshold: float = 0.8
@@ -42,6 +41,7 @@ class MemoryConfig:
 @dataclass
 class Message:
     """A single message in the conversation."""
+
     role: str
     content: str
     tool_calls: list[dict] | None = None
@@ -51,6 +51,7 @@ class Message:
     def to_dict(self) -> dict:
         """Convert to dictionary for API calls."""
         import json
+
         result = {"role": self.role, "content": self.content}
         if self.tool_calls:
             # Convert internal format to OpenAI ChatCompletions API format
@@ -72,7 +73,7 @@ class Message:
                         "function": {
                             "name": func.get("name", ""),
                             "arguments": args,
-                        }
+                        },
                     }
                     openai_tool_calls.append(openai_tc)
                 else:
@@ -87,7 +88,7 @@ class Message:
                         "function": {
                             "name": tc.get("name", ""),
                             "arguments": args,
-                        }
+                        },
                     }
                     openai_tool_calls.append(openai_tc)
             result["tool_calls"] = openai_tool_calls
@@ -251,8 +252,7 @@ class Memory:
 
         # ---- pass 2: fill dangling calls with placeholder results ----
         answered: set[str] = {
-            m.tool_call_id for m in cleaned
-            if m.role == "tool" and m.tool_call_id
+            m.tool_call_id for m in cleaned if m.role == "tool" and m.tool_call_id
         }
         final: list[Message] = []
         i = 0
@@ -275,17 +275,19 @@ class Memory:
                     continue
                 cid = tc.get("id", "")
                 if cid and cid not in answered:
-                    final.append(Message(
-                        role="tool",
-                        content=(
-                            "Error: no result was recorded for this tool "
-                            "call (the run was interrupted before it "
-                            "completed). Continue, but do not retry it "
-                            "blindly."
-                        ),
-                        tool_call_id=cid,
-                        name=tc.get("name"),
-                    ))
+                    final.append(
+                        Message(
+                            role="tool",
+                            content=(
+                                "Error: no result was recorded for this tool "
+                                "call (the run was interrupted before it "
+                                "completed). Continue, but do not retry it "
+                                "blindly."
+                            ),
+                            tool_call_id=cid,
+                            name=tc.get("name"),
+                        )
+                    )
                     answered.add(cid)
             i = j
 
@@ -335,9 +337,7 @@ class Memory:
         """
         # ---- tier 1: message-count window ----
         if len(self._messages) > self.config.max_messages:
-            keep_count = max(1, int(
-                self.config.max_messages * self.config.summarization_threshold
-            ))
+            keep_count = max(1, int(self.config.max_messages * self.config.summarization_threshold))
 
             systems = [m for m in self._messages if m.role == "system"]
             non_system = [m for m in self._messages if m.role != "system"]
@@ -372,9 +372,7 @@ class Memory:
         # Slide to the summarization threshold (mirrors the count tier's
         # headroom approach so the next few adds don't immediately
         # re-trigger pruning), keeping at least one message.
-        target = max(1, int(
-            self.config.max_tokens * self.config.summarization_threshold
-        ))
+        target = max(1, int(self.config.max_tokens * self.config.summarization_threshold))
 
         drop = 0
         acc = total
@@ -437,9 +435,11 @@ class Memory:
         # in the last 10 messages used to bypass compaction entirely.
         if max_kept_msg_chars > 0:
             for msg in non_system:
-                if (msg.content
-                        and len(msg.content) > max_kept_msg_chars
-                        and "[truncated]" not in msg.content):
+                if (
+                    msg.content
+                    and len(msg.content) > max_kept_msg_chars
+                    and "[truncated]" not in msg.content
+                ):
                     # Keep head + tail so the agent retains both the
                     # start (often the most important context) and the
                     # end (recent output). For tool results the tail is

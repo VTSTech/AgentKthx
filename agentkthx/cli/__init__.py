@@ -35,68 +35,68 @@ from __future__ import annotations
 
 from .. import __version__  # noqa: F401  (was a cli module attribute pre-split)
 
-# ── banner ──
-from .banner import (
-    BANNER_ATOM_BRAILLE,
-    BANNER_ATOM_PLAIN,
-    _LAST_UPDATE_CHECK,
-    print_banner,
-    _run_update_check,
-    _print_update_notice,
-)
-
-# ── parser ──
-from .parser import create_parser, _make_confirm_callback
-
 # ── agent factory ──
 from .agent_factory import (
-    _init_acp,
-    _load_skills_prompt,
     _build_agent,
     _get_catalog_defaults,
+    _init_acp,
+    _load_skills_prompt,
     apply_model_switch,
 )
 
-# ── headers ──
-from .headers import (
-    _print_session_header,
-    _print_run_header,
-    _print_run_summary,
-)
-
-# ── utils ──
-from .utils import (
-    resolve_model_pattern,
-    _print_agent_steps,
-    _get_cache_dir,
-    _tool_status,
-    _is_externally_managed_error,
+# ── banner ──
+from .banner import (
+    _LAST_UPDATE_CHECK,
+    BANNER_ATOM_BRAILLE,
+    BANNER_ATOM_PLAIN,
+    _print_update_notice,
+    _run_update_check,
+    print_banner,
 )
 
 # ── commands ──
 from .commands import (
-    cmd_run,
-    cmd_chat,
     cmd_agent,
-    cmd_models,
-    cmd_tools,
-    cmd_test,
-    cmd_turbo,
-    cmd_version,
+    cmd_chat,
     cmd_config,
     cmd_modelfile,
+    cmd_models,
+    cmd_plugins,
+    cmd_run,
+    cmd_sessions,
     cmd_skills,
     cmd_soul,
-    cmd_sessions,
-    cmd_plugins,
+    cmd_test,
+    cmd_tools,
+    cmd_turbo,
     cmd_update,
+    cmd_version,
 )
 
 # ── config helpers (shared with cmd_config; importable from cli pre-split) ──
 from .commands.config import _mask_key, _print_config_summary
 
+# ── headers ──
+from .headers import (
+    _print_run_header,
+    _print_run_summary,
+    _print_session_header,
+)
+
 # ── entry point ──
 from .main import main
+
+# ── parser ──
+from .parser import _make_confirm_callback, create_parser
+
+# ── utils ──
+from .utils import (
+    _get_cache_dir,
+    _is_externally_managed_error,
+    _print_agent_steps,
+    _tool_status,
+    resolve_model_pattern,
+)
 
 __all__ = [
     "BANNER_ATOM_BRAILLE",

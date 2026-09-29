@@ -11,15 +11,15 @@ Written by VTSTech — https://www.vts-tech.org
 
 from __future__ import annotations
 
+from ..config import AGENTKTHX_BACKEND, LLAMA_SERVER_BASE_URL, OLLAMA_BASE_URL
+from ..core.types import ApiMode
 from .base import BaseBackend
-from .ollama import OllamaBackend
-from .llama_server import LlamaServerBackend
+
 # MAINT-02 (R07.05): expose CloudBackend so cloud plugin authors can
 # inherit from it instead of duplicating the cloud-backend boilerplate.
 from .cloud_base import CloudBackend
-from ..config import AGENTKTHX_BACKEND, OLLAMA_BASE_URL, LLAMA_SERVER_BASE_URL
-from ..core.types import ApiMode
-
+from .llama_server import LlamaServerBackend
+from .ollama import OllamaBackend
 
 # ---------------------------------------------------------------------------
 # Native backend registry (always available, no plugin overhead)
@@ -40,6 +40,7 @@ def _ensure_plugin(name: str) -> None:
     scan (e.g. ``"test-backend"`` → ``"test-plugin"``).
     """
     from ..plugins import get_plugin_manager
+
     pm = get_plugin_manager()
     if pm.is_loaded(name):
         return  # already loaded
@@ -53,18 +54,17 @@ def _ensure_plugin(name: str) -> None:
     plugin = pm.load(plugin_name)
     if plugin is None:
         raise ValueError(
-            f"Cannot load backend '{name}'. "
-            f"Plugin '{plugin_name}' not found or failed to load."
+            f"Cannot load backend '{name}'. " f"Plugin '{plugin_name}' not found or failed to load."
         )
     # Plugin should have registered its backend via register_backend().
     # Verify it's actually available now.
     if pm.get_backend_class(name) is None:
-        raise ValueError(
-            f"Plugin '{plugin_name}' loaded but did not register a backend class."
-        )
+        raise ValueError(f"Plugin '{plugin_name}' loaded but did not register a backend class.")
 
 
-def get_backend(name: str, timeout: int | None = None, api_mode: ApiMode | str | None = None, **kwargs) -> BaseBackend:
+def get_backend(
+    name: str, timeout: int | None = None, api_mode: ApiMode | str | None = None, **kwargs
+) -> BaseBackend:
     """
     Get a backend instance by name.
 
@@ -91,12 +91,12 @@ def get_backend(name: str, timeout: int | None = None, api_mode: ApiMode | str |
     if backend_class is None:
         _ensure_plugin(name_lower)
         from ..plugins import get_plugin_manager
+
         pm = get_plugin_manager()
         backend_class = pm.get_backend_class(name_lower)
         if backend_class is None:
             raise ValueError(
-                f"Unknown backend: '{name}'. "
-                f"Available native: {list(_BACKENDS.keys())}"
+                f"Unknown backend: '{name}'. " f"Available native: {list(_BACKENDS.keys())}"
             )
 
     # Pass appropriate base_url if not provided
@@ -122,7 +122,9 @@ def get_backend(name: str, timeout: int | None = None, api_mode: ApiMode | str |
     return backend_class(**kwargs)
 
 
-def get_default_backend(name: str | None = None, api_mode: ApiMode | str | None = None, timeout: int | None = None) -> BaseBackend:
+def get_default_backend(
+    name: str | None = None, api_mode: ApiMode | str | None = None, timeout: int | None = None
+) -> BaseBackend:
     """
     Get a default backend instance.
 
@@ -163,6 +165,7 @@ def get_backend_choices() -> list[str]:
     valid CLI choices.
     """
     from ..plugins import get_plugin_manager
+
     pm = get_plugin_manager()
     # R07: delegate to PluginManager.get_backend_choices() so plugin-
     # registered aliases (e.g. "hf" → "huggingface") are surfaced as

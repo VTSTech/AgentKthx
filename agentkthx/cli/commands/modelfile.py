@@ -7,8 +7,9 @@ from __future__ import annotations
 import argparse
 
 from ...backends import get_backend
-from ...colors import bold, dim, cyan, red
+from ...colors import bold, cyan, dim, red
 from ...config import get_config
+
 
 def cmd_modelfile(args: argparse.Namespace) -> int:
     """Show model's Modelfile system prompt and other info."""
@@ -27,7 +28,9 @@ def cmd_modelfile(args: argparse.Namespace) -> int:
         return 1
 
     model = args.model or config.default_model
-    print(bold(f"\n⚛️ AgentKthx Modelfile") + dim(" · Written by VTSTech · https://kthx.vts-tech.org"))
+    print(
+        bold("\n⚛️ AgentKthx Modelfile") + dim(" · Written by VTSTech · https://kthx.vts-tech.org")
+    )
     print()
 
     try:

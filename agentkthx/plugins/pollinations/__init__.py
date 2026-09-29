@@ -30,6 +30,7 @@ def register(manager) -> None:
     produce identical backend instances.
     """
     from .pollinations import PollinationsBackend
+
     manager.register_backend("pollinations", PollinationsBackend)
     manager.register_backend("poll", PollinationsBackend, alias_of="pollinations")
 

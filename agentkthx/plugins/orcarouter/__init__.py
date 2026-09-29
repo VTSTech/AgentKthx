@@ -25,6 +25,7 @@ def register(manager) -> None:
     fully interchangeable.
     """
     from .orcarouter import OrcaRouterBackend
+
     manager.register_backend("orcarouter", OrcaRouterBackend)
     manager.register_backend("orca", OrcaRouterBackend, alias_of="orcarouter")
 

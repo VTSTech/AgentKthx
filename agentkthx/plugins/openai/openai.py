@@ -93,7 +93,6 @@ from agentkthx.backends.openai_compat import OpenAICompatibleBackend
 from agentkthx.config import (
     OPENAI_API_KEY,
     OPENAI_BASE_URL,
-    OPENAI_DEFAULT_MODEL,
     OPENAI_FREE_FALLBACK_MODEL,
     OPENAI_FREE_ONLY,
     OPENAI_ORGANIZATION_ID,
@@ -103,7 +102,6 @@ from agentkthx.config import (
 )
 from agentkthx.core.models import Tool
 from agentkthx.core.types import ApiMode, BackendType, ToolSupportLevel
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Static model catalog — fallback when /v1/models is unreachable
@@ -121,12 +119,12 @@ OPENAI_MODELS: dict[str, dict] = {
         "max_completion_tokens": 65_536,
         "supports_thinking": True,
         "supports_reasoning_effort": True,
-        "supports_reasoning_mode": True,        # standard + pro
+        "supports_reasoning_mode": True,  # standard + pro
         "supports_function_calling": True,
         "supports_parallel_function_calling": True,
         "supports_response_format_json_schema": True,
-        "supports_multimodal_input": True,     # text, image, audio, file
-        "supports_multimodal_output": True,    # text, audio
+        "supports_multimodal_input": True,  # text, image, audio, file
+        "supports_multimodal_output": True,  # text, audio
         "supports_web_search_tool": True,
         "supports_file_search_tool": True,
         "supports_code_interpreter_tool": True,
@@ -171,14 +169,13 @@ OPENAI_MODELS: dict[str, dict] = {
         "supports_web_search_tool": True,
         "supports_file_search_tool": True,
         "supports_code_interpreter_tool": True,
-        "supports_computer_use_tool": False,    # not supported on Luna
+        "supports_computer_use_tool": False,  # not supported on Luna
         "family": "gpt-6",
         "tier": "lite",
         "standard_input_per_1m": 0.10,
         "standard_output_per_1m": 0.50,
-        "free_tier_eligible": True,             # covered by monthly credit
+        "free_tier_eligible": True,  # covered by monthly credit
     },
-
     # === GPT-5.6 family — Daybreak program ===
     "gpt-5.6-sol": {  # alias: gpt-daybreak-blue-latest
         "context_length": 200_000,
@@ -194,7 +191,6 @@ OPENAI_MODELS: dict[str, dict] = {
         "standard_input_per_1m": 4.00,
         "standard_output_per_1m": 20.00,
     },
-
     # === GPT-5.x family — legacy but still served ===
     "gpt-5.5": {
         "context_length": 200_000,
@@ -228,7 +224,6 @@ OPENAI_MODELS: dict[str, dict] = {
         "standard_input_per_1m": 1.75,
         "standard_output_per_1m": 14.00,
     },
-
     # === GPT-4o family — legacy chat models (no reasoning) ===
     "gpt-4o": {
         "context_length": 128_000,
@@ -237,8 +232,8 @@ OPENAI_MODELS: dict[str, dict] = {
         "supports_function_calling": True,
         "supports_parallel_function_calling": True,
         "supports_response_format_json_schema": True,
-        "supports_multimodal_input": True,        # text, image, audio
-        "supports_multimodal_output": True,       # text, audio
+        "supports_multimodal_input": True,  # text, image, audio
+        "supports_multimodal_output": True,  # text, audio
         "supports_web_search_tool": True,
         "family": "gpt-4o",
         "tier": "standard",
@@ -256,7 +251,7 @@ OPENAI_MODELS: dict[str, dict] = {
         "free_tier_eligible": True,
     },
     "gpt-4.1-mini": {
-        "context_length": 1_000_000,             # 1M tokens
+        "context_length": 1_000_000,  # 1M tokens
         "max_completion_tokens": 32_768,
         "supports_thinking": False,
         "supports_function_calling": True,
@@ -267,7 +262,6 @@ OPENAI_MODELS: dict[str, dict] = {
         "tier": "mini",
         "free_tier_eligible": True,
     },
-
     # === Specialized models ===
     "chat-latest": {  # ChatGPT backend model
         "context_length": 128_000,
@@ -279,14 +273,13 @@ OPENAI_MODELS: dict[str, dict] = {
         "standard_input_per_1m": 5.00,
         "standard_output_per_1m": 30.00,
     },
-
     # === Realtime / audio / image models (not chat backends — listed for completeness) ===
     "gpt-realtime-2.1": {
         "context_length": 128_000,
         "family": "realtime",
         "supports_streaming": True,
-        "supports_multimodal_input": True,        # text, audio, image
-        "supports_multimodal_output": True,       # text, audio
+        "supports_multimodal_input": True,  # text, audio, image
+        "supports_multimodal_output": True,  # text, audio
         "tier": "standard",
     },
     "gpt-realtime-2.1-mini": {
@@ -298,7 +291,6 @@ OPENAI_MODELS: dict[str, dict] = {
         "tier": "mini",
         "free_tier_eligible": True,
     },
-
     # === o-series — reasoning models (added R07.03 polish, discovered via live API) ===
     "o1": {
         "context_length": 200_000,
@@ -340,7 +332,6 @@ OPENAI_MODELS: dict[str, dict] = {
         "family": "o-series",
         "tier": "mini",
     },
-
     # === GPT-5.0 family — original gpt-5 release (discovered via live API) ===
     "gpt-5": {
         "context_length": 200_000,
@@ -382,7 +373,6 @@ OPENAI_MODELS: dict[str, dict] = {
     },
     # R07.13: gpt-5-codex retired — shutdown_date 2026-07-23 (68 days past at cleanup time)
     # R07.13: gpt-5.1-codex retired — shutdown_date 2026-07-23 (68 days past at cleanup time)
-
     # === GPT-5.1 family (discovered via live API) ===
     "gpt-5.1": {
         "context_length": 200_000,
@@ -393,7 +383,6 @@ OPENAI_MODELS: dict[str, dict] = {
         "family": "gpt-5",
         "tier": "standard",
     },
-
     # === GPT-5.2 family (discovered via live API) ===
     "gpt-5.2": {
         "context_length": 200_000,
@@ -413,7 +402,6 @@ OPENAI_MODELS: dict[str, dict] = {
         "family": "gpt-5",
         "tier": "pro",
     },
-
     # === GPT-5.4 expanded family (discovered via live API — had only base 5.4) ===
     "gpt-5.4-mini": {
         "context_length": 128_000,
@@ -440,7 +428,6 @@ OPENAI_MODELS: dict[str, dict] = {
         "family": "gpt-5",
         "tier": "pro",
     },
-
     # === GPT-5.5 pro variant (discovered via live API — had only base 5.5) ===
     "gpt-5.5-pro": {
         "context_length": 200_000,
@@ -451,7 +438,6 @@ OPENAI_MODELS: dict[str, dict] = {
         "family": "gpt-5",
         "tier": "pro",
     },
-
     # === GPT-5.6 Daybreak expanded (discovered via live API — had only sol+cyber) ===
     "gpt-5.6-luna": {
         "context_length": 200_000,
@@ -471,7 +457,6 @@ OPENAI_MODELS: dict[str, dict] = {
         "family": "gpt-5.6",
         "tier": "daybreak",
     },
-
     # === Legacy GPT-3.5 (still served, chat-capable via /chat/completions) ===
     "gpt-3.5-turbo": {
         "context_length": 16_384,
@@ -489,10 +474,9 @@ OPENAI_MODELS: dict[str, dict] = {
         "family": "gpt-3.5",
         "tier": "legacy",
     },
-
     # === GPT-4.1 family (discovered via live API — had only gpt-4.1-mini) ===
     "gpt-4.1": {
-        "context_length": 1_047_576,           # ~1M tokens
+        "context_length": 1_047_576,  # ~1M tokens
         "max_completion_tokens": 32_768,
         "supports_thinking": False,
         "supports_function_calling": True,
@@ -547,26 +531,30 @@ OPENAI_FREE_MODEL_WHITELIST: frozenset[str] = frozenset()
 # ─────────────────────────────────────────────────────────────────────────────
 # Service tier values accepted by OpenAI's /v1/chat/completions endpoint
 # (verified Sept 2026 via platform.openai.com/docs/api-reference/chat).
-OPENAI_SERVICE_TIER_VALUES: frozenset[str] = frozenset({
-    "auto",       # default — uses project's configured tier
-    "default",    # standard pricing and performance
-    "flex",       # 50% off, best-effort async
-    "scale",      # custom — reserved capacity
-    "priority",   # 2x premium — fastest latency (renamed from "fast" July 30 2026)
-    "fast",       # alias for priority
-})
+OPENAI_SERVICE_TIER_VALUES: frozenset[str] = frozenset(
+    {
+        "auto",  # default — uses project's configured tier
+        "default",  # standard pricing and performance
+        "flex",  # 50% off, best-effort async
+        "scale",  # custom — reserved capacity
+        "priority",  # 2x premium — fastest latency (renamed from "fast" July 30 2026)
+        "fast",  # alias for priority
+    }
+)
 
 # Reasoning effort values accepted by OpenAI for thinking-capable models
 # (gpt-5.x+, gpt-6.x, o-series).
-OPENAI_REASONING_EFFORT_VALUES: frozenset[str] = frozenset({
-    "none",       # disable reasoning entirely (gpt-5.x only; gpt-6 rejects)
-    "minimal",    # brief reasoning, minimal tokens
-    "low",        # light reasoning (latency-sensitive)
-    "medium",     # balanced — default for gpt-5.5+, gpt-6.sol/luna
-    "high",       # deeper reasoning (complex planning, agentic tasks)
-    "xhigh",      # maximum reasoning (hard reasoning, deep planning)
-    "max",        # absolute maximum — use sparingly
-})
+OPENAI_REASONING_EFFORT_VALUES: frozenset[str] = frozenset(
+    {
+        "none",  # disable reasoning entirely (gpt-5.x only; gpt-6 rejects)
+        "minimal",  # brief reasoning, minimal tokens
+        "low",  # light reasoning (latency-sensitive)
+        "medium",  # balanced — default for gpt-5.5+, gpt-6.sol/luna
+        "high",  # deeper reasoning (complex planning, agentic tasks)
+        "xhigh",  # maximum reasoning (hard reasoning, deep planning)
+        "max",  # absolute maximum — use sparingly
+    }
+)
 
 # When OPENAI_FREE_ONLY is true, reasoning_effort is capped at this value
 # (reasoning tokens are billed at output rate; higher effort = more tokens =
@@ -594,15 +582,15 @@ OPENAI_FREE_ONLY_SERVICE_TIER_FORCED = "default"
 #   agentkthx models --backend openai 2>&1 | grep -i "<pattern>"
 # and confirm every result is genuinely non-chat.
 _NON_CHAT_PATTERNS: tuple[str, ...] = (
-    "embedding",        # text-embedding-3-large, text-embedding-3-small, text-embedding-ada-002
-    "tts",              # tts-1, tts-1-hd, gpt-4o-mini-tts → /audio/speech
-    "transcribe",       # gpt-4o-transcribe, gpt-4o-mini-transcribe, gpt-transcribe, gpt-live-transcribe → /audio/transcriptions
-    "whisper",          # whisper-1 → legacy /audio/transcriptions
-    "image",            # gpt-image-1, gpt-image-2, gpt-image-2.5-flare, gpt-image-2.5-sunburst, chatgpt-image-latest → /images/generations
-    "sora",             # sora-2, sora-2-pro → video generation
-    "moderation",       # omni-moderation-latest, omni-moderation-2024-09-26 → /moderations
-    "babbage",          # babbage-002 → legacy /completions (not /chat/completions)
-    "davinci",          # davinci-002 → legacy /completions (not /chat/completions)
+    "embedding",  # text-embedding-3-large, text-embedding-3-small, text-embedding-ada-002
+    "tts",  # tts-1, tts-1-hd, gpt-4o-mini-tts → /audio/speech
+    "transcribe",  # gpt-4o-transcribe, gpt-4o-mini-transcribe, gpt-transcribe, gpt-live-transcribe → /audio/transcriptions
+    "whisper",  # whisper-1 → legacy /audio/transcriptions
+    "image",  # gpt-image-1, gpt-image-2, gpt-image-2.5-flare, gpt-image-2.5-sunburst, chatgpt-image-latest → /images/generations
+    "sora",  # sora-2, sora-2-pro → video generation
+    "moderation",  # omni-moderation-latest, omni-moderation-2024-09-26 → /moderations
+    "babbage",  # babbage-002 → legacy /completions (not /chat/completions)
+    "davinci",  # davinci-002 → legacy /completions (not /chat/completions)
 )
 
 
@@ -626,6 +614,7 @@ def _is_chat_model(model_id: str) -> bool:
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers (module-level so tests can import them directly)
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def _is_free_model(model_id: str) -> bool:
     """Check whether a model id is in the OPENAI_FREE_MODEL_WHITELIST.
@@ -672,6 +661,7 @@ def _is_insufficient_quota(err_str: str) -> bool:
 # ─────────────────────────────────────────────────────────────────────────────
 # Backend class
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class OpenAIBackend(OpenAICompatibleBackend):
     """Backend for the OpenAI Chat-Completions API.
@@ -773,8 +763,7 @@ class OpenAIBackend(OpenAICompatibleBackend):
         # after config.py has already been imported. Mirrors the
         # OpenRouterBackend pattern at openrouter.py:302.
         self.api_key: str = (
-            os.environ.get("OPENAI_API_KEY")
-            or OPENAI_API_KEY  # fall back to module-level
+            os.environ.get("OPENAI_API_KEY") or OPENAI_API_KEY  # fall back to module-level
         )
 
         # Detect token type and surface a warning for legacy sk- keys
@@ -782,30 +771,26 @@ class OpenAIBackend(OpenAICompatibleBackend):
         self._key_type: str = _detect_key_type(self.api_key)
         if self._key_type == "user" and os.environ.get("AGENTKTHX_DEBUG"):
             print(
-                f"  [OpenAI Debug] Legacy user API key detected (sk-...). "
-                f"Project API keys (sk-proj-...) are recommended for "
-                f"production — they support project-scoped billing and "
-                f"tighter permissions. See "
-                f"https://platform.openai.com/api-keys"
+                "  [OpenAI Debug] Legacy user API key detected (sk-...). "
+                "Project API keys (sk-proj-...) are recommended for "
+                "production — they support project-scoped billing and "
+                "tighter permissions. See "
+                "https://platform.openai.com/api-keys"
             )
         if self._key_type == "admin" and os.environ.get("AGENTKTHX_DEBUG"):
             print(
-                f"  [OpenAI Debug] Admin API key detected (sk-admin-...). "
-                f"Admin keys are for administration endpoints only (users, "
-                f"audit logs, projects) — they're not for inference calls. "
-                f"Use a project key (sk-proj-...) for chat completions."
+                "  [OpenAI Debug] Admin API key detected (sk-admin-...). "
+                "Admin keys are for administration endpoints only (users, "
+                "audit logs, projects) — they're not for inference calls. "
+                "Use a project key (sk-proj-...) for chat completions."
             )
 
         # Optional org/project headers — only set if env vars are populated
         # (relevant for sk-proj- and legacy sk- keys with multi-org accounts).
         self._organization_id: str = (
-            os.environ.get("OPENAI_ORGANIZATION_ID")
-            or OPENAI_ORGANIZATION_ID
+            os.environ.get("OPENAI_ORGANIZATION_ID") or OPENAI_ORGANIZATION_ID
         )
-        self._project_id: str = (
-            os.environ.get("OPENAI_PROJECT_ID")
-            or OPENAI_PROJECT_ID
-        )
+        self._project_id: str = os.environ.get("OPENAI_PROJECT_ID") or OPENAI_PROJECT_ID
 
         # ROB-06: Persisted safe max_tokens after a context-length 400.
         # When set, _get_model_defaults() returns this instead of the
@@ -925,8 +910,7 @@ class OpenAIBackend(OpenAICompatibleBackend):
         include models in ``OPENAI_FREE_MODEL_WHITELIST``.
         """
         current_time = time.time()
-        if (self._model_cache is not None
-                and current_time - self._cache_time < self._CACHE_TIMEOUT):
+        if self._model_cache is not None and current_time - self._cache_time < self._CACHE_TIMEOUT:
             return self._model_cache
 
         try:
@@ -958,31 +942,34 @@ class OpenAIBackend(OpenAICompatibleBackend):
             cached_names = {m["name"] for m in available_models}
             for name, info in OPENAI_MODELS.items():
                 if name not in cached_names:
-                    available_models.append({
-                        "name": name,
-                        "size": 0,
-                        "details": {
-                            "family": info.get("family", "unknown"),
-                            "backend": "openai",
-                            "context_length": info.get("context_length", 128_000),
-                            "max_completion_tokens": info.get("max_completion_tokens", 16_384),
-                            "supports_thinking": info.get("supports_thinking", False),
-                            "supports_function_calling": info.get("supports_function_calling", True),
-                            "supports_multimodal_input": info.get("supports_multimodal_input", False),
-                            "free_tier_eligible": info.get("free_tier_eligible", False),
-                            "owned_by": "openai",
-                            "standard_input_per_1m": info.get("standard_input_per_1m"),
-                            "standard_output_per_1m": info.get("standard_output_per_1m"),
-                            "tier": info.get("tier", "unknown"),
-                        },
-                    })
+                    available_models.append(
+                        {
+                            "name": name,
+                            "size": 0,
+                            "details": {
+                                "family": info.get("family", "unknown"),
+                                "backend": "openai",
+                                "context_length": info.get("context_length", 128_000),
+                                "max_completion_tokens": info.get("max_completion_tokens", 16_384),
+                                "supports_thinking": info.get("supports_thinking", False),
+                                "supports_function_calling": info.get(
+                                    "supports_function_calling", True
+                                ),
+                                "supports_multimodal_input": info.get(
+                                    "supports_multimodal_input", False
+                                ),
+                                "free_tier_eligible": info.get("free_tier_eligible", False),
+                                "owned_by": "openai",
+                                "standard_input_per_1m": info.get("standard_input_per_1m"),
+                                "standard_output_per_1m": info.get("standard_output_per_1m"),
+                                "tier": info.get("tier", "unknown"),
+                            },
+                        }
+                    )
 
             # OPENAI_FREE_ONLY: filter to whitelist only
             if OPENAI_FREE_ONLY:
-                available_models = [
-                    m for m in available_models
-                    if _is_free_model(m["name"])
-                ]
+                available_models = [m for m in available_models if _is_free_model(m["name"])]
 
             # MAINT-19 (R07.15): cache at CLASS level (type(self)) so every
             # instance of this backend shares one fetch per TTL window.
@@ -1012,24 +999,30 @@ class OpenAIBackend(OpenAICompatibleBackend):
 
             catalog_models: list[dict] = []
             for name, info in OPENAI_MODELS.items():
-                catalog_models.append({
-                    "name": name,
-                    "size": 0,
-                    "details": {
-                        "family": info.get("family", "unknown"),
-                        "backend": "openai",
-                        "context_length": info.get("context_length", 128_000),
-                        "max_completion_tokens": info.get("max_completion_tokens", 16_384),
-                        "supports_thinking": info.get("supports_thinking", False),
-                        "supports_function_calling": info.get("supports_function_calling", True),
-                        "supports_multimodal_input": info.get("supports_multimodal_input", False),
-                        "free_tier_eligible": info.get("free_tier_eligible", False),
-                        "owned_by": "openai",
-                        "standard_input_per_1m": info.get("standard_input_per_1m"),
-                        "standard_output_per_1m": info.get("standard_output_per_1m"),
-                        "tier": info.get("tier", "unknown"),
-                    },
-                })
+                catalog_models.append(
+                    {
+                        "name": name,
+                        "size": 0,
+                        "details": {
+                            "family": info.get("family", "unknown"),
+                            "backend": "openai",
+                            "context_length": info.get("context_length", 128_000),
+                            "max_completion_tokens": info.get("max_completion_tokens", 16_384),
+                            "supports_thinking": info.get("supports_thinking", False),
+                            "supports_function_calling": info.get(
+                                "supports_function_calling", True
+                            ),
+                            "supports_multimodal_input": info.get(
+                                "supports_multimodal_input", False
+                            ),
+                            "free_tier_eligible": info.get("free_tier_eligible", False),
+                            "owned_by": "openai",
+                            "standard_input_per_1m": info.get("standard_input_per_1m"),
+                            "standard_output_per_1m": info.get("standard_output_per_1m"),
+                            "tier": info.get("tier", "unknown"),
+                        },
+                    }
+                )
 
             if OPENAI_FREE_ONLY:
                 catalog_models = [m for m in catalog_models if _is_free_model(m["name"])]
@@ -1090,15 +1083,11 @@ class OpenAIBackend(OpenAICompatibleBackend):
                     details = cached["details"]
                     max_tokens = details.get("max_completion_tokens", 4096)
                     context_length = details.get("context_length", 128_000)
-                    return self._apply_max_tokens_cap(
-                        max_tokens, context_length, temperature=0.7
-                    )
+                    return self._apply_max_tokens_cap(max_tokens, context_length, temperature=0.7)
 
         max_tokens = info.get("max_completion_tokens", 4096) if info else 4096
         context_length = info.get("context_length", 128_000) if info else 128_000
-        return self._apply_max_tokens_cap(
-            max_tokens, context_length, temperature=0.7
-        )
+        return self._apply_max_tokens_cap(max_tokens, context_length, temperature=0.7)
 
     # ─────────────────────────────────────────────────────────────────────
     # 429 / 5xx retry helpers (mirrors OpenRouterBackend R06.54 / HuggingFaceBackend)
@@ -1226,6 +1215,7 @@ class OpenAIBackend(OpenAICompatibleBackend):
                             f"https://platform.openai.com/settings/billing."
                         )
                     import sys
+
                     print(
                         f"\n  \033[33m[OpenAI] Trial credit exhausted for "
                         f"'{current_model}' — falling back to "
@@ -1245,9 +1235,7 @@ class OpenAIBackend(OpenAICompatibleBackend):
                         ) as resp2:
                             return json.loads(resp2.read().decode("utf-8"))
                     except urllib.error.HTTPError as e2:
-                        error_body2 = (
-                            e2.read().decode("utf-8") if e2.fp else ""
-                        )
+                        error_body2 = e2.read().decode("utf-8") if e2.fp else ""
                         raise RuntimeError(
                             f"OpenAI: paid model '{current_model}' "
                             f"failed (insufficient_quota, trial credit "
@@ -1256,10 +1244,7 @@ class OpenAIBackend(OpenAICompatibleBackend):
                         )
 
                 # ---- 429 Rate Limit / transient 5xx: wait and retry ----
-                retryable = (
-                    status_code == 429
-                    or status_code in (502, 503, 504)
-                )
+                retryable = status_code == 429 or status_code in (502, 503, 504)
                 if retryable:
                     error_msg = (
                         "Rate limit exceeded"
@@ -1272,7 +1257,8 @@ class OpenAIBackend(OpenAICompatibleBackend):
                             inner = err_data["error"]
                             error_msg = (
                                 inner.get("message", inner)
-                                if isinstance(inner, dict) else str(inner)
+                                if isinstance(inner, dict)
+                                else str(inner)
                             )
                         elif "message" in err_data:
                             error_msg = err_data["message"]
@@ -1332,17 +1318,13 @@ class OpenAIBackend(OpenAICompatibleBackend):
                     if len(upstream_msg) > 500:
                         upstream_msg = upstream_msg[:500] + "..."
 
-                    raise RuntimeError(
-                        f"OpenAI API error {status_code}: {upstream_msg}"
-                    )
+                    raise RuntimeError(f"OpenAI API error {status_code}: {upstream_msg}")
 
             except urllib.error.URLError as e:
                 raise RuntimeError(f"OpenAI connection error: {e.reason}")
 
         # Should not reach here — the loop either returns or raises.
-        raise RuntimeError(
-            f"OpenAI API request exhausted retries: {last_retryable_error}"
-        )
+        raise RuntimeError(f"OpenAI API request exhausted retries: {last_retryable_error}")
 
     def _stream_request(
         self,
@@ -1372,13 +1354,11 @@ class OpenAIBackend(OpenAICompatibleBackend):
             # half-sent)
             if e.code == 429 and _is_insufficient_quota(error_body):
                 raise RuntimeError(
-                    f"OpenAI trial credit exhausted (stream, "
-                    f"insufficient_quota). Upgrade at "
-                    f"https://platform.openai.com/settings/billing."
+                    "OpenAI trial credit exhausted (stream, "
+                    "insufficient_quota). Upgrade at "
+                    "https://platform.openai.com/settings/billing."
                 )
-            raise RuntimeError(
-                f"OpenAI HTTP error {e.code} (stream): {error_body}"
-            )
+            raise RuntimeError(f"OpenAI HTTP error {e.code} (stream): {error_body}")
         except urllib.error.URLError as e:
             raise RuntimeError(f"OpenAI connection error: {e.reason}")
 
@@ -1465,9 +1445,7 @@ class OpenAIBackend(OpenAICompatibleBackend):
 
             # Cap reasoning_effort at "low" if it's set higher
             reasoning_effort = body.get("reasoning_effort")
-            if reasoning_effort and reasoning_effort not in (
-                "none", "minimal", "low"
-            ):
+            if reasoning_effort and reasoning_effort not in ("none", "minimal", "low"):
                 body["reasoning_effort"] = OPENAI_FREE_ONLY_REASONING_EFFORT_CAP
         else:
             # Add service_tier if set via env var or kwargs
@@ -1476,10 +1454,7 @@ class OpenAIBackend(OpenAICompatibleBackend):
                 body["service_tier"] = service_tier
 
             # Add reasoning_effort if set via env var or kwargs
-            reasoning_effort = (
-                kwargs.get("reasoning_effort")
-                or OPENAI_REASONING_EFFORT
-            )
+            reasoning_effort = kwargs.get("reasoning_effort") or OPENAI_REASONING_EFFORT
             if reasoning_effort and reasoning_effort in OPENAI_REASONING_EFFORT_VALUES:
                 body["reasoning_effort"] = reasoning_effort
 
@@ -1595,8 +1570,8 @@ class OpenAIBackend(OpenAICompatibleBackend):
             if tools and self._is_tools_not_supported_error(err_str):
                 if os.environ.get("AGENTKTHX_DEBUG"):
                     print(
-                        f"  [OpenAI] Model rejected tools — retrying "
-                        f"without tools (ReAct fallback)"
+                        "  [OpenAI] Model rejected tools — retrying "
+                        "without tools (ReAct fallback)"
                     )
                 body.pop("tools", None)
                 body.pop("tool_choice", None)
@@ -1705,10 +1680,7 @@ class OpenAIBackend(OpenAICompatibleBackend):
                 err_lower = str(e).lower()
                 if "empty response" in err_lower or "no content" in err_lower:
                     if os.environ.get("AGENTKTHX_DEBUG"):
-                        print(
-                            f"  [OpenAI.JEV] Empty response — retrying "
-                            f"with simplified prompt"
-                        )
+                        print("  [OpenAI.JEV] Empty response — retrying " "with simplified prompt")
                     simplified = [
                         {"role": "user", "content": messages[-1]["content"] if messages else ""}
                     ]
@@ -1808,14 +1780,15 @@ class OpenAIBackend(OpenAICompatibleBackend):
                 # 429 insufficient_quota on streaming path
                 if e.code == 429 and _is_insufficient_quota(error_body):
                     raise RuntimeError(
-                        f"OpenAI trial credit exhausted (stream, "
-                        f"insufficient_quota). Upgrade at "
-                        f"https://platform.openai.com/settings/billing."
+                        "OpenAI trial credit exhausted (stream, "
+                        "insufficient_quota). Upgrade at "
+                        "https://platform.openai.com/settings/billing."
                     )
 
                 # ReAct fallback on streaming 400 (rare on OpenAI)
                 if "does not support tools" in error_body.lower() and body.get("tools"):
                     import sys
+
                     print(
                         f"\n  \033[33m[OpenAI-Stream] Model "
                         f"'{body.get('model')}' does not support tools "
@@ -1831,21 +1804,15 @@ class OpenAIBackend(OpenAICompatibleBackend):
                         method="POST",
                     )
                     try:
-                        response = urllib.request.urlopen(
-                            fb_req, timeout=self.config.timeout
-                        )
+                        response = urllib.request.urlopen(fb_req, timeout=self.config.timeout)
                     except urllib.error.HTTPError as e2:
-                        error_body2 = (
-                            e2.read().decode("utf-8") if e2.fp else ""
-                        )
+                        error_body2 = e2.read().decode("utf-8") if e2.fp else ""
                         raise RuntimeError(
                             f"OpenAI HTTP error {e2.code} "
                             f"(stream no-tools fallback): {error_body2}"
                         )
                 else:
-                    raise RuntimeError(
-                        f"OpenAI HTTP error {e.code} (stream): {error_body}"
-                    )
+                    raise RuntimeError(f"OpenAI HTTP error {e.code} (stream): {error_body}")
             except urllib.error.URLError as e:
                 raise RuntimeError(f"OpenAI connection error: {e.reason}")
 

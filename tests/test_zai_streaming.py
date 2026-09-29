@@ -9,9 +9,8 @@ endpoint is ``/api/paas/v4/chat/completions``.
 These tests verify the override exists, uses the correct URL, emits the
 expected dict shape, and handles the SSE stream parsing correctly.
 """
-import io
+
 import json
-import sys
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -26,10 +25,12 @@ def _make_zai_backend():
     # The property reads self._base_url, so we just set the underlying attr.
     b._api_key = "test-key"
     # _get_model_defaults is needed — mock it.
-    b._get_model_defaults = MagicMock(return_value={
-        "temperature": 0.6,
-        "max_tokens": 4096,
-    })
+    b._get_model_defaults = MagicMock(
+        return_value={
+            "temperature": 0.6,
+            "max_tokens": 4096,
+        }
+    )
     b.config = MagicMock()
     b.config.timeout = 30.0
     return b
@@ -85,7 +86,7 @@ class TestZaiStreamMethodShape(unittest.TestCase):
             b'data: {"choices":[{"delta":{"content":"Hello"},"finish_reason":null}]}\n\n',
             b'data: {"choices":[{"delta":{"content":", world!"},"finish_reason":null}]}\n\n',
             b'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n',
-            b'data: [DONE]\n\n',
+            b"data: [DONE]\n\n",
         ]
 
         # Mock urllib.request.urlopen to return an iterable response
@@ -94,10 +95,12 @@ class TestZaiStreamMethodShape(unittest.TestCase):
         fake_response.close = MagicMock()
 
         with patch("urllib.request.urlopen", return_value=fake_response):
-            chunks = list(b.generate_completions_stream(
-                model="glm-4.5-flash",
-                messages=[{"role": "user", "content": "hi"}],
-            ))
+            chunks = list(
+                b.generate_completions_stream(
+                    model="glm-4.5-flash",
+                    messages=[{"role": "user", "content": "hi"}],
+                )
+            )
 
         # Should yield 3 chunks (the [DONE] marker is consumed internally)
         self.assertEqual(len(chunks), 3)
@@ -123,7 +126,7 @@ class TestZaiStreamMethodShape(unittest.TestCase):
         sse_lines = [
             b'data: {"choices":[{"delta":{"reasoning_content":"thinking...","content":""},"finish_reason":null}]}\n\n',
             b'data: {"choices":[{"delta":{"content":"answer"},"finish_reason":"stop"}]}\n\n',
-            b'data: [DONE]\n\n',
+            b"data: [DONE]\n\n",
         ]
 
         fake_response = MagicMock()
@@ -131,10 +134,12 @@ class TestZaiStreamMethodShape(unittest.TestCase):
         fake_response.close = MagicMock()
 
         with patch("urllib.request.urlopen", return_value=fake_response):
-            chunks = list(b.generate_completions_stream(
-                model="glm-4.5-flash",
-                messages=[{"role": "user", "content": "hi"}],
-            ))
+            chunks = list(
+                b.generate_completions_stream(
+                    model="glm-4.5-flash",
+                    messages=[{"role": "user", "content": "hi"}],
+                )
+            )
 
         # First chunk should carry reasoning_content
         self.assertEqual(chunks[0]["reasoning_content"], "thinking...")
@@ -149,7 +154,7 @@ class TestZaiStreamMethodShape(unittest.TestCase):
             b'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"shell","arguments":""}}]},"finish_reason":null}]}\n\n',
             b'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\\"command\\":\\"ls\\"}"}}]},"finish_reason":null}]}\n\n',
             b'data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}\n\n',
-            b'data: [DONE]\n\n',
+            b"data: [DONE]\n\n",
         ]
 
         fake_response = MagicMock()
@@ -157,10 +162,12 @@ class TestZaiStreamMethodShape(unittest.TestCase):
         fake_response.close = MagicMock()
 
         with patch("urllib.request.urlopen", return_value=fake_response):
-            chunks = list(b.generate_completions_stream(
-                model="glm-4.5-flash",
-                messages=[{"role": "user", "content": "run ls"}],
-            ))
+            chunks = list(
+                b.generate_completions_stream(
+                    model="glm-4.5-flash",
+                    messages=[{"role": "user", "content": "run ls"}],
+                )
+            )
 
         # First chunk should carry the tool_calls delta with id + name
         self.assertIsNotNone(chunks[0]["tool_calls"])
@@ -190,10 +197,12 @@ class TestZaiStreamMethodShape(unittest.TestCase):
             return fake_response
 
         with patch("urllib.request.urlopen", side_effect=_fake_urlopen):
-            list(b.generate_completions_stream(
-                model="glm-4.5-flash",
-                messages=[{"role": "user", "content": "hi"}],
-            ))
+            list(
+                b.generate_completions_stream(
+                    model="glm-4.5-flash",
+                    messages=[{"role": "user", "content": "hi"}],
+                )
+            )
 
         self.assertIn("body", captured_body)
         body = captured_body["body"]
@@ -220,16 +229,19 @@ class TestZaiStreamMethodShape(unittest.TestCase):
             return fake_response
 
         with patch("urllib.request.urlopen", side_effect=_fake_urlopen):
-            list(b.generate_completions_stream(
-                model="glm-4.5-flash",
-                messages=[{"role": "user", "content": "hi"}],
-            ))
+            list(
+                b.generate_completions_stream(
+                    model="glm-4.5-flash",
+                    messages=[{"role": "user", "content": "hi"}],
+                )
+            )
 
         self.assertIn("url", captured_url)
         url = captured_url["url"]
         self.assertIn("/api/paas/v4/chat/completions", url)
         self.assertNotIn(
-            "/v1/chat/completions", url,
+            "/v1/chat/completions",
+            url,
             f"URL must not contain /v1/chat/completions (that's OllamaBackend's "
             f"path which returns 404 on ZAI). Got: {url}",
         )
@@ -248,10 +260,12 @@ class TestZaiStreamMethodShape(unittest.TestCase):
             return fake_response
 
         with patch("urllib.request.urlopen", side_effect=_fake_urlopen):
-            list(b.generate_completions_stream(
-                model="glm-4.5-flash",
-                messages=[{"role": "user", "content": "hi"}],
-            ))
+            list(
+                b.generate_completions_stream(
+                    model="glm-4.5-flash",
+                    messages=[{"role": "user", "content": "hi"}],
+                )
+            )
 
         # urllib normalizes header names — Authorization becomes Authorization
         # but keys are case-insensitive via req.headers

@@ -25,7 +25,6 @@ import os
 import re
 import sys
 
-
 # ---------------------------------------------------------------------------
 # Windows console setup.
 #
@@ -44,8 +43,7 @@ if os.name == "nt":
         # --- VT processing --------------------------------------------------
         _kernel32.GetStdHandle.restype = wintypes.HANDLE
         _kernel32.GetStdHandle.argtypes = [wintypes.DWORD]
-        _kernel32.GetConsoleMode.argtypes = [wintypes.HANDLE,
-                                              ctypes.POINTER(wintypes.DWORD)]
+        _kernel32.GetConsoleMode.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
         _kernel32.GetConsoleMode.restype = wintypes.BOOL
         _kernel32.SetConsoleMode.argtypes = [wintypes.HANDLE, wintypes.DWORD]
         _kernel32.SetConsoleMode.restype = wintypes.BOOL
@@ -53,7 +51,7 @@ if os.name == "nt":
         _ENABLE_VIRTUAL_TERMINAL_PROCESSING = 0x0004
         _ENABLE_PROCESSED_OUTPUT = 0x0001
         _STD_OUTPUT_HANDLE = 0xFFFFFFF5  # -11 as DWORD
-        _STD_ERROR_HANDLE = 0xFFFFFFF4   # -12 as DWORD
+        _STD_ERROR_HANDLE = 0xFFFFFFF4  # -12 as DWORD
 
         def _enable_vt(handle_value: int) -> None:
             h = _kernel32.GetStdHandle(handle_value)
@@ -64,8 +62,7 @@ if os.name == "nt":
                 return
             # Only flip the VT bit; preserve whatever else was set
             # (wrap-at-EOL, processed-output, etc.).
-            _kernel32.SetConsoleMode(h, mode.value |
-                                     _ENABLE_VIRTUAL_TERMINAL_PROCESSING)
+            _kernel32.SetConsoleMode(h, mode.value | _ENABLE_VIRTUAL_TERMINAL_PROCESSING)
 
         # --- UTF-8 output codepage -----------------------------------------
         # CP_UTF8 = 65001.  Returns 0 on failure, non-zero on success.
@@ -149,25 +146,26 @@ _UNICODE_OK = _looks_unicode_capable()
 # Glyph constants -- import these instead of hardcoding `\\u2713` etc.
 # so all of AgentKthx gets the same fallback behaviour.
 if _UNICODE_OK:
-    GLYPH_OK = "\u2713"        # check mark
-    GLYPH_REACT = "\u25cb"     # white circle
-    GLYPH_FAIL = "\u2717"     # ballot X
-    GLYPH_UNKNOWN = "?"        # already ASCII
-    GLYPH_DOT_ON = "\u25cf"    # black circle
-    GLYPH_DOT_OFF = "\u25cb"   # white circle (same as REACT)
-    GLYPH_ATOM = "\u269b"      # atom symbol (also missing from raster fonts)
+    GLYPH_OK = "\u2713"  # check mark
+    GLYPH_REACT = "\u25cb"  # white circle
+    GLYPH_FAIL = "\u2717"  # ballot X
+    GLYPH_UNKNOWN = "?"  # already ASCII
+    GLYPH_DOT_ON = "\u25cf"  # black circle
+    GLYPH_DOT_OFF = "\u25cb"  # white circle (same as REACT)
+    GLYPH_ATOM = "\u269b"  # atom symbol (also missing from raster fonts)
 else:
-    GLYPH_OK = "v"             # ASCII fallback: v for "verified/valid"
-    GLYPH_REACT = "o"          # ASCII fallback: little circle
-    GLYPH_FAIL = "x"           # ASCII fallback: x for "fail"
+    GLYPH_OK = "v"  # ASCII fallback: v for "verified/valid"
+    GLYPH_REACT = "o"  # ASCII fallback: little circle
+    GLYPH_FAIL = "x"  # ASCII fallback: x for "fail"
     GLYPH_UNKNOWN = "?"
     GLYPH_DOT_ON = "*"
     GLYPH_DOT_OFF = "."
-    GLYPH_ATOM = "@"           # ASCII fallback for the atom symbol
+    GLYPH_ATOM = "@"  # ASCII fallback for the atom symbol
 
 
 class Color:
     """ANSI color codes for terminal output."""
+
     # Reset
     RESET = "\033[0m"
 
@@ -306,15 +304,15 @@ def bright_red(text: str) -> str:
 
 
 # ANSI escape code pattern for stripping
-_ANSI_ESCAPE = re.compile(r'\x1b\[[0-9;]*m')
+_ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
 
 
 def visible_len(text: str) -> int:
     """Get the visible length of text (excluding ANSI codes)."""
-    return len(_ANSI_ESCAPE.sub('', text))
+    return len(_ANSI_ESCAPE.sub("", text))
 
 
-def pad_colored(text: str, width: int, align: str = 'left') -> str:
+def pad_colored(text: str, width: int, align: str = "left") -> str:
     """Pad colored text to a given visible width.
 
     Args:
@@ -331,14 +329,14 @@ def pad_colored(text: str, width: int, align: str = 'left') -> str:
     if padding <= 0:
         return text
 
-    if align == 'left':
-        return text + ' ' * padding
-    elif align == 'right':
-        return ' ' * padding + text
+    if align == "left":
+        return text + " " * padding
+    elif align == "right":
+        return " " * padding + text
     else:  # center
         left = padding // 2
         right = padding - left
-        return ' ' * left + text + ' ' * right
+        return " " * left + text + " " * right
 
 
 __all__ = [

@@ -119,17 +119,16 @@ import urllib.error
 import urllib.request
 from typing import Any, Generator
 
+from agentkthx.backends.base import BackendConfig
 from agentkthx.backends.cloud_base import CloudBackend
 from agentkthx.backends.openai_compat import OpenAICompatibleBackend
-from agentkthx.backends.base import BackendConfig
-from agentkthx.core.types import BackendType, ApiMode
-from agentkthx.core.models import Tool
 from agentkthx.config import (
     POLLINATIONS_BASE_URL,
     POLLINATIONS_DEFAULT_MODEL,
     POLLINATIONS_FALLBACK_MODEL,
 )
-
+from agentkthx.core.models import Tool
+from agentkthx.core.types import ApiMode, BackendType
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Pollinations model catalog (offline fallback)
@@ -152,7 +151,7 @@ from agentkthx.config import (
 POLLINATIONS_MODELS: dict[str, dict] = {
     # ── OpenAI — nano is the cheap workhorse / platform default ─────────
     "openai/gpt-5.4-nano": {
-        "context_length": 400_000,           # card-verified (Sep 2026)
+        "context_length": 400_000,  # card-verified (Sep 2026)
         "default_temperature": 0.7,
         "default_max_tokens": 8192,
         "pricing": {"input": 0.15, "output": 0.9375},
@@ -205,7 +204,7 @@ POLLINATIONS_MODELS: dict[str, dict] = {
         "note": "Cheap alternate family — POLLINATIONS_FALLBACK_MODEL",
     },
     "z-ai/glm-5.3-flashx": {
-        "context_length": 1_000_000,         # 1M-token context
+        "context_length": 1_000_000,  # 1M-token context
         "default_temperature": 0.7,
         "default_max_tokens": 8192,
         "pricing": {"input": 0.15, "output": 0.6},
@@ -259,7 +258,7 @@ POLLINATIONS_MODELS: dict[str, dict] = {
     },
     # ── Mistral — same models as the native Mistral backend ─────────────
     "mistralai/mistral-small-4": {
-        "context_length": 262_144,           # 256K (matches native catalog)
+        "context_length": 262_144,  # 256K (matches native catalog)
         "default_temperature": 0.7,
         "default_max_tokens": 8192,
         "pricing": {"input": 0.2, "output": 0.5},
@@ -298,9 +297,9 @@ POLLINATIONS_DEFAULT_MODEL_FALLBACK = "openai/gpt-5.4-nano"
 # list_models()); these seeds cover the keyless bootstrap path where the
 # user types a bare alias before any catalog fetch has happened.
 _STATIC_ALIASES: dict[str, str] = {
-    "openai": "openai/gpt-5.4-nano",        # doc: "openai alias resolves to gpt-5.4-nano"
+    "openai": "openai/gpt-5.4-nano",  # doc: "openai alias resolves to gpt-5.4-nano"
     "gpt-5.4-nano": "openai/gpt-5.4-nano",
-    "gpt-oss": "openai/gpt-oss-20b",        # legacy anonymous-tier aliases
+    "gpt-oss": "openai/gpt-oss-20b",  # legacy anonymous-tier aliases
     "gpt-oss-20b": "openai/gpt-oss-20b",
 }
 
@@ -368,15 +367,9 @@ def _card_is_free(card_or_meta: dict) -> bool:
         prompt = _pollen_to_per_million(pricing.get("promptTextTokens"))
         completion = _pollen_to_per_million(pricing.get("completionTextTokens"))
         return bool(
-            prompt is not None
-            and completion is not None
-            and prompt == 0.0
-            and completion == 0.0
+            prompt is not None and completion is not None and prompt == 0.0 and completion == 0.0
         )
-    return (
-        pricing.get("input", -1) == 0.0
-        and pricing.get("output", -1) == 0.0
-    )
+    return pricing.get("input", -1) == 0.0 and pricing.get("output", -1) == 0.0
 
 
 def _env_flag(name: str) -> bool:
@@ -505,8 +498,7 @@ class PollinationsBackend(CloudBackend):
             resolved_url = f"https://{host}:{port}"
         else:
             resolved_url = (
-                os.environ.get("POLLINATIONS_BASE_URL")
-                or self._default_base_url
+                os.environ.get("POLLINATIONS_BASE_URL") or self._default_base_url
             ).rstrip("/")
 
         # Cloud backends only support OPENAI / JEV. Reject OPENRE.
@@ -651,9 +643,7 @@ class PollinationsBackend(CloudBackend):
         resolved = self._alias_map.get(model)
         if resolved and resolved != model:
             if os.environ.get("AGENTKTHX_DEBUG"):
-                print(
-                    f"  [Pollinations] alias '{model}' → '{resolved}'"
-                )
+                print(f"  [Pollinations] alias '{model}' → '{resolved}'")
             return resolved
         return model
 
@@ -775,20 +765,22 @@ class PollinationsBackend(CloudBackend):
                 continue
             seen.add(name)
             meta = self.MODELS[name]
-            models.append({
-                "name": name,
-                "size": 0,
-                "details": {
-                    "family": meta.get("family", name.split("/")[0]),
-                    "backend": self._catalog_backend_name(),
-                    "context_length": meta.get(
-                        "context_length", self._DEFAULT_CONTEXT_FALLBACK
-                    ),
-                    "free_tier": _card_is_free(meta),
-                    "is_chat_model": True,
-                    "pricing": meta.get("pricing", {}),
-                },
-            })
+            models.append(
+                {
+                    "name": name,
+                    "size": 0,
+                    "details": {
+                        "family": meta.get("family", name.split("/")[0]),
+                        "backend": self._catalog_backend_name(),
+                        "context_length": meta.get(
+                            "context_length", self._DEFAULT_CONTEXT_FALLBACK
+                        ),
+                        "free_tier": _card_is_free(meta),
+                        "is_chat_model": True,
+                        "pricing": meta.get("pricing", {}),
+                    },
+                }
+            )
 
         if _env_flag("POLLINATIONS_FREE_ONLY"):
             models = [m for m in models if m["details"].get("free_tier")]
@@ -855,9 +847,7 @@ class PollinationsBackend(CloudBackend):
                 "details": {
                     "family": meta.get("family", model.split("/")[0]),
                     "backend": self._catalog_backend_name(),
-                    "context_length": meta.get(
-                        "context_length", self._DEFAULT_CONTEXT_FALLBACK
-                    ),
+                    "context_length": meta.get("context_length", self._DEFAULT_CONTEXT_FALLBACK),
                     "free_tier": _card_is_free(meta),
                     "is_chat_model": True,
                     "pricing": meta.get("pricing", {}),
@@ -904,9 +894,7 @@ class PollinationsBackend(CloudBackend):
         max_tokens = (meta or {}).get("default_max_tokens", 8192)
         temperature = (meta or {}).get("default_temperature", 0.7)
 
-        return self._apply_max_tokens_cap(
-            max_tokens, ctx, temperature=temperature
-        )
+        return self._apply_max_tokens_cap(max_tokens, ctx, temperature=temperature)
 
     # ───────────────────────────────────────────────────────────────────
     # Health-aware fallback (Pollinations-exclusive capability)
@@ -1016,7 +1004,9 @@ class PollinationsBackend(CloudBackend):
     # ───────────────────────────────────────────────────────────────────
 
     @staticmethod
-    def _parse_error_envelope(body_text: str, status_code: int) -> tuple[str, str | None, str | None]:
+    def _parse_error_envelope(
+        body_text: str, status_code: int
+    ) -> tuple[str, str | None, str | None]:
         """Parse a Pollinations error body into ``(message, code, request_id)``.
 
         Primary shape (Pollinations envelope):
@@ -1105,8 +1095,7 @@ class PollinationsBackend(CloudBackend):
         choices = raw_response.get("choices", []) or []
         if not choices:
             raise RuntimeError(
-                f"Pollinations API returned no choices in response: "
-                f"{str(raw_response)[:300]}"
+                f"Pollinations API returned no choices in response: " f"{str(raw_response)[:300]}"
             )
 
         choice = choices[0]
@@ -1133,11 +1122,13 @@ class PollinationsBackend(CloudBackend):
                     args = {}
             elif not isinstance(args, dict):
                 args = {"_raw_arguments": str(args)}
-            parsed_tool_calls.append({
-                "id": tc.get("id") or f"pollinations_tc_{i}",
-                "name": func.get("name", ""),
-                "arguments": args,
-            })
+            parsed_tool_calls.append(
+                {
+                    "id": tc.get("id") or f"pollinations_tc_{i}",
+                    "name": func.get("name", ""),
+                    "arguments": args,
+                }
+            )
 
         # usage: null on media-model chat responses — normalize to zeros.
         usage = raw_response.get("usage") or {}
@@ -1333,7 +1324,7 @@ class PollinationsBackend(CloudBackend):
             except (ValueError, TypeError):
                 retry_after = None
         if retry_after is None:
-            base = self._BACKOFF_BASE * (2 ** attempt)
+            base = self._BACKOFF_BASE * (2**attempt)
             retry_after = min(base, self._BACKOFF_CAP)
             retry_after += random.uniform(0, retry_after * 0.2)
         # ROB-16: cap honored Retry-After — never sleep more than 60s
@@ -1392,15 +1383,13 @@ class PollinationsBackend(CloudBackend):
             ) from cause
         if status_code == 422:
             detail = (
-                "content_policy_violation — rephrase the prompt and do not "
-                "retry unchanged"
+                "content_policy_violation — rephrase the prompt and do not " "retry unchanged"
                 if code == "content_policy_violation"
                 else "unsupported parameter combination — check the model "
-                     "card's supported_parameters"
+                "card's supported_parameters"
             )
             raise RuntimeError(
-                f"Pollinations validation error ({klass}){rid}: {err_msg}. "
-                f"Likely {detail}."
+                f"Pollinations validation error ({klass}){rid}: {err_msg}. " f"Likely {detail}."
             ) from cause
 
         raise RuntimeError(
@@ -1436,22 +1425,15 @@ class PollinationsBackend(CloudBackend):
                 method="POST",
             )
             try:
-                with urllib.request.urlopen(
-                    req, timeout=self.config.timeout
-                ) as resp:
+                with urllib.request.urlopen(req, timeout=self.config.timeout) as resp:
                     raw = json.loads(resp.read().decode("utf-8"))
                     return self._parse_pollinations_response(raw)
 
             except urllib.error.HTTPError as e:
                 status_code = e.code
                 body_bytes = e.read() if e.fp else b""
-                body_text = (
-                    body_bytes.decode("utf-8", errors="replace")
-                    if body_bytes else ""
-                )
-                err_msg, err_code, request_id = self._parse_error_envelope(
-                    body_text, status_code
-                )
+                body_text = body_bytes.decode("utf-8", errors="replace") if body_bytes else ""
+                err_msg, err_code, request_id = self._parse_error_envelope(body_text, status_code)
                 last_error_msg = err_msg
 
                 # ARCH-03: shared context-length 400 handler. Only on
@@ -1470,14 +1452,9 @@ class PollinationsBackend(CloudBackend):
                 # Retryable: 429 (rate limit) + 500/502/503/504
                 # (server/upstream/transient). 402 NEVER — pollen budget
                 # exhaustion cannot be slept away.
-                retryable = (
-                    status_code == 429
-                    or status_code in (500, 502, 503, 504)
-                )
+                retryable = status_code == 429 or status_code in (500, 502, 503, 504)
                 if retryable and attempt < max_retries:
-                    slept = self._sleep_for_retry(
-                        attempt, e.headers.get("Retry-After", "")
-                    )
+                    slept = self._sleep_for_retry(attempt, e.headers.get("Retry-After", ""))
                     if os.environ.get("AGENTKTHX_DEBUG") or attempt < 2:
                         # Always surface the first 2 retries — the user
                         # must see the harness is patiently waiting.
@@ -1488,9 +1465,7 @@ class PollinationsBackend(CloudBackend):
                         )
                     continue
 
-                self._raise_for_status(
-                    status_code, err_msg, err_code, request_id, cause=e
-                )
+                self._raise_for_status(status_code, err_msg, err_code, request_id, cause=e)
 
             except urllib.error.URLError as e:
                 # Network-level error — retry with backoff, then surface
@@ -1502,14 +1477,10 @@ class PollinationsBackend(CloudBackend):
                             f"retrying in {slept:.0f}s"
                         )
                     continue
-                raise RuntimeError(
-                    f"Pollinations connection error: {e.reason}"
-                ) from e
+                raise RuntimeError(f"Pollinations connection error: {e.reason}") from e
 
         # Should not reach here — the loop either returns or raises.
-        raise RuntimeError(
-            f"Pollinations API retries exhausted. Last error: {last_error_msg}"
-        )
+        raise RuntimeError(f"Pollinations API retries exhausted. Last error: {last_error_msg}")
 
     # ───────────────────────────────────────────────────────────────────
     # Streaming — SSE with data: [DONE] terminator + 429/5xx retry
@@ -1554,19 +1525,12 @@ class PollinationsBackend(CloudBackend):
                 method="POST",
             )
             try:
-                response = urllib.request.urlopen(
-                    req, timeout=self.config.timeout
-                )
+                response = urllib.request.urlopen(req, timeout=self.config.timeout)
             except urllib.error.HTTPError as e:
                 status_code = e.code
                 body_bytes = e.read() if e.fp else b""
-                body_text = (
-                    body_bytes.decode("utf-8", errors="replace")
-                    if body_bytes else ""
-                )
-                err_msg, err_code, request_id = self._parse_error_envelope(
-                    body_text, status_code
-                )
+                body_text = body_bytes.decode("utf-8", errors="replace") if body_bytes else ""
+                err_msg, err_code, request_id = self._parse_error_envelope(body_text, status_code)
                 last_error_msg = err_msg
 
                 # ARCH-03: shared context-length 400 handler.
@@ -1582,14 +1546,9 @@ class PollinationsBackend(CloudBackend):
                         continue
 
                 # Retryable: 429 + 5xx (Retry-After honored, capped).
-                retryable = (
-                    status_code == 429
-                    or status_code in (500, 502, 503, 504)
-                )
+                retryable = status_code == 429 or status_code in (500, 502, 503, 504)
                 if retryable and attempt < max_retries:
-                    slept = self._sleep_for_retry(
-                        attempt, e.headers.get("Retry-After", "")
-                    )
+                    slept = self._sleep_for_retry(attempt, e.headers.get("Retry-After", ""))
                     if os.environ.get("AGENTKTHX_DEBUG") or attempt < 2:
                         print(
                             f"  [Pollinations-Stream] {status_code} — {err_msg}. "
@@ -1598,9 +1557,7 @@ class PollinationsBackend(CloudBackend):
                         )
                     continue
 
-                self._raise_for_status(
-                    status_code, err_msg, err_code, request_id, cause=e
-                )
+                self._raise_for_status(status_code, err_msg, err_code, request_id, cause=e)
 
             except urllib.error.URLError as e:
                 if attempt < max_retries:
@@ -1611,9 +1568,7 @@ class PollinationsBackend(CloudBackend):
                             f"({e.reason}), retrying in {slept:.0f}s"
                         )
                     continue
-                raise RuntimeError(
-                    f"Pollinations connection error: {e.reason}"
-                ) from e
+                raise RuntimeError(f"Pollinations connection error: {e.reason}") from e
 
             # Success — yield raw SSE line bytes. The base class's
             # generate_completions_stream() handles JSON parsing,
@@ -1633,9 +1588,7 @@ class PollinationsBackend(CloudBackend):
             return  # success — don't retry
 
         # Should not reach here — the loop either yields + returns, or raises
-        raise RuntimeError(
-            f"Pollinations-Stream retries exhausted. Last error: {last_error_msg}"
-        )
+        raise RuntimeError(f"Pollinations-Stream retries exhausted. Last error: {last_error_msg}")
 
     # ───────────────────────────────────────────────────────────────────
     # generate_stream — thin text-delta wrapper (parity with siblings)
@@ -1733,12 +1686,8 @@ class PollinationsBackend(CloudBackend):
                 body_text = e.read().decode("utf-8", errors="replace")
             except Exception:
                 pass
-            err_msg, err_code, request_id = self._parse_error_envelope(
-                body_text, e.code
-            )
+            err_msg, err_code, request_id = self._parse_error_envelope(body_text, e.code)
             self._raise_for_status(e.code, err_msg, err_code, request_id, cause=e)
         except urllib.error.URLError as e:
-            raise RuntimeError(
-                f"Pollinations connection error: {e.reason}"
-            ) from e
+            raise RuntimeError(f"Pollinations connection error: {e.reason}") from e
         return {}  # unreachable — _raise_for_status always raises

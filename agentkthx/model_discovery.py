@@ -11,8 +11,8 @@ from __future__ import annotations
 
 from typing import Optional
 
+from .backends import BaseBackend, get_backend, get_default_backend
 from .config import AGENTKTHX_BACKEND
-from .backends import get_backend, get_default_backend, BaseBackend
 
 
 def get_client(backend: Optional[str] = None) -> BaseBackend:
@@ -241,7 +241,18 @@ def pick_models_for_benchmark(
         return []
 
     # Categorize models by size
-    small_indicators = ["0.5b", "270m", "135m", "350m", "0.6b", "1b", "tiny", "mini", "micro", "small"]
+    small_indicators = [
+        "0.5b",
+        "270m",
+        "135m",
+        "350m",
+        "0.6b",
+        "1b",
+        "tiny",
+        "mini",
+        "micro",
+        "small",
+    ]
     medium_indicators = ["3b", "7b", "8b"]
 
     small_models = []
@@ -273,7 +284,7 @@ def pick_models_for_benchmark(
         # Mix of all sizes
         result.extend(small_models[:2])
         result.extend(medium_models[:2])
-        result.extend(large_models[:max_models - len(result)])
+        result.extend(large_models[: max_models - len(result)])
 
     # If we still don't have enough, add any remaining
     if len(result) < max_models:
@@ -376,29 +387,29 @@ def match_models(
     ['qwen2.5-coder:0.5b', 'qwen2.5:0.5b', 'qwen:0.5b']
     """
     available = get_models(client=backend)
-    
+
     if not available:
         return []
-    
+
     if not pattern:
         return sorted(available)
-    
+
     pattern_lower = pattern.lower()
-    
+
     # Try exact match first
     if exact_first:
         exact_matches = [m for m in available if m.lower() == pattern_lower]
         if exact_matches:
             return exact_matches
-    
+
     # Categorize matches by priority
     starts_with = []
     contains = []
     tag_matches = []
-    
+
     for model in available:
         model_lower = model.lower()
-        
+
         # Check if pattern is a tag (starts with ":")
         if pattern.startswith(":"):
             if model_lower.endswith(pattern_lower):
@@ -410,7 +421,7 @@ def match_models(
                 starts_with.append(model)
             elif pattern_lower in model_lower:
                 contains.append(model)
-    
+
     # Combine results: starts_with first, then contains, then tag_matches
     if pattern.startswith(":"):
         result = sorted(tag_matches)

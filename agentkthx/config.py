@@ -16,8 +16,6 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from urllib.parse import urlparse
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # OLLAMA CONFIGURATION (native backend)
@@ -52,7 +50,9 @@ if _llama_server_env:
 # Kept here for backward compatibility — plugin code imports these.
 
 # BitNet plugin (agentkthx/plugins/bitnet/)
-BITNET_BASE_URL = os.environ.get("BITNET_TUNNEL") or os.environ.get("BITNET_BASE_URL", "http://localhost:8765")
+BITNET_BASE_URL = os.environ.get("BITNET_TUNNEL") or os.environ.get(
+    "BITNET_BASE_URL", "http://localhost:8765"
+)
 
 # ZAI plugin (agentkthx/plugins/zai/)
 ZAI_BASE_URL = os.environ.get("ZAI_BASE_URL", "https://api.z.ai")
@@ -103,13 +103,19 @@ ORCAROUTER_FREE_FALLBACK_MODEL = os.environ.get("ORCAROUTER_FREE_FALLBACK_MODEL"
 ORCAROUTER_FALLBACK_MODELS = os.environ.get("ORCAROUTER_FALLBACK_MODELS", "")
 # When true (default), adds X-OrcaRouter-Include-Cost: true to every
 # request so the response includes usage.cost_usd. Disable to suppress.
-ORCAROUTER_INCLUDE_COST = os.environ.get("ORCAROUTER_INCLUDE_COST", "true").lower() in ("1", "true", "yes")
+ORCAROUTER_INCLUDE_COST = os.environ.get("ORCAROUTER_INCLUDE_COST", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
 
 # Gemini plugin (agentkthx/plugins/gemini/)
 # Google AI Studio / Gemini API via OpenAI-compatible endpoint.
 # Trailing slash on base URL matters — OpenAI SDK appends paths like
 # "/chat/completions" without a leading slash. We preserve it here.
-GEMINI_BASE_URL = os.environ.get("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/")
+GEMINI_BASE_URL = os.environ.get(
+    "GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/"
+)
 # GEMINI_API_KEY is the documented env var. GOOGLE_API_KEY is accepted
 # as a fallback, mirroring Google's own SDK precedence.
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY", "")
@@ -136,7 +142,11 @@ HF_BASE_URL_LEGACY = os.environ.get("HF_BASE_URL_LEGACY", "https://api-inference
 # HF_TOKEN is the documented env var. HUGGING_FACE_HUB_TOKEN is the
 # older form (still used by huggingface_hub SDK). HF_API_KEY is accepted
 # as a third fallback (some users set this instead of HF_TOKEN).
-HF_TOKEN = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN") or os.environ.get("HF_API_KEY", "")
+HF_TOKEN = (
+    os.environ.get("HF_TOKEN")
+    or os.environ.get("HUGGING_FACE_HUB_TOKEN")
+    or os.environ.get("HF_API_KEY", "")
+)
 HF_DEFAULT_MODEL = os.environ.get("HF_DEFAULT_MODEL", "openai/gpt-oss-120b")
 # Strict free-tier enforcement: when true, only models in the
 # HF_FREE_MODEL_WHITELIST are accepted; the :cheapest suffix is
@@ -146,7 +156,9 @@ HF_FREE_ONLY = os.environ.get("HF_FREE_ONLY", "").lower() in ("1", "true", "yes"
 # Used when HF_FREE_ONLY=false and HTTP 402 is received mid-run — the
 # backend swaps to this model and retries. Mirrors the ZAI plugin's
 # ZAI_FREE_FALLBACK_MODEL pattern (zai.py:706-714).
-HF_FREE_FALLBACK_MODEL = os.environ.get("HF_FREE_FALLBACK_MODEL", "prism-ml/Ternary-Bonsai-27B-gguf")
+HF_FREE_FALLBACK_MODEL = os.environ.get(
+    "HF_FREE_FALLBACK_MODEL", "prism-ml/Ternary-Bonsai-27B-gguf"
+)
 # Provider routing policy — auto-appended as a suffix to the model id
 # when no explicit suffix is present. Empty string (default) means no
 # suffix (router's :fastest default applies). One of:
@@ -224,7 +236,9 @@ MISTRAL_FREE_ONLY = os.environ.get("MISTRAL_FREE_ONLY", "").lower() in ("1", "tr
 # When MISTRAL_FREE_ONLY=false and the model 404s as unknown_model or
 # the org is rate-limited past the daily quota, swap to this model and
 # retry. Labs models are the safest fallback since they're free.
-MISTRAL_FREE_FALLBACK_MODEL = os.environ.get("MISTRAL_FREE_FALLBACK_MODEL", "labs-mistral-small-creative")
+MISTRAL_FREE_FALLBACK_MODEL = os.environ.get(
+    "MISTRAL_FREE_FALLBACK_MODEL", "labs-mistral-small-creative"
+)
 # Mistral-specific: inject the safety system prompt before all
 # conversations (slightly changes tone + costs a few prompt tokens).
 # Default false — the agent's soul/system prompt owns behavior.
@@ -265,14 +279,22 @@ POLLINATIONS_SAFE = os.environ.get("POLLINATIONS_SAFE", "")
 # '-free' community variants. (The broader paid_only free TIER —
 # Quest-Pollen-eligible models — is visible via scripts/probe_pollinations.sh
 # on the bare GET /models endpoint.) Default false.
-POLLINATIONS_FREE_ONLY = os.environ.get("POLLINATIONS_FREE_ONLY", "").lower() in ("1", "true", "yes")
+POLLINATIONS_FREE_ONLY = os.environ.get("POLLINATIONS_FREE_ONLY", "").lower() in (
+    "1",
+    "true",
+    "yes",
+)
 # Browse the PUBLIC 307-card catalog anonymously even when a key is set.
 # The gateway scopes GET /v1/models to the key's entitlements (observed
 # 2026-09-28: 307 cards anonymous vs 134 keyed — the keyed feed drops
 # premium vendors AND every zero-priced community model, which starves
 # FREE_ONLY). Catalog-only toggle: generation POSTs still authenticate.
 # Default false (keyed catalog when a key is present).
-POLLINATIONS_ANON_CATALOG = os.environ.get("POLLINATIONS_ANON_CATALOG", "").lower() in ("1", "true", "yes")
+POLLINATIONS_ANON_CATALOG = os.environ.get("POLLINATIONS_ANON_CATALOG", "").lower() in (
+    "1",
+    "true",
+    "yes",
+)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -336,6 +358,7 @@ MAX_TOOL_RETRIES = int(os.environ.get("AGENTKTHX_MAX_TOOL_RETRIES") or "2")
 @dataclass
 class Config:
     """AgentKthx configuration."""
+
     # Backend URLs (plugin-owned URLs are read directly from their env
     # constants — R07.01 dropped the never-read mirror fields)
     ollama_base_url: str = field(default_factory=lambda: OLLAMA_BASE_URL)
@@ -393,7 +416,7 @@ _config: Config | None = None
 
 def get_config(reload: bool = False) -> Config:
     """Get the global configuration.
-    
+
     Args:
         reload: If True, re-read from environment variables
     """
@@ -401,5 +424,3 @@ def get_config(reload: bool = False) -> Config:
     if _config is None or reload:
         _config = Config.from_env()
     return _config
-
-

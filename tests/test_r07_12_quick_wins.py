@@ -42,11 +42,7 @@ _AGENT_SRC = (Path(__file__).resolve().parent.parent / "agentkthx" / "agent.py")
 
 
 class TestPerf05ParseDedupe:
-    JSON_CODEBLOCK = (
-        "```json\n"
-        '{"name": "shell", "arguments": {"command": "ls"}}\n'
-        "```\n"
-    )
+    JSON_CODEBLOCK = "```json\n" '{"name": "shell", "arguments": {"command": "ls"}}\n' "```\n"
 
     def test_same_call_in_two_shapes_executes_once(self):
         """A ```json codeblock AND a ReAct block describing the SAME call:
@@ -71,9 +67,7 @@ class TestPerf05ParseDedupe:
         """Dedupe is by (name, canonical args) — genuinely DIFFERENT calls
         from the same message all survive, in first-seen order."""
         text = (
-            self.JSON_CODEBLOCK
-            + "Action: calculator\n"
-            + 'Action Input: {"expression": "2 + 2"}'
+            self.JSON_CODEBLOCK + "Action: calculator\n" + 'Action Input: {"expression": "2 + 2"}'
         )
         calls = ToolParser(["shell", "calculator"]).parse(text)
         assert [(c.name, c.arguments) for c in calls] == [
@@ -89,9 +83,7 @@ class TestPerf05ParseDedupe:
         )
         assert len(react_only) == 1
         assert react_only[0].name == "shell"
-        json_only = ToolParser(["shell"]).parse(
-            '{"name": "shell", "arguments": {"command": "ls"}}'
-        )
+        json_only = ToolParser(["shell"]).parse('{"name": "shell", "arguments": {"command": "ls"}}')
         assert len(json_only) == 1
         assert json_only[0].arguments == {"command": "ls"}
 
@@ -133,26 +125,27 @@ class TestRob19DebugAttribute:
     def test_register_tool_reads_live_debug_flag(self):
         from agentkthx.agent import Agent
 
-        agent = Agent(model="qwen2.5:0.5b", tools=["calculator"],
-                      system_prompt="You are a test agent.", debug=False)
+        agent = Agent(
+            model="qwen2.5:0.5b",
+            tools=["calculator"],
+            system_prompt="You are a test agent.",
+            debug=False,
+        )
         assert agent._parser.debug is False
         # Flip the flag post-construction, then register a tool — the
         # rebuilt parser must follow the LIVE attribute.
         agent.debug = True
         agent.register_tool(_calc_tool())
-        assert agent._parser.debug is True, (
-            "register_tool did not propagate self.debug into the rebuilt parser"
-        )
+        assert (
+            agent._parser.debug is True
+        ), "register_tool did not propagate self.debug into the rebuilt parser"
 
     def test_source_scan_no_getattr_debug_in_register_tool(self):
         # Line scan, comment lines excluded: the ROB-19 fix comment quotes
         # the historical call — only live CODE may not contain it.
-        code_lines = [
-            ln for ln in _AGENT_SRC.splitlines()
-            if not ln.strip().startswith("#")
-        ]
+        code_lines = [ln for ln in _AGENT_SRC.splitlines() if not ln.strip().startswith("#")]
         assert 'getattr(self, "debug", False)' not in "\n".join(code_lines), (
-            "Agent.register_tool regressed to getattr(self, \"debug\", ...) — "
+            'Agent.register_tool regressed to getattr(self, "debug", ...) — '
             "the defensive default masks init-order bugs (ROB-19)"
         )
 
@@ -170,26 +163,32 @@ class TestMaint21MistralErrorEnvelope:
         from agentkthx.plugins.mistral.mistral import MistralBackend
 
         with pytest.raises(RuntimeError, match="no choices"):
-            MistralBackend._parse_mistral_response({
-                "object": "chat.completion",
-                "message": "rate limit window resets soon",
-                "data": {"remaining_requests": 3},
-            })
+            MistralBackend._parse_mistral_response(
+                {
+                    "object": "chat.completion",
+                    "message": "rate limit window resets soon",
+                    "data": {"remaining_requests": 3},
+                }
+            )
 
     def test_success_shape_with_top_level_message_parses(self):
         """The audit's prescribed regression shape: a legitimate completion
         that also carries a top-level ``message`` field must parse."""
         from agentkthx.plugins.mistral.mistral import MistralBackend
 
-        out = MistralBackend._parse_mistral_response({
-            "object": "chat.completion",
-            "message": "served by gateway eu-west",
-            "choices": [{
-                "message": {"role": "assistant", "content": "Hello!"},
-                "finish_reason": "stop",
-            }],
-            "usage": {"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7},
-        })
+        out = MistralBackend._parse_mistral_response(
+            {
+                "object": "chat.completion",
+                "message": "served by gateway eu-west",
+                "choices": [
+                    {
+                        "message": {"role": "assistant", "content": "Hello!"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7},
+            }
+        )
         assert out["content"] == "Hello!"
         assert out["finish_reason"] == "stop"
 
@@ -199,11 +198,13 @@ class TestMaint21MistralErrorEnvelope:
         from agentkthx.plugins.mistral.mistral import MistralBackend
 
         with pytest.raises(RuntimeError, match="Provider rate limited"):
-            MistralBackend._parse_mistral_response({
-                "object": "error",
-                "message": "Provider rate limited",
-                "type": "rate_limit_error",
-            })
+            MistralBackend._parse_mistral_response(
+                {
+                    "object": "error",
+                    "message": "Provider rate limited",
+                    "type": "rate_limit_error",
+                }
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -215,12 +216,12 @@ class TestMaint21MistralErrorEnvelope:
 class TestMaint18VerifiedConsumer:
     def test_cmd_chat_consumes_apply_model_switch_return(self):
         src = (_CMDS_DIR / "chat.py").read_text(encoding="utf-8")
-        assert "changes = _cli.apply_model_switch(agent, new_model)" in src, (
-            "cmd_chat no longer captures apply_model_switch's return dict"
-        )
-        assert 'changes.get("model"' in src, (
-            "cmd_chat no longer consumes the switch-delta dict for printing"
-        )
+        assert (
+            "changes = _cli.apply_model_switch(agent, new_model)" in src
+        ), "cmd_chat no longer captures apply_model_switch's return dict"
+        assert (
+            'changes.get("model"' in src
+        ), "cmd_chat no longer consumes the switch-delta dict for printing"
 
 
 if __name__ == "__main__":

@@ -35,8 +35,6 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
@@ -44,15 +42,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 #  SEC-05 — ANSI escape stripping in confirm callback                #
 # ------------------------------------------------------------------ #
 
+
 class TestSEC05AnsiStripping:
     """Verify the _confirm callback strips ANSI escapes from model-controlled
     tool names + args before printing them to the terminal."""
 
     def test_strip_csi_clear_screen(self):
         """\\x1b[2J (clear screen) is stripped."""
-        from agentkthx.cli.parser import _make_confirm_callback
         # Build a mock args namespace with --confirm enabled
         import argparse
+
+        from agentkthx.cli.parser import _make_confirm_callback
+
         args = argparse.Namespace(confirm_dangerous=True)
         callback = _make_confirm_callback(args)
         assert callback is not None
@@ -80,7 +81,9 @@ class TestSEC05AnsiStripping:
         import argparse
         import io
         from contextlib import redirect_stdout
+
         from agentkthx.cli.parser import _make_confirm_callback
+
         args = argparse.Namespace(confirm_dangerous=True)
         callback = _make_confirm_callback(args)
         captured = io.StringIO()
@@ -96,7 +99,9 @@ class TestSEC05AnsiStripping:
         import argparse
         import io
         from contextlib import redirect_stdout
+
         from agentkthx.cli.parser import _make_confirm_callback
+
         args = argparse.Namespace(confirm_dangerous=True)
         callback = _make_confirm_callback(args)
         captured = io.StringIO()
@@ -112,7 +117,9 @@ class TestSEC05AnsiStripping:
         import argparse
         import io
         from contextlib import redirect_stdout
+
         from agentkthx.cli.parser import _make_confirm_callback
+
         args = argparse.Namespace(confirm_dangerous=True)
         callback = _make_confirm_callback(args)
         captured = io.StringIO()
@@ -128,6 +135,7 @@ class TestSEC05AnsiStripping:
 #  SEC-14 — body arg JSON-token matching (not raw substring)         #
 # ------------------------------------------------------------------ #
 
+
 class TestSEC14BodyMatching:
     """Verify the body arg only matches permanent markers as quoted JSON
     tokens, not raw substrings — preventing a malicious provider from
@@ -136,6 +144,7 @@ class TestSEC14BodyMatching:
     def test_quoted_json_key_matches(self):
         """A JSON key like "invalid_request": triggers permanent."""
         from agentkthx.core.api_resilience import is_transient_api_error
+
         exc = RuntimeError("HTTP 500: server error")
         body = '{"error": {"type": "invalid_request", "message": "bad"}}'
         assert is_transient_api_error(exc, body) is False
@@ -143,6 +152,7 @@ class TestSEC14BodyMatching:
     def test_quoted_json_value_matches(self):
         """A JSON value like "type":"invalid_request" triggers permanent."""
         from agentkthx.core.api_resilience import is_transient_api_error
+
         exc = RuntimeError("HTTP 500: server error")
         body = '{"error": {"type": "invalid_request"}}'
         assert is_transient_api_error(exc, body) is False
@@ -158,6 +168,7 @@ class TestSEC14BodyMatching:
         which is a larger refactor.
         """
         from agentkthx.core.api_resilience import is_transient_api_error
+
         exc = RuntimeError("HTTP 500: server error")
         # "invalid_request" inside a quoted value — still matches
         body = '{"user_message": "your request was not invalid_request yet"}'
@@ -168,6 +179,7 @@ class TestSEC14BodyMatching:
         structural chars) does NOT match. Before the fix, any substring
         in the entire body would match."""
         from agentkthx.core.api_resilience import is_transient_api_error
+
         exc = RuntimeError("HTTP 500: server error")
         # "401" appears as a JSON number, not inside quotes
         body = '{"status": 401, "retry": true}'
@@ -177,6 +189,7 @@ class TestSEC14BodyMatching:
     def test_clean_body_500_stays_transient(self):
         """A 500 with a clean body (no permanent markers) is transient."""
         from agentkthx.core.api_resilience import is_transient_api_error
+
         exc = RuntimeError("HTTP 500: internal server error")
         body = '{"status": "ok", "retry": true}'
         assert is_transient_api_error(exc, body) is True
@@ -184,6 +197,7 @@ class TestSEC14BodyMatching:
     def test_str_exc_substring_match_unchanged(self):
         """The str(exc) path keeps the raw substring match (trusted source)."""
         from agentkthx.core.api_resilience import is_transient_api_error
+
         # "invalid_request" in the exception message (not body) still matches
         exc = RuntimeError("HTTP 400: invalid_request error")
         assert is_transient_api_error(exc) is False
@@ -191,6 +205,7 @@ class TestSEC14BodyMatching:
     def test_401_in_body_json_matches(self):
         """HTTP status codes like 401 in JSON body trigger permanent."""
         from agentkthx.core.api_resilience import is_transient_api_error
+
         exc = RuntimeError("HTTP 500: server error")
         body = '{"error": {"code": "401"}}'
         assert is_transient_api_error(exc, body) is False
@@ -198,6 +213,7 @@ class TestSEC14BodyMatching:
     def test_401_as_json_number_does_not_match(self):
         """SEC-14: 401 as a JSON number (not inside quotes) doesn't match."""
         from agentkthx.core.api_resilience import is_transient_api_error
+
         exc = RuntimeError("HTTP 500: server error")
         body = '{"status": 401, "message": "retry later"}'
         # "401" is a JSON number, not inside quotes — should be transient
@@ -207,6 +223,7 @@ class TestSEC14BodyMatching:
 # ------------------------------------------------------------------ #
 #  SEC-15 — CloudBackend env-var mutation (first-instance-wins)      #
 # ------------------------------------------------------------------ #
+
 
 class TestSEC15EnvVarMutation:
     """Verify CloudBackend.__init__ no longer unconditionally overwrites
@@ -239,12 +256,16 @@ class TestSEC15EnvVarMutation:
             def generate_stream(self, **kwargs):
                 yield {}
 
-        with patch.dict(os.environ, {
-            "AGENTKTHX_API_MODE": "comp",
-            "TEST_API_KEY": "sk-test-key-long-enough",
-        }, clear=False):
+        with patch.dict(
+            os.environ,
+            {
+                "AGENTKTHX_API_MODE": "comp",
+                "TEST_API_KEY": "sk-test-key-long-enough",
+            },
+            clear=False,
+        ):
             # AGENTKTHX_API_MODE is already "comp"
-            backend = TestBackend()
+            TestBackend()
             # The env var should NOT have been overwritten to "openai"
             assert os.environ.get("AGENTKTHX_API_MODE") == "comp"
 
@@ -277,7 +298,7 @@ class TestSEC15EnvVarMutation:
         env = {"TEST_API_KEY2": "sk-test-key-long-enough"}
         with patch.dict(os.environ, env, clear=False):
             os.environ.pop("AGENTKTHX_API_MODE", None)
-            backend = TestBackend()
+            TestBackend()
             # The env var should now be set to "openai" (cloud default)
             assert os.environ.get("AGENTKTHX_API_MODE") == "openai"
 
@@ -311,16 +332,17 @@ class TestSEC15EnvVarMutation:
         with patch.dict(os.environ, env, clear=False):
             os.environ.pop("AGENTKTHX_API_MODE", None)
             # First instance — sets the env var
-            backend1 = TestBackend()
+            TestBackend()
             assert os.environ.get("AGENTKTHX_API_MODE") == "openai"
             # Second instance — must NOT overwrite
-            backend2 = TestBackend()
+            TestBackend()
             assert os.environ.get("AGENTKTHX_API_MODE") == "openai"
 
 
 # ------------------------------------------------------------------ #
 #  SEC-16 — _extract_buy_credits_url host validation                #
 # ------------------------------------------------------------------ #
+
 
 class TestSEC16UrlValidation:
     """Verify _extract_buy_credits_url only surfaces URLs pointing at
@@ -329,13 +351,17 @@ class TestSEC16UrlValidation:
     def test_legitimate_orcarouter_url(self):
         """A real OrcaRouter billing URL passes validation."""
         from agentkthx.plugins.orcarouter.orcarouter import _extract_buy_credits_url
-        body = '{"error":{"metadata":{"buy_credits_url":"https://www.orcarouter.ai/console/billing"}}}'
+
+        body = (
+            '{"error":{"metadata":{"buy_credits_url":"https://www.orcarouter.ai/console/billing"}}}'
+        )
         result = _extract_buy_credits_url(body)
         assert result == "https://www.orcarouter.ai/console/billing"
 
     def test_subdomain_of_orcarouter_ai(self):
         """Subdomains of orcarouter.ai pass validation."""
         from agentkthx.plugins.orcarouter.orcarouter import _extract_buy_credits_url
+
         body = '{"error":{"metadata":{"buy_credits_url":"https://billing.orcarouter.ai/topup"}}}'
         result = _extract_buy_credits_url(body)
         assert result == "https://billing.orcarouter.ai/topup"
@@ -343,6 +369,7 @@ class TestSEC16UrlValidation:
     def test_phishing_url_rejected(self):
         """SEC-16: a non-orcarouter.ai URL is rejected (returns None)."""
         from agentkthx.plugins.orcarouter.orcarouter import _extract_buy_credits_url
+
         body = '{"error":{"metadata":{"buy_credits_url":"https://evil-phishing.com/billing"}}}'
         result = _extract_buy_credits_url(body)
         assert result is None
@@ -350,13 +377,17 @@ class TestSEC16UrlValidation:
     def test_lookalike_domain_rejected(self):
         """A lookalike domain (orcarouter.evil.com) is rejected."""
         from agentkthx.plugins.orcarouter.orcarouter import _extract_buy_credits_url
-        body = '{"error":{"metadata":{"buy_credits_url":"https://www.orcarouter.evil.com/billing"}}}'
+
+        body = (
+            '{"error":{"metadata":{"buy_credits_url":"https://www.orcarouter.evil.com/billing"}}}'
+        )
         result = _extract_buy_credits_url(body)
         assert result is None
 
     def test_no_url_field_returns_none(self):
         """If the body has no buy_credits_url field, returns None."""
         from agentkthx.plugins.orcarouter.orcarouter import _extract_buy_credits_url
+
         body = '{"error":{"message":"some other error"}}'
         result = _extract_buy_credits_url(body)
         assert result is None
@@ -365,6 +396,7 @@ class TestSEC16UrlValidation:
         """HTTP (not HTTPS) orcarouter.ai URLs are accepted (the caller
         decides on the scheme; validation is about the host, not TLS)."""
         from agentkthx.plugins.orcarouter.orcarouter import _extract_buy_credits_url
+
         body = '{"error":{"metadata":{"buy_credits_url":"http://www.orcarouter.ai/billing"}}}'
         result = _extract_buy_credits_url(body)
         assert result == "http://www.orcarouter.ai/billing"
@@ -373,6 +405,7 @@ class TestSEC16UrlValidation:
         """When _extract_buy_credits_url returns None (phishing rejected),
         the caller falls back to the hardcoded safe URL."""
         from agentkthx.plugins.orcarouter.orcarouter import _extract_buy_credits_url
+
         phishing_body = '{"error":{"metadata":{"buy_credits_url":"https://evil.com/billing"}}}'
         extracted = _extract_buy_credits_url(phishing_body)
         # The caller's fallback pattern: _extract_buy_credits_url(body) or "https://www.orcarouter.ai/console/billing"
@@ -382,6 +415,7 @@ class TestSEC16UrlValidation:
     def test_url_without_scheme_rejected(self):
         """A URL without a scheme (no http://) is rejected."""
         from agentkthx.plugins.orcarouter.orcarouter import _extract_buy_credits_url
+
         body = '{"error":{"metadata":{"buy_credits_url":"www.orcarouter.ai/billing"}}}'
         result = _extract_buy_credits_url(body)
         assert result is None

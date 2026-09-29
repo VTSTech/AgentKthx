@@ -77,26 +77,21 @@ from __future__ import annotations
 import json
 import os
 import random
-import re
 import time
 import urllib.error
 import urllib.request
-from typing import Any, Generator
+from typing import Generator
 
-from agentkthx.backends.cloud_base import CloudBackend
 from agentkthx.backends.base import BackendConfig
-from agentkthx.core.types import BackendType, ToolSupportLevel, ApiMode
-from agentkthx.core.models import Tool
+from agentkthx.backends.cloud_base import CloudBackend
 from agentkthx.config import (
     MISTRAL_BASE_URL,
-    MISTRAL_API_KEY,
     MISTRAL_DEFAULT_MODEL,
-    MISTRAL_FREE_ONLY,
     MISTRAL_FREE_FALLBACK_MODEL,
-    MISTRAL_SAFE_PROMPT,
-    MISTRAL_SERVICE_TIER,
+    MISTRAL_FREE_ONLY,
 )
-
+from agentkthx.core.models import Tool
+from agentkthx.core.types import ApiMode, BackendType
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Mistral model catalog
@@ -117,7 +112,7 @@ from agentkthx.config import (
 MISTRAL_MODELS: dict[str, dict] = {
     # ── Mistral Medium — frontier multimodal, agentic + coding ──────────
     "mistral-medium-latest": {
-        "context_length": 262_144,            # 256K
+        "context_length": 262_144,  # 256K
         "default_temperature": 0.7,
         "default_max_tokens": 8192,
         "pricing": {"input": 2.00, "output": 6.00},
@@ -145,7 +140,7 @@ MISTRAL_MODELS: dict[str, dict] = {
     },
     # ── Mistral Small — efficient hybrid (instruct + reasoning + code) ──
     "mistral-small-latest": {
-        "context_length": 262_144,            # 256K
+        "context_length": 262_144,  # 256K
         "default_temperature": 0.7,
         "default_max_tokens": 8192,
         "pricing": {"input": 0.20, "output": 0.50},
@@ -173,7 +168,7 @@ MISTRAL_MODELS: dict[str, dict] = {
         "supports_vision": True,
         "supports_reasoning": True,
         "supports_function_calling": True,
-        "supports_n_completions": False,      # mistral-large-2512 rejects n > 1
+        "supports_n_completions": False,  # mistral-large-2512 rejects n > 1
         "license": "Apache 2.0",
     },
     "mistral-large-3": {
@@ -227,12 +222,12 @@ MISTRAL_MODELS: dict[str, dict] = {
     },
     # ── Magistral — dedicated reasoning ladder (128K context) ───────────
     "magistral-medium-latest": {
-        "context_length": 131_072,            # 128K — smaller than sibling Medium
+        "context_length": 131_072,  # 128K — smaller than sibling Medium
         "default_temperature": 0.7,
         "default_max_tokens": 8192,
         "pricing": {"input": 2.00, "output": 6.00},
         "family": "magistral",
-        "supports_reasoning": True,           # prompt_mode="reasoning", ThinkChunk output
+        "supports_reasoning": True,  # prompt_mode="reasoning", ThinkChunk output
         "supports_function_calling": True,
     },
     "magistral-small-latest": {
@@ -252,14 +247,14 @@ MISTRAL_MODELS: dict[str, dict] = {
         "pricing": {"input": 0.20, "output": 0.60},
         "family": "codestral",
         "supports_function_calling": True,
-        "supports_fim": True,                # dedicated /fim/completions endpoint
+        "supports_fim": True,  # dedicated /fim/completions endpoint
     },
     # ── Labs — free of charge, silent updates, NOT production-grade ─────
     # Pinned in the catalog so MISTRAL_FREE_ONLY mode has something to
     # fall back to without requiring a live API discovery call.
     "labs-mistral-small-creative": {
         "context_length": 262_144,
-        "default_temperature": 0.9,          # creative bias
+        "default_temperature": 0.9,  # creative bias
         "default_max_tokens": 8192,
         "pricing": {"input": 0.0, "output": 0.0},  # Labs = free
         "family": "labs",
@@ -364,11 +359,17 @@ class MistralBackend(CloudBackend):
 
     # Set of OpenAI-only request fields that would 422 on Mistral. Never
     # forward these to the API — strip them in _build_request().
-    _OPENAI_ONLY_FIELDS = frozenset({
-        "logprobs", "top_logprobs", "top_k", "user",
-        "max_completion_tokens", "seed",  # seed → random_seed (mapped)
-        "metadata_internal",
-    })
+    _OPENAI_ONLY_FIELDS = frozenset(
+        {
+            "logprobs",
+            "top_logprobs",
+            "top_k",
+            "user",
+            "max_completion_tokens",
+            "seed",  # seed → random_seed (mapped)
+            "metadata_internal",
+        }
+    )
 
     # ───────────────────────────────────────────────────────────────────
     # __init__ — delegate to CloudBackend
@@ -514,40 +515,44 @@ class MistralBackend(CloudBackend):
                 continue
             seen.add(model_key)
             meta = MISTRAL_MODELS.get(model_key, {})
-            models.append({
-                "name": model_key,
-                "size": 0,
-                "details": {
-                    "family": meta.get("family", self._catalog_family_name()),
-                    "backend": self._catalog_backend_name(),
-                    "context_length": meta.get(
-                        "context_length", self._DEFAULT_CONTEXT_FALLBACK
-                    ),
-                    "free_tier": _is_free_model(model_key),
-                    "is_chat_model": True,
-                    "pricing": meta.get("pricing", {}),
-                },
-            })
+            models.append(
+                {
+                    "name": model_key,
+                    "size": 0,
+                    "details": {
+                        "family": meta.get("family", self._catalog_family_name()),
+                        "backend": self._catalog_backend_name(),
+                        "context_length": meta.get(
+                            "context_length", self._DEFAULT_CONTEXT_FALLBACK
+                        ),
+                        "free_tier": _is_free_model(model_key),
+                        "is_chat_model": True,
+                        "pricing": meta.get("pricing", {}),
+                    },
+                }
+            )
 
         for name in sorted(MISTRAL_MODELS.keys()):
             if name in seen:
                 continue
             seen.add(name)
             meta = MISTRAL_MODELS[name]
-            models.append({
-                "name": name,
-                "size": 0,
-                "details": {
-                    "family": meta.get("family", self._catalog_family_name()),
-                    "backend": self._catalog_backend_name(),
-                    "context_length": meta.get(
-                        "context_length", self._DEFAULT_CONTEXT_FALLBACK
-                    ),
-                    "free_tier": _is_free_model(name),
-                    "is_chat_model": True,
-                    "pricing": meta.get("pricing", {}),
-                },
-            })
+            models.append(
+                {
+                    "name": name,
+                    "size": 0,
+                    "details": {
+                        "family": meta.get("family", self._catalog_family_name()),
+                        "backend": self._catalog_backend_name(),
+                        "context_length": meta.get(
+                            "context_length", self._DEFAULT_CONTEXT_FALLBACK
+                        ),
+                        "free_tier": _is_free_model(name),
+                        "is_chat_model": True,
+                        "pricing": meta.get("pricing", {}),
+                    },
+                }
+            )
 
         if MISTRAL_FREE_ONLY:
             models = [m for m in models if m["details"].get("free_tier")]
@@ -575,9 +580,7 @@ class MistralBackend(CloudBackend):
         if info is not None:
             info["details"]["is_chat_model"] = True
             model_key = model.split("/")[-1] if "/" in model else model
-            info["details"]["pricing"] = MISTRAL_MODELS.get(
-                model_key, {}
-            ).get("pricing", {})
+            info["details"]["pricing"] = MISTRAL_MODELS.get(model_key, {}).get("pricing", {})
             return info
         # Unknown model — Mistral accepts it; return a safe default.
         model_key = model.split("/")[-1] if "/" in model else model
@@ -712,11 +715,24 @@ class MistralBackend(CloudBackend):
             if key in self._OPENAI_ONLY_FIELDS:
                 continue
             if key in (
-                "model", "messages", "tools", "stream", "temperature",
-                "max_tokens", "tool_choice", "parallel_tool_calls",
-                "top_p", "n", "presence_penalty", "frequency_penalty",
-                "stop", "response_format", "reasoning_effort",
-                "seed", "random_seed", "session_id",
+                "model",
+                "messages",
+                "tools",
+                "stream",
+                "temperature",
+                "max_tokens",
+                "tool_choice",
+                "parallel_tool_calls",
+                "top_p",
+                "n",
+                "presence_penalty",
+                "frequency_penalty",
+                "stop",
+                "response_format",
+                "reasoning_effort",
+                "seed",
+                "random_seed",
+                "session_id",
             ):
                 continue
             body[key] = value
@@ -755,10 +771,7 @@ class MistralBackend(CloudBackend):
             msg = raw_response.get("message", str(raw_response))
             etype = raw_response.get("type", "")
             code = raw_response.get("code", "")
-            raise RuntimeError(
-                f"Mistral API error: {msg} "
-                f"(type={etype}, code={code})"
-            )
+            raise RuntimeError(f"Mistral API error: {msg} " f"(type={etype}, code={code})")
 
         # OpenAI-style {"error": {...}} envelope (some gateways wrap)
         err_field = raw_response.get("error")
@@ -771,9 +784,7 @@ class MistralBackend(CloudBackend):
 
         choices = raw_response.get("choices")
         if not choices:
-            raise RuntimeError(
-                f"Mistral API returned no choices in response: {raw_response}"
-            )
+            raise RuntimeError(f"Mistral API returned no choices in response: {raw_response}")
 
         choice = choices[0]
         msg = choice.get("message", {}) or {}
@@ -825,12 +836,14 @@ class MistralBackend(CloudBackend):
             # string "null" — synthesize a fallback when the model
             # emits nothing usable.
             tc_id = tc.get("id") or f"mistral_tc_{i}"
-            tool_calls_out.append({
-                "id": tc_id,
-                "type": tc.get("type", "function"),
-                "name": fn.get("name", ""),
-                "arguments": args,
-            })
+            tool_calls_out.append(
+                {
+                    "id": tc_id,
+                    "type": tc.get("type", "function"),
+                    "name": fn.get("name", ""),
+                    "arguments": args,
+                }
+            )
 
         usage = raw_response.get("usage", {}) or {}
 
@@ -1026,16 +1039,11 @@ class MistralBackend(CloudBackend):
                 method="POST",
             )
             try:
-                response = urllib.request.urlopen(
-                    req, timeout=self.config.timeout
-                )
+                response = urllib.request.urlopen(req, timeout=self.config.timeout)
             except urllib.error.HTTPError as e:
                 status_code = e.code
                 body_bytes = e.read() if e.fp else b""
-                body_text = (
-                    body_bytes.decode("utf-8", errors="replace")
-                    if body_bytes else ""
-                )
+                body_text = body_bytes.decode("utf-8", errors="replace") if body_bytes else ""
 
                 # ARCH-03: shared context-length 400 handler. Only on
                 # the first attempt (don't loop forever on a 400).
@@ -1071,10 +1079,7 @@ class MistralBackend(CloudBackend):
                 # Retryable: 429 + 5xx. Honor Retry-After when present,
                 # otherwise exponential backoff with full jitter (mirrors
                 # the non-streaming path).
-                retryable = (
-                    status_code == 429
-                    or status_code in (500, 502, 503, 504)
-                )
+                retryable = status_code == 429 or status_code in (500, 502, 503, 504)
                 if retryable and attempt < max_retries:
                     retry_after_raw = e.headers.get("Retry-After", "")
                     retry_after: float | None = None
@@ -1084,7 +1089,7 @@ class MistralBackend(CloudBackend):
                         except (ValueError, TypeError):
                             retry_after = None
                     if retry_after is None:
-                        base = self._BACKOFF_BASE * (2 ** attempt)
+                        base = self._BACKOFF_BASE * (2**attempt)
                         retry_after = min(base, self._BACKOFF_CAP)
                         retry_after += random.uniform(0, retry_after * 0.2)
                     retry_after = min(max(retry_after, 1.0), self._BACKOFF_CAP)
@@ -1104,14 +1109,12 @@ class MistralBackend(CloudBackend):
                         "Mistral authentication failed. Check your "
                         "MISTRAL_API_KEY environment variable."
                     ) from e
-                raise RuntimeError(
-                    f"Mistral API error {status_code}: {err_msg}"
-                ) from e
+                raise RuntimeError(f"Mistral API error {status_code}: {err_msg}") from e
 
             except urllib.error.URLError as e:
                 # Network-level error — retry once with backoff, then surface
                 if attempt < max_retries:
-                    backoff = self._BACKOFF_BASE * (2 ** attempt)
+                    backoff = self._BACKOFF_BASE * (2**attempt)
                     backoff = min(backoff, self._BACKOFF_CAP)
                     backoff += random.uniform(0, backoff * 0.2)
                     if os.environ.get("AGENTKTHX_DEBUG"):
@@ -1121,9 +1124,7 @@ class MistralBackend(CloudBackend):
                         )
                     time.sleep(backoff)
                     continue
-                raise RuntimeError(
-                    f"Mistral connection error: {e.reason}"
-                ) from e
+                raise RuntimeError(f"Mistral connection error: {e.reason}") from e
 
             # Success — yield raw SSE line bytes. The base class's
             # generate_completions_stream() handles the JSON parsing,
@@ -1143,9 +1144,7 @@ class MistralBackend(CloudBackend):
             return  # success — don't retry
 
         # Should not reach here — the loop either yields + returns, or raises
-        raise RuntimeError(
-            f"Mistral-Stream retries exhausted. Last error: {last_error_msg}"
-        )
+        raise RuntimeError(f"Mistral-Stream retries exhausted. Last error: {last_error_msg}")
 
     # ───────────────────────────────────────────────────────────────────
     # generate_stream — thin text-delta wrapper (parity with OpenRouter)
@@ -1226,19 +1225,14 @@ class MistralBackend(CloudBackend):
                 method="POST",
             )
             try:
-                with urllib.request.urlopen(
-                    req, timeout=self.config.timeout
-                ) as resp:
+                with urllib.request.urlopen(req, timeout=self.config.timeout) as resp:
                     raw = json.loads(resp.read().decode("utf-8"))
                     return self._parse_mistral_response(raw)
 
             except urllib.error.HTTPError as e:
                 status_code = e.code
                 body_bytes = e.read() if e.fp else b""
-                body_text = (
-                    body_bytes.decode("utf-8", errors="replace")
-                    if body_bytes else ""
-                )
+                body_text = body_bytes.decode("utf-8", errors="replace") if body_bytes else ""
 
                 # Parse Mistral error envelope
                 err_data: dict | None = None
@@ -1266,10 +1260,7 @@ class MistralBackend(CloudBackend):
 
                 # Retryable: 429 (rate limit) and 502/503/504 (transient
                 # server errors). 500 is also retryable per Mistral docs.
-                retryable = (
-                    status_code == 429
-                    or status_code in (500, 502, 503, 504)
-                )
+                retryable = status_code == 429 or status_code in (500, 502, 503, 504)
 
                 if retryable and attempt < max_retries:
                     # Honor Retry-After when parseable; otherwise
@@ -1283,7 +1274,7 @@ class MistralBackend(CloudBackend):
                             retry_after = None
 
                     if retry_after is None:
-                        base = self._BACKOFF_BASE * (2 ** attempt)
+                        base = self._BACKOFF_BASE * (2**attempt)
                         retry_after = min(base, self._BACKOFF_CAP)
                         retry_after += random.uniform(0, retry_after * 0.2)
 
@@ -1320,15 +1311,13 @@ class MistralBackend(CloudBackend):
                         f"value, or unknown OpenAI-only fields."
                     ) from e
 
-                raise RuntimeError(
-                    f"Mistral API error {status_code}: {err_msg}"
-                ) from e
+                raise RuntimeError(f"Mistral API error {status_code}: {err_msg}") from e
 
             except urllib.error.URLError as e:
                 # Network-level error — retry once with backoff, then
                 # surface as RuntimeError so the agent loop sees it.
                 if attempt < max_retries:
-                    backoff = self._BACKOFF_BASE * (2 ** attempt)
+                    backoff = self._BACKOFF_BASE * (2**attempt)
                     backoff = min(backoff, self._BACKOFF_CAP)
                     backoff += random.uniform(0, backoff * 0.2)
                     if os.environ.get("AGENTKTHX_DEBUG"):
@@ -1338,14 +1327,10 @@ class MistralBackend(CloudBackend):
                         )
                     time.sleep(backoff)
                     continue
-                raise RuntimeError(
-                    f"Mistral connection error: {e.reason}"
-                ) from e
+                raise RuntimeError(f"Mistral connection error: {e.reason}") from e
 
         # Should not reach here — the loop either returns or raises.
-        raise RuntimeError(
-            f"Mistral API retries exhausted. Last error: {last_error_msg}"
-        )
+        raise RuntimeError(f"Mistral API retries exhausted. Last error: {last_error_msg}")
 
     def _max_retries(self) -> int:
         """Resolve the retry budget (env override > class default)."""

@@ -38,12 +38,10 @@ Written by VTSTech — https://www.vts-tech.org
 from __future__ import annotations
 
 import os
-from typing import Any
 
-from .openai_compat import OpenAICompatibleBackend
-from .base import BackendConfig
 from ..core.types import ApiMode, BackendType, ToolSupportLevel
-from ..core.models import Tool
+from .base import BackendConfig
+from .openai_compat import OpenAICompatibleBackend
 
 
 class WireAdapter:
@@ -337,9 +335,7 @@ class CloudBackend(OpenAICompatibleBackend):
     @property
     def backend_type(self) -> BackendType:
         """Subclasses MUST override to return their specific BackendType."""
-        raise NotImplementedError(
-            f"{self.__class__.__name__} must override backend_type"
-        )
+        raise NotImplementedError(f"{self.__class__.__name__} must override backend_type")
 
     @property
     def api_key(self) -> str:
@@ -457,9 +453,7 @@ class CloudBackend(OpenAICompatibleBackend):
                     f"{max_tokens} -> {capped} (context={context_length}, divisor=32)"
                 )
 
-        return self._apply_max_tokens_cap(
-            max_tokens, context_length, temperature=temperature
-        )
+        return self._apply_max_tokens_cap(max_tokens, context_length, temperature=temperature)
 
     # ─────────────────────────────────────────────────────────────────────
     # Context-window reporting (R07.05 — fixes ``agentkthx models`` crash)
@@ -585,18 +579,22 @@ class CloudBackend(OpenAICompatibleBackend):
         models = []
         for name in sorted(self.MODELS.keys()):
             meta = self.MODELS[name]
-            models.append({
-                "name": name,
-                "size": 0,
-                "details": {
-                    "family": self._catalog_family_name(),
-                    "backend": self._catalog_backend_name(),
-                    "context_length": meta.get("context_length", self._DEFAULT_CONTEXT_FALLBACK),
-                    # free_tier from catalog pricing so /models free works
-                    # for catalog-driven backends too.
-                    "free_tier": self._is_free_model(name),
-                },
-            })
+            models.append(
+                {
+                    "name": name,
+                    "size": 0,
+                    "details": {
+                        "family": self._catalog_family_name(),
+                        "backend": self._catalog_backend_name(),
+                        "context_length": meta.get(
+                            "context_length", self._DEFAULT_CONTEXT_FALLBACK
+                        ),
+                        # free_tier from catalog pricing so /models free works
+                        # for catalog-driven backends too.
+                        "free_tier": self._is_free_model(name),
+                    },
+                }
+            )
         return models
 
     # ─────────────────────────────────────────────────────────────────────

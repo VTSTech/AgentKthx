@@ -78,7 +78,8 @@ def add_shared_args(parser: argparse.ArgumentParser) -> None:
         help="Use the system prompt from the model's Modelfile",
     )
     parser.add_argument(
-        "--model", "-m",
+        "--model",
+        "-m",
         default=None,
         metavar="MODEL",
         help="Model to use (overrides AGENTKTHX_MODEL env var)",
@@ -116,7 +117,8 @@ def add_shared_args(parser: argparse.ArgumentParser) -> None:
         help="Maximum tokens to generate",
     )
     parser.add_argument(
-        "--temp", "--temperature",
+        "--temp",
+        "--temperature",
         type=float,
         default=None,
         dest="temperature",
@@ -159,8 +161,16 @@ def _backend_choices_for_help() -> list[str]:
         names = []
     if not names:
         names = [
-            "ollama", "bitnet", "llama-server", "zai", "openrouter",
-            "huggingface", "gemini", "openai", "mistral", "orcarouter",
+            "ollama",
+            "bitnet",
+            "llama-server",
+            "zai",
+            "openrouter",
+            "huggingface",
+            "gemini",
+            "openai",
+            "mistral",
+            "orcarouter",
             "pollinations",
         ]
     return names
@@ -185,9 +195,7 @@ def add_agent_args(
         include_confirm:  Whether to include the ``--confirm`` flag.
     """
     parser.add_argument("-m", "--model", default=None, help="Model to use")
-    parser.add_argument(
-        "--tools", default=tools_default, help="Comma-separated tool list"
-    )
+    parser.add_argument("--tools", default=tools_default, help="Comma-separated tool list")
     parser.add_argument(
         "--backend",
         default=None,
@@ -199,7 +207,7 @@ def add_agent_args(
         default="openai",
         dest="api_mode",
         help="API mode: 'openre' (OpenResponses), 'openai' (Chat-Completions), "
-             "or 'jev' (System-One decision shape via any LLM)",
+        "or 'jev' (System-One decision shape via any LLM)",
     )
     parser.add_argument("--debug", action="store_true", help="Enable debug output")
     parser.add_argument(
@@ -247,7 +255,8 @@ def add_agent_args(
         help="Maximum tokens to generate (default: model-specific)",
     )
     parser.add_argument(
-        "--temp", "--temperature",
+        "--temp",
+        "--temperature",
         type=float,
         default=None,
         dest="temperature",
@@ -269,9 +278,7 @@ def add_agent_args(
     parser.add_argument(
         "--acp", action="store_true", help="Enable ACP logging to Agent Control Panel"
     )
-    parser.add_argument(
-        "--acp-url", default=None, help="ACP server URL (default: from config)"
-    )
+    parser.add_argument("--acp-url", default=None, help="ACP server URL (default: from config)")
     parser.add_argument(
         "--response-format",
         choices=["text", "json"],
@@ -289,9 +296,9 @@ def add_agent_args(
         "--compaction",
         default="auto",
         help="Memory compaction threshold as %% of context window (default: auto=85%%). "
-             "When token usage exceeds this %% of num_ctx, older messages are compacted "
-             "(tool results truncated, content summarized) instead of dropped. "
-             "Use 'off' or '0' to disable, or a number like '90' for 90%%.",
+        "When token usage exceeds this %% of num_ctx, older messages are compacted "
+        "(tool results truncated, content summarized) instead of dropped. "
+        "Use 'off' or '0' to disable, or a number like '90' for 90%%.",
     )
     parser.add_argument(
         "--stream",
@@ -299,7 +306,7 @@ def add_agent_args(
         default=None,
         dest="stream",
         help="Force streaming output. Cloud providers (zai/openrouter) stream by default; "
-             "use --no-stream to disable streaming for cloud providers.",
+        "use --no-stream to disable streaming for cloud providers.",
     )
     parser.add_argument(
         "--no-stream",
@@ -314,9 +321,9 @@ def add_agent_args(
         default="auto",
         dest="thinking_level",
         help="Thinking / reasoning effort: 'off' (disable, fastest — recommended "
-             "for JEV decisions), 'auto' (default, let model decide), "
-             "'low'/'medium'/'high' (forwarded as reasoning_effort for "
-             "thinking-capable models like GLM-5/o-series)",
+        "for JEV decisions), 'auto' (default, let model decide), "
+        "'low'/'medium'/'high' (forwarded as reasoning_effort for "
+        "thinking-capable models like GLM-5/o-series)",
     )
     parser.add_argument(
         "--think",
@@ -324,8 +331,8 @@ def add_agent_args(
         default=False,
         dest="show_reasoning",
         help="Display reasoning_content (chain-of-thought) in CLI output when the "
-             "model emits it. Off by default. Use --think to inspect what the "
-             "model was 'thinking' before its final answer.",
+        "model emits it. Off by default. Use --think to inspect what the "
+        "model was 'thinking' before its final answer.",
     )
     parser.add_argument(
         "--skills",
@@ -369,8 +376,10 @@ def parse_shared_args(args) -> SharedConfig:
         SharedConfig with values from args or env vars.
     """
     return SharedConfig(
-        force_react=getattr(args, "force_react", False) or os.environ.get("AGENTKTHX_FORCE_REACT", "0") == "1",
-        use_modelfile_system=getattr(args, "use_modelfile_system", False) or os.environ.get("AGENTKTHX_USE_MF_SYS", "0") == "1",
+        force_react=getattr(args, "force_react", False)
+        or os.environ.get("AGENTKTHX_FORCE_REACT", "0") == "1",
+        use_modelfile_system=getattr(args, "use_modelfile_system", False)
+        or os.environ.get("AGENTKTHX_USE_MF_SYS", "0") == "1",
         model=getattr(args, "model", None) or os.environ.get("AGENTKTHX_MODEL"),
         debug=getattr(args, "debug", False) or os.environ.get("AGENTKTHX_DEBUG", "0") == "1",
         acp=getattr(args, "acp", False) or os.environ.get("AGENTKTHX_ACP", "0") == "1",

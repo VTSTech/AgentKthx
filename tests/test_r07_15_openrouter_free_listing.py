@@ -57,6 +57,7 @@ ROUTER = "openrouter/free"
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(autouse=True)
 def _reset_class_cache():
     """MAINT-19 made the model cache CLASS-level — reset it around every
@@ -81,7 +82,9 @@ def backend(monkeypatch):
     starts from a genuinely cold cache.
     """
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test1234567890")
-    with unittest.mock.patch("urllib.request.urlopen", side_effect=OSError("no network during init")):
+    with unittest.mock.patch(
+        "urllib.request.urlopen", side_effect=OSError("no network during init")
+    ):
         instance = OpenRouterBackend()
     # Reset the class-level cache (MAINT-19) — and critically, POP any
     # instance-level attrs left by the init-time failure fallback rather
@@ -128,14 +131,13 @@ def _free_only(monkeypatch: pytest.MonkeyPatch, value: bool) -> None:
     import time, so the env var alone would not be seen — patch the module
     global the code actually reads.
     """
-    monkeypatch.setattr(
-        "agentkthx.plugins.openrouter.openrouter.OPENROUTER_FREE_ONLY", value
-    )
+    monkeypatch.setattr("agentkthx.plugins.openrouter.openrouter.OPENROUTER_FREE_ONLY", value)
 
 
 # ---------------------------------------------------------------------------
 # _free_router_entry() / _is_free_model()
 # ---------------------------------------------------------------------------
+
 
 class TestFreeRouterEntry:
     def test_entry_shape(self):
@@ -161,10 +163,12 @@ class TestFreeRouterEntry:
 # list_models() — live path
 # ---------------------------------------------------------------------------
 
+
 class TestListModelsRouterInjection:
     def test_router_injected_when_api_omits_it(self, backend, monkeypatch):
-        payload = {"data": [_api_model("qwen/qwen3.8-27b:free"),
-                            _api_model("google/gemma-4-31b-it:free")]}
+        payload = {
+            "data": [_api_model("qwen/qwen3.8-27b:free"), _api_model("google/gemma-4-31b-it:free")]
+        }
         with unittest.mock.patch("urllib.request.urlopen", _mock_urlopen(payload)):
             models = backend.list_models()
         names = [m["name"] for m in models]
@@ -175,8 +179,7 @@ class TestListModelsRouterInjection:
         assert "google/gemma-4-31b-it:free" in names
 
     def test_no_duplicate_when_api_includes_router(self, backend, monkeypatch):
-        payload = {"data": [_api_model("qwen/qwen3.8-27b:free"),
-                            _api_model(ROUTER)]}
+        payload = {"data": [_api_model("qwen/qwen3.8-27b:free"), _api_model(ROUTER)]}
         with unittest.mock.patch("urllib.request.urlopen", _mock_urlopen(payload)):
             models = backend.list_models()
         names = [m["name"] for m in models]
@@ -184,8 +187,7 @@ class TestListModelsRouterInjection:
 
     def test_free_only_filter_keeps_router(self, backend, monkeypatch):
         _free_only(monkeypatch, True)
-        payload = {"data": [_api_model("qwen/qwen3.8-27b:free"),
-                            _api_model("openai/gpt-4o")]}
+        payload = {"data": [_api_model("qwen/qwen3.8-27b:free"), _api_model("openai/gpt-4o")]}
         with unittest.mock.patch("urllib.request.urlopen", _mock_urlopen(payload)):
             models = backend.list_models()
         names = [m["name"] for m in models]
@@ -208,14 +210,13 @@ class TestListModelsRouterInjection:
 # list_models() — catalog fallback path (API unreachable)
 # ---------------------------------------------------------------------------
 
+
 class TestFallbackPathRouter:
     def test_fallback_includes_router_under_free_only(self, backend, monkeypatch):
         """The static catalog contains no free models — without the injected
         router a FREE_ONLY fallback list would be empty."""
         _free_only(monkeypatch, True)
-        with unittest.mock.patch(
-            "urllib.request.urlopen", side_effect=OSError("API unreachable")
-        ):
+        with unittest.mock.patch("urllib.request.urlopen", side_effect=OSError("API unreachable")):
             models = backend.list_models()
         names = [m["name"] for m in models]
         assert ROUTER in names
@@ -224,9 +225,7 @@ class TestFallbackPathRouter:
 
     def test_fallback_includes_router_without_free_only(self, backend, monkeypatch):
         _free_only(monkeypatch, False)
-        with unittest.mock.patch(
-            "urllib.request.urlopen", side_effect=OSError("API unreachable")
-        ):
+        with unittest.mock.patch("urllib.request.urlopen", side_effect=OSError("API unreachable")):
             models = backend.list_models()
         names = [m["name"] for m in models]
         assert ROUTER in names
@@ -237,11 +236,13 @@ class TestFallbackPathRouter:
 # CLI layer — cmd_models free-only filter
 # ---------------------------------------------------------------------------
 
+
 class TestCliFreeFilter:
     def test_models_command_no_longer_uses_bare_suffix_check(self):
         """Pin the exact regression: the OpenRouter branch must filter via
         the shared helper, not ``m["name"].endswith(":free")``."""
         from agentkthx.cli.commands import models as models_mod
+
         src = inspect.getsource(models_mod)
         assert 'm["name"].endswith(":free")' not in src
         assert "_is_free_model" in src
@@ -250,23 +251,33 @@ class TestCliFreeFilter:
         """End-to-end through cmd_models: a backend list that already
         contains the router (as the fixed backend guarantees) must render
         the router row and drop paid models under FREE_ONLY."""
-        from agentkthx.cli.commands import models as models_mod
         import agentkthx.cli as cli_pkg
+        from agentkthx.cli.commands import models as models_mod
 
         monkeypatch.setattr("agentkthx.config.OPENROUTER_FREE_ONLY", True)
         # ACP is not under test — never initialize it
         monkeypatch.setattr(cli_pkg, "_init_acp", lambda *a, **k: (None, None))
 
         fake_models = [
-            {"name": "qwen/qwen3.8-27b:free", "size": 0,
-             "details": {"family": "qwen", "backend": "openrouter",
-                         "context_length": 256000}},
-            {"name": ROUTER, "size": 0,
-             "details": {"family": "openrouter", "backend": "openrouter",
-                         "context_length": 200000}},
-            {"name": "openai/gpt-4o", "size": 0,
-             "details": {"family": "openai", "backend": "openrouter",
-                         "context_length": 128000}},
+            {
+                "name": "qwen/qwen3.8-27b:free",
+                "size": 0,
+                "details": {"family": "qwen", "backend": "openrouter", "context_length": 256000},
+            },
+            {
+                "name": ROUTER,
+                "size": 0,
+                "details": {
+                    "family": "openrouter",
+                    "backend": "openrouter",
+                    "context_length": 200000,
+                },
+            },
+            {
+                "name": "openai/gpt-4o",
+                "size": 0,
+                "details": {"family": "openai", "backend": "openrouter", "context_length": 128000},
+            },
         ]
 
         class _StubBackend:
@@ -301,6 +312,6 @@ class TestCliFreeFilter:
         out = capsys.readouterr().out
 
         assert rc == 0
-        assert ROUTER in out            # ← the user-visible regression
+        assert ROUTER in out  # ← the user-visible regression
         assert "qwen3.8-27b:free" in out
-        assert "gpt-4o" not in out      # paid model filtered at CLI level
+        assert "gpt-4o" not in out  # paid model filtered at CLI level

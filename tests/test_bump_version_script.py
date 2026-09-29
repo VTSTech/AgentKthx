@@ -40,6 +40,7 @@ def fresh_repo_copy(tmp_path: Path) -> Path:
     """Copy the repo to a tmp_path so we can mutate without affecting the
     real checkout. Faster than git clone — just copies files."""
     import shutil
+
     dst = tmp_path / "AgentKthx"
     # Copy only the files the script touches + the script itself, so the
     # test is fast and isolated. We re-create the minimal tree:
@@ -54,7 +55,7 @@ def fresh_repo_copy(tmp_path: Path) -> Path:
     os.chmod(dst / "scripts" / "bump-version.sh", 0o755)
 
     # Seed with a known starting version (R06.57 / 0.6.57)
-    (dst / "pyproject.toml").write_text(textwrap.dedent('''\
+    (dst / "pyproject.toml").write_text(textwrap.dedent("""\
         [build-system]
         requires = ["setuptools>=61.0", "wheel"]
         build-backend = "setuptools.build_meta"
@@ -63,7 +64,7 @@ def fresh_repo_copy(tmp_path: Path) -> Path:
         name = "agentkthx"
         version = "0.6.57"
         description = "test"
-    '''))
+    """))
     (dst / "agentkthx" / "__init__.py").write_text(textwrap.dedent('''\
         """
         ⚛️ AgentKthx R06.57
@@ -81,6 +82,7 @@ def fresh_repo_copy(tmp_path: Path) -> Path:
 # --current
 # ---------------------------------------------------------------------------
 
+
 def test_current_flag_prints_version(fresh_repo_copy: Path):
     """--current should print 'R06.57 (0.6.57)' and exit 0."""
     result = _run(["--current"], fresh_repo_copy)
@@ -92,6 +94,7 @@ def test_current_flag_prints_version(fresh_repo_copy: Path):
 # ---------------------------------------------------------------------------
 # happy path: R06.57 → R06.58
 # ---------------------------------------------------------------------------
+
 
 def test_bump_to_r06_58_writes_all_four_sites(fresh_repo_copy: Path):
     """Bumping R06.57 → R06.58 should update all 4 declaration sites."""
@@ -120,6 +123,7 @@ def test_bump_to_r06_58_writes_all_four_sites(fresh_repo_copy: Path):
 # semver input form
 # ---------------------------------------------------------------------------
 
+
 def test_bump_accepts_semver_form(fresh_repo_copy: Path):
     """Passing '0.6.58' should work the same as 'R06.58'."""
     result = _run(["0.6.58"], fresh_repo_copy)
@@ -131,6 +135,7 @@ def test_bump_accepts_semver_form(fresh_repo_copy: Path):
 # ---------------------------------------------------------------------------
 # dry-run
 # ---------------------------------------------------------------------------
+
 
 def test_dry_run_does_not_write(fresh_repo_copy: Path):
     """--dry-run should print the diff but leave files untouched."""
@@ -148,6 +153,7 @@ def test_dry_run_does_not_write(fresh_repo_copy: Path):
 # no-op when already at target
 # ---------------------------------------------------------------------------
 
+
 def test_no_op_when_already_at_target(fresh_repo_copy: Path):
     """Running with the current version should exit 2 with a 'nothing to do' msg."""
     result = _run(["R06.57"], fresh_repo_copy)
@@ -158,6 +164,7 @@ def test_no_op_when_already_at_target(fresh_repo_copy: Path):
 # ---------------------------------------------------------------------------
 # bad format
 # ---------------------------------------------------------------------------
+
 
 def test_bad_format_rejected(fresh_repo_copy: Path):
     """A malformed version string should exit 1 with a clear error."""
@@ -177,6 +184,7 @@ def test_missing_arg_shows_usage(fresh_repo_copy: Path):
 # round-trip: R06.58 ↔ 0.6.58
 # ---------------------------------------------------------------------------
 
+
 def test_round_trip_release_to_semver_to_release(fresh_repo_copy: Path):
     """Bumping to R06.58 then reading --current should give back R06.58."""
     _run(["R06.58"], fresh_repo_copy)
@@ -189,6 +197,7 @@ def test_round_trip_release_to_semver_to_release(fresh_repo_copy: Path):
 # safety: pattern-mismatch detection
 # ---------------------------------------------------------------------------
 
+
 def test_fails_loudly_when_pattern_not_found(fresh_repo_copy: Path):
     """If a file's version string was manually edited and no longer matches
     the expected pattern, the script should fail loudly rather than
@@ -199,5 +208,4 @@ def test_fails_loudly_when_pattern_not_found(fresh_repo_copy: Path):
 
     result = _run(["R06.58"], fresh_repo_copy)
     assert result.returncode != 0
-    assert "pattern not found" in result.stderr.lower() or \
-           "missing" in result.stderr.lower()
+    assert "pattern not found" in result.stderr.lower() or "missing" in result.stderr.lower()

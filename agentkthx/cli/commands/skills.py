@@ -6,9 +6,7 @@ from __future__ import annotations
 
 import argparse
 
-from ...colors import bold, yellow, magenta, dim, cyan, red
-
-
+from ...colors import bold, cyan, dim, magenta, red, yellow
 
 
 def cmd_skills(args: argparse.Namespace) -> int:
@@ -18,7 +16,7 @@ def cmd_skills(args: argparse.Namespace) -> int:
     loader = SkillLoader()
     skills = loader.list_skills()
 
-    print(bold(f"\n⚛️ AgentKthx Skills") + dim(" · Written by VTSTech · https://kthx.vts-tech.org"))
+    print(bold("\n⚛️ AgentKthx Skills") + dim(" · Written by VTSTech · https://kthx.vts-tech.org"))
 
     if not skills:
         print(yellow("  No skills found."))
@@ -31,7 +29,9 @@ def cmd_skills(args: argparse.Namespace) -> int:
     for name in skills:
         try:
             skill = loader.load(name)
-            desc = skill.description[:60] + "..." if len(skill.description) > 60 else skill.description
+            desc = (
+                skill.description[:60] + "..." if len(skill.description) > 60 else skill.description
+            )
             print(f"  {magenta(name):<26} {desc}")
 
             # Show resources
@@ -52,7 +52,11 @@ def cmd_skills(args: argparse.Namespace) -> int:
     print()
     print(dim(f"  Use with: {cyan('--skills')} {','.join(skills[:2])}"))
     print(dim("  Skills provide knowledge/instructions to the agent."))
-    print(dim(f"  Available commands support: {cyan('run --skills <list>')}, {cyan('chat --skills <list>')}, {cyan('agent --skills <list>')}"))
+    print(
+        dim(
+            f"  Available commands support: {cyan('run --skills <list>')}, {cyan('chat --skills <list>')}, {cyan('agent --skills <list>')}"
+        )
+    )
     print()
 
     return 0

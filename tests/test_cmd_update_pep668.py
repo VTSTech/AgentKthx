@@ -4,6 +4,7 @@ Covers the cmd_update retry-with-break-system-packages path: we want to
 fire only on genuine PEP 668 stderr and never on unrelated pip failures
 (auth, network, missing package, build errors).
 """
+
 import unittest
 
 from agentkthx.cli import _is_externally_managed_error
@@ -17,8 +18,7 @@ class TestIsExternallyManagedError(unittest.TestCase):
     def test_canonical_marker(self):
         """Canonical phrase pip emits under PEP 668."""
         err = (
-            "error: externally-managed-environment\n\n"
-            "x This environment is externally managed\n"
+            "error: externally-managed-environment\n\n" "x This environment is externally managed\n"
         )
         self.assertTrue(_is_externally_managed_error(err))
 

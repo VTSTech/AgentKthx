@@ -7,24 +7,23 @@ SPDX validation, compatibility parsing, and system prompt generation.
 These tests require NO model — they test the skill infrastructure directly.
 """
 
-import os
-import tempfile
-import pytest
 from pathlib import Path
 
-from agentkthx.skills import (
-    SkillLoader,
-    Skill,
-    SkillRegistry,
-    validate_spdx_license,
-    parse_compatibility,
-    SPDX_LICENSES,
-)
+import pytest
 
+from agentkthx.skills import (
+    SPDX_LICENSES,
+    Skill,
+    SkillLoader,
+    SkillRegistry,
+    parse_compatibility,
+    validate_spdx_license,
+)
 
 # ============================================================================
 # Fixtures
 # ============================================================================
+
 
 @pytest.fixture
 def skills_dir(tmp_path):
@@ -74,6 +73,7 @@ def loader(skills_dir):
 # ============================================================================
 # SPDX License Validation Tests
 # ============================================================================
+
 
 class TestSPDXValidation:
     """Test validate_spdx_license() function."""
@@ -130,6 +130,7 @@ class TestSPDXValidation:
 # Compatibility Parsing Tests
 # ============================================================================
 
+
 class TestCompatibilityParsing:
     """Test parse_compatibility() function."""
 
@@ -163,6 +164,7 @@ class TestCompatibilityParsing:
 # ============================================================================
 # Skill Dataclass Tests
 # ============================================================================
+
 
 class TestSkill:
     """Test Skill dataclass validation."""
@@ -230,7 +232,10 @@ class TestSkill:
 
     def test_unknown_license_warns_not_fails(self):
         skill = Skill(
-            name="test", description="desc", instructions="body", path=Path("/tmp/x"),
+            name="test",
+            description="desc",
+            instructions="body",
+            path=Path("/tmp/x"),
             license="FakeLicense",
         )
         assert skill.license_valid is False
@@ -240,6 +245,7 @@ class TestSkill:
 # ============================================================================
 # SkillLoader Tests
 # ============================================================================
+
 
 class TestSkillLoader:
     """Test SkillLoader class."""
@@ -285,10 +291,7 @@ class TestSkillLoader:
         bad_dir = tmp_path / "bad-name"
         bad_dir.mkdir()
         (bad_dir / "SKILL.md").write_text(
-            "---\n"
-            "name: wrong-name\n"
-            "description: Mismatched name.\n"
-            "---\n\n"
+            "---\n" "name: wrong-name\n" "description: Mismatched name.\n" "---\n\n"
         )
         sl = SkillLoader(tmp_path)
         with pytest.raises(ValueError, match="doesn't match"):
@@ -333,6 +336,7 @@ class TestSkillLoader:
 # ============================================================================
 # SkillRegistry Tests
 # ============================================================================
+
 
 class TestSkillRegistry:
     """Test SkillRegistry class."""
@@ -417,12 +421,12 @@ class TestSkillRegistry:
 # Integration: Real Built-in Skills
 # ============================================================================
 
+
 class TestBuiltinSkills:
     """Test loading of actual built-in skills shipped with AgentKthx."""
 
     def test_builtin_skills_dir_exists(self):
         """The built-in skills directory should exist."""
-        from agentkthx.skills.loader import SkillLoader
         # Use the default skills dir
         default = Path(__file__).parent.parent / "skills"
         if default.exists():
@@ -431,6 +435,7 @@ class TestBuiltinSkills:
     def test_load_acp_skill(self):
         """ACP skill should load successfully."""
         from agentkthx.skills.loader import SkillLoader
+
         skills_dir = Path(__file__).parent.parent / "skills"
         if not skills_dir.exists():
             pytest.skip("Built-in skills directory not found")
@@ -443,6 +448,7 @@ class TestBuiltinSkills:
     def test_load_skill_creator_skill(self):
         """skill-creator skill should load successfully."""
         from agentkthx.skills.loader import SkillLoader
+
         skills_dir = Path(__file__).parent.parent / "skills"
         if not skills_dir.exists():
             pytest.skip("Built-in skills directory not found")
@@ -454,6 +460,7 @@ class TestBuiltinSkills:
     def test_removed_skills_not_present(self):
         """datetime and web_search skills should NOT be present."""
         from agentkthx.skills.loader import SkillLoader
+
         skills_dir = Path(__file__).parent.parent / "skills"
         if not skills_dir.exists():
             pytest.skip("Built-in skills directory not found")
@@ -467,28 +474,33 @@ class TestBuiltinSkills:
 # web_search Tool Tests
 # ============================================================================
 
+
 class TestWebSearchTool:
     """Test the web_search tool function."""
 
     def test_import(self):
         """web_search should be importable from builtins."""
         from agentkthx.tools.builtins import web_search
+
         assert callable(web_search)
 
     def test_web_search_in_registry(self):
         """web_search tool should be registered in the builtin registry."""
         from agentkthx.tools.builtins import BUILTIN_REGISTRY
+
         assert BUILTIN_REGISTRY.get("web_search") is not None
 
     def test_web_search_description(self):
         """web_search tool should have a meaningful description."""
         from agentkthx.tools.builtins import BUILTIN_REGISTRY
+
         tool = BUILTIN_REGISTRY.get("web_search")
         assert "search" in tool.description.lower() or "search" in tool.description.lower()
 
     def test_web_search_params(self):
         """web_search tool should have query and num_results params."""
         from agentkthx.tools.builtins import BUILTIN_REGISTRY
+
         tool = BUILTIN_REGISTRY.get("web_search")
         param_names = [p.name for p in tool.params]
         assert "query" in param_names

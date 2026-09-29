@@ -59,19 +59,16 @@ import time
 from typing import Any, Generator
 
 from agentkthx.backends.cloud_base import CloudBackend
-from agentkthx.backends.base import BackendConfig
-from agentkthx.core.types import BackendType, ToolSupportLevel, ApiMode
-from agentkthx.core.models import Tool, ToolParam
 from agentkthx.config import (
     ORCAROUTER_BASE_URL,
-    ORCAROUTER_API_KEY,
     ORCAROUTER_DEFAULT_MODEL,
-    ORCAROUTER_FREE_ONLY,
-    ORCAROUTER_FREE_FALLBACK_MODEL,
     ORCAROUTER_FALLBACK_MODELS,
+    ORCAROUTER_FREE_FALLBACK_MODEL,
+    ORCAROUTER_FREE_ONLY,
     ORCAROUTER_INCLUDE_COST,
 )
-
+from agentkthx.core.models import Tool
+from agentkthx.core.types import BackendType, ToolSupportLevel
 
 # ---------------------------------------------------------------------------
 # Free-tier whitelist (R07.05)
@@ -85,23 +82,27 @@ from agentkthx.config import (
 #
 # Source: docs/api/ORCAROUTER_API_TECHNICAL_REFERENCE.md §Free Tier Behavior
 # Last verified: 2026-09-26
-ORCAROUTER_FREE_MODEL_WHITELIST: frozenset[str] = frozenset({
-    "deepseek/deepseek-v4-flash-free",
-    "orca/orcaverify-text1.0-free",
-    "tencent/hy3-free",
-    "z-ai/glm-5.3-flash-free",
-    # The free router itself is always allowed under FREE_ONLY
-    "orcarouter/free",
-})
+ORCAROUTER_FREE_MODEL_WHITELIST: frozenset[str] = frozenset(
+    {
+        "deepseek/deepseek-v4-flash-free",
+        "orca/orcaverify-text1.0-free",
+        "tencent/hy3-free",
+        "z-ai/glm-5.3-flash-free",
+        # The free router itself is always allowed under FREE_ONLY
+        "orcarouter/free",
+    }
+)
 
 
 # Named routers — these are not models per se, they route to a model at
 # request time. We list them here so the catalog includes them and so
 # ORCAROUTER_FREE_ONLY=true accepts the free router.
-_ORCA_NAMED_ROUTERS: frozenset[str] = frozenset({
-    "orcarouter/auto",   # picks cheapest live chat model at request time
-    "orcarouter/free",   # routes across free models by difficulty
-})
+_ORCA_NAMED_ROUTERS: frozenset[str] = frozenset(
+    {
+        "orcarouter/auto",  # picks cheapest live chat model at request time
+        "orcarouter/free",  # routes across free models by difficulty
+    }
+)
 
 
 # ---------------------------------------------------------------------------
@@ -138,19 +139,15 @@ _ORCA_NAMED_ROUTERS: frozenset[str] = frozenset({
 # Sources:
 #   - docs/api/ORCAROUTER_API_TECHNICAL_REFERENCE.md §Free-tier error reasons
 #   - https://docs.orcarouter.ai/routing/free-models (free-tier access requirements)
-_FREE_RATE_RETRYABLE_REASONS = (
-    "err_free_rate",  # per-minute or per-UTC-day rate window full
-)
-_FREE_RATE_RETRYABLE_CODES = (
-    "free_rate_limited",  # HTTP 429 — same as err_free_rate
-)
+_FREE_RATE_RETRYABLE_REASONS = ("err_free_rate",)  # per-minute or per-UTC-day rate window full
+_FREE_RATE_RETRYABLE_CODES = ("free_rate_limited",)  # HTTP 429 — same as err_free_rate
 _FREE_RATE_TERMINAL_REASONS = (
-    "err_free_used",            # free allowance used up OR workspace not eligible
-    "err_free_access_denied",   # GitHub account not linked / not "established"
+    "err_free_used",  # free allowance used up OR workspace not eligible
+    "err_free_access_denied",  # GitHub account not linked / not "established"
 )
 _FREE_RATE_TERMINAL_CODES = (
     "free_quota_exhausted",  # orcarouter/free had no free model available
-    "err_free_prompt_cap",   # per-request prompt-token cap exceeded (not retryable)
+    "err_free_prompt_cap",  # per-request prompt-token cap exceeded (not retryable)
 )
 
 
@@ -165,10 +162,10 @@ def _is_free_rate_limited(err_str: str) -> bool:
     or ``_is_free_rate_terminal()`` instead.
     """
     err_lower = err_str.lower()
-    for pat in (_FREE_RATE_RETRYABLE_REASONS + _FREE_RATE_TERMINAL_REASONS):
+    for pat in _FREE_RATE_RETRYABLE_REASONS + _FREE_RATE_TERMINAL_REASONS:
         if pat in err_lower:
             return True
-    for pat in (_FREE_RATE_RETRYABLE_CODES + _FREE_RATE_TERMINAL_CODES):
+    for pat in _FREE_RATE_RETRYABLE_CODES + _FREE_RATE_TERMINAL_CODES:
         if pat in err_lower:
             return True
     return False
@@ -237,7 +234,7 @@ def _extract_buy_credits_url(err_str: str) -> str | None:
         return None
     url = m.group(1)
     # SEC-16: only surface URLs pointing at OrcaRouter's own domain.
-    host = re.search(r'https?://([^/]+)', url)
+    host = re.search(r"https?://([^/]+)", url)
     if not host:
         return None
     hostname = host.group(1).lower()
@@ -331,6 +328,7 @@ class _HttpErrorAction:
     Use the constructors ``.retry()``, ``.raise_(exc)``, ``.fallthrough()``
     rather than instantiating directly. Inspect via ``.kind``.
     """
+
     __slots__ = ("kind", "error")
 
     def __init__(self, kind: str, error: Exception | None = None):
@@ -356,6 +354,7 @@ class _HttpErrorAction:
 # ---------------------------------------------------------------------------
 # OrcaRouterBackend
 # ---------------------------------------------------------------------------
+
 
 class OrcaRouterBackend(CloudBackend):
     """Backend for OrcaRouter API (OpenAI Chat-Completions compatible).
@@ -500,8 +499,8 @@ class OrcaRouterBackend(CloudBackend):
             return list(self._model_cache)
 
         # Fetch fresh
-        import urllib.request
         import urllib.error
+        import urllib.request
 
         models: list[dict] = []
         try:
@@ -521,58 +520,68 @@ class OrcaRouterBackend(CloudBackend):
                 # from /v1/models — OrcaRouter's pricing is per-request
                 # via X-OrcaRouter-Include-Cost. Default context_length to
                 # 128K (most modern chat models support this).
-                models.append({
-                    "name": name,
-                    "size": 0,
-                    "details": {
-                        "family": owned_by,
-                        "backend": "orcarouter",
-                        "context_length": 128000,  # default; overridden by per-model catalog if any
-                        "owned_by": owned_by,
-                        "supported_endpoint_types": m.get("supported_endpoint_types", ["openai"]),
-                    },
-                })
+                models.append(
+                    {
+                        "name": name,
+                        "size": 0,
+                        "details": {
+                            "family": owned_by,
+                            "backend": "orcarouter",
+                            "context_length": 128000,  # default; overridden by per-model catalog if any
+                            "owned_by": owned_by,
+                            "supported_endpoint_types": m.get(
+                                "supported_endpoint_types", ["openai"]
+                            ),
+                        },
+                    }
+                )
 
             # Always include the named routers (orcarouter/auto, orcarouter/free)
             # even if the API didn't list them — they're always available.
             existing_names = {m["name"] for m in models}
             for router in _ORCA_NAMED_ROUTERS:
                 if router not in existing_names:
-                    models.append({
-                        "name": router,
-                        "size": 0,
-                        "details": {
-                            "family": "orcarouter",
-                            "backend": "orcarouter",
-                            "context_length": 128000,
-                            "owned_by": "orcarouter",
-                            "supported_endpoint_types": ["openai"],
-                            "is_named_router": True,
-                        },
-                    })
+                    models.append(
+                        {
+                            "name": router,
+                            "size": 0,
+                            "details": {
+                                "family": "orcarouter",
+                                "backend": "orcarouter",
+                                "context_length": 128000,
+                                "owned_by": "orcarouter",
+                                "supported_endpoint_types": ["openai"],
+                                "is_named_router": True,
+                            },
+                        }
+                    )
 
             # Update cache
             self._model_cache = models
             self._model_cache_ts = now
 
             if os.environ.get("AGENTKTHX_DEBUG"):
-                print(f"  [OrcaRouter] /v1/models returned {len(models)} models "
-                      f"(+ {len(_ORCA_NAMED_ROUTERS)} named routers)")
+                print(
+                    f"  [OrcaRouter] /v1/models returned {len(models)} models "
+                    f"(+ {len(_ORCA_NAMED_ROUTERS)} named routers)"
+                )
 
         except (urllib.error.HTTPError, urllib.error.URLError) as e:
             if os.environ.get("AGENTKTHX_DEBUG"):
                 print(f"  [OrcaRouter] Model discovery failed ({e}), using fallback list")
             # Fallback: return just the named routers + free whitelist
             for name in sorted(_ORCA_NAMED_ROUTERS | ORCAROUTER_FREE_MODEL_WHITELIST):
-                models.append({
-                    "name": name,
-                    "size": 0,
-                    "details": {
-                        "family": name.split("/")[0] if "/" in name else "orcarouter",
-                        "backend": "orcarouter",
-                        "context_length": 128000,
-                    },
-                })
+                models.append(
+                    {
+                        "name": name,
+                        "size": 0,
+                        "details": {
+                            "family": name.split("/")[0] if "/" in name else "orcarouter",
+                            "backend": "orcarouter",
+                            "context_length": 128000,
+                        },
+                    }
+                )
 
         # Apply FREE_ONLY filter
         if ORCAROUTER_FREE_ONLY:
@@ -747,8 +756,10 @@ class OrcaRouterBackend(CloudBackend):
             # help — the gate applies to ALL free models. Surface the
             # buy_credits_url and terminate.
             if _is_free_rate_terminal(error_msg):
-                buy_url = _extract_buy_credits_url(error_body) or \
-                    "https://www.orcarouter.ai/console/billing"
+                buy_url = (
+                    _extract_buy_credits_url(error_body)
+                    or "https://www.orcarouter.ai/console/billing"
+                )
                 # err_free_access_denied specifically means "GitHub not
                 # linked / not established". err_free_used means the
                 # workspace's free allowance is used up OR the workspace
@@ -807,8 +818,10 @@ class OrcaRouterBackend(CloudBackend):
                     # Already on the fallback — just wait and retry the
                     # same model (the rate window will reset).
                     if os.environ.get("AGENTKTHX_DEBUG"):
-                        print(f"  {log_tag} Already on fallback {fallback!r}; "
-                              f"not swapping, just waiting for rate window.")
+                        print(
+                            f"  {log_tag} Already on fallback {fallback!r}; "
+                            f"not swapping, just waiting for rate window."
+                        )
                 else:
                     # Swap to the free router for the retry
                     body["model"] = fallback
@@ -873,8 +886,8 @@ class OrcaRouterBackend(CloudBackend):
           - 400 "does not support tools" → retry without tools (ReAct fallback)
           - 401/403 access_denied → fatal (raise RuntimeError)
         """
-        import urllib.request
         import urllib.error
+        import urllib.request
 
         url = self._get_chat_completions_url()
         headers = self._get_auth_headers()
@@ -889,8 +902,15 @@ class OrcaRouterBackend(CloudBackend):
         }
 
         # Optional params
-        for opt_key in ("stop", "top_p", "presence_penalty", "frequency_penalty",
-                        "response_format", "seed", "reasoning_effort"):
+        for opt_key in (
+            "stop",
+            "top_p",
+            "presence_penalty",
+            "frequency_penalty",
+            "response_format",
+            "seed",
+            "reasoning_effort",
+        ):
             val = kwargs.get(opt_key)
             if val is not None:
                 body[opt_key] = val
@@ -933,9 +953,13 @@ class OrcaRouterBackend(CloudBackend):
 
                 # Surface X-Orca-* response headers in debug mode
                 if os.environ.get("AGENTKTHX_DEBUG"):
-                    for h in ("X-Orca-Request-Id", "X-Orca-Fallback-Level",
-                              "X-Orca-Fallback-Model", "X-Orca-Router",
-                              "X-Orca-Resolved-Model"):
+                    for h in (
+                        "X-Orca-Request-Id",
+                        "X-Orca-Fallback-Level",
+                        "X-Orca-Fallback-Model",
+                        "X-Orca-Router",
+                        "X-Orca-Resolved-Model",
+                    ):
                         val = response.headers.get(h)
                         if val:
                             print(f"  [OrcaRouter] {h}: {val}")
@@ -986,7 +1010,9 @@ class OrcaRouterBackend(CloudBackend):
                 # ARCH-03 (R06.57): context-length 400 — delegate to shared helper
                 if e.code == 400 and attempt == 0:
                     if self._handle_context_length_400(error_body, body):
-                        print(f"  [OrcaRouter] Context length exceeded — reducing max_tokens and retrying")
+                        print(
+                            "  [OrcaRouter] Context length exceeded — reducing max_tokens and retrying"
+                        )
                         continue
 
                 # 400 "does not support tools" — retry without tools (ReAct fallback)
@@ -1037,8 +1063,8 @@ class OrcaRouterBackend(CloudBackend):
         but for the SSE streaming path. The 429 free-rate and 400
         context-length handling are shared with the non-streaming path.
         """
-        import urllib.request
         import urllib.error
+        import urllib.request
 
         def _do_request(req_body: dict):
             req = urllib.request.Request(
@@ -1060,8 +1086,10 @@ class OrcaRouterBackend(CloudBackend):
                 # Context-length 400 — delegate to shared helper
                 if e.code == 400 and attempt == 0:
                     if self._handle_context_length_400(error_body, body):
-                        print(f"  [OrcaRouter-Stream] Context length exceeded — "
-                              f"reducing max_tokens and retrying")
+                        print(
+                            "  [OrcaRouter-Stream] Context length exceeded — "
+                            "reducing max_tokens and retrying"
+                        )
                         continue
 
                 # "does not support tools" — retry without tools (ReAct fallback)
@@ -1241,8 +1269,10 @@ class OrcaRouterBackend(CloudBackend):
         if ORCAROUTER_FREE_ONLY and not _is_free_model(model):
             fallback = ORCAROUTER_FREE_FALLBACK_MODEL
             if os.environ.get("AGENTKTHX_DEBUG"):
-                print(f"  [OrcaRouter.JEV] FREE_ONLY mode — {model!r} not free, "
-                      f"switching to {fallback!r}")
+                print(
+                    f"  [OrcaRouter.JEV] FREE_ONLY mode — {model!r} not free, "
+                    f"switching to {fallback!r}"
+                )
             model = fallback
 
         return self._generate_with_auth(

@@ -20,13 +20,13 @@ from __future__ import annotations
 import json
 import os
 import time
-from typing import Any, Generator
+from typing import Generator
 
-from .base import BaseBackend, BackendConfig
-from .ollama import OllamaBackend
-from ..core.types import BackendType, ToolSupportLevel, ApiMode
+from ..config import BITNET_BASE_URL, LLAMA_SERVER_BASE_URL
 from ..core.models import Tool, ToolParam
-from ..config import LLAMA_SERVER_BASE_URL, BITNET_BASE_URL
+from ..core.types import ApiMode, BackendType, ToolSupportLevel
+from .base import BackendConfig
+from .ollama import OllamaBackend
 
 
 class LlamaServerBackend(OllamaBackend):
@@ -104,8 +104,8 @@ class LlamaServerBackend(OllamaBackend):
     def is_running(self) -> bool:
         """Check if llama-server is running via /health endpoint."""
         try:
-            import urllib.request
             import urllib.error
+            import urllib.request
 
             url = f"{self._base_url}/health"
             req = urllib.request.Request(url, method="GET")
@@ -116,8 +116,8 @@ class LlamaServerBackend(OllamaBackend):
         except Exception:
             # Fallback: try root URL
             try:
-                import urllib.request
                 import urllib.error
+                import urllib.request
 
                 req = urllib.request.Request(self._base_url, method="GET")
                 with urllib.request.urlopen(req, timeout=3) as response:
@@ -138,16 +138,14 @@ class LlamaServerBackend(OllamaBackend):
         Falls back to /props (llama.cpp) to get the loaded model's filename
         when /v1/models returns nothing useful.
         """
-        import urllib.request
         import urllib.error
+        import urllib.request
 
         # BitNet mode: use /props to discover the loaded model
         # (BitNet typically doesn't expose /v1/models)
         if self._bitnet_mode:
             try:
-                req = urllib.request.Request(
-                    f"{self._base_url}/props", method="GET"
-                )
+                req = urllib.request.Request(f"{self._base_url}/props", method="GET")
                 with urllib.request.urlopen(req, timeout=5) as response:
                     props = json.loads(response.read().decode("utf-8"))
 
@@ -161,30 +159,35 @@ class LlamaServerBackend(OllamaBackend):
                 if model_path:
                     # Extract filename: "/models/qwen2.5-0.5b.gguf" → "qwen2.5-0.5b"
                     import os.path as _osp
+
                     model_name = _osp.splitext(_osp.basename(model_path))[0]
 
                 if os.environ.get("AGENTKTHX_DEBUG"):
                     print(f"  [bitnet] list_models: discovered model='{model_name}' via /props")
 
-                return [{
-                    "name": model_name,
-                    "size": 0,
-                    "details": {
-                        "family": "bitnet",
-                        "backend": "bitnet",
-                        "model_path": model_path,
-                    },
-                }]
+                return [
+                    {
+                        "name": model_name,
+                        "size": 0,
+                        "details": {
+                            "family": "bitnet",
+                            "backend": "bitnet",
+                            "model_path": model_path,
+                        },
+                    }
+                ]
 
             except (urllib.error.HTTPError, urllib.error.URLError, json.JSONDecodeError):
                 pass
 
             # Fallback: hardcoded stub
-            return [{
-                "name": "bitnet",
-                "size": 0,
-                "details": {"family": "bitnet", "backend": "bitnet"},
-            }]
+            return [
+                {
+                    "name": "bitnet",
+                    "size": 0,
+                    "details": {"family": "bitnet", "backend": "bitnet"},
+                }
+            ]
 
         # llama-server mode: try /v1/models first (OpenAI-compatible)
         url = f"{self._base_url}/v1/models"
@@ -206,20 +209,22 @@ class LlamaServerBackend(OllamaBackend):
                 n_ctx_train = meta.get("n_ctx_train", 0)
                 n_params = meta.get("n_params", 0)
                 size = meta.get("size", 0)
-                models.append({
-                    "name": m.get("id", "unknown"),
-                    "size": size,
-                    "details": {
-                        "family": "llama-server",
-                        "backend": "llama-cpp",
-                        # Store the meta fields for get_model_runtime_context
-                        # and get_model_max_context to pick up.
-                        "n_ctx": n_ctx,
-                        "n_ctx_train": n_ctx_train,
-                        "n_params": n_params,
+                models.append(
+                    {
+                        "name": m.get("id", "unknown"),
                         "size": size,
-                    },
-                })
+                        "details": {
+                            "family": "llama-server",
+                            "backend": "llama-cpp",
+                            # Store the meta fields for get_model_runtime_context
+                            # and get_model_max_context to pick up.
+                            "n_ctx": n_ctx,
+                            "n_ctx_train": n_ctx_train,
+                            "n_params": n_params,
+                            "size": size,
+                        },
+                    }
+                )
 
             if models:
                 return models
@@ -230,9 +235,7 @@ class LlamaServerBackend(OllamaBackend):
         # Fallback: try /props (llama.cpp native) to get the loaded model name
         # /props returns {"model_path": "/path/to/model.gguf", ...}
         try:
-            req = urllib.request.Request(
-                f"{self._base_url}/props", method="GET"
-            )
+            req = urllib.request.Request(f"{self._base_url}/props", method="GET")
             with urllib.request.urlopen(req, timeout=5) as response:
                 props = json.loads(response.read().decode("utf-8"))
 
@@ -244,28 +247,35 @@ class LlamaServerBackend(OllamaBackend):
             if model_path:
                 # Extract just the filename (e.g., "/models/qwen2.5-7b-q4_k_m.gguf")
                 import os.path as _osp
+
                 model_name = _osp.splitext(_osp.basename(model_path))[0]
 
-            return [{
-                "name": model_name,
-                "size": 0,
-                "details": {
-                    "family": "llama-server",
-                    "backend": "llama-cpp",
-                    "model_path": model_path,
-                },
-            }]
+            return [
+                {
+                    "name": model_name,
+                    "size": 0,
+                    "details": {
+                        "family": "llama-server",
+                        "backend": "llama-cpp",
+                        "model_path": model_path,
+                    },
+                }
+            ]
 
         except (urllib.error.HTTPError, urllib.error.URLError, json.JSONDecodeError):
             pass
 
         if os.environ.get("AGENTKTHX_DEBUG"):
-            print(f"  [llama-server] list_models: /v1/models and /props both failed, returning default")
-        return [{
-            "name": "default",
-            "size": 0,
-            "details": {"family": "llama-server", "backend": "llama-cpp"},
-        }]
+            print(
+                "  [llama-server] list_models: /v1/models and /props both failed, returning default"
+            )
+        return [
+            {
+                "name": "default",
+                "size": 0,
+                "details": {"family": "llama-server", "backend": "llama-cpp"},
+            }
+        ]
 
     def get_model_info(self, model: str) -> dict | None:
         """
@@ -284,9 +294,16 @@ class LlamaServerBackend(OllamaBackend):
     # OpenRE mode — llama.cpp native /completion endpoint
     # ─────────────────────────────────────────────────────────────────────
 
-    def generate(self, model: str, messages: list[dict], tools: list[Tool] | None = None,
-                 temperature: float = 0.7, max_tokens: int = 2048,
-                 think: bool | None = None, **kwargs) -> dict:
+    def generate(
+        self,
+        model: str,
+        messages: list[dict],
+        tools: list[Tool] | None = None,
+        temperature: float = 0.7,
+        max_tokens: int = 2048,
+        think: bool | None = None,
+        **kwargs,
+    ) -> dict:
         """
         Generate a response from llama-server.
 
@@ -295,14 +312,25 @@ class LlamaServerBackend(OllamaBackend):
         - openre: uses /completion (llama.cpp native, ReAct mode only)
         """
         if self._api_mode == ApiMode.OPENRE:
-            return self._generate_completion(model, messages, tools, temperature, max_tokens, **kwargs)
+            return self._generate_completion(
+                model, messages, tools, temperature, max_tokens, **kwargs
+            )
 
         # OpenAI mode — use the inherited OllamaBackend implementation
         # which talks to /v1/chat/completions
-        return super().generate(model, messages, tools, temperature, max_tokens, think=think, **kwargs)
+        return super().generate(
+            model, messages, tools, temperature, max_tokens, think=think, **kwargs
+        )
 
-    def generate_stream(self, model: str, messages: list[dict], tools: list[Tool] | None = None,
-                        temperature: float = 0.7, max_tokens: int = 2048, **kwargs) -> Generator[str, None, None]:
+    def generate_stream(
+        self,
+        model: str,
+        messages: list[dict],
+        tools: list[Tool] | None = None,
+        temperature: float = 0.7,
+        max_tokens: int = 2048,
+        **kwargs,
+    ) -> Generator[str, None, None]:
         """
         Stream generated text from llama-server.
 
@@ -311,7 +339,9 @@ class LlamaServerBackend(OllamaBackend):
         - openre: uses /completion (streaming)
         """
         if self._api_mode == ApiMode.OPENRE:
-            return self._stream_completion(model, messages, tools, temperature, max_tokens, **kwargs)
+            return self._stream_completion(
+                model, messages, tools, temperature, max_tokens, **kwargs
+            )
 
         return super().generate_stream(model, messages, tools, temperature, max_tokens, **kwargs)
 
@@ -336,14 +366,16 @@ class LlamaServerBackend(OllamaBackend):
         Stop tokens must be explicitly provided or the model generates until
         n_predict is exhausted.
         """
-        import urllib.request
         import urllib.error
+        import urllib.request
 
         url = f"{self._base_url}/completion"
 
         if os.environ.get("AGENTKTHX_DEBUG"):
             label = "bitnet" if self._bitnet_mode else "llama-server"
-            print(f"  [{label}] /completion mode: model={model!r} (config-only, not sent to server)")
+            print(
+                f"  [{label}] /completion mode: model={model!r} (config-only, not sent to server)"
+            )
 
         # Convert messages to a single prompt (family-aware format)
         prompt = self._messages_to_prompt(messages, tools, model=model)
@@ -356,6 +388,7 @@ class LlamaServerBackend(OllamaBackend):
         # agent.py should send these via kwargs["stop"], but this catches
         # direct backend usage where kwargs may not include family stops.
         from ..core.model_family_config import get_model_config
+
         family_config = get_model_config(model)
         for family_stop in family_config.stop_tokens:
             if family_stop and family_stop not in stop_sequences:
@@ -407,7 +440,7 @@ class LlamaServerBackend(OllamaBackend):
 
         except (urllib.error.URLError, ConnectionError, OSError) as e:
             label = "bitnet" if self._bitnet_mode else "llama-server"
-            reason = getattr(e, 'reason', str(e))
+            reason = getattr(e, "reason", str(e))
             raise RuntimeError(f"{label} connection error: {reason}")
 
         latency_ms = (time.time() - start_time) * 1000
@@ -420,7 +453,8 @@ class LlamaServerBackend(OllamaBackend):
             "usage": {
                 "prompt_tokens": result.get("tokens_evaluated", 0),
                 "completion_tokens": result.get("tokens_predicted", 0),
-                "total_tokens": result.get("tokens_evaluated", 0) + result.get("tokens_predicted", 0),
+                "total_tokens": result.get("tokens_evaluated", 0)
+                + result.get("tokens_predicted", 0),
             },
             "latency_ms": latency_ms,
             "raw": result,
@@ -438,8 +472,8 @@ class LlamaServerBackend(OllamaBackend):
         """
         Stream via llama.cpp native /completion endpoint (OpenRE/ReAct mode).
         """
-        import urllib.request
         import urllib.error
+        import urllib.request
 
         url = f"{self._base_url}/completion"
 
@@ -451,6 +485,7 @@ class LlamaServerBackend(OllamaBackend):
 
         # Add model-family stop tokens as a safety net (same logic as _generate_completion)
         from ..core.model_family_config import get_model_config
+
         family_config = get_model_config(model)
         for family_stop in family_config.stop_tokens:
             if family_stop and family_stop not in stop_sequences:
@@ -505,7 +540,7 @@ class LlamaServerBackend(OllamaBackend):
 
         except (urllib.error.URLError, ConnectionError, OSError) as e:
             label = "bitnet" if self._bitnet_mode else "llama-server"
-            reason = getattr(e, 'reason', str(e))
+            reason = getattr(e, "reason", str(e))
             raise RuntimeError(f"{label} connection error: {reason}")
 
     # Maximum prompt character budget for BitNet.
@@ -545,20 +580,20 @@ class LlamaServerBackend(OllamaBackend):
 
         # Layer 1: Strip markdown patterns that worsen tokenization
         # Remove fenced code blocks: ```...```
-        text = re.sub(r'```[\s\S]*?```', '', text)
+        text = re.sub(r"```[\s\S]*?```", "", text)
 
         # Remove markdown table rows
-        lines = text.split('\n')
+        lines = text.split("\n")
         cleaned = []
         for line in lines:
             stripped = line.strip()
-            if stripped.startswith('|') or stripped.startswith('|--'):
+            if stripped.startswith("|") or stripped.startswith("|--"):
                 continue
-            if re.match(r'^[-]+$', stripped):
+            if re.match(r"^[-]+$", stripped):
                 continue
             cleaned.append(line)
-        text = '\n'.join(cleaned)
-        text = re.sub(r'\n{3,}', '\n\n', text)
+        text = "\n".join(cleaned)
+        text = re.sub(r"\n{3,}", "\n\n", text)
         text = text.strip()
 
         return text
@@ -579,7 +614,7 @@ class LlamaServerBackend(OllamaBackend):
             return text
 
         # Try to keep complete paragraphs
-        paragraphs = text.split('\n\n')
+        paragraphs = text.split("\n\n")
         result = []
         total = 0
         for para in paragraphs:
@@ -590,7 +625,7 @@ class LlamaServerBackend(OllamaBackend):
             total += para_len
 
         if result:
-            return '\n\n'.join(result)
+            return "\n\n".join(result)
 
         # Single paragraph exceeds budget — truncate at budget
         return text[:budget]
@@ -625,23 +660,24 @@ class LlamaServerBackend(OllamaBackend):
         # tokenizer — non-BitNet models (e.g. qwen2.5) on the BitNet server
         # have proper tokenizer support and must NOT be truncated.
         from ..core.model_family_config import detect_family
+
         _model_family = detect_family(model) if model else None
-        _is_actual_bitnet = (_model_family == "bitnet")
+        _is_actual_bitnet = _model_family == "bitnet"
 
         # Resolve family-specific prompt tokens (for non-BitNet models)
         family_config = None
         family_start_user = "\nUser: "
         family_start_assistant = "\nAssistant: "
-        family_stop = ""
 
         if not _is_actual_bitnet and model:
             from ..core.model_family_config import get_model_config
+
             family_config = get_model_config(model)
             if family_config.start_tokens:
                 family_start_user = "\n" + family_config.start_tokens.get("user", "User: ")
-                family_start_assistant = "\n" + family_config.start_tokens.get("assistant", "Assistant: ")
-            if family_config.stop_tokens:
-                family_stop = family_config.stop_tokens[0]  # primary stop token
+                family_start_assistant = "\n" + family_config.start_tokens.get(
+                    "assistant", "Assistant: "
+                )
 
         # Reserve budget for conversation suffix (~100 chars)
         suffix_budget = 100  # "\nUser: <query>\n\nAssistant:"
@@ -654,9 +690,7 @@ class LlamaServerBackend(OllamaBackend):
                 system_content = msg["content"]
                 if _is_actual_bitnet:
                     system_content = self._sanitize_for_bitnet(system_content)
-                    system_content = self._truncate_for_bitnet(
-                        system_content, budget=system_budget
-                    )
+                    system_content = self._truncate_for_bitnet(system_content, budget=system_budget)
                 parts.append(system_content)
                 break
 
@@ -678,14 +712,14 @@ class LlamaServerBackend(OllamaBackend):
                 param = first.params[0].name if first.params else "arg"
                 ptype = first.params[0].type if first.params else "value"
                 placeholder = '"value"' if ptype == "string" else "0"
-                tool_lines.append(f'Action Input: {{{param!r}: {placeholder}}}')
+                tool_lines.append(f"Action Input: {{{param!r}: {placeholder}}}")
             else:
                 # Non-BitNet: use actual param names if available
                 first = tools[0]
                 if first.params:
                     p = first.params[0]
                     ph = '"value"' if p.type == "string" else "0"
-                    tool_lines.append(f'Action Input: {{{p.name!r}: {ph}}}')
+                    tool_lines.append(f"Action Input: {{{p.name!r}: {ph}}}")
                 else:
                     tool_lines.append('Action Input: {"param": "value"}')
 
@@ -739,7 +773,7 @@ class LlamaServerBackend(OllamaBackend):
 
             # Keep only the most recent N exchanges
             if len(exchanges) > self._BITNET_MAX_EXCHANGES:
-                exchanges = exchanges[-self._BITNET_MAX_EXCHANGES:]
+                exchanges = exchanges[-self._BITNET_MAX_EXCHANGES :]
 
             # Add turns newest-first, measuring budget as we go
             conversation_parts = []
@@ -785,7 +819,9 @@ class LlamaServerBackend(OllamaBackend):
     # Tool Support Testing — live test via OpenAI endpoint
     # ─────────────────────────────────────────────────────────────────────
 
-    def test_tool_support(self, model: str, family: str | None = None, force_test: bool = False) -> ToolSupportLevel:
+    def test_tool_support(
+        self, model: str, family: str | None = None, force_test: bool = False
+    ) -> ToolSupportLevel:
         """
         Test model's tool support capability.
 
@@ -796,7 +832,7 @@ class LlamaServerBackend(OllamaBackend):
         if self._bitnet_mode:
             return ToolSupportLevel.REACT
 
-        from ..core.tool_cache import get_cached_tool_support, cache_tool_support
+        from ..core.tool_cache import cache_tool_support, get_cached_tool_support
 
         api_mode = "openai"  # Always test via OpenAI endpoint
 
@@ -810,26 +846,25 @@ class LlamaServerBackend(OllamaBackend):
         test_tool = Tool(
             name="get_weather",
             description="Get the current weather for a location",
-            params=[ToolParam(
-                name="location",
-                type="string",
-                description="The city and country, e.g., 'Paris, France'"
-            )],
+            params=[
+                ToolParam(
+                    name="location",
+                    type="string",
+                    description="The city and country, e.g., 'Paris, France'",
+                )
+            ],
         )
 
         try:
-            import urllib.request
             import urllib.error
+            import urllib.request
 
             # Use /v1/chat/completions directly
             url = f"{self._base_url}/v1/chat/completions"
 
             body = {
                 "model": model,
-                "messages": [{
-                    "role": "user",
-                    "content": "What's the weather like in Tokyo?"
-                }],
+                "messages": [{"role": "user", "content": "What's the weather like in Tokyo?"}],
                 "tools": [test_tool.to_openai_schema()],
                 "stream": False,
                 "temperature": 0.0,
@@ -860,20 +895,28 @@ class LlamaServerBackend(OllamaBackend):
             if tool_calls:
                 if os.environ.get("AGENTKTHX_DEBUG"):
                     print(f"  [llama-server] Tool support: NATIVE (tool_calls={len(tool_calls)})")
-                cache_tool_support(model, ToolSupportLevel.NATIVE, family=family or "unknown", api_mode=api_mode)
+                cache_tool_support(
+                    model, ToolSupportLevel.NATIVE, family=family or "unknown", api_mode=api_mode
+                )
                 return ToolSupportLevel.NATIVE
 
             # Check if content contains ReAct-style tool call pattern
-            if content and any(kw in content.lower() for kw in ["action:", "action input:", "final answer:"]):
+            if content and any(
+                kw in content.lower() for kw in ["action:", "action input:", "final answer:"]
+            ):
                 if os.environ.get("AGENTKTHX_DEBUG"):
-                    print(f"  [llama-server] Tool support: REACT (text-based tool pattern)")
-                cache_tool_support(model, ToolSupportLevel.REACT, family=family or "unknown", api_mode=api_mode)
+                    print("  [llama-server] Tool support: REACT (text-based tool pattern)")
+                cache_tool_support(
+                    model, ToolSupportLevel.REACT, family=family or "unknown", api_mode=api_mode
+                )
                 return ToolSupportLevel.REACT
 
             # API accepted tools but model didn't use them — still REACT-capable
             if os.environ.get("AGENTKTHX_DEBUG"):
-                print(f"  [llama-server] Tool support: REACT (tools accepted, no tool calls)")
-            cache_tool_support(model, ToolSupportLevel.REACT, family=family or "unknown", api_mode=api_mode)
+                print("  [llama-server] Tool support: REACT (tools accepted, no tool calls)")
+            cache_tool_support(
+                model, ToolSupportLevel.REACT, family=family or "unknown", api_mode=api_mode
+            )
             return ToolSupportLevel.REACT
 
         except urllib.error.HTTPError as e:
@@ -883,23 +926,38 @@ class LlamaServerBackend(OllamaBackend):
             # If the server doesn't support the tools parameter, fall back to REACT
             if "does not support" in error_msg or "invalid" in error_msg:
                 if os.environ.get("AGENTKTHX_DEBUG"):
-                    print(f"  [llama-server] Tool support: REACT (server rejected tools param)")
-                cache_tool_support(model, ToolSupportLevel.REACT, family=family or "unknown",
-                                   error=str(e), api_mode=api_mode)
+                    print("  [llama-server] Tool support: REACT (server rejected tools param)")
+                cache_tool_support(
+                    model,
+                    ToolSupportLevel.REACT,
+                    family=family or "unknown",
+                    error=str(e),
+                    api_mode=api_mode,
+                )
                 return ToolSupportLevel.REACT
 
             # Other errors — assume REACT
             if os.environ.get("AGENTKTHX_DEBUG"):
                 print(f"  [llama-server] Tool support: REACT (HTTP {e.code})")
-            cache_tool_support(model, ToolSupportLevel.REACT, family=family or "unknown",
-                               error=str(e), api_mode=api_mode)
+            cache_tool_support(
+                model,
+                ToolSupportLevel.REACT,
+                family=family or "unknown",
+                error=str(e),
+                api_mode=api_mode,
+            )
             return ToolSupportLevel.REACT
 
         except Exception as e:
             if os.environ.get("AGENTKTHX_DEBUG"):
                 print(f"  [llama-server] Tool support test failed: {e}")
-            cache_tool_support(model, ToolSupportLevel.REACT, family=family or "unknown",
-                               error=str(e), api_mode=api_mode)
+            cache_tool_support(
+                model,
+                ToolSupportLevel.REACT,
+                family=family or "unknown",
+                error=str(e),
+                api_mode=api_mode,
+            )
             return ToolSupportLevel.REACT
 
     # ─────────────────────────────────────────────────────────────────────
@@ -926,6 +984,7 @@ class LlamaServerBackend(OllamaBackend):
 
         # Fallback: NUM_CTX env var (set by --num-ctx CLI flag or user)
         from ..config import NUM_CTX
+
         if NUM_CTX and NUM_CTX > 0:
             return NUM_CTX
 

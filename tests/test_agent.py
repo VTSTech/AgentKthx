@@ -5,11 +5,18 @@ Written by VTSTech — https://www.vts-tech.org
 """
 
 import pytest
-from agentkthx.core.types import StepResultType, ToolSupportLevel, BackendType
-from agentkthx.core.models import Tool, ToolParam, StepResult, AgentRun
+
+from agentkthx.core.helpers import (
+    fuzzy_match,
+    is_safe_url,
+    normalize_args,
+    sanitize_command,
+    validate_path,
+)
 from agentkthx.core.memory import Memory, MemoryConfig
+from agentkthx.core.models import AgentRun, StepResult, Tool, ToolParam
 from agentkthx.core.tool_parse import ToolParser
-from agentkthx.core.helpers import fuzzy_match, normalize_args, sanitize_command, validate_path, is_safe_url
+from agentkthx.core.types import BackendType, StepResultType, ToolSupportLevel
 from agentkthx.tools import ToolRegistry, make_builtin_registry
 
 
@@ -32,7 +39,7 @@ class TestTypes:
         assert ToolSupportLevel.detect("qwen2.5:7b") == ToolSupportLevel.UNTESTED
         assert ToolSupportLevel.detect("llama3.1:8b") == ToolSupportLevel.UNTESTED
         assert ToolSupportLevel.detect("unknown-model") == ToolSupportLevel.UNTESTED
-        
+
         # Test the enum values are correct
         assert ToolSupportLevel.NATIVE.value == "native"
         assert ToolSupportLevel.REACT.value == "react"
@@ -207,7 +214,7 @@ Action Input: {"expression": "2 + 2"}"""
         # R03.5: Conservative matching - only explicit ReAct format markers
         assert parser.is_final_answer("Final Answer: 42")
         assert parser.is_final_answer("Final Answer: The result is 42")
-        
+
         # These should NOT match (conservative to prevent small models bypassing tools)
         assert not parser.is_final_answer("The answer is 42")
         assert not parser.is_final_answer("Answer: 42")

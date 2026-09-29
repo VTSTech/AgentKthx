@@ -20,6 +20,7 @@ def register(manager) -> None:
     backend instances.
     """
     from .openai import OpenAIBackend
+
     manager.register_backend("openai", OpenAIBackend)
     manager.register_backend("oai", OpenAIBackend, alias_of="openai")
 

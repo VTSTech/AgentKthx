@@ -57,7 +57,6 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -66,11 +65,14 @@ from typing import Any, Callable, Optional
 from .error_recovery import build_enhanced_observation, build_retry_context, is_error_result
 from .models import AgentRun, StepResult, ToolCall
 from .openresponses import (
-    Response, ResponseStatus, ItemStatus,
-    create_message_item, create_function_call_item, create_function_call_output,
+    ItemStatus,
+    Response,
+    ResponseStatus,
+    create_function_call_item,
+    create_function_call_output,
+    create_message_item,
 )
 from .types import StepResultType
-
 
 # ═══════════════════════════════════════════════════════════════════════
 # FEAT-02 (R07.15): per-tool timeouts + concurrent tool execution
@@ -229,7 +231,9 @@ class AgenticLoopMixin:
         response.input.append(user_item)
 
         if self.debug and not self._is_comp_mode:
-            print(f"[OpenResponses] Input item added: id={user_item.id}, type={user_item.type}, role={user_item.role}")
+            print(
+                f"[OpenResponses] Input item added: id={user_item.id}, type={user_item.type}, role={user_item.role}"
+            )
 
         if self.debug:
             print(f"\n[AgentKthx] Model: {self.model}")
@@ -283,12 +287,14 @@ class AgenticLoopMixin:
             # Handle user cancellation (Ctrl+C during generate)
             if gen_response.get("_cancelled"):
                 if self.debug:
-                    print(f"  [Cancelled] Generation interrupted by user")
-                steps.append(StepResult(
-                    type=StepResultType.ERROR,
-                    error="Cancelled by user",
-                    tokens_used=tokens,
-                ))
+                    print("  [Cancelled] Generation interrupted by user")
+                steps.append(
+                    StepResult(
+                        type=StepResultType.ERROR,
+                        error="Cancelled by user",
+                        tokens_used=tokens,
+                    )
+                )
                 response.mark_cancelled(debug=self.debug)
                 break
 
@@ -303,7 +309,9 @@ class AgenticLoopMixin:
 
             # ---- Process tool calls (native or ReAct) ----
             tool_calls_found = self._parse_tool_calls(
-                content, native_tool_calls, response,
+                content,
+                native_tool_calls,
+                response,
             )
 
             # Execute tool calls if found
@@ -368,20 +376,24 @@ class AgenticLoopMixin:
                 # Check if model provided final_answer along with tool call
                 if state.pending_final_answer:
                     if self.debug and not self._is_comp_mode:
-                        print(f"  [OpenResponses] Model provided final_answer with tool call")
-                        print(f"  [OpenResponses] Using final_answer: {state.pending_final_answer[:100]}...")
+                        print("  [OpenResponses] Model provided final_answer with tool call")
+                        print(
+                            f"  [OpenResponses] Using final_answer: {state.pending_final_answer[:100]}..."
+                        )
 
                     # Create output message item
                     msg_item = create_message_item("assistant", state.pending_final_answer)
                     msg_item.status = ItemStatus.COMPLETED
                     response.add_output_item(msg_item, debug=not self._is_comp_mode and self.debug)
 
-                    steps.append(StepResult(
-                        type=StepResultType.FINAL_ANSWER,
-                        content=state.pending_final_answer,
-                        tokens_used=tokens,
-                        reasoning_content=reasoning_content,
-                    ))
+                    steps.append(
+                        StepResult(
+                            type=StepResultType.FINAL_ANSWER,
+                            content=state.pending_final_answer,
+                            tokens_used=tokens,
+                            reasoning_content=reasoning_content,
+                        )
+                    )
 
                     return self._finalize_run(
                         final_answer=state.pending_final_answer,
@@ -405,7 +417,7 @@ class AgenticLoopMixin:
                 if needs_tool:
                     if self.debug and not self._is_comp_mode:
                         print(f"  [OpenResponses] REJECTED: {rejection_reason}")
-                        print(f"  [OpenResponses] Enforcing tool requirement...")
+                        print("  [OpenResponses] Enforcing tool requirement...")
                     # Tell model to use tools.
                     self._reject_for_tool_choice(
                         content,
@@ -425,15 +437,19 @@ class AgenticLoopMixin:
                 response.add_output_item(msg_item, debug=not self._is_comp_mode and self.debug)
 
                 if self.debug and not self._is_comp_mode:
-                    print(f"  [OpenResponses] MessageItem created: id={msg_item.id}, role={msg_item.role}")
+                    print(
+                        f"  [OpenResponses] MessageItem created: id={msg_item.id}, role={msg_item.role}"
+                    )
                     print(f"  [OpenResponses] MessageItem status: {msg_item.status.value}")
 
-                steps.append(StepResult(
-                    type=StepResultType.FINAL_ANSWER,
-                    content=answer,
-                    tokens_used=tokens,
-                    reasoning_content=reasoning_content,
-                ))
+                steps.append(
+                    StepResult(
+                        type=StepResultType.FINAL_ANSWER,
+                        content=answer,
+                        tokens_used=tokens,
+                        reasoning_content=reasoning_content,
+                    )
+                )
 
                 if self.debug:
                     print(f"  Final answer: {answer}")
@@ -448,7 +464,7 @@ class AgenticLoopMixin:
             if needs_tool:
                 if self.debug and not self._is_comp_mode:
                     print(f"  [OpenResponses] REJECTED: {rejection_reason}")
-                    print(f"  [OpenResponses] Enforcing tool requirement...")
+                    print("  [OpenResponses] Enforcing tool requirement...")
                 # Tell model to use tools.
                 self._reject_for_tool_choice(
                     content,
@@ -483,14 +499,16 @@ class AgenticLoopMixin:
                 response.add_output_item(msg_item, debug=not self._is_comp_mode and self.debug)
 
             if self.debug:
-                print(f"  No tool calls detected, accepting as final answer")
+                print("  No tool calls detected, accepting as final answer")
 
-            steps.append(StepResult(
-                type=StepResultType.FINAL_ANSWER,
-                content=content,
-                tokens_used=tokens,
-                reasoning_content=reasoning_content,
-            ))
+            steps.append(
+                StepResult(
+                    type=StepResultType.FINAL_ANSWER,
+                    content=content,
+                    tokens_used=tokens,
+                    reasoning_content=reasoning_content,
+                )
+            )
             self.memory.add("assistant", content)
             break
 
@@ -498,11 +516,15 @@ class AgenticLoopMixin:
             # Max steps reached
             response.mark_incomplete()
             if self.debug and not self._is_comp_mode:
-                print(f"\n[OpenResponses] Response status: {response.status.value} (max steps reached)")
-            steps.append(StepResult(
-                type=StepResultType.MAX_STEPS,
-                content="Maximum steps reached without final answer",
-            ))
+                print(
+                    f"\n[OpenResponses] Response status: {response.status.value} (max steps reached)"
+                )
+            steps.append(
+                StepResult(
+                    type=StepResultType.MAX_STEPS,
+                    content="Maximum steps reached without final answer",
+                )
+            )
 
         # Mark response as completed (non-streaming path; the streaming
         # path preserves its historical never-mark behavior).
@@ -570,7 +592,9 @@ class AgenticLoopMixin:
         if self._allowed_tools and tool_name not in self._allowed_tools:
             error_msg = f"Tool '{tool_name}' not in allowed_tools: {self._allowed_tools}"
             if self.debug and not self._is_comp_mode:
-                print(f"  [OpenResponses] BLOCKED by allowed_tools: '{tool_name}' not in {self._allowed_tools}")
+                print(
+                    f"  [OpenResponses] BLOCKED by allowed_tools: '{tool_name}' not in {self._allowed_tools}"
+                )
             if native_tool_calls:
                 self.memory.add_tool_result(
                     tool_call_id=tool_call_id,
@@ -609,7 +633,9 @@ class AgenticLoopMixin:
         response.add_output_item(fc_item, debug=not self._is_comp_mode and self.debug)
 
         if self.debug and not self._is_comp_mode:
-            print(f"  [OpenResponses] FunctionCallItem created: id={fc_item.id}, call_id={fc_item.call_id}")
+            print(
+                f"  [OpenResponses] FunctionCallItem created: id={fc_item.id}, call_id={fc_item.call_id}"
+            )
             print(f"  [OpenResponses] FunctionCallItem status: {fc_item.status.value}")
 
         return "run", fc_item
@@ -655,7 +681,8 @@ class AgenticLoopMixin:
         tool_call_id = tc.get("id", "") or ""
 
         action, fc_item = self._gate_and_prepare_tool_call(
-            tc, state,
+            tc,
+            state,
             native_tool_calls=native_tool_calls,
             steps=steps,
             response=response,
@@ -683,10 +710,12 @@ class AgenticLoopMixin:
             state.terminated = True
             fc_item.status = ItemStatus.FAILED
             response.mark_cancelled(debug=self.debug)
-            steps.append(StepResult(
-                type=StepResultType.ERROR,
-                error="Cancelled by user during tool execution",
-            ))
+            steps.append(
+                StepResult(
+                    type=StepResultType.ERROR,
+                    error="Cancelled by user during tool execution",
+                )
+            )
             return "break"
 
         return self._commit_tool_result(
@@ -763,13 +792,15 @@ class AgenticLoopMixin:
             state.terminated = True
             return "break"
 
-        steps.append(StepResult(
-            type=StepResultType.TOOL_CALL,
-            content=content,
-            tool_call=ToolCall(name=tool_name, arguments=tool_args),
-            tool_result=result,
-            tokens_used=tokens,
-        ))
+        steps.append(
+            StepResult(
+                type=StepResultType.TOOL_CALL,
+                content=content,
+                tool_call=ToolCall(name=tool_name, arguments=tool_args),
+                tool_result=result,
+                tokens_used=tokens,
+            )
+        )
 
         if self.debug:
             print(f"  Tool: {tool_name}({tool_args})")
@@ -817,7 +848,9 @@ class AgenticLoopMixin:
                          terminal tool failure, or Ctrl+C — ROB-01 parity)
         """
         parallel_enabled = os.environ.get("AGENTKTHX_PARALLEL_TOOLS", "1").lower() in (
-            "1", "true", "yes"
+            "1",
+            "true",
+            "yes",
         )
         if (
             not parallel_enabled
@@ -892,7 +925,8 @@ class AgenticLoopMixin:
         approved: list[tuple[dict, Any]] = []  # (tc, fc_item)
         for tc in tool_calls_found:
             action, fc_item = self._gate_and_prepare_tool_call(
-                tc, state,
+                tc,
+                state,
                 native_tool_calls=native_tool_calls,
                 steps=steps,
                 response=response,
@@ -911,7 +945,8 @@ class AgenticLoopMixin:
             # lifecycle (Ctrl+C handling included).
             for tc, _fc in approved:
                 action = self._execute_single_tool_call(
-                    tc, state,
+                    tc,
+                    state,
                     prompt="",
                     step_num=step_num,
                     tokens=tokens,
@@ -945,10 +980,12 @@ class AgenticLoopMixin:
             for _tc, fc_item in approved:
                 fc_item.status = ItemStatus.FAILED
             response.mark_cancelled(debug=self.debug)
-            steps.append(StepResult(
-                type=StepResultType.ERROR,
-                error="Cancelled by user during tool execution",
-            ))
+            steps.append(
+                StepResult(
+                    type=StepResultType.ERROR,
+                    error="Cancelled by user during tool execution",
+                )
+            )
             return "break"
         except BaseException:
             # Never leak a half-alive pool on unexpected errors.
@@ -1010,16 +1047,15 @@ class AgenticLoopMixin:
         is_error = is_error_result(str(result))
         if is_error:
             self._error_tracker.record_failure(
-                tool_name=tool_name,
-                error_message=str(result),
-                step=step_num,
-                arguments=tool_args
+                tool_name=tool_name, error_message=str(result), step=step_num, arguments=tool_args
             )
 
             # Check if we should terminate due to too many failures
             if self._error_tracker.should_terminate():
                 if self.debug:
-                    print(f"  [ErrorRecovery] Terminating: {self._error_tracker.consecutive_all} consecutive all-failure steps >= max ({self._error_tracker.max_total_failures})")
+                    print(
+                        f"  [ErrorRecovery] Terminating: {self._error_tracker.consecutive_all} consecutive all-failure steps >= max ({self._error_tracker.max_total_failures})"
+                    )
                 fc_item.status = ItemStatus.FAILED
                 term_msg = (
                     f"Error: run terminated after "
@@ -1038,13 +1074,17 @@ class AgenticLoopMixin:
                     )
                 else:
                     self.memory.add("user", f"Observation: {term_msg}")
-                steps.append(StepResult(
-                    type=StepResultType.ERROR,
-                    error=term_msg,
-                    tool_call=ToolCall(name=tool_name, arguments=tool_args),
-                    tokens_used=tokens,
-                ))
-                response.mark_failed({"message": "Too many tool failures", "type": "error_recovery"})
+                steps.append(
+                    StepResult(
+                        type=StepResultType.ERROR,
+                        error=term_msg,
+                        tool_call=ToolCall(name=tool_name, arguments=tool_args),
+                        tokens_used=tokens,
+                    )
+                )
+                response.mark_failed(
+                    {"message": "Too many tool failures", "type": "error_recovery"}
+                )
                 return True
         else:
             # Record success to reset consecutive failure counter
@@ -1068,6 +1108,7 @@ class AgenticLoopMixin:
         # is still stored in the StepResult and FunctionCallOutputItem
         # below for debugging / OpenResponses clients.
         from .helpers import sanitize_tool_output
+
         sanitized_output = sanitize_tool_output(
             result,
             tool_name=tool_name,
@@ -1079,7 +1120,9 @@ class AgenticLoopMixin:
         response.add_output_item(fco_item, debug=not self._is_comp_mode and self.debug)
 
         if self.debug and not self._is_comp_mode:
-            print(f"  [OpenResponses] FunctionCallOutputItem created: id={fco_item.id}, call_id={fco_item.call_id}")
+            print(
+                f"  [OpenResponses] FunctionCallOutputItem created: id={fco_item.id}, call_id={fco_item.call_id}"
+            )
 
         # Add tool result to memory with enhanced guidance
         if native_tool_calls:
@@ -1098,7 +1141,9 @@ class AgenticLoopMixin:
                 )
                 if retry_msg:
                     if self.debug:
-                        print(f"  [Retry Context] Adding retry hint for native tool call: {tool_name}")
+                        print(
+                            f"  [Retry Context] Adding retry hint for native tool call: {tool_name}"
+                        )
                     self.memory.add("user", retry_msg)
         else:
             # Use error recovery module for enhanced observation
@@ -1120,6 +1165,7 @@ class AgenticLoopMixin:
                 state.last_tool_name = None
             else:
                 from .error_recovery import _is_simple_result
+
                 if _is_simple_result(sanitized_output, tool_name):
                     state.expecting_final_answer = True
                     state.last_successful_result = sanitized_output

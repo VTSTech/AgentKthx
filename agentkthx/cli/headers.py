@@ -7,10 +7,8 @@ from __future__ import annotations
 import argparse
 
 from ..agent import Agent
-from ..colors import yellow, dim, green, cyan, bright_magenta
-
+from ..colors import bright_magenta, cyan, dim, green, yellow
 from .banner import print_banner
-
 
 
 def _print_session_header(agent: Agent, args: argparse.Namespace, config, label: str) -> None:
@@ -31,16 +29,14 @@ def _print_session_header(agent: Agent, args: argparse.Namespace, config, label:
         print(f"{dim('Context:')} {yellow(ctx_display)}")
     if timeout:
         print(f"{dim('Timeout:')} {yellow(str(timeout) + 's')}")
-    acp = getattr(args, '_acp', None)
+    acp = getattr(args, "_acp", None)
     if acp:
         print(f"{dim('ACP:')} {green('✓ Connected')} ({acp.base_url})")
     if agent._response_format:
         print(f"{dim('Output:')} {yellow('JSON mode')}")
-    if getattr(agent, '_is_persistent', False) and hasattr(agent.memory, 'session_id'):
+    if getattr(agent, "_is_persistent", False) and hasattr(agent.memory, "session_id"):
         print(f"{dim('Session:')} {green(agent.memory.session_id)}")
     print(f"{dim('Status:')} {yellow('Alpha')}")
-
-
 
 
 def _print_run_header(agent: Agent, args: argparse.Namespace, config) -> None:
@@ -49,9 +45,17 @@ def _print_run_header(agent: Agent, args: argparse.Namespace, config) -> None:
     api_mode = getattr(args, "api_mode", "openre")
 
     # Resolve effective generation params
-    eff_temp = agent._temperature if agent._temperature is not None else agent.model_config.default_temperature
+    eff_temp = (
+        agent._temperature
+        if agent._temperature is not None
+        else agent.model_config.default_temperature
+    )
     eff_top_p = agent._top_p if agent._top_p is not None else agent.model_config.default_top_p
-    eff_max_tokens = agent._num_predict if agent._num_predict is not None else agent.model_config.default_max_tokens
+    eff_max_tokens = (
+        agent._num_predict
+        if agent._num_predict is not None
+        else agent.model_config.default_max_tokens
+    )
 
     parts = [
         f"{cyan(agent.model)}",
@@ -84,8 +88,6 @@ def _print_run_header(agent: Agent, args: argparse.Namespace, config) -> None:
     print(f"  {line1}")
     print(f"  {line2}")
     print(f"{dim('─') * 60}")
-
-
 
 
 def _print_run_summary(result, agent: Agent) -> None:

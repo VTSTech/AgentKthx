@@ -6,8 +6,8 @@ the move verbatim: registry lookup, dangerous-tool gate, numeric-string
 coercion, hallucinated-param stripping, error formatting.
 """
 
-from agentkthx.core.tool_execution import ToolExecutionMixin
 from agentkthx.core.models import Tool, ToolParam
+from agentkthx.core.tool_execution import ToolExecutionMixin
 
 
 def _make_tool(name="echo", params=None, dangerous=False, fn=None):
@@ -15,6 +15,7 @@ def _make_tool(name="echo", params=None, dangerous=False, fn=None):
         if fn:
             return fn(**kwargs)
         return "ok:" + ",".join(f"{k}={v}" for k, v in sorted(kwargs.items()))
+
     tool = Tool(name=name, description="test tool", params=params or [])
     tool.execute = execute
     if dangerous:
@@ -29,9 +30,6 @@ class _Host(ToolExecutionMixin):
         self._tools = {t.name: t for t in tools}
         self._confirm_dangerous = confirm
 
-    class tools:
-        pass
-
     def _registry(self):
         return self
 
@@ -42,10 +40,13 @@ class _Host(ToolExecutionMixin):
     class _Reg:
         def __init__(self, d):
             self._d = d
+
         def get(self, name):
             return self._d.get(name)
+
         def names(self):
             return list(self._d)
+
     @property
     def tools(self):
         return _Host._Reg(self._tools)
@@ -54,10 +55,11 @@ class _Host(ToolExecutionMixin):
 def test_mixin_provides_method_and_agent_inherits():
     assert callable(getattr(ToolExecutionMixin, "_execute_tool", None))
     from agentkthx.agent import Agent
+
     assert issubclass(Agent, ToolExecutionMixin)
     assert "_execute_tool" not in vars(Agent), (
-        "Agent.__dict__ still contains _execute_tool — extraction left a "
-        "shadowing copy behind")
+        "Agent.__dict__ still contains _execute_tool — extraction left a " "shadowing copy behind"
+    )
 
 
 def test_unknown_tool_returns_error_string_with_available_names():
@@ -69,9 +71,11 @@ def test_unknown_tool_returns_error_string_with_available_names():
 
 def test_dangerous_tool_confirmation_gate():
     calls = []
+
     def confirm(name, args):
         calls.append((name, args))
         return False
+
     host = _Host(tools=[_make_tool("nuke", dangerous=True)], confirm=confirm)
     result = host._execute_tool("nuke", {"target": "x"})
     assert "blocked by user confirmation" in result
@@ -79,8 +83,7 @@ def test_dangerous_tool_confirmation_gate():
 
 
 def test_numeric_string_coercion_and_hallucinated_param_stripping():
-    t = _make_tool("depth_tool", params=[ToolParam(name="depth", type="integer",
-                                                   description="d")])
+    t = _make_tool("depth_tool", params=[ToolParam(name="depth", type="integer", description="d")])
     host = _Host(tools=[t])
     result = host._execute_tool("depth_tool", {"depth": "3", "bogus": "x"})
     # depth coerced to int 3; bogus stripped and reported back
@@ -91,6 +94,7 @@ def test_numeric_string_coercion_and_hallucinated_param_stripping():
 def test_execution_exception_returns_error_string_not_raise():
     def boom(**kw):
         raise RuntimeError("kaboom")
+
     host = _Host(tools=[_make_tool("exploder", fn=boom)])
     result = host._execute_tool("exploder", {})
     assert isinstance(result, str) and "Error executing tool: kaboom" in result

@@ -18,11 +18,15 @@
 #    reproducible.
 #  - The `test` job does NOT run with coverage — keeps PR feedback at ~3s
 #    instead of ~5s. Coverage runs once per push (Python 3.12 only).
-#  - Audit TEST-06 (R07.15): a separate non-blocking `lint` job runs
-#    `ruff check` + `black --check` so style drift is surfaced on every
-#    push instead of being caught by review. It is NOT gating
-#    (continue-on-error: true) — promoting it to a required check is an
-#    explicit follow-up decision once the existing drift is burned down.
+#  - Audit TEST-06 (R07.15): a separate `lint` job runs `ruff check` +
+#    `black --check` so style drift is surfaced on every push instead of
+#    being caught by review. It launched non-blocking because the repo
+#    predates the tooling (~2.8k findings of drift). The drift has since
+#    been burned down to zero (auto-fix + black reformat + hand fixes,
+#    including two latent dict-key bugs and a missing Path import the
+#    linters caught), so the job is now a REQUIRED check — new drift
+#    fails CI outright. Linter versions are pinned: bump them deliberately
+#    after validating the new rule set locally.
 
 name: CI
 
@@ -114,15 +118,14 @@ jobs:
           if-no-files-found: error
 
   lint:
-    name: lint (ruff + black, non-blocking)
+    name: lint (ruff + black)
     runs-on: ubuntu-latest
-    # TEST-06 (R07.15): the pyproject configures [tool.black] and
-    # [tool.ruff] but nothing ever invoked them — style drift went
-    # undetected. Surface it on every push WITHOUT blocking PRs: the
-    # repo predates the tooling and a gating switch would fail on the
-    # first run. Turn continue-on-error off once the reported drift is
-    # fixed (or pinned as intentional via ruff per-rule ignores).
-    continue-on-error: true
+    # TEST-06 (R07.15), follow-up: launched non-blocking while the
+    # pre-tooling drift was burned down (see header note). Gating now —
+    # the tree is lint-clean and pyproject documents the two intentional
+    # suppressions (E501 → black; per-file E402 for setup-then-import
+    # modules). Keep it that way: style regressions should fail CI,
+    # not review.
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -135,9 +138,11 @@ jobs:
           cache-dependency-path: pyproject.toml
 
       - name: Install linters
-        # Lint-only job: no package install needed — ruff + black only,
-        # pinned to the versions the pyproject config targets.
-        run: python -m pip install ruff black
+        # Lint-only job: no package install needed. Versions are PINNED to
+        # the pair the burn-down was validated against — a new ruff release
+        # can add rules, and with the job now gating that should be a
+        # deliberate bump (validate locally first), not a surprise red run.
+        run: python -m pip install ruff==0.16.9 black==26.5.1
 
       - name: Ruff check
         run: python -m ruff check agentkthx/ tests/

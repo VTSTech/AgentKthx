@@ -7,7 +7,7 @@ for testing the plugin system's backend discovery and selection.
 
 from __future__ import annotations
 
-from agentkthx.backends.base import BaseBackend, BackendConfig
+from agentkthx.backends.base import BackendConfig, BaseBackend
 from agentkthx.core.types import BackendType, ToolSupportLevel
 
 
@@ -48,5 +48,7 @@ class TestBackend(BaseBackend):
     def list_models(self) -> list[dict]:
         return [{"name": "test-model", "size": 0, "modified_at": ""}]
 
-    def test_tool_support(self, model: str = "test-model", family: str | None = None, force_test: bool = False) -> ToolSupportLevel:
+    def test_tool_support(
+        self, model: str = "test-model", family: str | None = None, force_test: bool = False
+    ) -> ToolSupportLevel:
         return ToolSupportLevel.NONE

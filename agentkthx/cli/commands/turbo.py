@@ -5,23 +5,23 @@ Extracted verbatim from cli.py in R07.00 Phase 8."""
 from __future__ import annotations
 
 import argparse
-
-from ...backends import get_backend
-from ...colors import bold, yellow, dim, cyan, bright_red, bright_cyan
-from ...config import get_config
 from pathlib import Path
 
-
+from ...backends import get_backend
+from ...colors import bold, bright_cyan, bright_red, cyan, dim, yellow
+from ...config import get_config
 
 
 def cmd_turbo(args: argparse.Namespace) -> int:
     """TurboQuant server management commands."""
-    from ...plugins.turboquant.turbo import (
-        start_server, stop_server, get_status,
-        print_model_list, print_status,
-        TURBOQUANT_SERVER_PATH,
-    )
     from ...backends.ollama_registry import discover_models
+    from ...plugins.turboquant.turbo import (
+        get_status,
+        print_model_list,
+        print_status,
+        start_server,
+        stop_server,
+    )
 
     turbo_cmd = getattr(args, "turbo_command", None)
 
@@ -34,12 +34,14 @@ def cmd_turbo(args: argparse.Namespace) -> int:
             print(bold(bright_cyan("TURBOQUANT")) + dim(" — server management"))
             print()
             print(f"  {bold('Usage:')}")
-            print(f"    agentkthx turbo list             List Ollama models")
-            print(f"    agentkthx turbo start <model>     Start TurboQuant server")
-            print(f"    agentkthx turbo stop              Stop TurboQuant server")
-            print(f"    agentkthx turbo status            Show server status")
+            print("    agentkthx turbo list             List Ollama models")
+            print("    agentkthx turbo start <model>     Start TurboQuant server")
+            print("    agentkthx turbo stop              Stop TurboQuant server")
+            print("    agentkthx turbo status            Show server status")
             print()
-            print(f"  {dim('No server running.')} Run {cyan('agentkthx turbo list')} to see available models.")
+            print(
+                f"  {dim('No server running.')} Run {cyan('agentkthx turbo list')} to see available models."
+            )
             print()
         return 0
 
@@ -73,7 +75,10 @@ def cmd_turbo(args: argparse.Namespace) -> int:
             for m in local_models:
                 local_lookup[m.name] = m
                 # Derive full name from manifest path: .../registry.ollama.ai/<library>/<repo>/<tag>
-                if m.manifest_path != Path("") and m.manifest_path.parent.parent.name != "registry.ollama.ai":
+                if (
+                    m.manifest_path != Path("")
+                    and m.manifest_path.parent.parent.name != "registry.ollama.ai"
+                ):
                     library = m.manifest_path.parent.parent.name
                     full_name = f"{library}/{m.name}"
                     local_lookup[full_name] = m
@@ -90,16 +95,18 @@ def cmd_turbo(args: argparse.Namespace) -> int:
                     repo, tag = name, "latest"
                     if ":" in name:
                         repo, tag = name.rsplit(":", 1)
-                    models.append(OllamaModel(
-                        name=name,
-                        repo=repo,
-                        tag=tag,
-                        blob_path=Path(""),
-                        size_bytes=api_m.get("size", 0),
-                        weight_quant="not pulled",
-                        manifest_path=Path(""),
-                        model_digest="",
-                    ))
+                    models.append(
+                        OllamaModel(
+                            name=name,
+                            repo=repo,
+                            tag=tag,
+                            blob_path=Path(""),
+                            size_bytes=api_m.get("size", 0),
+                            weight_quant="not pulled",
+                            manifest_path=Path(""),
+                            model_digest="",
+                        )
+                    )
             models.sort(key=lambda m: m.name)
             print_model_list(models, source="api", backend_url=api_url)
         else:
@@ -126,8 +133,8 @@ def cmd_turbo(args: argparse.Namespace) -> int:
             )
             # Show how to use
             print(dim("  Use with AgentKthx:"))
-            _cmd1 = f"agentkthx run --backend llama-server --model {args.model} \"<prompt>\""
-            _cmd2 = f"OLLAMA_BASE_URL=http://localhost:{state.port} agentkthx run \"<prompt>\""
+            _cmd1 = f'agentkthx run --backend llama-server --model {args.model} "<prompt>"'
+            _cmd2 = f'OLLAMA_BASE_URL=http://localhost:{state.port} agentkthx run "<prompt>"'
             print(f"    {cyan(_cmd1)}")
             print(f"    {cyan(_cmd2)}")
             print()

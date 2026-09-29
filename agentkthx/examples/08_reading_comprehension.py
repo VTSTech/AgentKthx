@@ -22,10 +22,10 @@ Environment Variables:
 Written by VTSTech — https://www.vts-tech.org
 """
 
-import sys
-import os
-import time
 import argparse
+import os
+import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -38,24 +38,45 @@ def parse_args():
     parser.add_argument("-m", "--model", default=None, help="Model to test")
     parser.add_argument("--debug", action="store_true", help="Enable debug output")
     parser.add_argument("--backend", choices=["ollama", "bitnet", "llama-server"], default=None)
-    parser.add_argument("--api", choices=["openre", "openai"], default="openre", dest="api_mode",
-                       help="API mode: 'openre' (OpenResponses) or 'openai' (Chat-Completions (OpenAI))")
-    parser.add_argument("--use-mf-sys", action="store_true", dest="use_modelfile_system",
-                        help="Use the model's Modelfile system prompt instead of custom prompt")
+    parser.add_argument(
+        "--api",
+        choices=["openre", "openai"],
+        default="openre",
+        dest="api_mode",
+        help="API mode: 'openre' (OpenResponses) or 'openai' (Chat-Completions (OpenAI))",
+    )
+    parser.add_argument(
+        "--use-mf-sys",
+        action="store_true",
+        dest="use_modelfile_system",
+        help="Use the model's Modelfile system prompt instead of custom prompt",
+    )
     parser.add_argument("--soul", default=None, help="Path to Soul Spec package")
-    parser.add_argument("--soul-level", type=int, default=2, choices=[1, 2, 3],
-                       help="Soul progressive disclosure level")
-    parser.add_argument("--num-ctx", type=int, default=None,
-                       help="Context window size in tokens")
-    parser.add_argument("--num-predict", type=int, default=None,
-                       help="Maximum tokens to generate")
-    parser.add_argument("--temp", type=float, default=None, dest="temperature",
-                       help="Sampling temperature 0.0-2.0")
-    parser.add_argument("--top-p", type=float, default=None, dest="top_p",
-                       help="Nucleus sampling probability 0.0-1.0")
-    parser.add_argument("--force-react", action="store_true", help="Force ReAct mode for tool calling")
-    parser.add_argument("--timeout", type=int, default=None,
-                       help="Request timeout in seconds (default: 120)")
+    parser.add_argument(
+        "--soul-level",
+        type=int,
+        default=2,
+        choices=[1, 2, 3],
+        help="Soul progressive disclosure level",
+    )
+    parser.add_argument("--num-ctx", type=int, default=None, help="Context window size in tokens")
+    parser.add_argument("--num-predict", type=int, default=None, help="Maximum tokens to generate")
+    parser.add_argument(
+        "--temp", type=float, default=None, dest="temperature", help="Sampling temperature 0.0-2.0"
+    )
+    parser.add_argument(
+        "--top-p",
+        type=float,
+        default=None,
+        dest="top_p",
+        help="Nucleus sampling probability 0.0-1.0",
+    )
+    parser.add_argument(
+        "--force-react", action="store_true", help="Force ReAct mode for tool calling"
+    )
+    parser.add_argument(
+        "--timeout", type=int, default=None, help="Request timeout in seconds (default: 120)"
+    )
     return parser.parse_args()
 
 
@@ -97,7 +118,6 @@ Question: How many chambers does the human heart have? Answer with a number.""",
         "expected": "4",
         "type": "number",
     },
-    
     # Inference
     {
         "category": "Inference",
@@ -134,7 +154,6 @@ Question: Is this an indoor or outdoor game? Answer with one word.""",
         "expected": "outdoor",
         "type": "exact",
     },
-    
     # Main idea
     {
         "category": "Main Idea",
@@ -171,7 +190,6 @@ Question: How do dolphins sleep differently from humans? Answer briefly.""",
         "expected": "eye",
         "type": "keyword",
     },
-    
     # Sequencing
     {
         "category": "Sequencing",
@@ -208,7 +226,6 @@ Question: How many days between placing the order and receiving it? Answer with 
         "expected": "4",
         "type": "number",
     },
-    
     # Vocabulary in context
     {
         "category": "Vocabulary",
@@ -251,21 +268,49 @@ Question: Does abundant mean plentiful or scarce? Answer with one word.""",
 def check_answer(response: str, expected: str, check_type: str) -> bool:
     """Check if response matches expected answer with flexible matching."""
     import re
+
     response_lower = response.lower().strip()
     expected_lower = expected.lower().strip()
-    
+
     # Synonyms and acceptable alternatives for vocabulary and concepts
     synonyms = {
         # Vocabulary - delicate vs strong
         "delicate": ["delicate", "fragile", "breakable", "easily broken", "careful", "weak"],
         # Vocabulary - difficult vs easy
-        "difficult": ["difficult", "hard", "tough", "challenging", "arduous", "strenuous", "demanding"],
+        "difficult": [
+            "difficult",
+            "hard",
+            "tough",
+            "challenging",
+            "arduous",
+            "strenuous",
+            "demanding",
+        ],
         # Vocabulary - careful vs careless
         "careful": ["careful", "meticulous", "thorough", "precise", "diligent", "attentive"],
         # Vocabulary - average vs excellent
-        "average": ["average", "mediocre", "ordinary", "moderate", "so-so", "ok", "okay", "not excellent"],
+        "average": [
+            "average",
+            "mediocre",
+            "ordinary",
+            "moderate",
+            "so-so",
+            "ok",
+            "okay",
+            "not excellent",
+        ],
         # Vocabulary - plentiful vs scarce
-        "plentiful": ["plentiful", "abundant", "plenty", "ample", "copious", "bountiful", "rich", "lots", "not scarce"],
+        "plentiful": [
+            "plentiful",
+            "abundant",
+            "plenty",
+            "ample",
+            "copious",
+            "bountiful",
+            "rich",
+            "lots",
+            "not scarce",
+        ],
         # Main idea / concepts
         "spoil": ["spoil", "spoils", "spoiled", "never spoils", "edible", "preserved", "lasts"],
         "memory": ["memory", "remember", "recall", "retention", "myth"],
@@ -273,7 +318,14 @@ def check_answer(response: str, expected: str, check_type: str) -> bool:
         "accessible": ["accessible", "access", "available", "affordable", "cheaper", "spread"],
         "eye": ["eye", "eyes", "open", "unihemispheric", "one eye", "half brain"],
         # Factual
-        "radioactivity": ["radioactivity", "radioactive", "radiation", "nuclear", "physics", "chemistry"],
+        "radioactivity": [
+            "radioactivity",
+            "radioactive",
+            "radiation",
+            "nuclear",
+            "physics",
+            "chemistry",
+        ],
         "america": ["america", "american", "south america", "south american"],
         # Inference
         "wet": ["wet", "rain", "rained", "soaked", "drenched", "get wet", "umbrella"],
@@ -283,7 +335,7 @@ def check_answer(response: str, expected: str, check_type: str) -> bool:
         "started": ["started", "began", "start", "begin", "3 pm", "3:00"],
         "left": ["left", "leave", "departed", "went", "8:15"],
     }
-    
+
     if check_type == "exact":
         # Check for expected word or synonyms
         if expected_lower in response_lower:
@@ -293,7 +345,7 @@ def check_answer(response: str, expected: str, check_type: str) -> bool:
                 if syn in response_lower:
                     return True
         return False
-    
+
     elif check_type == "keyword":
         # Check for expected word or synonyms
         if expected_lower in response_lower:
@@ -305,39 +357,49 @@ def check_answer(response: str, expected: str, check_type: str) -> bool:
         # Also check if any keyword is present
         keywords = expected_lower.split()
         return any(kw in response_lower for kw in keywords)
-    
+
     elif check_type == "number":
         # Extract numbers from both
-        resp_nums = re.findall(r'-?\d+\.?\d*', response_lower.replace(',', '').replace(' ', ''))
-        exp_nums = re.findall(r'-?\d+\.?\d*', expected_lower)
-        
+        resp_nums = re.findall(r"-?\d+\.?\d*", response_lower.replace(",", "").replace(" ", ""))
+        exp_nums = re.findall(r"-?\d+\.?\d*", expected_lower)
+
         if resp_nums and exp_nums:
             try:
                 resp_val = float(resp_nums[0])
                 exp_val = float(exp_nums[0])
                 # Allow tolerance
                 if exp_val > 100:
-                    return abs(resp_val - exp_val) < exp_val * 0.1  # 10% tolerance for large numbers
+                    return (
+                        abs(resp_val - exp_val) < exp_val * 0.1
+                    )  # 10% tolerance for large numbers
                 return abs(resp_val - exp_val) < 1.0
             except ValueError:
                 return False
         return False
-    
+
     return False
 
 
-def run_tests(model: str, backend, debug: bool = False, use_mf_sys: bool = False,
-              soul: str = None, soul_level: int = 2,
-              force_react: bool = False,
-              num_ctx: int = None, num_predict: int = None,
-              temperature: float = None, top_p: float = None) -> dict:
+def run_tests(
+    model: str,
+    backend,
+    debug: bool = False,
+    use_mf_sys: bool = False,
+    soul: str = None,
+    soul_level: int = 2,
+    force_react: bool = False,
+    num_ctx: int = None,
+    num_predict: int = None,
+    temperature: float = None,
+    top_p: float = None,
+) -> dict:
     """Run reading comprehension tests for a model."""
     print(f"\n{'='*60}")
     print(f"📖 Reading Comprehension Tests: {model}")
     print(f"{'='*60}")
-    
+
     results = {"model": model, "passed": 0, "total": len(TESTS), "time": 0, "categories": {}}
-    
+
     # Custom system prompt for reading comprehension (ignored if use_mf_sys=True)
     comprehension_prompt = """Answer questions based on the text provided. Be direct and concise.
 
@@ -349,15 +411,15 @@ Instructions:
 - Be brief and accurate"""
 
     # Note: We create a fresh agent for each test to avoid memory contamination
-    
+
     for test in TESTS:
         category = test["category"]
         prompt = test["prompt"]
         expected = test["expected"]
         check_type = test["type"]
-        
+
         print(f"\n📋 [{category}] {prompt}...")
-        
+
         # Create fresh agent for each test (isolates memory)
         # If use_mf_sys=True, don't pass custom system_prompt (use model's Modelfile)
         agent_kwargs = {
@@ -375,79 +437,87 @@ Instructions:
         }
         if not use_mf_sys:
             agent_kwargs["system_prompt"] = comprehension_prompt
-        
+
         agent = Agent(**agent_kwargs)
-        
+
         t0 = time.time()
         run = agent.run(prompt)
         elapsed = time.time() - t0
         results["time"] += elapsed
-        
+
         response = run.final_answer
         passed = check_answer(response, expected, check_type)
-        
+
         if category not in results["categories"]:
             results["categories"][category] = {"passed": 0, "total": 0}
         results["categories"][category]["total"] += 1
         if passed:
             results["categories"][category]["passed"] += 1
-        
+
         results["passed"] += int(passed)
-        
+
         status = "✅" if passed else "❌"
         print(f"  {status} Expected: {expected} | Got: {response}")
         print(f"     {elapsed:.1f}s")
-    
+
     return results
 
 
 def main():
     args = parse_args()
     config = get_config()
-    
+
     model = args.model or config.default_model
     backend_name = args.backend or config.backend
-    api_mode = getattr(args, 'api_mode', 'openre')
-    timeout = getattr(args, 'timeout', None)
+    api_mode = getattr(args, "api_mode", "openre")
+    timeout = getattr(args, "timeout", None)
     backend = get_default_backend(backend_name, api_mode=api_mode, timeout=timeout)
-    
+
     if not backend.is_running():
         print(f"❌ {backend_name.capitalize()} not running at {backend.base_url}")
         return {"passed": 0, "total": len(TESTS), "time": 0, "exit_code": 1}
-    
+
     print(f"\n⚛️ AgentKthx Reading Comprehension Tests ({len(TESTS)} questions)")
     print(f"   Backend: {backend_name} ({backend.base_url})")
     print(f"   Model: {model}")
-    if api_mode != 'openre':
+    if api_mode != "openre":
         print(f"   API Mode: {api_mode}")
     if timeout:
         print(f"   Timeout: {timeout}s")
     if args.use_modelfile_system:
-        print(f"   System Prompt: Modelfile (native)")
+        print("   System Prompt: Modelfile (native)")
     else:
-        print(f"   System Prompt: Custom (reading comprehension)")
-    
-    result = run_tests(model, backend, args.debug, args.use_modelfile_system,
-                       soul=args.soul, soul_level=args.soul_level,
-                       force_react=getattr(args, 'force_react', False),
-                       num_ctx=getattr(args, 'num_ctx', None),
-                       num_predict=getattr(args, 'num_predict', None),
-                       temperature=getattr(args, 'temperature', None),
-                       top_p=getattr(args, 'top_p', None))
-    
+        print("   System Prompt: Custom (reading comprehension)")
+
+    result = run_tests(
+        model,
+        backend,
+        args.debug,
+        args.use_modelfile_system,
+        soul=args.soul,
+        soul_level=args.soul_level,
+        force_react=getattr(args, "force_react", False),
+        num_ctx=getattr(args, "num_ctx", None),
+        num_predict=getattr(args, "num_predict", None),
+        temperature=getattr(args, "temperature", None),
+        top_p=getattr(args, "top_p", None),
+    )
+
     print(f"\n{'='*60}")
     print("📊 Results by Category")
     print(f"{'='*60}")
-    
+
     for category, stats in result["categories"].items():
         pct = stats["passed"] / stats["total"] * 100
         bar = "█" * stats["passed"] + "░" * (stats["total"] - stats["passed"])
         print(f"  {category:<15} {bar} {stats['passed']}/{stats['total']} ({pct:.0f}%)")
-    
+
     pass_rate = result["passed"] / result["total"] * 100
-    print(f"\n📊 Overall: {result['passed']}/{result['total']} ({pass_rate:.0f}%) in {result['time']:.1f}s")
+    print(
+        f"\n📊 Overall: {result['passed']}/{result['total']} ({pass_rate:.0f}%) in {result['time']:.1f}s"
+    )
     print(f"{'='*60}")
-    
+
     result["exit_code"] = 0 if result["passed"] == result["total"] else 1
     return result
 

@@ -8,8 +8,7 @@ Written by VTSTech — https://www.vts-tech.org
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
-from typing import Any, Callable, Optional
+from typing import Callable
 
 from ..core.models import Tool, ToolParam
 
@@ -52,6 +51,7 @@ class ToolRegistry:
         Returns:
             Decorator function
         """
+
         def decorator(func: Callable) -> Callable:
             tool_name = name or func.__name__
             tool_desc = description or func.__doc__ or ""
@@ -89,6 +89,7 @@ class ToolRegistry:
 
         # Fuzzy match
         from ..core.helpers import fuzzy_match
+
         matched = fuzzy_match(name, list(self._tools.keys()), threshold)
         if matched:
             return self._tools[matched]
@@ -126,8 +127,10 @@ class ToolRegistry:
             elif warn:
                 available = list(self._tools.keys())
                 if os.environ.get("AGENTKTHX_DEBUG"):
-                    print(f"[ToolRegistry] subset: '{name}' not found in registry "
-                          f"(available: {available})")
+                    print(
+                        f"[ToolRegistry] subset: '{name}' not found in registry "
+                        f"(available: {available})"
+                    )
         return ToolRegistry(tools)
 
     def to_json_schema(self) -> list[dict]:
@@ -151,7 +154,7 @@ class ToolRegistry:
                 annotation = param.annotation
                 if annotation in (int, float):
                     param_type = "number"
-                elif annotation == bool:
+                elif annotation is bool:
                     param_type = "boolean"
                 elif annotation in (list, list):
                     param_type = "array"
@@ -161,12 +164,14 @@ class ToolRegistry:
             # Determine if required
             required = param.default == inspect.Parameter.empty
 
-            params.append(ToolParam(
-                name=name,
-                type=param_type,
-                required=required,
-                default=None if required else param.default,
-            ))
+            params.append(
+                ToolParam(
+                    name=name,
+                    type=param_type,
+                    required=required,
+                    default=None if required else param.default,
+                )
+            )
 
         return params
 

@@ -33,20 +33,28 @@ def fmt_tok(n) -> str:
 def footer_line1(agent) -> str:
     """Build the first footer line: version, model, prompt, context, tokens."""
     ctx = agent.num_ctx
-    ctx_str = f"{ctx // 1024}K" if ctx and ctx >= 1024 else str(ctx) if ctx else '?'
-    max_t = agent._num_predict if agent._num_predict is not None else agent.model_config.default_max_tokens
+    ctx_str = f"{ctx // 1024}K" if ctx and ctx >= 1024 else str(ctx) if ctx else "?"
+    max_t = (
+        agent._num_predict
+        if agent._num_predict is not None
+        else agent.model_config.default_max_tokens
+    )
     max_t_str = f"{max_t // 1024}K" if max_t >= 1024 else str(max_t)
-    temp = agent._temperature if agent._temperature is not None else agent.model_config.default_temperature
-    _sys_prompt = getattr(agent, '_custom_system_prompt', '') or ''
+    temp = (
+        agent._temperature
+        if agent._temperature is not None
+        else agent.model_config.default_temperature
+    )
+    _sys_prompt = getattr(agent, "_custom_system_prompt", "") or ""
     _prompt_chr = len(_sys_prompt)
     _prompt_tok = _prompt_chr // 4
     prompt_str = f"{fmt_tok(_prompt_chr)} chr {fmt_tok(_prompt_tok)} tok"
-    _e_brand = '\u269b\ufe0f'
-    _e_model = '\U0001f9e0'
-    _e_ctx   = '\U0001f4e6'
-    _e_resp  = '\U0001f4ac'
-    _e_temp  = '\U0001f321\ufe0f'
-    _e_prmpt = '\U0001f4dd'
+    _e_brand = "\u269b\ufe0f"
+    _e_model = "\U0001f9e0"
+    _e_ctx = "\U0001f4e6"
+    _e_resp = "\U0001f4ac"
+    _e_temp = "\U0001f321\ufe0f"
+    _e_prmpt = "\U0001f4dd"
     parts = [
         f"{dim(_e_brand)} {cyan(__version__)}",
         f"{dim(_e_model)} {cyan(agent.model)}",
@@ -55,7 +63,7 @@ def footer_line1(agent) -> str:
         f"{dim(_e_resp)} {yellow(max_t_str)}",
         f"{dim(_e_temp)} {yellow(str(temp))}",
     ]
-    return ' '.join(parts)
+    return " ".join(parts)
 
 
 def footer_line2(agent, session_tokens_in: int = 0, session_tokens_out: int = 0) -> str:
@@ -66,10 +74,12 @@ def footer_line2(agent, session_tokens_in: int = 0, session_tokens_out: int = 0)
     (`_running_tokens_in/out`, updated during the streaming loop — the
     session counters alone only advance after `agent.run()` returns).
     """
-    backend = getattr(agent.backend, 'backend_type', None)
-    bname = backend.value if backend and hasattr(backend, 'value') else str(backend) if backend else '?'
-    _tok_in = getattr(agent, '_running_tokens_in', 0) or session_tokens_in
-    _tok_out = getattr(agent, '_running_tokens_out', 0) or session_tokens_out
+    backend = getattr(agent.backend, "backend_type", None)
+    bname = (
+        backend.value if backend and hasattr(backend, "value") else str(backend) if backend else "?"
+    )
+    _tok_in = getattr(agent, "_running_tokens_in", 0) or session_tokens_in
+    _tok_out = getattr(agent, "_running_tokens_out", 0) or session_tokens_out
     tok_str = f"\u2191{fmt_tok(_tok_in)} \u2193{fmt_tok(_tok_out)}"
     # Session context usage percentage: (in + out) / num_ctx
     _total_session = _tok_in + _tok_out
@@ -82,9 +92,9 @@ def footer_line2(agent, session_tokens_in: int = 0, session_tokens_out: int = 0)
         _ctx_pct_str = yellow(f"{_ctx_pct}%")
     else:
         _ctx_pct_str = green(f"{_ctx_pct}%")
-    _e_be    = '\U0001f50c'
-    _e_tok   = '\U0001f4c8'
-    _e_dbg   = '\U0001f41b'
+    _e_be = "\U0001f50c"
+    _e_tok = "\U0001f4c8"
+    _e_dbg = "\U0001f41b"
     parts = [
         f"{dim(_e_be)} {green(bname)}",
         f"{dim(_e_tok)} {yellow(tok_str)}",
@@ -92,7 +102,7 @@ def footer_line2(agent, session_tokens_in: int = 0, session_tokens_out: int = 0)
     ]
     if agent.debug:
         parts.append(f"{red(_e_dbg + ' debug')}")
-    return ' '.join(parts)
+    return " ".join(parts)
 
 
 def footer_text(agent, session_tokens_in: int = 0, session_tokens_out: int = 0) -> str:

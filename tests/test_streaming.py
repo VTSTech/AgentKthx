@@ -6,15 +6,15 @@ Covers the three components added for streaming support:
   - Agent._run_core_streaming(): agentic loop with streaming generation
   - Agent._run_core(stream=True): delegation to _run_core_streaming
 """
+
 import io
-import sys
 import unittest
 from unittest.mock import MagicMock, patch
 
 from agentkthx.agent import Agent
 from agentkthx.core.models import AgentRun
-from agentkthx.core.types import StepResultType
 from agentkthx.core.openresponses import ToolChoiceType
+from agentkthx.core.types import StepResultType
 
 
 def _make_agent():
@@ -84,11 +84,13 @@ class TestGenerateStreamBasics(unittest.TestCase):
 
     def test_returns_dict_with_required_keys(self):
         a = _make_agent()
+
         # Mock backend with generate_completions_stream yielding text deltas
         def _stream_gen(**kwargs):
             yield {"delta": "Hello", "tool_calls": None, "finish_reason": None}
             yield {"delta": ", world!", "tool_calls": None, "finish_reason": None}
             yield {"delta": "", "tool_calls": None, "finish_reason": "stop"}
+
         a.backend.generate_completions_stream = MagicMock(side_effect=_stream_gen)
 
         # Suppress stdout writes from the streaming path
@@ -105,12 +107,14 @@ class TestGenerateStreamBasics(unittest.TestCase):
         """_run_core(stream=False) must NOT delegate to _run_core_streaming."""
         a = _make_agent()
         # Make _generate return a final-answer response (no tool calls).
-        a.backend.generate = MagicMock(return_value={
-            "content": "Hello",
-            "tool_calls": [],
-            "usage": {},
-            "finish_reason": "stop",
-        })
+        a.backend.generate = MagicMock(
+            return_value={
+                "content": "Hello",
+                "tool_calls": [],
+                "usage": {},
+                "finish_reason": "stop",
+            }
+        )
         a._parser.is_final_answer.return_value = False
         a._parser.parse.return_value = []
         # The non-streaming path will accept "Hello" as the final answer.
@@ -122,9 +126,11 @@ class TestGenerateStreamBasics(unittest.TestCase):
     def test_stream_true_returns_agent_run(self):
         """_run_core(stream=True) delegates to _run_core_streaming and returns AgentRun."""
         a = _make_agent()
+
         def _stream_gen(**kwargs):
             yield {"delta": "Hello", "tool_calls": None, "finish_reason": None}
             yield {"delta": "", "tool_calls": None, "finish_reason": "stop"}
+
         a.backend.generate_completions_stream = MagicMock(side_effect=_stream_gen)
         with patch("sys.stdout", new=io.StringIO()):
             result = a._run_core("hi", stream=True)
@@ -143,88 +149,111 @@ class TestGenerateStreamToolCallAccumulation(unittest.TestCase):
 
     def test_single_tool_call_assembled_from_fragments(self):
         a = _make_agent()
+
         def _stream_gen(**kwargs):
             # First chunk: id + name, no args yet
             yield {
                 "delta": "",
-                "tool_calls": [{
-                    "index": 0,
-                    "id": "call_abc",
-                    "function": {"name": "shell", "arguments": ""},
-                }],
+                "tool_calls": [
+                    {
+                        "index": 0,
+                        "id": "call_abc",
+                        "function": {"name": "shell", "arguments": ""},
+                    }
+                ],
                 "finish_reason": None,
             }
             # Subsequent chunks: arguments string grows
             yield {
                 "delta": "",
-                "tool_calls": [{
-                    "index": 0,
-                    "function": {"arguments": "{\"command\":"},
-                }],
+                "tool_calls": [
+                    {
+                        "index": 0,
+                        "function": {"arguments": '{"command":'},
+                    }
+                ],
                 "finish_reason": None,
             }
             yield {
                 "delta": "",
-                "tool_calls": [{
-                    "index": 0,
-                    "function": {"arguments": " \"ls -la\"}"},
-                }],
+                "tool_calls": [
+                    {
+                        "index": 0,
+                        "function": {"arguments": ' "ls -la"}'},
+                    }
+                ],
                 "finish_reason": None,
             }
             yield {"delta": "", "tool_calls": None, "finish_reason": "tool_calls"}
+
         a.backend.generate_completions_stream = MagicMock(side_effect=_stream_gen)
 
         with patch("sys.stdout", new=io.StringIO()):
             result = a._generate_stream()
 
-        self.assertEqual(result["tool_calls"], [{
-            "id": "call_abc",
-            "name": "shell",
-            "arguments": {"command": "ls -la"},
-        }])
+        self.assertEqual(
+            result["tool_calls"],
+            [
+                {
+                    "id": "call_abc",
+                    "name": "shell",
+                    "arguments": {"command": "ls -la"},
+                }
+            ],
+        )
         self.assertEqual(result["content"], "")
         self.assertEqual(result["_finish_reason"], "tool_calls")
 
     def test_multiple_tool_calls_assembled_in_index_order(self):
         a = _make_agent()
+
         def _stream_gen(**kwargs):
             # First tool call (index 0)
             yield {
                 "delta": "",
-                "tool_calls": [{
-                    "index": 0,
-                    "id": "call_1",
-                    "function": {"name": "read_file", "arguments": ""},
-                }],
+                "tool_calls": [
+                    {
+                        "index": 0,
+                        "id": "call_1",
+                        "function": {"name": "read_file", "arguments": ""},
+                    }
+                ],
                 "finish_reason": None,
             }
             yield {
                 "delta": "",
-                "tool_calls": [{
-                    "index": 0,
-                    "function": {"arguments": "{\"file_path\": \"/tmp/a\"}"},
-                }],
+                "tool_calls": [
+                    {
+                        "index": 0,
+                        "function": {"arguments": '{"file_path": "/tmp/a"}'},
+                    }
+                ],
                 "finish_reason": None,
             }
             # Second tool call (index 1)
             yield {
                 "delta": "",
-                "tool_calls": [{
-                    "index": 1,
-                    "id": "call_2",
-                    "function": {"name": "read_file", "arguments": ""},
-                }],
+                "tool_calls": [
+                    {
+                        "index": 1,
+                        "id": "call_2",
+                        "function": {"name": "read_file", "arguments": ""},
+                    }
+                ],
                 "finish_reason": None,
             }
             yield {
                 "delta": "",
-                "tool_calls": [{
-                    "index": 1,
-                    "function": {"arguments": "{\"file_path\": \"/tmp/b\"}"},
-                }],
+                "tool_calls": [
+                    {
+                        "index": 1,
+                        "function": {"arguments": '{"file_path": "/tmp/b"}'},
+                    }
+                ],
                 "finish_reason": None,
             }
             yield {"delta": "", "tool_calls": None, "finish_reason": "tool_calls"}
+
         a.backend.generate_completions_stream = MagicMock(side_effect=_stream_gen)
 
         with patch("sys.stdout", new=io.StringIO()):
@@ -239,17 +268,21 @@ class TestGenerateStreamToolCallAccumulation(unittest.TestCase):
     def test_malformed_arguments_json_falls_back_to_raw_wrapper(self):
         """If arguments JSON can't be parsed, surface the raw string."""
         a = _make_agent()
+
         def _stream_gen(**kwargs):
             yield {
                 "delta": "",
-                "tool_calls": [{
-                    "index": 0,
-                    "id": "call_x",
-                    "function": {"name": "shell", "arguments": "not-valid-json{"},
-                }],
+                "tool_calls": [
+                    {
+                        "index": 0,
+                        "id": "call_x",
+                        "function": {"name": "shell", "arguments": "not-valid-json{"},
+                    }
+                ],
                 "finish_reason": None,
             }
             yield {"delta": "", "tool_calls": None, "finish_reason": "tool_calls"}
+
         a.backend.generate_completions_stream = MagicMock(side_effect=_stream_gen)
 
         with patch("sys.stdout", new=io.StringIO()):
@@ -266,17 +299,21 @@ class TestGenerateStreamToolCallAccumulation(unittest.TestCase):
     def test_empty_arguments_become_empty_dict(self):
         """Tool calls with no arguments string should yield {} arguments."""
         a = _make_agent()
+
         def _stream_gen(**kwargs):
             yield {
                 "delta": "",
-                "tool_calls": [{
-                    "index": 0,
-                    "id": "call_1",
-                    "function": {"name": "get_time", "arguments": ""},
-                }],
+                "tool_calls": [
+                    {
+                        "index": 0,
+                        "id": "call_1",
+                        "function": {"name": "get_time", "arguments": ""},
+                    }
+                ],
                 "finish_reason": None,
             }
             yield {"delta": "", "tool_calls": None, "finish_reason": "tool_calls"}
+
         a.backend.generate_completions_stream = MagicMock(side_effect=_stream_gen)
 
         with patch("sys.stdout", new=io.StringIO()):
@@ -293,12 +330,14 @@ class TestGenerateStreamFallback(unittest.TestCase):
         # Remove any streaming methods from the backend mock
         a.backend = MagicMock(spec=["generate"])
         a.backend.base_url = "http://test"
-        a.backend.generate = MagicMock(return_value={
-            "content": "Hello",
-            "tool_calls": [],
-            "usage": {},
-            "finish_reason": "stop",
-        })
+        a.backend.generate = MagicMock(
+            return_value={
+                "content": "Hello",
+                "tool_calls": [],
+                "usage": {},
+                "finish_reason": "stop",
+            }
+        )
         with patch("sys.stdout", new=io.StringIO()):
             result = a._generate_stream()
         self.assertEqual(result["content"], "Hello")
@@ -311,9 +350,14 @@ class TestGenerateStreamFallback(unittest.TestCase):
         # Remove generate_completions_stream, keep generate_stream
         a.backend = MagicMock(spec=["generate_stream"])
         a.backend.base_url = "http://test"
-        a.backend.generate_stream = MagicMock(return_value=iter([
-            "Hello", " world",
-        ]))
+        a.backend.generate_stream = MagicMock(
+            return_value=iter(
+                [
+                    "Hello",
+                    " world",
+                ]
+            )
+        )
         with patch("sys.stdout", new=io.StringIO()):
             result = a._generate_stream()
         self.assertEqual(result["content"], "Hello world")
@@ -325,9 +369,11 @@ class TestGenerateStreamKeyboardInterrupt(unittest.TestCase):
 
     def test_keyboard_interrupt_returns_cancelled_response(self):
         a = _make_agent()
+
         def _stream_gen(**kwargs):
             yield {"delta": "Hello", "tool_calls": None, "finish_reason": None}
             raise KeyboardInterrupt
+
         a.backend.generate_completions_stream = MagicMock(side_effect=_stream_gen)
 
         with patch("sys.stdout", new=io.StringIO()):
@@ -343,9 +389,11 @@ class TestRunCoreStreamingAgentRun(unittest.TestCase):
 
     def test_streamed_response_returned_in_agent_run(self):
         a = _make_agent()
+
         def _stream_gen(**kwargs):
             yield {"delta": "Hello", "tool_calls": None, "finish_reason": None}
             yield {"delta": " streamed!", "tool_calls": None, "finish_reason": "stop"}
+
         a.backend.generate_completions_stream = MagicMock(side_effect=_stream_gen)
         with patch("sys.stdout", new=io.StringIO()):
             result = a._run_core_streaming("hi")

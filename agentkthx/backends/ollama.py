@@ -10,13 +10,13 @@ from __future__ import annotations
 import json
 import os
 import time
-from typing import Any, Generator, Optional
+from typing import Generator
 
-from .base import BaseBackend, BackendConfig
-from .openai_compat import OpenAICompatibleBackend
-from ..core.types import BackendType, ToolSupportLevel, ApiMode
-from ..core.models import Tool, ToolParam
 from ..config import OLLAMA_BASE_URL
+from ..core.models import Tool, ToolParam
+from ..core.types import ApiMode, BackendType, ToolSupportLevel
+from .base import BackendConfig
+from .openai_compat import OpenAICompatibleBackend
 
 
 class OllamaBackend(OpenAICompatibleBackend):
@@ -87,18 +87,18 @@ class OllamaBackend(OpenAICompatibleBackend):
     def _convert_messages_to_ollama_format(self, messages: list[dict]) -> list[dict]:
         """
         Convert messages to Ollama native format.
-        
+
         Key difference from OpenAI format:
         - OpenAI: tool_calls[].function.arguments is a JSON STRING
         - Ollama: tool_calls[].function.arguments should be an OBJECT
-        
+
         This method parses the JSON string arguments back to objects for
         Ollama's native /api/chat endpoint.
         """
         converted = []
         for msg in messages:
             converted_msg = dict(msg)  # Copy the message
-            
+
             # Convert tool_calls if present
             if "tool_calls" in msg and msg["tool_calls"]:
                 ollama_tool_calls = []
@@ -107,23 +107,20 @@ class OllamaBackend(OpenAICompatibleBackend):
                     if "function" in tc:
                         func = tc["function"]
                         args = func.get("arguments", "{}")
-                        
+
                         # Parse JSON string to object for Ollama
                         if isinstance(args, str):
                             try:
                                 args = json.loads(args)
                             except json.JSONDecodeError:
                                 args = {}
-                        
-                        ollama_tc["function"] = {
-                            "name": func.get("name", ""),
-                            "arguments": args
-                        }
+
+                        ollama_tc["function"] = {"name": func.get("name", ""), "arguments": args}
                     ollama_tool_calls.append(ollama_tc)
                 converted_msg["tool_calls"] = ollama_tool_calls
-            
+
             converted.append(converted_msg)
-        
+
         return converted
 
     def generate(
@@ -137,7 +134,7 @@ class OllamaBackend(OpenAICompatibleBackend):
         **kwargs,
     ) -> dict:
         """Generate a response from Ollama.
-        
+
         Args:
             model: Model name
             messages: Chat messages
@@ -150,7 +147,9 @@ class OllamaBackend(OpenAICompatibleBackend):
         # Dispatch based on api_mode
         if self._api_mode == ApiMode.OPENAI:
             if os.environ.get("AGENTKTHX_DEBUG"):
-                print(f"  [Ollama] Dispatching to OpenAI-compatible API (mode={self._api_mode.value})")
+                print(
+                    f"  [Ollama] Dispatching to OpenAI-compatible API (mode={self._api_mode.value})"
+                )
             return self.generate_completions(
                 model=model,
                 messages=messages,
@@ -175,8 +174,8 @@ class OllamaBackend(OpenAICompatibleBackend):
             return jev_response
 
         # Native Ollama /api/chat endpoint
-        import urllib.request
         import urllib.error
+        import urllib.request
 
         url = f"{self.base_url}/api/chat"
 
@@ -225,18 +224,24 @@ class OllamaBackend(OpenAICompatibleBackend):
             for i, msg in enumerate(body.get("messages", [])):
                 role = msg.get("role", "?")
                 if role == "system":
-                    print(f"  [Ollama.Body] msg[{i}]: role={role}, content=<{len(msg.get('content', ''))} chars>")
+                    print(
+                        f"  [Ollama.Body] msg[{i}]: role={role}, content=<{len(msg.get('content', ''))} chars>"
+                    )
                 elif role == "tool":
-                    content = msg.get('content', '')
+                    content = msg.get("content", "")
                     if truncation_disabled:
-                        print(f"  [Ollama.Body] msg[{i}]: role={role}, tool_call_id={msg.get('tool_call_id', 'MISSING')!r}, content={content}")
+                        print(
+                            f"  [Ollama.Body] msg[{i}]: role={role}, tool_call_id={msg.get('tool_call_id', 'MISSING')!r}, content={content}"
+                        )
                     else:
-                        print(f"  [Ollama.Body] msg[{i}]: role={role}, tool_call_id={msg.get('tool_call_id', 'MISSING')!r}, content={content[:50]!r}")
+                        print(
+                            f"  [Ollama.Body] msg[{i}]: role={role}, tool_call_id={msg.get('tool_call_id', 'MISSING')!r}, content={content[:50]!r}"
+                        )
                 elif "tool_calls" in msg:
                     tc = msg.get("tool_calls", [])
                     print(f"  [Ollama.Body] msg[{i}]: role={role}, tool_calls={tc}")
                 else:
-                    content = msg.get('content', '')
+                    content = msg.get("content", "")
                     if truncation_disabled:
                         print(f"  [Ollama.Body] msg[{i}]: role={role}, content={content}")
                     else:
@@ -259,13 +264,15 @@ class OllamaBackend(OpenAICompatibleBackend):
         except urllib.error.HTTPError as e:
             error_body = e.read().decode("utf-8") if e.fp else ""
             error_msg = error_body.lower() if error_body else ""
-            
+
             # Check if model doesn't support tools - fallback to no tools (ReAct mode)
             # R06.57: also match "unsupported param: tools" (llama-server 500)
             # which is how BitNet's llama.cpp fork rejects the tools param.
-            if tools and ("does not support tools" in error_msg or "unsupported param: tools" in error_msg):
+            if tools and (
+                "does not support tools" in error_msg or "unsupported param: tools" in error_msg
+            ):
                 if os.environ.get("AGENTKTHX_DEBUG"):
-                    print(f"  [Ollama] Model doesn't support tools, falling back to ReAct mode")
+                    print("  [Ollama] Model doesn't support tools, falling back to ReAct mode")
                 # Retry without tools - let ReAct parsing handle tool calls
                 body_fallback = {k: v for k, v in body.items() if k != "tools"}
                 try:
@@ -296,9 +303,7 @@ class OllamaBackend(OpenAICompatibleBackend):
         # Ollama uses "thinking" key for thinking-capable models (qwen3,
         # deepseek-r1, etc.). OpenAI-compatible responses use "reasoning_content".
         reasoning_content = (
-            message.get("reasoning_content", "")
-            or message.get("thinking", "")
-            or ""
+            message.get("reasoning_content", "") or message.get("thinking", "") or ""
         )
 
         # Debug output
@@ -311,7 +316,11 @@ class OllamaBackend(OpenAICompatibleBackend):
                 print(f"  [Ollama] Content: {content[:1024] if content else '(empty)'}")
             print(f"  [Ollama] Tool calls: {tool_calls}")
             if reasoning_content:
-                rc_preview = reasoning_content[:200] + "..." if len(reasoning_content) > 200 else reasoning_content
+                rc_preview = (
+                    reasoning_content[:200] + "..."
+                    if len(reasoning_content) > 200
+                    else reasoning_content
+                )
                 print(f"  [Ollama] Reasoning: {rc_preview}")
 
         # Parse tool calls from Ollama format
@@ -319,11 +328,13 @@ class OllamaBackend(OpenAICompatibleBackend):
         parsed_tool_calls = []
         for tc in tool_calls:
             func = tc.get("function", {})
-            parsed_tool_calls.append({
-                "id": tc.get("id", ""),  # Preserve for tool result correlation
-                "name": func.get("name", ""),
-                "arguments": func.get("arguments", {}),
-            })
+            parsed_tool_calls.append(
+                {
+                    "id": tc.get("id", ""),  # Preserve for tool result correlation
+                    "name": func.get("name", ""),
+                    "arguments": func.get("arguments", {}),
+                }
+            )
 
         return {
             "content": content,
@@ -409,10 +420,10 @@ class OllamaBackend(OpenAICompatibleBackend):
         **kwargs,
     ) -> dict:
         """Generate a response using OpenAI Chat-Completions compatible API.
-        
+
         Uses Ollama's /v1/chat/completions endpoint which is compatible with
         OpenAI's Chat Completions API format.
-        
+
         Args:
             model: Model name
             messages: Chat messages
@@ -431,8 +442,8 @@ class OllamaBackend(OpenAICompatibleBackend):
             user: Unique identifier representing the end-user for abuse monitoring
             **kwargs: Additional options passed to Ollama
         """
-        import urllib.request
         import urllib.error
+        import urllib.request
 
         # OpenAI-compatible endpoint
         url = f"{self.base_url}/v1/chat/completions"
@@ -445,7 +456,7 @@ class OllamaBackend(OpenAICompatibleBackend):
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
-        
+
         # Add optional OpenAI parameters
         if stop is not None:
             body["stop"] = stop if isinstance(stop, list) else [stop]
@@ -457,7 +468,7 @@ class OllamaBackend(OpenAICompatibleBackend):
             body["response_format"] = response_format
         if top_p is not None:
             body["top_p"] = top_p
-        
+
         # Add OpenAI API spec completeness parameters (v1.0)
         if logprobs is not None:
             body["logprobs"] = logprobs
@@ -471,7 +482,7 @@ class OllamaBackend(OpenAICompatibleBackend):
         # Add tools in OpenAI format
         if tools:
             body["tools"] = [t.to_openai_schema() for t in tools]
-        
+
         # Add tool_choice parameter (OpenAI API spec)
         # Supports: "auto", "none", "required", or {"type": "function", "function": {"name": "..."}}
         if tool_choice is not None:
@@ -509,13 +520,15 @@ class OllamaBackend(OpenAICompatibleBackend):
         except urllib.error.HTTPError as e:
             error_body = e.read().decode("utf-8") if e.fp else ""
             error_msg = error_body.lower() if error_body else ""
-            
+
             # Check if model doesn't support tools - fallback to no tools (ReAct mode)
             # R06.57: also match "unsupported param: tools" (llama-server 500)
             # which is how BitNet's llama.cpp fork rejects the tools param.
-            if tools and ("does not support tools" in error_msg or "unsupported param: tools" in error_msg):
+            if tools and (
+                "does not support tools" in error_msg or "unsupported param: tools" in error_msg
+            ):
                 if os.environ.get("AGENTKTHX_DEBUG"):
-                    print(f"  [OpenAI-Comp] Model doesn't support tools, falling back to ReAct mode")
+                    print("  [OpenAI-Comp] Model doesn't support tools, falling back to ReAct mode")
                 # Retry without tools - let ReAct parsing handle tool calls
                 body_fallback = {k: v for k, v in body.items() if k != "tools"}
                 try:
@@ -576,11 +589,13 @@ class OllamaBackend(OpenAICompatibleBackend):
                         args = json.loads(args)
                     except json.JSONDecodeError:
                         args = {}
-                parsed_tool_calls.append({
-                    "id": tc.get("id", ""),
-                    "name": func.get("name", ""),
-                    "arguments": args,
-                })
+                parsed_tool_calls.append(
+                    {
+                        "id": tc.get("id", ""),
+                        "name": func.get("name", ""),
+                        "arguments": args,
+                    }
+                )
 
             # Extract logprobs if present
             choice_logprobs = None
@@ -620,7 +635,11 @@ class OllamaBackend(OpenAICompatibleBackend):
                 print(f"  [OpenAI-Comp] Content[0]: {content[:1024] if content else '(empty)'}")
             print(f"  [OpenAI-Comp] Tool calls[0]: {parsed_tool_calls}")
             if reasoning_content:
-                rc_preview = reasoning_content[:200] + "..." if len(reasoning_content) > 200 else reasoning_content
+                rc_preview = (
+                    reasoning_content[:200] + "..."
+                    if len(reasoning_content) > 200
+                    else reasoning_content
+                )
                 print(f"  [OpenAI-Comp] Reasoning[0]: {rc_preview}")
 
         # Build response dict
@@ -666,16 +685,16 @@ class OllamaBackend(OpenAICompatibleBackend):
         **kwargs,
     ) -> Generator[dict, None, None]:
         """Stream generated text using OpenAI Chat-Completions compatible API with SSE.
-        
-        Uses Server-Sent Events (SSE) to stream responses from Ollama's 
+
+        Uses Server-Sent Events (SSE) to stream responses from Ollama's
         /v1/chat/completions endpoint.
-        
+
         Yields dict chunks with:
             - "delta": text delta from the model
             - "finish_reason": None or "stop" when complete
             - "tool_calls": incremental tool call data (if any)
             - "logprobs": log probability data (when logprobs=True)
-        
+
         Args:
             model: Model name
             messages: Chat messages
@@ -693,12 +712,12 @@ class OllamaBackend(OpenAICompatibleBackend):
             n: Number of completions to generate (default: 1)
             user: Unique identifier representing the end-user for abuse monitoring
             **kwargs: Additional options
-            
+
         Yields:
             Dict with "delta", "finish_reason", and optionally "tool_calls" and "logprobs"
         """
-        import urllib.request
         import urllib.error
+        import urllib.request
 
         url = f"{self.base_url}/v1/chat/completions"
 
@@ -710,7 +729,7 @@ class OllamaBackend(OpenAICompatibleBackend):
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
-        
+
         # Add optional OpenAI parameters
         if stop is not None:
             body["stop"] = stop if isinstance(stop, list) else [stop]
@@ -722,7 +741,7 @@ class OllamaBackend(OpenAICompatibleBackend):
             body["response_format"] = response_format
         if top_p is not None:
             body["top_p"] = top_p
-        
+
         # Add OpenAI API spec completeness parameters (v1.0)
         if logprobs is not None:
             body["logprobs"] = logprobs
@@ -745,7 +764,9 @@ class OllamaBackend(OpenAICompatibleBackend):
             body["reasoning_effort"] = reasoning_effort
 
         if os.environ.get("AGENTKTHX_DEBUG"):
-            print(f"  [OpenAI-Comp-Stream] Request: tools={len(tools) if tools else 0}, think={think}")
+            print(
+                f"  [OpenAI-Comp-Stream] Request: tools={len(tools) if tools else 0}, think={think}"
+            )
 
         try:
             req = urllib.request.Request(
@@ -756,15 +777,14 @@ class OllamaBackend(OpenAICompatibleBackend):
             )
 
             with urllib.request.urlopen(req, timeout=self.config.timeout) as response:
-                buffer = ""
                 last_finish_reason = None
                 for line in response:
                     line = line.decode("utf-8")
-                    
+
                     # SSE format: "data: {...}\n\n"
                     if line.startswith("data: "):
                         data_str = line[6:].strip()
-                        
+
                         # Check for end of stream
                         if data_str == "[DONE]":
                             # Yield final chunk with finish_reason if not already sent
@@ -775,46 +795,46 @@ class OllamaBackend(OpenAICompatibleBackend):
                                     "tool_calls": None,
                                 }
                             break
-                        
+
                         try:
                             chunk = json.loads(data_str)
                         except json.JSONDecodeError:
                             continue
-                        
+
                         choices = chunk.get("choices", [])
                         if not choices:
                             continue
-                        
+
                         delta = choices[0].get("delta", {})
                         finish_reason = choices[0].get("finish_reason")
-                        
+
                         # Track last finish_reason for final chunk
                         if finish_reason:
                             last_finish_reason = finish_reason
-                        
+
                         # Extract text content from delta
                         text_delta = delta.get("content", "")
-                        
+
                         # Extract tool calls if present
                         tool_calls_delta = delta.get("tool_calls", None)
-                        
+
                         # Extract logprobs if present (OpenAI API spec completeness)
                         # In streaming mode, logprobs are returned per-chunk in choices[0].logprobs
                         logprobs_data = choices[0].get("logprobs") if logprobs else None
-                        
+
                         # Build yield dict with required fields
                         yield_chunk = {
                             "delta": text_delta,
                             "finish_reason": finish_reason,
                             "tool_calls": tool_calls_delta,
                         }
-                        
+
                         # Include logprobs in yield when available
                         if logprobs_data is not None:
                             yield_chunk["logprobs"] = logprobs_data
-                        
+
                         yield yield_chunk
-                        
+
                         if finish_reason:
                             break
 
@@ -835,8 +855,8 @@ class OllamaBackend(OpenAICompatibleBackend):
         **kwargs,
     ) -> Generator[str, None, None]:
         """Stream generated text from Ollama."""
-        import urllib.request
         import urllib.error
+        import urllib.request
 
         url = f"{self.base_url}/api/chat"
 
@@ -892,23 +912,23 @@ class OllamaBackend(OpenAICompatibleBackend):
     def get_model_info(self, model: str) -> dict | None:
         """
         Get detailed model information from Ollama (with per-instance caching).
-        
+
         Uses /api/show endpoint which returns:
         - modelfile
         - parameters (including num_ctx)
         - template
         - details (family, parameter count, etc.)
-        
+
         Results are cached for the lifetime of the backend instance.
         """
         # Check instance cache first
-        if not hasattr(self, '_model_info_cache'):
+        if not hasattr(self, "_model_info_cache"):
             self._model_info_cache = {}
         if model in self._model_info_cache:
             return self._model_info_cache[model]
 
-        import urllib.request
         import urllib.error
+        import urllib.request
 
         url = f"{self.base_url}/api/show"
 
@@ -942,21 +962,21 @@ class OllamaBackend(OpenAICompatibleBackend):
     def get_model_runtime_context(self, model: str) -> int:
         """
         Get the actual runtime context window size for a model.
-        
+
         This is the num_ctx value from parameters, which Ollama defaults to 2048
         if not explicitly set in the Modelfile.
-        
+
         Args:
             model: Model name
-        
+
         Returns:
             Runtime context window size in tokens (defaults to 2048)
         """
         info = self.get_model_info(model)
-        
+
         if not info:
             return 2048  # Ollama's default
-        
+
         # Check parameters string for num_ctx
         parameters = info.get("parameters", "")
         if parameters:
@@ -969,30 +989,30 @@ class OllamaBackend(OpenAICompatibleBackend):
                             return int(parts[1])
                         except ValueError:
                             pass
-        
+
         # No explicit num_ctx - Ollama defaults to 2048
         return 2048
 
     def get_model_max_context(self, model: str, family: str | None = None) -> int:
         """
         Get the model's maximum trained context window size.
-        
+
         Resolution order (most authoritative first):
         1. API /api/show → model_info.<family>.context_length  (exact model data)
         2. API /api/show → details.family → FAMILY_CONTEXT_DEFAULTS lookup
         3. Caller-provided family → FAMILY_CONTEXT_DEFAULTS lookup
         4. Hardcoded fallback 4096
-        
+
         Args:
             model: Model name
             family: Optional family name (fallback if API doesn't report it)
-        
+
         Returns:
             Maximum context window size in tokens
         """
         # Primary: ask the API for the model's actual context_length
         info = self.get_model_info(model)
-        
+
         if info:
             model_info = info.get("model_info", {})
             # Key format: "<family>.context_length" (e.g., "gemma3.context_length")
@@ -1002,14 +1022,14 @@ class OllamaBackend(OpenAICompatibleBackend):
                         return int(value)
                     except (ValueError, TypeError):
                         pass
-            
+
             # Fallback: bare "context_length" key (some Ollama versions)
             if "context_length" in model_info:
                 try:
                     return int(model_info["context_length"])
                 except (ValueError, TypeError):
                     pass
-            
+
             # Try family from API details (more reliable than caller-provided)
             details = info.get("details", {})
             api_family = details.get("family", "")
@@ -1017,19 +1037,19 @@ class OllamaBackend(OpenAICompatibleBackend):
                 ctx = self.get_context_by_family(api_family)
                 if ctx:
                     return ctx
-        
+
         # Fallback: use caller-provided family or hardcoded table
         if family:
             ctx = self.get_context_by_family(family)
             if ctx:
                 return ctx
-        
+
         return 4096  # Ultimate fallback
 
     def list_models(self) -> list[dict]:
         """List available models from Ollama."""
-        import urllib.request
         import urllib.error
+        import urllib.request
 
         url = f"{self.base_url}/api/tags"
 
@@ -1047,7 +1067,9 @@ class OllamaBackend(OpenAICompatibleBackend):
     # No family-based assumptions - tool support depends on the model's template
     # Each model must be tested individually. Use --tool-support to test.
 
-    def test_tool_support(self, model: str, family: str | None = None, force_test: bool = False) -> ToolSupportLevel:
+    def test_tool_support(
+        self, model: str, family: str | None = None, force_test: bool = False
+    ) -> ToolSupportLevel:
         """
         Test model's tool support capability.
 
@@ -1071,7 +1093,7 @@ class OllamaBackend(OpenAICompatibleBackend):
         Returns:
             ToolSupportLevel (NATIVE, REACT, NONE, or UNTESTED if force_test=False)
         """
-        from ..core.tool_cache import get_cached_tool_support, cache_tool_support
+        from ..core.tool_cache import cache_tool_support, get_cached_tool_support
 
         # Determine API mode for cache namespacing
         api_mode = self._api_mode.value if hasattr(self, "_api_mode") else "openre"
@@ -1087,11 +1109,13 @@ class OllamaBackend(OpenAICompatibleBackend):
         test_tool = Tool(
             name="get_weather",
             description="Get the current weather for a location",
-            params=[ToolParam(
-                name="location",
-                type="string",
-                description="The city and country, e.g., 'Paris, France'"
-            )],
+            params=[
+                ToolParam(
+                    name="location",
+                    type="string",
+                    description="The city and country, e.g., 'Paris, France'",
+                )
+            ],
         )
 
         try:
@@ -1099,10 +1123,7 @@ class OllamaBackend(OpenAICompatibleBackend):
             # Use model's default Modelfile system prompt
             response = self.generate(
                 model=model,
-                messages=[{
-                    "role": "user",
-                    "content": "What's the weather like in Tokyo?"
-                }],
+                messages=[{"role": "user", "content": "What's the weather like in Tokyo?"}],
                 tools=[test_tool],
                 max_tokens=100,
             )
@@ -1119,11 +1140,13 @@ class OllamaBackend(OpenAICompatibleBackend):
                     # After parsing by generate(), structure is flat
                     func_name = tc.get("name", "")
                     args = tc.get("arguments", {})
-                    
+
                     # Verify it's calling our tool (not hallucinating a different one)
                     if func_name == "get_weather":
                         # Check for reasonable arguments
-                        if isinstance(args, dict) and ("location" in args or "city" in args or len(args) > 0):
+                        if isinstance(args, dict) and (
+                            "location" in args or "city" in args or len(args) > 0
+                        ):
                             result = ToolSupportLevel.NATIVE
                             break
                     # Native tool_calls exist but wrong function - still native capability
@@ -1144,13 +1167,17 @@ class OllamaBackend(OpenAICompatibleBackend):
             # 3. Check for text-based tool calls in content
             # Models that output JSON like {"name": "get_weather", ...} as TEXT
             if self._contains_text_tool_call(content):
-                cache_tool_support(model, ToolSupportLevel.REACT, family=family or "", api_mode=api_mode)
+                cache_tool_support(
+                    model, ToolSupportLevel.REACT, family=family or "", api_mode=api_mode
+                )
                 return ToolSupportLevel.REACT
 
             # 4. API succeeded, no explicit rejection, no native tool_calls
             # Model accepted tools parameter but didn't use native calling
             # This is the "react" case - can still parse text-based tool calls
-            cache_tool_support(model, ToolSupportLevel.REACT, family=family or "", api_mode=api_mode)
+            cache_tool_support(
+                model, ToolSupportLevel.REACT, family=family or "", api_mode=api_mode
+            )
             return ToolSupportLevel.REACT
 
         except Exception as e:
@@ -1161,13 +1188,23 @@ class OllamaBackend(OpenAICompatibleBackend):
             # used by BitNet's llama.cpp fork to reject the tools param).
             error_lower = error_str.lower()
             if "does not support tools" in error_lower or "unsupported param: tools" in error_lower:
-                cache_tool_support(model, ToolSupportLevel.NONE, family=family or "",
-                                   error=error_str[:100], api_mode=api_mode)
+                cache_tool_support(
+                    model,
+                    ToolSupportLevel.NONE,
+                    family=family or "",
+                    error=error_str[:100],
+                    api_mode=api_mode,
+                )
                 return ToolSupportLevel.NONE
 
             # Other HTTP errors or connection issues
-            cache_tool_support(model, ToolSupportLevel.REACT, family=family or "",
-                               error=error_str[:100], api_mode=api_mode)
+            cache_tool_support(
+                model,
+                ToolSupportLevel.REACT,
+                family=family or "",
+                error=error_str[:100],
+                api_mode=api_mode,
+            )
             return ToolSupportLevel.REACT
 
         finally:
@@ -1202,7 +1239,8 @@ class OllamaBackend(OpenAICompatibleBackend):
 
         try:
             import json
-            obj = json.loads(cleaned[start:end + 1])
+
+            obj = json.loads(cleaned[start : end + 1])
 
             # Check for tool call patterns
             if not isinstance(obj, dict):
@@ -1232,8 +1270,8 @@ class OllamaBackend(OpenAICompatibleBackend):
         Returns:
             Response dict from server
         """
-        import urllib.request
         import urllib.error
+        import urllib.request
 
         url = f"{self.base_url}/api/generate"
         body = {"model": model, "keep_alive": 0}
@@ -1270,8 +1308,9 @@ class OllamaBackend(OpenAICompatibleBackend):
         backends rarely 400 on context length (they truncate internally),
         but llama.cpp forks (TurboQuant, BitNet) might.
         """
-        import urllib.request
         import urllib.error
+        import urllib.request
+
         for attempt in range(2):  # max 2 attempts (original + 1 retry)
             req = urllib.request.Request(
                 url,
@@ -1329,6 +1368,7 @@ class OllamaBackend(OpenAICompatibleBackend):
             family = "deepseek-r1"
 
         from ..core.model_family_config import get_family_defaults
+
         defaults = get_family_defaults(family)
         max_tokens = defaults.get("max_tokens", 2048)
         # R06.57: Use the RUNTIME context (what the server actually enforces),
@@ -1344,7 +1384,7 @@ class OllamaBackend(OpenAICompatibleBackend):
         try:
             # Try runtime context first (queries Ollama /api/show for num_ctx,
             # or checks NUM_CTX env var for llama-server)
-            if hasattr(self, 'get_model_runtime_context'):
+            if hasattr(self, "get_model_runtime_context"):
                 context_length = self.get_model_runtime_context(model)
                 # If runtime context is the Ollama default (2048), try the
                 # max context as a fallback — the model might support more
@@ -1355,6 +1395,7 @@ class OllamaBackend(OpenAICompatibleBackend):
                     if max_ctx and max_ctx > 2048:
                         # Use the smaller of: the CLI --num-ctx, or the model max
                         from ..config import NUM_CTX
+
                         if NUM_CTX and NUM_CTX > 0:
                             context_length = min(NUM_CTX, max_ctx)
                         else:
@@ -1368,9 +1409,7 @@ class OllamaBackend(OpenAICompatibleBackend):
         temperature = defaults.get("temperature", 0.7)
 
         # Use the shared cap helper (honors _context_safe_max_tokens if set)
-        return self._apply_max_tokens_cap(
-            max_tokens, context_length, temperature=temperature
-        )
+        return self._apply_max_tokens_cap(max_tokens, context_length, temperature=temperature)
 
     def __repr__(self) -> str:
         return f"OllamaBackend(url={self.base_url})"

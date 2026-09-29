@@ -26,8 +26,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import pytest
-
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from agentkthx.plugins.openrouter.openrouter import OpenRouterBackend
@@ -42,6 +40,7 @@ def _make_backend(monkeypatch):
 # ---------------------------------------------------------------------------
 # Free-tier detection in _parse_openrouter_model
 # ---------------------------------------------------------------------------
+
 
 class TestFreeSuffixDetection:
     """Verify :free-suffix models are marked free_tier=True."""
@@ -138,6 +137,7 @@ class TestFreeSuffixDetection:
 # is_chat_model detection
 # ---------------------------------------------------------------------------
 
+
 class TestIsChatModelDetection:
     """Verify is_chat_model is set correctly."""
 
@@ -184,6 +184,7 @@ class TestIsChatModelDetection:
 # /models free filter integration (simulated)
 # ---------------------------------------------------------------------------
 
+
 class TestModelsFreeFilterIntegration:
     """Verify the /models free filter would now match :free-suffix models.
 
@@ -205,21 +206,45 @@ class TestModelsFreeFilterIntegration:
         # Mock list_models to return a representative sample
         mock_models = [
             # Free via :free suffix
-            {"name": "google/gemma-3-27b-it:free", "size": 0, "details": {
-                "free_tier": True, "is_chat_model": True, "context_length": 256000,
-            }},
+            {
+                "name": "google/gemma-3-27b-it:free",
+                "size": 0,
+                "details": {
+                    "free_tier": True,
+                    "is_chat_model": True,
+                    "context_length": 256000,
+                },
+            },
             # Free via is_free=True (no :free suffix)
-            {"name": "some-provider/free-model", "size": 0, "details": {
-                "free_tier": True, "is_chat_model": True, "context_length": 128000,
-            }},
+            {
+                "name": "some-provider/free-model",
+                "size": 0,
+                "details": {
+                    "free_tier": True,
+                    "is_chat_model": True,
+                    "context_length": 128000,
+                },
+            },
             # Paid
-            {"name": "openai/gpt-4o-mini", "size": 0, "details": {
-                "free_tier": False, "is_chat_model": True, "context_length": 128000,
-            }},
+            {
+                "name": "openai/gpt-4o-mini",
+                "size": 0,
+                "details": {
+                    "free_tier": False,
+                    "is_chat_model": True,
+                    "context_length": 128000,
+                },
+            },
             # Paid
-            {"name": "anthropic/claude-sonnet-4.6", "size": 0, "details": {
-                "free_tier": False, "is_chat_model": True, "context_length": 200000,
-            }},
+            {
+                "name": "anthropic/claude-sonnet-4.6",
+                "size": 0,
+                "details": {
+                    "free_tier": False,
+                    "is_chat_model": True,
+                    "context_length": 200000,
+                },
+            },
         ]
         monkeypatch.setattr(b, "list_models", lambda: mock_models)
 
@@ -242,6 +267,7 @@ class TestModelsFreeFilterIntegration:
 # ---------------------------------------------------------------------------
 # Real :free-suffix models from the user's /models output
 # ---------------------------------------------------------------------------
+
 
 class TestRealFreeModelsFromUserReport:
     """Verify the exact :free-suffix models from the user's /models report
@@ -302,6 +328,7 @@ class TestRealFreeModelsFromUserReport:
 # R07.09 fix: openrouter/free router + _is_free_model() helper
 # ---------------------------------------------------------------------------
 
+
 class TestOpenRouterFreeRouter:
     """R07.09 fix: ``openrouter/free`` (the named Free Models Router) was
     missing from the OpenRouter free whitelist.
@@ -324,16 +351,19 @@ class TestOpenRouterFreeRouter:
         from agentkthx.plugins.openrouter.openrouter import (
             OPENROUTER_FREE_MODEL_WHITELIST,
         )
+
         assert "openrouter/free" in OPENROUTER_FREE_MODEL_WHITELIST
 
     def test_is_free_model_openrouter_free_router(self):
         """The named router is free."""
         from agentkthx.plugins.openrouter.openrouter import _is_free_model
+
         assert _is_free_model("openrouter/free") is True
 
     def test_is_free_model_free_suffix(self):
         """Models ending in ``:free`` are free (canonical OpenRouter marker)."""
         from agentkthx.plugins.openrouter.openrouter import _is_free_model
+
         assert _is_free_model("google/gemini-flash-1.5:free") is True
         assert _is_free_model("qwen/qwen-2.5-7b-instruct:free") is True
         assert _is_free_model("meta-llama/llama-3.3-70b-instruct:free") is True
@@ -341,6 +371,7 @@ class TestOpenRouterFreeRouter:
     def test_is_free_model_paid_models_not_free(self):
         """Paid models (no ``:free`` suffix, not the named router) return False."""
         from agentkthx.plugins.openrouter.openrouter import _is_free_model
+
         assert _is_free_model("anthropic/claude-3.5-sonnet") is False
         assert _is_free_model("openai/gpt-4o") is False
         # Prior substring hack would have incorrectly flagged these as free
@@ -410,13 +441,16 @@ class TestOpenRouterRouterNullMaxTokens:
         # Populate the cache with a router entry that has null max_completion_tokens
         # (simulates the live API response shape)
         from agentkthx.plugins.openrouter.openrouter import OpenRouterBackend
+
         OpenRouterBackend._model_cache = [
-            b._parse_openrouter_model({
-                "id": "openrouter/free",
-                "context_length": 195000,
-                "top_provider": {"max_completion_tokens": None},
-                "pricing": {"prompt": "0", "completion": "0"},
-            })
+            b._parse_openrouter_model(
+                {
+                    "id": "openrouter/free",
+                    "context_length": 195000,
+                    "top_provider": {"max_completion_tokens": None},
+                    "pricing": {"prompt": "0", "completion": "0"},
+                }
+            )
         ]
         OpenRouterBackend._cache_time = float("inf")  # never expire
 

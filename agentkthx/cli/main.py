@@ -8,25 +8,45 @@ from __future__ import annotations
 from typing import Callable, Optional
 
 from .banner import _print_update_notice, _run_update_check, print_banner
-from .commands import cmd_agent, cmd_chat, cmd_config, cmd_modelfile, cmd_models, cmd_plugins, cmd_run, cmd_sessions, cmd_skills, cmd_soul, cmd_test, cmd_tools, cmd_turbo, cmd_update, cmd_version
+from .commands import (
+    cmd_agent,
+    cmd_chat,
+    cmd_config,
+    cmd_modelfile,
+    cmd_models,
+    cmd_plugins,
+    cmd_run,
+    cmd_sessions,
+    cmd_skills,
+    cmd_soul,
+    cmd_test,
+    cmd_tools,
+    cmd_turbo,
+    cmd_update,
+    cmd_version,
+)
 from .parser import create_parser
+
 
 def main(argv: Optional[list[str]] = None) -> int:
     """Main entry point."""
-    
+
     # Load plugins early so that CLI arguments can include plugin backends
     try:
         from ..plugins import get_plugin_manager
+
         pm = get_plugin_manager()
         pm.load_all()  # Load all plugins to register backends
-    except Exception as e:
+    except Exception:
         # Plugin loading should not prevent CLI from working
         pass
 
     # on_shutdown: emit once before interpreter exit (spec §Hooks, §Lifecycle)
     try:
         import atexit as _atexit
+
         from ..plugins import get_plugin_manager as _get_pm
+
         _pm_ref = _get_pm(init=False)
 
         def _emit_on_shutdown_once():
@@ -40,13 +60,14 @@ def main(argv: Optional[list[str]] = None) -> int:
         _atexit.register(_emit_on_shutdown_once)
     except Exception:
         pass
-    
+
     parser = create_parser()
 
     # Discover plugin-provided CLI commands, add as subparsers, and mark with *
     _plugin_cli_handlers: dict[str, Callable] = {}
     try:
         from ..plugins import get_plugin_manager
+
         pm = get_plugin_manager()
         manifests = pm.discover()
 
@@ -71,9 +92,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                                     break
                         else:
                             # Add a new subparser for this plugin command
-                            subparsers_action.add_parser(
-                                cmd_name, help=f"* {cmd_name} [plugin]"
-                            )
+                            subparsers_action.add_parser(cmd_name, help=f"* {cmd_name} [plugin]")
 
                 # Load all plugins so their register_cli_command() handlers are wired
                 pm.load_all()
@@ -83,6 +102,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                     _plugin_cli_handlers[cmd_name] = cmd_info["handler"]
     except Exception as e:
         import sys
+
         print(f"[PluginManager] Warning: plugin CLI discovery failed: {e}", file=sys.stderr)
 
     args = parser.parse_args(argv)

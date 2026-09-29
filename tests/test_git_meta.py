@@ -20,8 +20,7 @@ import agentkthx
 
 
 def _proc(stdout="", returncode=0):
-    return subprocess.CompletedProcess(args=[], returncode=returncode,
-                                       stdout=stdout, stderr="")
+    return subprocess.CompletedProcess(args=[], returncode=returncode, stdout=stdout, stderr="")
 
 
 def _point_into(monkeypatch, tmp_path, has_git_at=(), git_is_file=False):
@@ -43,15 +42,16 @@ def _point_into(monkeypatch, tmp_path, has_git_at=(), git_is_file=False):
     return pkg_dir
 
 
-def _mock_git(monkeypatch, origin_url=None, origin_rc=0,
-              describe_stdout="", describe_rc=0):
+def _mock_git(monkeypatch, origin_url=None, origin_rc=0, describe_stdout="", describe_rc=0):
     """Mock subprocess.run for the two git queries the resolver makes."""
+
     def fake_run(cmd, **_kwargs):
         if "get-url" in cmd or "remote" in cmd:
             return _proc(origin_url or "", origin_rc)
         if "describe" in cmd:
             return _proc(describe_stdout, describe_rc)
         return _proc("", 1)
+
     monkeypatch.setattr(subprocess, "run", fake_run)
 
 
@@ -68,34 +68,42 @@ def _unbake(monkeypatch):
 class TestLiveVerifiedCheckout:
     def test_https_remote_accepted(self, monkeypatch, tmp_path):
         _point_into(monkeypatch, tmp_path, has_git_at=[1])
-        _mock_git(monkeypatch,
-                  origin_url="https://github.com/VTSTech/AgentKthx.git",
-                  describe_stdout="acf1d72\n")
+        _mock_git(
+            monkeypatch,
+            origin_url="https://github.com/VTSTech/AgentKthx.git",
+            describe_stdout="acf1d72\n",
+        )
         _unbake(monkeypatch)
         assert agentkthx._get_git_short_hash() == "acf1d72"
 
     def test_ssh_remote_accepted(self, monkeypatch, tmp_path):
         _point_into(monkeypatch, tmp_path, has_git_at=[1])
-        _mock_git(monkeypatch,
-                  origin_url="git@github.com:VTSTech/AgentKthx.git",
-                  describe_stdout="acf1d72\n")
+        _mock_git(
+            monkeypatch,
+            origin_url="git@github.com:VTSTech/AgentKthx.git",
+            describe_stdout="acf1d72\n",
+        )
         _unbake(monkeypatch)
         assert agentkthx._get_git_short_hash() == "acf1d72"
 
     def test_dirty_marker_passed_through(self, monkeypatch, tmp_path):
         _point_into(monkeypatch, tmp_path, has_git_at=[1])
-        _mock_git(monkeypatch,
-                  origin_url="https://github.com/VTSTech/AgentKthx.git",
-                  describe_stdout="acf1d72-dirty\n")
+        _mock_git(
+            monkeypatch,
+            origin_url="https://github.com/VTSTech/AgentKthx.git",
+            describe_stdout="acf1d72-dirty\n",
+        )
         _unbake(monkeypatch)
         assert agentkthx._get_git_short_hash() == "acf1d72-dirty"
 
     def test_git_file_worktree_marker_detected(self, monkeypatch, tmp_path):
         # .git may be a FILE (git worktrees / submodules), not a directory
         _point_into(monkeypatch, tmp_path, has_git_at=[1], git_is_file=True)
-        _mock_git(monkeypatch,
-                  origin_url="https://github.com/VTSTech/AgentKthx.git",
-                  describe_stdout="acf1d72\n")
+        _mock_git(
+            monkeypatch,
+            origin_url="https://github.com/VTSTech/AgentKthx.git",
+            describe_stdout="acf1d72\n",
+        )
         _unbake(monkeypatch)
         assert agentkthx._get_git_short_hash() == "acf1d72"
 
@@ -169,6 +177,7 @@ class TestDegradation:
 
         def no_git(*_a, **_k):
             raise FileNotFoundError("git not installed")
+
         monkeypatch.setattr(subprocess, "run", no_git)
         _bake_meta(monkeypatch, "acf1d72")
         # Subprocess failure is swallowed; baked value still available
@@ -176,9 +185,7 @@ class TestDegradation:
 
     def test_describe_failure_falls_to_baked(self, monkeypatch, tmp_path):
         _point_into(monkeypatch, tmp_path, has_git_at=[1])
-        _mock_git(monkeypatch,
-                  origin_url="https://github.com/VTSTech/AgentKthx.git",
-                  describe_rc=1)
+        _mock_git(monkeypatch, origin_url="https://github.com/VTSTech/AgentKthx.git", describe_rc=1)
         _bake_meta(monkeypatch, "acf1d72")
         assert agentkthx._get_git_short_hash() == "acf1d72"
 
@@ -186,6 +193,7 @@ class TestDegradation:
 class TestVersionSuffixFormat:
     def test_base_version_still_parses_with_dirty(self):
         from agentkthx.update_check import base_version, git_hash
+
         assert base_version("0.7.00-acf1d72-dirty") == "0.7.00"
         assert git_hash("0.7.00-acf1d72-dirty") == "acf1d72-dirty"
         assert base_version("0.7.00-acf1d72") == "0.7.00"

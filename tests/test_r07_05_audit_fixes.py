@@ -16,16 +16,14 @@ import tempfile
 import threading
 from pathlib import Path
 
-import pytest
-
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from agentkthx.core.persistent_memory import PersistentMemory, _get_db_path, _DEFAULT_DB_DIR
-
+from agentkthx.core.persistent_memory import PersistentMemory, _get_db_path
 
 # ---------------------------------------------------------------------------
 # SEC-07: File permissions on SQLite DB + parent dir
 # ---------------------------------------------------------------------------
+
 
 class TestSec07DbFilePermissions:
     """Verify the SQLite DB file and parent directory have restrictive permissions."""
@@ -51,6 +49,7 @@ class TestSec07DbFilePermissions:
         # Actually, _DEFAULT_DB_DIR is computed at module load. Let's call _get_db_path
         # which uses the module-level _DEFAULT_DB_DIR. We need to patch it.
         import agentkthx.core.persistent_memory as pm_mod
+
         monkeypatch.setattr(pm_mod, "_DEFAULT_DB_DIR", os.path.join(fake_home, ".agentkthx"))
 
         path = _get_db_path()
@@ -76,6 +75,7 @@ class TestSec07DbFilePermissions:
 # ROB-03: threading.Lock on PersistentMemory writes
 # ---------------------------------------------------------------------------
 
+
 class TestRob03ThreadSafeWrites:
     """Verify PersistentMemory writes are thread-safe via _write_lock."""
 
@@ -96,6 +96,7 @@ class TestRob03ThreadSafeWrites:
         # Use a large max_messages so the sliding window doesn't prune
         # (the in-memory list prunes at ~max_messages, but the DB keeps all)
         from agentkthx.core.memory import MemoryConfig
+
         pm = PersistentMemory(
             db_path=db_path,
             auto_save=True,
@@ -118,12 +119,11 @@ class TestRob03ThreadSafeWrites:
 
         assert not errors, f"Concurrent writes raised errors: {errors}"
         # All 80 messages should be in memory (max_messages=1000 prevents pruning)
-        assert len(pm._messages) == 80, (
-            f"Expected 80 messages, got {len(pm._messages)}"
-        )
+        assert len(pm._messages) == 80, f"Expected 80 messages, got {len(pm._messages)}"
         # Verify all 80 also made it to the DB
         pm.save()
         import sqlite3
+
         conn = sqlite3.connect(db_path)
         count = conn.execute(
             "SELECT COUNT(*) FROM messages WHERE session_id = ?",
@@ -153,18 +153,21 @@ class TestRob03ThreadSafeWrites:
 # ROB-04: Agent.register_tool doesn't clear memory
 # ---------------------------------------------------------------------------
 
+
 class TestRob04RegisterToolPreservesMemory:
     """Verify register_tool adds a tool WITHOUT clearing conversation memory."""
 
     def test_register_tool_exists(self):
         """Agent has a register_tool method (the new, non-destructive API)."""
         from agentkthx.agent import Agent
+
         assert hasattr(Agent, "register_tool")
         assert callable(getattr(Agent, "register_tool"))
 
     def test_rebuild_system_prompt_exists(self):
         """Agent has a rebuild_system_prompt method (explicit clear+rebuild)."""
         from agentkthx.agent import Agent
+
         assert hasattr(Agent, "rebuild_system_prompt")
         assert callable(getattr(Agent, "rebuild_system_prompt"))
 
@@ -176,6 +179,7 @@ class TestRob04RegisterToolPreservesMemory:
         """
         # Mock the backend to avoid needing a real LLM
         from unittest.mock import MagicMock
+
         from agentkthx.agent import Agent
         from agentkthx.core.models import Tool, ToolParam
         from agentkthx.tools import make_builtin_registry
@@ -226,6 +230,7 @@ class TestRob04RegisterToolPreservesMemory:
         the warning with ``pytest.warns`` rather than letting it surface.
         """
         from unittest.mock import MagicMock
+
         from agentkthx.agent import Agent
         from agentkthx.core.models import Tool, ToolParam
         from agentkthx.tools import make_builtin_registry
@@ -255,6 +260,7 @@ class TestRob04RegisterToolPreservesMemory:
         # add_tool (deprecated) — should clear memory (backward compat).
         # MAINT-16 (R07.07): now also emits DeprecationWarning; catch it.
         import warnings as _w
+
         with _w.catch_warnings():
             _w.simplefilter("ignore", DeprecationWarning)
             agent.add_tool(new_tool)
@@ -271,12 +277,14 @@ class TestRob04RegisterToolPreservesMemory:
 # MAINT-04: args_normal.py deleted
 # ---------------------------------------------------------------------------
 
+
 class TestMaint04ArgsNormalDeleted:
     """Verify args_normal.py is deleted and no longer importable."""
 
     def test_args_normal_module_deleted(self):
         """The args_normal module no longer exists."""
         import importlib
+
         try:
             importlib.import_module("agentkthx.core.args_normal")
             assert False, "agentkthx.core.args_normal should have been deleted (MAINT-04)"
@@ -291,10 +299,15 @@ class TestMaint04ArgsNormalDeleted:
     def test_core_init_no_longer_imports_args_normal(self):
         """core/__init__.py no longer imports from args_normal."""
         import agentkthx.core as core_mod
+
         # The 4 symbols that were re-exported from args_normal should no longer
         # be accessible via the core package
-        for symbol in ("normalize_args_full", "fix_calculator_args",
-                       "synthesize_missing_args", "generate_helpful_error_message"):
+        for symbol in (
+            "normalize_args_full",
+            "fix_calculator_args",
+            "synthesize_missing_args",
+            "generate_helpful_error_message",
+        ):
             assert not hasattr(core_mod, symbol), (
                 f"core module still exports {symbol!r} — args_normal import "
                 f"not fully cleaned up (MAINT-04)"
@@ -304,6 +317,7 @@ class TestMaint04ArgsNormalDeleted:
         """core.normalize_args (from helpers.py) is still exported — the
         production code path is unaffected by the args_normal deletion."""
         import agentkthx.core as core_mod
+
         assert hasattr(core_mod, "normalize_args")
         assert callable(core_mod.normalize_args)
 
@@ -312,28 +326,32 @@ class TestMaint04ArgsNormalDeleted:
 # MAINT-05: cli/utils.py dead-code trio deleted
 # ---------------------------------------------------------------------------
 
+
 class TestMaint05CliUtilsDeadCodeDeleted:
     """Verify _load_tool_cache, _save_tool_cache, _get_cloud_model_size are gone."""
 
     def test_dead_functions_removed_from_utils(self):
         """The 3 dead functions are no longer defined in cli/utils.py."""
         from agentkthx.cli import utils
+
         for name in ("_load_tool_cache", "_save_tool_cache", "_get_cloud_model_size"):
-            assert not hasattr(utils, name), (
-                f"cli/utils.py still defines {name!r} (MAINT-05 not complete)"
-            )
+            assert not hasattr(
+                utils, name
+            ), f"cli/utils.py still defines {name!r} (MAINT-05 not complete)"
 
     def test_dead_functions_not_exported_from_cli_init(self):
         """The 3 dead functions are no longer in cli.__all__."""
         import agentkthx.cli as cli_mod
+
         for name in ("_load_tool_cache", "_save_tool_cache", "_get_cloud_model_size"):
-            assert name not in getattr(cli_mod, "__all__", []), (
-                f"cli.__all__ still contains {name!r} (MAINT-05 not complete)"
-            )
+            assert name not in getattr(
+                cli_mod, "__all__", []
+            ), f"cli.__all__ still contains {name!r} (MAINT-05 not complete)"
 
     def test_cli_utils_live_functions_still_present(self):
         """The live functions in cli/utils.py are still present."""
         from agentkthx.cli import utils
+
         # These should still exist
         assert hasattr(utils, "resolve_model_pattern")
         assert hasattr(utils, "_get_cache_dir")
@@ -345,12 +363,14 @@ class TestMaint05CliUtilsDeadCodeDeleted:
 # MAINT-06: model_config.py deleted
 # ---------------------------------------------------------------------------
 
+
 class TestMaint06ModelConfigDeleted:
     """Verify model_config.py is deleted and no longer importable."""
 
     def test_model_config_module_deleted(self):
         """The model_config module no longer exists."""
         import importlib
+
         try:
             importlib.import_module("agentkthx.core.model_config")
             assert False, "agentkthx.core.model_config should have been deleted (MAINT-06)"
@@ -365,8 +385,11 @@ class TestMaint06ModelConfigDeleted:
     def test_model_family_config_still_importable(self):
         """The canonical model_family_config module is unaffected."""
         from agentkthx.core.model_family_config import (
-            ModelFamilyConfig, get_model_config, FAMILY_CONFIGS
+            FAMILY_CONFIGS,
+            ModelFamilyConfig,
+            get_model_config,
         )
+
         assert ModelFamilyConfig is not None
         assert callable(get_model_config)
         assert isinstance(FAMILY_CONFIGS, dict)

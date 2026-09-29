@@ -12,6 +12,7 @@ from __future__ import annotations
 def register(manager) -> None:
     """Register the ZAI backend with the plugin manager."""
     from .zai import ZaiBackend
+
     manager.register_backend("zai", ZaiBackend)
 
 

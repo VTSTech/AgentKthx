@@ -32,10 +32,10 @@ from agentkthx.update_check import (
     parse_version,
 )
 
-
 # ----------------------------------------------------------------------------
 # Helpers
 # ----------------------------------------------------------------------------
+
 
 class _FakeResponse:
     """Minimal stand-in for urllib's response object."""
@@ -118,6 +118,7 @@ def git_checkout(monkeypatch):
 # base_version / git_hash / parse_version / is_newer
 # ----------------------------------------------------------------------------
 
+
 class TestBaseVersion:
     def test_strips_git_hash_suffix(self):
         assert base_version("0.6.51-f754294") == "0.6.51"
@@ -133,13 +134,20 @@ class TestBaseVersion:
 
 
 class TestGitHash:
-    @pytest.mark.parametrize("raw,expected", [
-        ("0.6.51-f754294", "f754294"),
-        ("0.6.51", ""),
-        ("0.6.51+local", ""),
-        ("0.6.51+local-abc", ""),   # local segment wins, no hash after strip
-        ("", base_version(update_check.__version__).strip() and git_hash(update_check.__version__)),
-    ])
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            ("0.6.51-f754294", "f754294"),
+            ("0.6.51", ""),
+            ("0.6.51+local", ""),
+            ("0.6.51+local-abc", ""),  # local segment wins, no hash after strip
+            (
+                "",
+                base_version(update_check.__version__).strip()
+                and git_hash(update_check.__version__),
+            ),
+        ],
+    )
     def test_extract(self, raw, expected):
         assert git_hash(raw) == expected
 
@@ -150,31 +158,37 @@ class TestGitHash:
 
 
 class TestParseVersion:
-    @pytest.mark.parametrize("raw,expected", [
-        ("0.6.51", (0, 6, 51)),
-        ("0.6.51-f754294", (0, 6, 51)),
-        ("0.6.51+local", (0, 6, 51)),
-        ("0.6", (0, 6, 0)),          # padded to 3 segments
-        ("1.2.3.4", (1, 2, 3, 4)),   # longer preserved
-        ("0.6.5rc1", (0, 6, 5)),     # leading digits tolerated
-        ("garbage", (0, 0, 0)),      # never raises
-        ("", (0, 0, 0)),
-    ])
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            ("0.6.51", (0, 6, 51)),
+            ("0.6.51-f754294", (0, 6, 51)),
+            ("0.6.51+local", (0, 6, 51)),
+            ("0.6", (0, 6, 0)),  # padded to 3 segments
+            ("1.2.3.4", (1, 2, 3, 4)),  # longer preserved
+            ("0.6.5rc1", (0, 6, 5)),  # leading digits tolerated
+            ("garbage", (0, 0, 0)),  # never raises
+            ("", (0, 0, 0)),
+        ],
+    )
     def test_parse(self, raw, expected):
         assert parse_version(raw) == expected
 
 
 class TestIsNewer:
-    @pytest.mark.parametrize("latest,current,expected", [
-        ("0.6.51", "0.6.50", True),
-        ("0.6.50", "0.6.51", False),
-        ("0.6.51", "0.6.51", False),      # equal is not newer
-        ("0.7.0", "0.6.99", True),
-        ("1.0.0", "0.9.9", True),
-        ("0.6.51-f754294", "0.6.50", True),  # git suffix ignored
-        ("0.6", "0.6.41", False),          # padded: (0,6,0) < (0,6,41)
-        ("garbage", "0.6.41", False),      # unparseable -> (0,0,0), not newer
-    ])
+    @pytest.mark.parametrize(
+        "latest,current,expected",
+        [
+            ("0.6.51", "0.6.50", True),
+            ("0.6.50", "0.6.51", False),
+            ("0.6.51", "0.6.51", False),  # equal is not newer
+            ("0.7.0", "0.6.99", True),
+            ("1.0.0", "0.9.9", True),
+            ("0.6.51-f754294", "0.6.50", True),  # git suffix ignored
+            ("0.6", "0.6.41", False),  # padded: (0,6,0) < (0,6,41)
+            ("garbage", "0.6.41", False),  # unparseable -> (0,0,0), not newer
+        ],
+    )
     def test_compare(self, latest, current, expected):
         assert is_newer(latest, current) is expected
 
@@ -190,13 +204,18 @@ class TestCacheRemoved:
     def test_cache_plumbing_is_gone(self):
         # Regression guard against silently re-adding a disk cache.
         for name in (
-            "DEFAULT_CACHE_FILE", "SUCCESS_TTL", "FAILURE_TTL",
-            "_read_cache", "_write_cache", "_cache_fresh",
+            "DEFAULT_CACHE_FILE",
+            "SUCCESS_TTL",
+            "FAILURE_TTL",
+            "_read_cache",
+            "_write_cache",
+            "_cache_fresh",
         ):
             assert not hasattr(update_check, name), name
 
     def test_signature_has_no_cache_or_force_params(self):
         import inspect
+
         params = inspect.signature(check_for_update).parameters
         assert set(params) == {"timeout"}
 
@@ -205,9 +224,11 @@ class TestCacheRemoved:
 # check_for_update — always-live network behavior (per source)
 # ----------------------------------------------------------------------------
 
+
 class TestCheckForUpdate:
     def test_opt_out_env_disables_check(self, counter_urlopen, pip_install):
         import os
+
         calls, _ = counter_urlopen
         os.environ["AGENTKTHX_NO_UPDATE_CHECK"] = "1"
         try:
@@ -231,14 +252,16 @@ class TestCheckForUpdate:
         out of __init__.py on GitHub main.
         """
         calls, set_fake = counter_urlopen
+
         def _route(url, timeout=None):
             if "raw.githubusercontent.com" in url:
                 return _FakeResponse(_github_init_payload("0.6.99"))
             return _FakeResponse(_pypi_payload("0.6.51"))
+
         set_fake(_route)
         result = check_for_update()
         assert result["from_git"] is False
-        assert result["github_sha"] is None              # SHA API never hit
+        assert result["github_sha"] is None  # SHA API never hit
         assert result["github_latest_version"] == "0.6.99"  # raw __init__.py was hit
         # commits/HEAD API never hit, but raw __init__.py was
         assert all("commits/HEAD" not in c["url"] for c in calls)
@@ -247,10 +270,12 @@ class TestCheckForUpdate:
     def test_every_invocation_hits_the_network(self, counter_urlopen, pip_install):
         """R07.00: no disk cache — back-to-back calls both fetch live."""
         calls, set_fake = counter_urlopen
+
         def _route(url, timeout=None):
             if "raw.githubusercontent.com" in url:
                 return _FakeResponse(_github_init_payload("0.6.51"))
             return _FakeResponse(_pypi_payload("0.6.51"))
+
         set_fake(_route)
         first = check_for_update()
         second = check_for_update()
@@ -264,10 +289,12 @@ class TestCheckForUpdate:
         immediately — the second call returns the new live answer."""
         _, set_fake = counter_urlopen
         state = {"version": "0.6.51"}
+
         def _route(url, timeout=None):
             if "raw.githubusercontent.com" in url:
                 return _FakeResponse(_github_init_payload(state["version"]))
             return _FakeResponse(_pypi_payload(state["version"]))
+
         set_fake(_route)
         assert check_for_update()["pypi_latest"] == "0.6.51"
         state["version"] = "0.7.00"  # a release just went out
@@ -276,12 +303,14 @@ class TestCheckForUpdate:
     def test_github_fetched_for_git_checkout(self, counter_urlopen, git_checkout):
         calls, set_fake = counter_urlopen
         full_sha = "f754294" + "0" * 33  # installed short hash + padding = same commit
+
         def _route(url, timeout=None):
             if "raw.githubusercontent.com" in url:
                 return _FakeResponse(_github_init_payload("0.6.51"))
             if "github" in url:  # commits API
                 return _FakeResponse(_github_payload(full_sha))
             return _FakeResponse(_pypi_payload("0.6.51"))
+
         set_fake(_route)
         result = check_for_update()
         assert result["github_sha"] == full_sha
@@ -289,22 +318,22 @@ class TestCheckForUpdate:
         assert sum("github" in c["url"] for c in calls) == 2  # commits + raw both contain "github"
         assert sum("pypi" in c["url"] for c in calls) == 1
 
-    def test_github_failure_is_silent_and_retried_live(
-        self, counter_urlopen, git_checkout
-    ):
+    def test_github_failure_is_silent_and_retried_live(self, counter_urlopen, git_checkout):
         """R07.00: GitHub failures are silent, independent, and NOT
         negatively cached — the failing sources are retried live on the
         very next invocation."""
         calls, set_fake = counter_urlopen
+
         def _route(url, timeout=None):
             if "github" in url:  # commits API and raw both fail
                 raise ConnectionError("rate limited")
             return _FakeResponse(_pypi_payload("0.6.51"))
+
         set_fake(_route)
         first = check_for_update()
-        assert first["pypi_latest"] == "0.6.51"      # pypi fine
-        assert first["github_sha"] is None            # commits API failed silently
-        assert first["github_latest_version"] is None # raw __init__.py also failed
+        assert first["pypi_latest"] == "0.6.51"  # pypi fine
+        assert first["github_sha"] is None  # commits API failed silently
+        assert first["github_latest_version"] is None  # raw __init__.py also failed
 
         # second call: pypi live again, github sources retried live (still down)
         second = check_for_update()
@@ -313,12 +342,12 @@ class TestCheckForUpdate:
         # → 2 cycles = 6 calls (a negative cache would have stopped at 3)
         assert len(calls) == 6
 
-    def test_network_failure_returns_none_value_silently(
-        self, counter_urlopen, pip_install
-    ):
+    def test_network_failure_returns_none_value_silently(self, counter_urlopen, pip_install):
         calls, set_fake = counter_urlopen
+
         def _boom(url, timeout=None):
             raise ConnectionError("no internet")
+
         set_fake(_boom)
         result = check_for_update()
         assert result is not None  # structured result, sources just empty
@@ -339,12 +368,14 @@ class TestCheckForUpdate:
 
     def test_urls_are_the_documented_endpoints(self, counter_urlopen, git_checkout):
         calls, set_fake = counter_urlopen
+
         def _route(url, timeout=None):
             if "github" in url and "raw" not in url:
                 return _FakeResponse(_github_payload("a" * 40))
             if "raw.githubusercontent.com" in url:
                 return _FakeResponse(_github_init_payload("0.6.51"))
             return _FakeResponse(_pypi_payload("0.6.51"))
+
         set_fake(_route)
         check_for_update()
         hit = {c["url"] for c in calls}
@@ -358,58 +389,61 @@ class TestCheckForUpdate:
 # R06.57: _fetch_github_latest_version — parsing __init__.py from raw GitHub
 # ----------------------------------------------------------------------------
 
+
 class TestFetchGithubLatestVersion:
     """R06.57: Tests for the new pip-installed dev track."""
 
     def test_parses_double_quoted_version(self, counter_urlopen, monkeypatch):
         from agentkthx.update_check import _fetch_github_latest_version
+
         _, set_fake = counter_urlopen
         set_fake(lambda url, timeout=None: _FakeResponse(_github_init_payload("0.6.57")))
         assert _fetch_github_latest_version(timeout=1.0) == "0.6.57"
 
     def test_parses_single_quoted_version(self, counter_urlopen, monkeypatch):
         from agentkthx.update_check import _fetch_github_latest_version
+
         _, set_fake = counter_urlopen
-        set_fake(lambda url, timeout=None: _FakeResponse(
-            b'__version__ = \'0.6.57\'\n'
-        ))
+        set_fake(lambda url, timeout=None: _FakeResponse(b"__version__ = '0.6.57'\n"))
         assert _fetch_github_latest_version(timeout=1.0) == "0.6.57"
 
     def test_strips_git_hash_suffix_from_response(self, counter_urlopen):
         from agentkthx.update_check import _fetch_github_latest_version
+
         _, set_fake = counter_urlopen
-        set_fake(lambda url, timeout=None: _FakeResponse(
-            b'__version__ = "0.6.57-cf9f134"\n'
-        ))
+        set_fake(lambda url, timeout=None: _FakeResponse(b'__version__ = "0.6.57-cf9f134"\n'))
         # base_version() strips the suffix
         assert _fetch_github_latest_version(timeout=1.0) == "0.6.57"
 
     def test_raises_on_missing_assignment(self, counter_urlopen):
         from agentkthx.update_check import _fetch_github_latest_version
+
         _, set_fake = counter_urlopen
-        set_fake(lambda url, timeout=None: _FakeResponse(
-            b'"""AgentKthx"""\n__author__ = "VTSTech"\n'
-        ))
+        set_fake(
+            lambda url, timeout=None: _FakeResponse(b'"""AgentKthx"""\n__author__ = "VTSTech"\n')
+        )
         with pytest.raises(ValueError, match="no __version__"):
             _fetch_github_latest_version(timeout=1.0)
 
     def test_raises_on_empty_version_string(self, counter_urlopen):
         from agentkthx.update_check import _fetch_github_latest_version
+
         _, set_fake = counter_urlopen
-        set_fake(lambda url, timeout=None: _FakeResponse(
-            b'__version__ = ""\n'
-        ))
+        set_fake(lambda url, timeout=None: _FakeResponse(b'__version__ = ""\n'))
         with pytest.raises(ValueError, match="empty"):
             _fetch_github_latest_version(timeout=1.0)
 
     def test_response_closed_after_read(self, counter_urlopen):
         from agentkthx.update_check import _fetch_github_latest_version
+
         _, set_fake = counter_urlopen
         resp_holder = {}
+
         def _track(url, timeout=None):
             r = _FakeResponse(_github_init_payload("0.6.57"))
             resp_holder["r"] = r
             return r
+
         set_fake(_track)
         _fetch_github_latest_version(timeout=1.0)
         assert resp_holder["r"].closed is True
@@ -419,12 +453,14 @@ class TestFetchGithubLatestVersion:
         cache) — the source recovers on the very next invocation."""
         calls, set_fake = counter_urlopen
         state = {"down": True}
+
         def _route(url, timeout=None):
             if "raw.githubusercontent.com" in url and state["down"]:
                 raise ConnectionError("GitHub raw down")
             if "raw.githubusercontent.com" in url:
                 return _FakeResponse(_github_init_payload("0.6.99"))
             return _FakeResponse(_pypi_payload("0.6.51"))
+
         set_fake(_route)
         first = check_for_update()
         assert first["github_latest_version"] is None
@@ -439,6 +475,7 @@ class TestFetchGithubLatestVersion:
 # ----------------------------------------------------------------------------
 # format_notice — stable and development tracks
 # ----------------------------------------------------------------------------
+
 
 class TestFormatNotice:
     def test_stable_notice_when_newer(self, monkeypatch):
@@ -465,7 +502,7 @@ class TestFormatNotice:
         text = format_notice({"pypi_latest": "0.6.51", "github_sha": "deadbeef" + "0" * 33})
         assert text is not None
         assert "Development:" in text
-        assert "deadbee" in text          # 7-char short sha shown
+        assert "deadbee" in text  # 7-char short sha shown
         assert "agentkthx update" in text
 
     def test_no_dev_notice_when_up_to_date_commit(self, git_checkout):
@@ -486,11 +523,13 @@ class TestFormatNotice:
         """R06.57: pip-installed users see a dev notice when __init__.py on
         main declares a newer version than what's installed.
         """
-        text = format_notice({
-            "pypi_latest": "0.6.51",        # PyPI same as installed → no stable notice
-            "github_sha": None,              # no SHA baseline (pip install)
-            "github_latest_version": "0.6.57",
-        })
+        text = format_notice(
+            {
+                "pypi_latest": "0.6.51",  # PyPI same as installed → no stable notice
+                "github_sha": None,  # no SHA baseline (pip install)
+                "github_latest_version": "0.6.57",
+            }
+        )
         assert text is not None
         assert "Development:" in text
         assert "0.6.51" in text and "0.6.57" in text
@@ -503,11 +542,13 @@ class TestFormatNotice:
         to dev. Example: PyPI 0.6.57, GitHub main 0.6.57, installed 0.6.54
         → stable notice fires for 0.6.57 → 0.6.54, dev notice is suppressed.
         """
-        text = format_notice({
-            "pypi_latest": "0.6.57",
-            "github_sha": None,
-            "github_latest_version": "0.6.57",
-        })
+        text = format_notice(
+            {
+                "pypi_latest": "0.6.57",
+                "github_sha": None,
+                "github_latest_version": "0.6.57",
+            }
+        )
         # __version__ is 0.6.51 (pip_install fixture) → stable fires,
         # dev should be suppressed because pypi already covers it.
         assert text is not None
@@ -520,11 +561,13 @@ class TestFormatNotice:
         Example: PyPI 0.6.55, GitHub main 0.6.57, installed 0.6.54
         → both stable and dev notices should fire (dev is newer than stable).
         """
-        text = format_notice({
-            "pypi_latest": "0.6.55",
-            "github_sha": None,
-            "github_latest_version": "0.6.57",
-        })
+        text = format_notice(
+            {
+                "pypi_latest": "0.6.55",
+                "github_sha": None,
+                "github_latest_version": "0.6.57",
+            }
+        )
         assert text is not None
         assert "Stable:" in text and "Development:" in text
 

@@ -27,10 +27,10 @@ Usage:
 Max Tokens Information (from ZAI API docs):
   Note: max_tokens limits the length of generated content (output), not including input.
   Context window (input + output) confirmed for each model below.
-  
+
   Model Code          Default max_tokens    Maximum max_tokens    Context Length (Official)
   glm-5.3             65536               131072               128K → 125K display
-  glm-5.3-flash       65536               131072               128K → 125K display  
+  glm-5.3-flash       65536               131072               128K → 125K display
   glm-5.2             65536               131072               128K → 125K display
   glm-5.1             65536               131072               128K → 125K display
   glm-5               65536               131072               128K → 125K display
@@ -56,14 +56,13 @@ from __future__ import annotations
 import json
 import os
 import time
-from typing import Any, Generator
+from typing import Generator
 
-from agentkthx.backends.cloud_base import CloudBackend
 from agentkthx.backends.base import BackendConfig
-from agentkthx.core.types import BackendType, ToolSupportLevel, ApiMode
+from agentkthx.backends.cloud_base import CloudBackend
+from agentkthx.config import ZAI_BASE_URL, ZAI_FREE_FALLBACK_MODEL, ZAI_FREE_ONLY
 from agentkthx.core.models import Tool, ToolParam
-from agentkthx.config import ZAI_BASE_URL, ZAI_API_KEY, ZAI_FREE_ONLY, ZAI_FREE_FALLBACK_MODEL
-
+from agentkthx.core.types import ApiMode, BackendType, ToolSupportLevel
 
 # ZAI model catalog with metadata for context sizing and defaults.
 # Keys are model identifiers accepted by the ZAI API.
@@ -337,8 +336,8 @@ class ZaiBackend(CloudBackend):
         the ground truth here because ZAI's discovery endpoint does not
         return pricing data.
         """
-        import urllib.request
         import urllib.error
+        import urllib.request
 
         # Track which models the API knows about
         api_model_keys: set[str] = set()
@@ -387,44 +386,54 @@ class ZaiBackend(CloudBackend):
                 continue
             seen.add(model_key)
             meta = ZAI_MODELS.get(model_key, {})
-            models.append({
-                "name": model_key,
-                "size": 0,
-                "details": {
-                    # MAINT-13 (R07.07): use self._catalog_family_name()
-                    # instead of hardcoded "glm" so a future override of
-                    # _catalog_family_name stays consistent with list_models.
-                    "family": self._catalog_family_name(),
-                    "backend": self._catalog_backend_name(),
-                    "context_length": meta.get("context_length", self._DEFAULT_CONTEXT_FALLBACK),
-                    "free_tier": self._is_free_model(model_key),
-                    "is_chat_model": True,
-                    "pricing": meta.get("pricing", {}),
-                },
-            })
+            models.append(
+                {
+                    "name": model_key,
+                    "size": 0,
+                    "details": {
+                        # MAINT-13 (R07.07): use self._catalog_family_name()
+                        # instead of hardcoded "glm" so a future override of
+                        # _catalog_family_name stays consistent with list_models.
+                        "family": self._catalog_family_name(),
+                        "backend": self._catalog_backend_name(),
+                        "context_length": meta.get(
+                            "context_length", self._DEFAULT_CONTEXT_FALLBACK
+                        ),
+                        "free_tier": self._is_free_model(model_key),
+                        "is_chat_model": True,
+                        "pricing": meta.get("pricing", {}),
+                    },
+                }
+            )
 
         # Add catalog-only models (not returned by API, e.g. flash variants)
         for name in sorted(ZAI_MODELS.keys()):
             if name not in seen:
                 seen.add(name)
                 meta = ZAI_MODELS[name]
-                models.append({
-                    "name": name,
-                    "size": 0,
-                    "details": {
-                        # MAINT-13 (R07.07): use self._catalog_family_name()
-                        "family": self._catalog_family_name(),
-                        "backend": self._catalog_backend_name(),
-                        "context_length": meta.get("context_length", self._DEFAULT_CONTEXT_FALLBACK),
-                        "free_tier": self._is_free_model(name),
-                        "is_chat_model": True,
-                        "pricing": meta.get("pricing", {}),
-                    },
-                })
+                models.append(
+                    {
+                        "name": name,
+                        "size": 0,
+                        "details": {
+                            # MAINT-13 (R07.07): use self._catalog_family_name()
+                            "family": self._catalog_family_name(),
+                            "backend": self._catalog_backend_name(),
+                            "context_length": meta.get(
+                                "context_length", self._DEFAULT_CONTEXT_FALLBACK
+                            ),
+                            "free_tier": self._is_free_model(name),
+                            "is_chat_model": True,
+                            "pricing": meta.get("pricing", {}),
+                        },
+                    }
+                )
 
         if os.environ.get("AGENTKTHX_DEBUG"):
             catalog_only = len(models) - len(api_model_keys)
-            print(f"  [ZAI] Total: {len(models)} models ({len(api_model_keys)} API + {catalog_only} catalog)")
+            print(
+                f"  [ZAI] Total: {len(models)} models ({len(api_model_keys)} API + {catalog_only} catalog)"
+            )
 
         return models
 
@@ -471,9 +480,7 @@ class ZaiBackend(CloudBackend):
             try:
                 from difflib import get_close_matches
 
-                matches = get_close_matches(
-                    model_key, list(self.MODELS.keys()), n=1, cutoff=0.8
-                )
+                matches = get_close_matches(model_key, list(self.MODELS.keys()), n=1, cutoff=0.8)
                 if matches:
                     hint = f" — did you mean '{matches[0]}'?"
             except Exception:
@@ -549,9 +556,9 @@ class ZaiBackend(CloudBackend):
             temperature = defaults["temperature"]
         if max_tokens is None:
             max_tokens = defaults["max_tokens"]
-            
+
         if think is not None and os.environ.get("AGENTKTHX_DEBUG"):
-            print(f"  [ZAI] 'think' parameter ignored — ZAI manages thinking internally")
+            print("  [ZAI] 'think' parameter ignored — ZAI manages thinking internally")
 
         # ZAI_FREE_ONLY: reject paid models upfront
         if ZAI_FREE_ONLY and not _is_free_model(model):
@@ -600,7 +607,9 @@ class ZaiBackend(CloudBackend):
         if ZAI_FREE_ONLY and not _is_free_model(model):
             fallback = ZAI_FREE_FALLBACK_MODEL
             if os.environ.get("AGENTKTHX_DEBUG"):
-                print(f"  [ZAI.JEV] FREE_ONLY mode — '{model}' is a paid model, switching to '{fallback}'")
+                print(
+                    f"  [ZAI.JEV] FREE_ONLY mode — '{model}' is a paid model, switching to '{fallback}'"
+                )
             model = fallback
 
         # _generate_with_auth() returns the same {content, tool_calls, usage, ...} shape
@@ -629,8 +638,8 @@ class ZaiBackend(CloudBackend):
 
         Always uses OpenAI Chat-Completions SSE streaming.
         """
-        import urllib.request
         import urllib.error
+        import urllib.request
 
         url = f"{self.base_url}/api/paas/v4/chat/completions"
 
@@ -708,8 +717,8 @@ class ZaiBackend(CloudBackend):
         - 400 "does not support tools" -> retry without tools (ReAct fallback)
         - 400 "context length" -> reduce max_tokens, persist, retry once (R06.57)
         """
-        import urllib.request
         import urllib.error
+        import urllib.request
 
         def _do_request(req_body: dict):
             req = urllib.request.Request(
@@ -738,8 +747,10 @@ class ZaiBackend(CloudBackend):
                     old_max = body.get("max_tokens", 4096)
                     if self._handle_context_length_400(error_body, body):
                         new_max = body["max_tokens"]
-                        print(f"  [ZAI-Stream] Context length exceeded — "
-                              f"reducing max_tokens {old_max} -> {new_max} and retrying")
+                        print(
+                            f"  [ZAI-Stream] Context length exceeded — "
+                            f"reducing max_tokens {old_max} -> {new_max} and retrying"
+                        )
                         continue
 
                 # Insufficient credits -- auto-fallback to free model.
@@ -749,11 +760,16 @@ class ZaiBackend(CloudBackend):
                 # which runs the proper /model switch path so num_ctx /
                 # num_predict / family config are re-derived and the footer
                 # reflects the new model.
-                if e.code == 429 and ("insufficient balance" in error_msg or "insufficient" in error_msg or "no resource package" in error_msg):
+                if e.code == 429 and (
+                    "insufficient balance" in error_msg
+                    or "insufficient" in error_msg
+                    or "no resource package" in error_msg
+                ):
                     fallback = ZAI_FREE_FALLBACK_MODEL
                     if not _is_free_model(body.get("model", "")):
                         self._notify_model_switch(body.get("model", ""), fallback)
                         import sys
+
                         print(
                             f"\n  \033[33m[ZAI-Stream] Insufficient credits for '{body.get('model')}' -- "
                             f"falling back to free model '{fallback}'\033[0m",
@@ -770,6 +786,7 @@ class ZaiBackend(CloudBackend):
                 # Model doesn't support tools -- retry without tools (ReAct fallback)
                 elif "does not support tools" in error_msg and body.get("tools"):
                     import sys
+
                     print(
                         f"\n  \033[33m[ZAI-Stream] Model '{body.get('model')}' does not support tools -- "
                         f"retrying without tool definitions\033[0m",
@@ -848,8 +865,8 @@ class ZaiBackend(CloudBackend):
         super().generate_completions() because we need to inject
         the Authorization header, which the parent method doesn't support.
         """
-        import urllib.request
         import urllib.error
+        import urllib.request
 
         url = f"{self.base_url}/api/paas/v4/chat/completions"
 
@@ -859,7 +876,7 @@ class ZaiBackend(CloudBackend):
             temperature = defaults["temperature"]
         if max_tokens is None:
             max_tokens = defaults["max_tokens"]
-        
+
         # Build request body in OpenAI format
         body = {
             "model": model,
@@ -920,18 +937,25 @@ class ZaiBackend(CloudBackend):
             # completes; the SESSION switch is delegated to the registered
             # callback (agent_factory.register_insufficient_credits_switch),
             # which runs the proper /model switch path.
-            if e.code == 429 and ("insufficient balance" in error_msg or "insufficient" in error_msg or "no resource package" in error_msg):
+            if e.code == 429 and (
+                "insufficient balance" in error_msg
+                or "insufficient" in error_msg
+                or "no resource package" in error_msg
+            ):
                 fallback = ZAI_FREE_FALLBACK_MODEL
                 if not _is_free_model(model):
                     self._notify_model_switch(model, fallback)
                     import sys
+
                     print(
                         f"\n  \033[33m[ZAI] Insufficient credits for '{model}' — "
                         f"falling back to free model '{fallback}'\033[0m",
                         file=sys.stderr,
                     )
                     if os.environ.get("AGENTKTHX_DEBUG"):
-                        print(f"  [ZAI] Insufficient credits for '{model}', falling back to '{fallback}'")
+                        print(
+                            f"  [ZAI] Insufficient credits for '{model}', falling back to '{fallback}'"
+                        )
                     body_fallback = {**body, "model": fallback}
                     try:
                         req = urllib.request.Request(
@@ -945,19 +969,22 @@ class ZaiBackend(CloudBackend):
                         print(f"  [ZAI] Fallback to '{fallback}' succeeded")
                         # Continue to normal response parsing below
                     except Exception as e2:
-                        raise RuntimeError(f"ZAI: paid model '{model}' failed (insufficient credits) and free fallback '{fallback}' also failed: {e2}")
+                        raise RuntimeError(
+                            f"ZAI: paid model '{model}' failed (insufficient credits) and free fallback '{fallback}' also failed: {e2}"
+                        )
                 else:
                     raise RuntimeError(f"ZAI HTTP error {e.code}: {error_body}")
             # Check if model doesn't support tools — fallback to no tools
             elif "does not support tools" in error_msg and tools:
                 import sys
+
                 print(
                     f"\n  \033[33m[ZAI] Model '{model}' does not support tools — "
                     f"retrying without tool definitions\033[0m",
                     file=sys.stderr,
                 )
                 if os.environ.get("AGENTKTHX_DEBUG"):
-                    print(f"  [ZAI] Model doesn't support tools, falling back to ReAct mode")
+                    print("  [ZAI] Model doesn't support tools, falling back to ReAct mode")
                 body_fallback = {k: v for k, v in body.items() if k != "tools"}
                 try:
                     req = urllib.request.Request(
@@ -979,8 +1006,10 @@ class ZaiBackend(CloudBackend):
                 old_max = body.get("max_tokens", 4096)
                 if self._handle_context_length_400(error_body, body):
                     new_max = body["max_tokens"]
-                    print(f"  [ZAI] Context length exceeded — "
-                          f"reducing max_tokens {old_max} -> {new_max} and retrying")
+                    print(
+                        f"  [ZAI] Context length exceeded — "
+                        f"reducing max_tokens {old_max} -> {new_max} and retrying"
+                    )
                     try:
                         req = urllib.request.Request(
                             url,
@@ -1033,17 +1062,23 @@ class ZaiBackend(CloudBackend):
                     args = json.loads(args)
                 except json.JSONDecodeError:
                     args = {}
-            parsed_tool_calls.append({
-                "id": tc.get("id", ""),
-                "name": func.get("name", ""),
-                "arguments": args,
-            })
+            parsed_tool_calls.append(
+                {
+                    "id": tc.get("id", ""),
+                    "name": func.get("name", ""),
+                    "arguments": args,
+                }
+            )
 
         if os.environ.get("AGENTKTHX_DEBUG"):
             print(f"  [ZAI] Content: {content[:1024] if content else '(empty)'}")
             print(f"  [ZAI] Tool calls: {parsed_tool_calls}")
             if reasoning_content:
-                rc_preview = reasoning_content[:200] + "..." if len(reasoning_content) > 200 else reasoning_content
+                rc_preview = (
+                    reasoning_content[:200] + "..."
+                    if len(reasoning_content) > 200
+                    else reasoning_content
+                )
                 print(f"  [ZAI] Reasoning: {rc_preview}")
 
         usage = result.get("usage", {})
@@ -1066,7 +1101,9 @@ class ZaiBackend(CloudBackend):
     # Tool Support — ZAI models support native function calling
     # ─────────────────────────────────────────────────────────────────────
 
-    def test_tool_support(self, model: str, family: str | None = None, force_test: bool = False) -> ToolSupportLevel:
+    def test_tool_support(
+        self, model: str, family: str | None = None, force_test: bool = False
+    ) -> ToolSupportLevel:
         """
         Test model's tool support capability.
 
@@ -1075,7 +1112,7 @@ class ZaiBackend(CloudBackend):
 
         When force_test=True, makes a live API call to verify.
         """
-        from agentkthx.core.tool_cache import get_cached_tool_support, cache_tool_support
+        from agentkthx.core.tool_cache import cache_tool_support, get_cached_tool_support
 
         api_mode = "openai"
 
@@ -1088,32 +1125,31 @@ class ZaiBackend(CloudBackend):
         # Check API key before making a test call
         if not self._api_key:
             if os.environ.get("AGENTKTHX_DEBUG"):
-                print(f"  [ZAI] No API key configured — cannot test tool support")
+                print("  [ZAI] No API key configured — cannot test tool support")
             return ToolSupportLevel.UNTESTED
 
         # Test tool: Weather
         test_tool = Tool(
             name="get_weather",
             description="Get the current weather for a location",
-            params=[ToolParam(
-                name="location",
-                type="string",
-                description="The city and country, e.g., 'Paris, France'"
-            )],
+            params=[
+                ToolParam(
+                    name="location",
+                    type="string",
+                    description="The city and country, e.g., 'Paris, France'",
+                )
+            ],
         )
 
         try:
-            import urllib.request
             import urllib.error
+            import urllib.request
 
             url = f"{self.base_url}/api/paas/v4/chat/completions"
 
             body = {
                 "model": model,
-                "messages": [{
-                    "role": "user",
-                    "content": "What's the weather like in Tokyo?"
-                }],
+                "messages": [{"role": "user", "content": "What's the weather like in Tokyo?"}],
                 "tools": [test_tool.to_openai_schema()],
                 "stream": False,
                 "temperature": 0.0,
@@ -1148,20 +1184,28 @@ class ZaiBackend(CloudBackend):
             if tool_calls:
                 if os.environ.get("AGENTKTHX_DEBUG"):
                     print(f"  [ZAI] Tool support: NATIVE (tool_calls={len(tool_calls)})")
-                cache_tool_support(model, ToolSupportLevel.NATIVE, family=family or "glm", api_mode=api_mode)
+                cache_tool_support(
+                    model, ToolSupportLevel.NATIVE, family=family or "glm", api_mode=api_mode
+                )
                 return ToolSupportLevel.NATIVE
 
             # Check for ReAct-style text patterns
-            if content and any(kw in content.lower() for kw in ["action:", "action input:", "final answer:"]):
+            if content and any(
+                kw in content.lower() for kw in ["action:", "action input:", "final answer:"]
+            ):
                 if os.environ.get("AGENTKTHX_DEBUG"):
-                    print(f"  [ZAI] Tool support: REACT (text-based tool pattern)")
-                cache_tool_support(model, ToolSupportLevel.REACT, family=family or "glm", api_mode=api_mode)
+                    print("  [ZAI] Tool support: REACT (text-based tool pattern)")
+                cache_tool_support(
+                    model, ToolSupportLevel.REACT, family=family or "glm", api_mode=api_mode
+                )
                 return ToolSupportLevel.REACT
 
             # API accepted tools but model didn't use them — REACT-capable
             if os.environ.get("AGENTKTHX_DEBUG"):
-                print(f"  [ZAI] Tool support: REACT (tools accepted, no tool calls)")
-            cache_tool_support(model, ToolSupportLevel.REACT, family=family or "glm", api_mode=api_mode)
+                print("  [ZAI] Tool support: REACT (tools accepted, no tool calls)")
+            cache_tool_support(
+                model, ToolSupportLevel.REACT, family=family or "glm", api_mode=api_mode
+            )
             return ToolSupportLevel.REACT
 
         except urllib.error.HTTPError as e:
@@ -1170,22 +1214,37 @@ class ZaiBackend(CloudBackend):
 
             if "does not support" in error_msg or "invalid" in error_msg:
                 if os.environ.get("AGENTKTHX_DEBUG"):
-                    print(f"  [ZAI] Tool support: REACT (server rejected tools param)")
-                cache_tool_support(model, ToolSupportLevel.REACT, family=family or "glm",
-                                   error=str(e), api_mode=api_mode)
+                    print("  [ZAI] Tool support: REACT (server rejected tools param)")
+                cache_tool_support(
+                    model,
+                    ToolSupportLevel.REACT,
+                    family=family or "glm",
+                    error=str(e),
+                    api_mode=api_mode,
+                )
                 return ToolSupportLevel.REACT
 
             if os.environ.get("AGENTKTHX_DEBUG"):
                 print(f"  [ZAI] Tool support: REACT (HTTP {e.code})")
-            cache_tool_support(model, ToolSupportLevel.REACT, family=family or "glm",
-                               error=str(e), api_mode=api_mode)
+            cache_tool_support(
+                model,
+                ToolSupportLevel.REACT,
+                family=family or "glm",
+                error=str(e),
+                api_mode=api_mode,
+            )
             return ToolSupportLevel.REACT
 
         except Exception as e:
             if os.environ.get("AGENTKTHX_DEBUG"):
                 print(f"  [ZAI] Tool support test failed: {e}")
-            cache_tool_support(model, ToolSupportLevel.REACT, family=family or "glm",
-                               error=str(e), api_mode=api_mode)
+            cache_tool_support(
+                model,
+                ToolSupportLevel.REACT,
+                family=family or "glm",
+                error=str(e),
+                api_mode=api_mode,
+            )
             return ToolSupportLevel.REACT
 
     # ─────────────────────────────────────────────────────────────────────
@@ -1206,6 +1265,7 @@ class ZaiBackend(CloudBackend):
 
         # Check if user set num_ctx via env var
         from agentkthx.config import NUM_CTX
+
         if NUM_CTX and NUM_CTX > 0:
             return NUM_CTX
 

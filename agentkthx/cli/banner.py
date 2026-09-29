@@ -7,10 +7,7 @@ _print_update_notice)."""
 from __future__ import annotations
 
 from .. import __version__
-from ..colors import is_color_enabled, dim
-
-
-
+from ..colors import dim, is_color_enabled
 
 # ============================================================================
 # ASCII Banner
@@ -36,7 +33,6 @@ BANNER_ATOM_BRAILLE = """
 """
 
 
-
 BANNER_ATOM_PLAIN = """
 ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣴⠿⠛⢷⣦⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀  AgentKthx
 ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢠⡿⠃⠀⠀⠀⠙⣷⡀⠀⠀⢀⣀⠀⠀⠀⠀⠀  Autonomous Agents with Local LLMs
@@ -57,24 +53,23 @@ BANNER_ATOM_PLAIN = """
 """
 
 
-
-
 def print_banner() -> None:
     """Print the AgentKthx ASCII banner."""
-    from .. import __version__, __status__
+    from .. import __status__, __version__
+
     # Convert 0.3.3 to R03.3 format for display
-    parts = __version__.split('.')
-    display_version = f"R{int(parts[1]):02d}.{parts[2]}" if len(parts) >= 2 else __version__    
+    parts = __version__.split(".")
+    display_version = f"R{int(parts[1]):02d}.{parts[2]}" if len(parts) >= 2 else __version__
     version_str = f"{display_version} [{__status__}]"
     if is_color_enabled():
         # Replace ANSI-colored "Status: Alpha" with version
-        banner = BANNER_ATOM_BRAILLE.replace("\x1b[2mStatus:\x1b[0m \x1b[33mAlpha\x1b[0m", f"\x1b[2m{version_str}\x1b[0m")
+        banner = BANNER_ATOM_BRAILLE.replace(
+            "\x1b[2mStatus:\x1b[0m \x1b[33mAlpha\x1b[0m", f"\x1b[2m{version_str}\x1b[0m"
+        )
         print(banner)
     else:
         banner = BANNER_ATOM_PLAIN.replace("Status: Alpha", version_str)
         print(banner)
-
-
 
 
 # ============================================================================
@@ -89,18 +84,15 @@ def print_banner() -> None:
 _LAST_UPDATE_CHECK = None
 
 
-
-
 def _run_update_check(timeout: float = 1.0) -> None:
     """Run the live update check once per process; stash the result. Never raises."""
     global _LAST_UPDATE_CHECK
     try:
         from ..update_check import check_for_update
+
         _LAST_UPDATE_CHECK = check_for_update(timeout=timeout)
     except Exception:
         _LAST_UPDATE_CHECK = None
-
-
 
 
 def _print_update_notice() -> None:
@@ -110,6 +102,7 @@ def _print_update_notice() -> None:
         return
     try:
         from ..update_check import format_notice
+
         text = format_notice(result, current=__version__)
     except Exception:
         return

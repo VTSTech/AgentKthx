@@ -23,16 +23,13 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import pytest
-
 # Make agentkthx importable when run from the repo root
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from agentkthx.core.helpers import (
-    sanitize_tool_output,
-    DEFAULT_TOOL_OUTPUT_MAX_CHARS,
     _SECRET_LINE_RE,
-    _ANSI_ESCAPE_RE,
+    DEFAULT_TOOL_OUTPUT_MAX_CHARS,
+    sanitize_tool_output,
 )
 
 
@@ -68,7 +65,7 @@ class TestSanitizeToolOutputWrapping:
     def test_quotes_in_tool_name_escaped(self):
         """A tool name containing a double-quote is XML-escaped."""
         result = sanitize_tool_output("body", tool_name='evil"name')
-        assert '&quot;' in result
+        assert "&quot;" in result
         # The raw unescaped quote should not appear inside the attribute value
         # (it would close the attribute early and break the tag).
         # Valid form: tool="evil&quot;name"  →  the `&quot;` is the only
@@ -204,7 +201,7 @@ class TestSanitizeToolOutputInjectionResistance:
         result = sanitize_tool_output(body, tool_name="http_get", tool_call_id="call_1")
 
         # The wrapper must be present
-        assert result.startswith("<tool_output tool=\"http_get\" call_id=\"call_1\">")
+        assert result.startswith('<tool_output tool="http_get" call_id="call_1">')
         assert result.endswith("</tool_output>")
 
         # The injection text must NOT appear (it was past the 8KB truncation point)

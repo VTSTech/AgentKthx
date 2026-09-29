@@ -16,13 +16,13 @@ class _FakeBackend:
     api_mode = None
 
     def generate(self, messages, tools=None, **kw):
-        return {"content": "ok", "tool_calls": [], "usage": {},
-                "finish_reason": "stop"}
+        return {"content": "ok", "tool_calls": [], "usage": {}, "finish_reason": "stop"}
 
 
 def _make_agent(**kw):
-    return Agent(model="fake", backend=_FakeBackend(),
-                 system_prompt="sys", tools=None, soul=None, **kw)
+    return Agent(
+        model="fake", backend=_FakeBackend(), system_prompt="sys", tools=None, soul=None, **kw
+    )
 
 
 def test_create_response_defaults_to_queued():
@@ -55,7 +55,8 @@ def test_create_response_with_previous_response_id_links_history():
 
     # Store a response manually and verify context linking
     first = agent.create_response(
-        input_items=[{"type": "message", "role": "user", "content": "hi"}])
+        input_items=[{"type": "message", "role": "user", "content": "hi"}]
+    )
     first.status = ResponseStatus.COMPLETED
     first.output = [{"type": "message", "role": "assistant", "content": "hello"}]
     agent._response_history[first.id] = first
@@ -79,8 +80,9 @@ def test_add_tool_registers_and_rebuilds_prompt():
     calc = Tool(
         name="calculator",
         description="Evaluate a mathematical expression",
-        params=[ToolParam(name="expression", type="string",
-                          description="The expression", required=True)],
+        params=[
+            ToolParam(name="expression", type="string", description="The expression", required=True)
+        ],
     )
     # MAINT-16 (R07.07): add_tool is deprecated and emits DeprecationWarning.
     # Use register_tool instead — this test exercises the OpenResponses API,

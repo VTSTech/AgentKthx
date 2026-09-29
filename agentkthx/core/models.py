@@ -8,13 +8,15 @@ Written by VTSTech — https://www.vts-tech.org
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
+
 from .types import StepResultType
 
 
 @dataclass
 class ToolParam:
     """Parameter definition for a tool."""
+
     name: str
     type: str = "string"
     description: str = ""
@@ -38,6 +40,7 @@ class ToolParam:
 @dataclass
 class Tool:
     """Tool definition for agent use."""
+
     name: str
     description: str
     params: list[ToolParam] = field(default_factory=list)
@@ -67,13 +70,13 @@ class Tool:
                 },
             },
         }
-    
+
     def to_openai_schema(self) -> dict:
         """Convert to OpenAI Chat-Completions tool format.
-        
+
         This is the format expected by OpenAI's /v1/chat/completions endpoint
         and Ollama's OpenAI-compatible endpoint.
-        
+
         The format is identical to Ollama's native format, so we delegate.
         """
         return self.to_json_schema()
@@ -88,9 +91,10 @@ class Tool:
 @dataclass
 class ToolCall:
     """Represents a parsed tool call from model output.
-    
+
     OpenResponses Enhancement: Includes thought capture for ReasoningItem.
     """
+
     name: str
     arguments: dict[str, Any]
     raw: str = ""  # Original text that was parsed
@@ -102,6 +106,7 @@ class ToolCall:
 @dataclass
 class StepResult:
     """Result of a single agent step."""
+
     type: StepResultType
     content: str = ""
     tool_call: ToolCall | None = None
@@ -120,6 +125,7 @@ class StepResult:
 @dataclass
 class AgentRun:
     """Complete result of an agent execution."""
+
     final_answer: str
     steps: list[StepResult] = field(default_factory=list)
     total_tokens: int = 0

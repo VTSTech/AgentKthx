@@ -35,9 +35,9 @@ Written by VTSTech -- https://www.vts-tech.org
 """
 
 from ._loader import (
-    PluginManifest,
     Plugin,
     PluginManager,
+    PluginManifest,
     get_plugin_manager,
 )
 

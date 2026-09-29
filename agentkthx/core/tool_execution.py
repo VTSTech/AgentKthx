@@ -47,7 +47,7 @@ class ToolExecutionMixin:
             return f"Error: Unknown tool '{name}'. Available tools: {self.tools.names()}"
 
         # Confirmation gate for dangerous tools
-        if getattr(tool, 'dangerous', False) and self._confirm_dangerous is not None:
+        if getattr(tool, "dangerous", False) and self._confirm_dangerous is not None:
             if not self._confirm_dangerous(name, args):
                 return (
                     f"Tool '{name}' was blocked by user confirmation. "
@@ -58,6 +58,7 @@ class ToolExecutionMixin:
         expected_params = [p.name for p in tool.params]
 
         from .helpers import normalize_args
+
         normalized_args = normalize_args(args, expected_params, tool_name=name)
 
         # R06.52: numeric-string coercion. Small models frequently emit

@@ -21,31 +21,28 @@ Written by VTSTech — https://www.vts-tech.org
 import io
 import json
 import os
-import sys
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
-import pytest
-
+from agentkthx.core.models import Tool, ToolParam
+from agentkthx.core.types import BackendType, ToolSupportLevel
 from agentkthx.plugins.openai.openai import (
-    OpenAIBackend,
     OPENAI_FREE_MODEL_WHITELIST,
-    OPENAI_MODELS,
-    OPENAI_SERVICE_TIER_VALUES,
-    OPENAI_REASONING_EFFORT_VALUES,
     OPENAI_FREE_ONLY_REASONING_EFFORT_CAP,
     OPENAI_FREE_ONLY_SERVICE_TIER_FORCED,
+    OPENAI_MODELS,
+    OPENAI_REASONING_EFFORT_VALUES,
+    OPENAI_SERVICE_TIER_VALUES,
+    OpenAIBackend,
     _detect_key_type,
     _is_free_model,
     _is_insufficient_quota,
 )
-from agentkthx.core.models import Tool, ToolParam
-from agentkthx.core.types import ApiMode, BackendType, ToolSupportLevel
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def _make_tool() -> Tool:
     """Sample tool used in the generate-flow tests below."""
@@ -59,6 +56,7 @@ def _make_tool() -> Tool:
 # ─────────────────────────────────────────────────────────────────────────────
 # Module-level constants and helpers
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class TestWhitelistAndCatalog:
     """The OPENAI_FREE_MODEL_WHITELIST and OPENAI_MODELS catalog should be
@@ -159,6 +157,7 @@ class TestIsInsufficientQuota:
 # ─────────────────────────────────────────────────────────────────────────────
 # Backend hooks + is_cloud + BackendType
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class TestBackendHooks(unittest.TestCase):
     """The 4 abstract hooks from OpenAICompatibleBackend (ARCH-01)
@@ -266,6 +265,7 @@ class TestIsCloudAndBackendType(unittest.TestCase):
 # _is_tools_not_supported_error — parity check
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestIsToolsNotSupportedError(unittest.TestCase):
     """ReAct-fallback error detection — OpenAI parity check."""
 
@@ -307,6 +307,7 @@ class TestIsToolsNotSupportedError(unittest.TestCase):
 # Generate flow — ReAct fallback + empty response
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestGenerateFlow(unittest.TestCase):
     """Tests for OpenAIBackend.generate() — mirrors the HuggingFace
     generate flow tests, with OpenAI-specific request/response shape."""
@@ -335,19 +336,23 @@ class TestGenerateFlow(unittest.TestCase):
         with the tools field, and parse the response into AgentKthx's
         {content, tool_calls, usage, finish_reason} shape."""
         mock_urlopen.side_effect = [
-            self._mock_urlopen({
-                "id": "chatcmpl-test",
-                "choices": [{
-                    "index": 0,
-                    "message": {
-                        "role": "assistant",
-                        "content": "The result is 120.",
-                        "tool_calls": [],
-                    },
-                    "finish_reason": "stop",
-                }],
-                "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
-            }).return_value,
+            self._mock_urlopen(
+                {
+                    "id": "chatcmpl-test",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": "The result is 120.",
+                                "tool_calls": [],
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+                }
+            ).return_value,
         ]
 
         result = self.backend.generate(
@@ -369,6 +374,7 @@ class TestGenerateFlow(unittest.TestCase):
         'does not support tools' error, generate() should retry without
         tools (ReAct fallback path)."""
         import urllib.error
+
         real_http_err = urllib.error.HTTPError(
             url="http://test",
             code=400,
@@ -379,19 +385,25 @@ class TestGenerateFlow(unittest.TestCase):
         success_response = MagicMock()
         success_response.__enter__ = MagicMock(return_value=success_response)
         success_response.__exit__ = MagicMock(return_value=False)
-        success_response.read = MagicMock(return_value=json.dumps({
-            "id": "chatcmpl-react",
-            "choices": [{
-                "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": 'I should call shell({"command": "echo 120"})',
-                    "tool_calls": [],
-                },
-                "finish_reason": "stop",
-            }],
-            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
-        }).encode("utf-8"))
+        success_response.read = MagicMock(
+            return_value=json.dumps(
+                {
+                    "id": "chatcmpl-react",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": 'I should call shell({"command": "echo 120"})',
+                                "tool_calls": [],
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+                }
+            ).encode("utf-8")
+        )
         mock_urlopen.side_effect = [real_http_err, success_response]
 
         result = self.backend.generate(
@@ -410,19 +422,23 @@ class TestGenerateFlow(unittest.TestCase):
         """An empty response (no content, no tool_calls) should raise
         RuntimeError so the chat loop can surface a meaningful error."""
         mock_urlopen.side_effect = [
-            self._mock_urlopen({
-                "id": "chatcmpl-empty",
-                "choices": [{
-                    "index": 0,
-                    "message": {
-                        "role": "assistant",
-                        "content": "",
-                        "tool_calls": [],
-                    },
-                    "finish_reason": "stop",
-                }],
-                "usage": {"prompt_tokens": 10, "completion_tokens": 0, "total_tokens": 10},
-            }).return_value,
+            self._mock_urlopen(
+                {
+                    "id": "chatcmpl-empty",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": "",
+                                "tool_calls": [],
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {"prompt_tokens": 10, "completion_tokens": 0, "total_tokens": 10},
+                }
+            ).return_value,
         ]
         with self.assertRaises(RuntimeError) as ctx:
             self.backend.generate(
@@ -437,6 +453,7 @@ class TestGenerateFlow(unittest.TestCase):
 # OPENAI_FREE_ONLY enforcement
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestFreeOnlyEnforcement(unittest.TestCase):
     """OPENAI_FREE_ONLY mode should reject non-whitelisted models BEFORE any
     HTTP request is made — preventing accidental trial-credit-burning
@@ -447,6 +464,7 @@ class TestFreeOnlyEnforcement(unittest.TestCase):
         self._saved_free_only = os.environ.get("OPENAI_FREE_ONLY", "")
         os.environ["OPENAI_FREE_ONLY"] = "false"
         from agentkthx.plugins.openai import openai as oai_mod
+
         self._oai_mod = oai_mod
         self._original_free_only = oai_mod.OPENAI_FREE_ONLY
         oai_mod.OPENAI_FREE_ONLY = False
@@ -466,18 +484,22 @@ class TestFreeOnlyEnforcement(unittest.TestCase):
         self._oai_mod.OPENAI_FREE_ONLY = False
         b = OpenAIBackend()
         called_with = {}
+
         def fake_request(endpoint, data, stream=False):
             called_with["endpoint"] = endpoint
             called_with["model"] = data.get("model")
             return {
                 "id": "test",
-                "choices": [{
-                    "index": 0,
-                    "message": {"role": "assistant", "content": "ok", "tool_calls": []},
-                    "finish_reason": "stop",
-                }],
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": "ok", "tool_calls": []},
+                        "finish_reason": "stop",
+                    }
+                ],
                 "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
             }
+
         b._make_api_request = fake_request
         result = b.generate(
             model="gpt-6-astra",  # not in whitelist
@@ -494,12 +516,14 @@ class TestFreeOnlyEnforcement(unittest.TestCase):
         self._oai_mod.OPENAI_FREE_ONLY = True
         b = OpenAIBackend()
         called = {"count": 0}
+
         def fail_if_called(endpoint, data, stream=False):
             called["count"] += 1
             raise AssertionError(
                 "_make_api_request should NOT be called when OPENAI_FREE_ONLY "
                 "rejects the model upfront"
             )
+
         b._make_api_request = fail_if_called
         with self.assertRaises(RuntimeError) as ctx:
             b.generate(
@@ -507,7 +531,9 @@ class TestFreeOnlyEnforcement(unittest.TestCase):
                 messages=[{"role": "user", "content": "hi"}],
                 max_tokens=10,
             )
-        assert "no genuinely free" in str(ctx.exception).lower() or "OPENAI_FREE_ONLY" in str(ctx.exception)
+        assert "no genuinely free" in str(ctx.exception).lower() or "OPENAI_FREE_ONLY" in str(
+            ctx.exception
+        )
         assert called["count"] == 0
 
     def test_free_only_true_rejects_all_models(self):
@@ -517,9 +543,11 @@ class TestFreeOnlyEnforcement(unittest.TestCase):
         self._oai_mod.OPENAI_FREE_ONLY = True
         b = OpenAIBackend()
         called = {"count": 0}
+
         def fail_if_called(endpoint, data, stream=False):
             called["count"] += 1
             raise AssertionError("_make_api_request should NOT be called")
+
         b._make_api_request = fail_if_called
         # Even gpt-6-luna (cheapest OpenAI model) is rejected
         with self.assertRaises(RuntimeError) as ctx:
@@ -528,7 +556,9 @@ class TestFreeOnlyEnforcement(unittest.TestCase):
                 messages=[{"role": "user", "content": "hi"}],
                 max_tokens=10,
             )
-        assert "no genuinely free" in str(ctx.exception).lower() or "OPENAI_FREE_ONLY" in str(ctx.exception)
+        assert "no genuinely free" in str(ctx.exception).lower() or "OPENAI_FREE_ONLY" in str(
+            ctx.exception
+        )
         assert called["count"] == 0
 
 
@@ -542,6 +572,7 @@ class TestFreeOnlyReasoningEffortCap(unittest.TestCase):
         self._saved_free_only = os.environ.get("OPENAI_FREE_ONLY", "")
         os.environ["OPENAI_FREE_ONLY"] = "true"
         from agentkthx.plugins.openai import openai as oai_mod
+
         self._oai_mod = oai_mod
         self._original_free_only = oai_mod.OPENAI_FREE_ONLY
         oai_mod.OPENAI_FREE_ONLY = True
@@ -599,13 +630,17 @@ class TestFreeOnlyReasoningEffortCap(unittest.TestCase):
         # reasoning_effort should NOT be in the body when not explicitly set
         # (OPENAI_FREE_ONLY forces service_tier=default but doesn't add
         # reasoning_effort if it wasn't requested)
-        assert "reasoning_effort" not in body or body.get("reasoning_effort") is None \
-               or body.get("reasoning_effort") == "low"
+        assert (
+            "reasoning_effort" not in body
+            or body.get("reasoning_effort") is None
+            or body.get("reasoning_effort") == "low"
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # HTTP 429 insufficient_quota trial-credit-exhaustion fallback
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class TestInsufficientQuotaFallback(unittest.TestCase):
     """When OpenAI returns HTTP 429 with `insufficient_quota` code
@@ -621,6 +656,7 @@ class TestInsufficientQuotaFallback(unittest.TestCase):
     def setUp(self):
         os.environ["OPENAI_API_KEY"] = "sk-proj-fake_test_token_for_scaffold"
         from agentkthx.plugins.openai import openai as oai_mod
+
         self._oai_mod = oai_mod
         self._original_free_only = oai_mod.OPENAI_FREE_ONLY
 
@@ -633,12 +669,14 @@ class TestInsufficientQuotaFallback(unittest.TestCase):
         clear actionable error (no retry — retrying is futile)."""
         self._oai_mod.OPENAI_FREE_ONLY = True
         b = OpenAIBackend()
+
         def raise_429(endpoint, data, stream=False):
             raise RuntimeError(
                 "OpenAI trial credit exhausted for "
                 f"'{data.get('model')}' (insufficient_quota). "
                 "Upgrade to a paid tier..."
             )
+
         b._make_api_request = raise_429
         with self.assertRaises(RuntimeError) as ctx:
             b.generate(
@@ -646,7 +684,9 @@ class TestInsufficientQuotaFallback(unittest.TestCase):
                 messages=[{"role": "user", "content": "hi"}],
                 max_tokens=10,
             )
-        assert "credit exhausted" in str(ctx.exception).lower() or "OPENAI_FREE_ONLY" in str(ctx.exception)
+        assert "credit exhausted" in str(ctx.exception).lower() or "OPENAI_FREE_ONLY" in str(
+            ctx.exception
+        )
 
 
 class TestFreeOnlyStreamingOverride(unittest.TestCase):
@@ -664,6 +704,7 @@ class TestFreeOnlyStreamingOverride(unittest.TestCase):
         self._saved_free_only = os.environ.get("OPENAI_FREE_ONLY", "")
         os.environ["OPENAI_FREE_ONLY"] = "true"
         from agentkthx.plugins.openai import openai as oai_mod
+
         self._oai_mod = oai_mod
         self._original_free_only = oai_mod.OPENAI_FREE_ONLY
         oai_mod.OPENAI_FREE_ONLY = True
@@ -681,6 +722,7 @@ class TestFreeOnlyStreamingOverride(unittest.TestCase):
         (the path the agentic loop uses for cloud backends) should reject
         non-whitelisted models BEFORE any HTTP request is made."""
         b = OpenAIBackend()
+
         # Mock _iter_sse_lines to fail loudly if called (proves the upfront
         # check fires before any HTTP path)
         def fail_if_called(url, body, headers):
@@ -688,6 +730,7 @@ class TestFreeOnlyStreamingOverride(unittest.TestCase):
                 "_iter_sse_lines should NOT be called when OPENAI_FREE_ONLY "
                 "rejects the model upfront in the streaming path"
             )
+
         b._iter_sse_lines = fail_if_called
         # Generator must be consumed to trigger the check
         gen = b.generate_completions_stream(
@@ -697,7 +740,9 @@ class TestFreeOnlyStreamingOverride(unittest.TestCase):
         )
         with self.assertRaises(RuntimeError) as ctx:
             list(gen)  # consume the generator
-        assert "no genuinely free" in str(ctx.exception).lower() or "OPENAI_FREE_ONLY" in str(ctx.exception)
+        assert "no genuinely free" in str(ctx.exception).lower() or "OPENAI_FREE_ONLY" in str(
+            ctx.exception
+        )
 
     def test_free_only_true_rejects_all_models_in_streaming_path(self):
         """When OPENAI_FREE_ONLY is true, generate_completions_stream()
@@ -711,12 +756,15 @@ class TestFreeOnlyStreamingOverride(unittest.TestCase):
         )
         with self.assertRaises(RuntimeError) as ctx:
             list(gen)
-        assert "no genuinely free" in str(ctx.exception).lower() or "OPENAI_FREE_ONLY" in str(ctx.exception)
+        assert "no genuinely free" in str(ctx.exception).lower() or "OPENAI_FREE_ONLY" in str(
+            ctx.exception
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Service tier + reasoning_effort enum validation
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class TestServiceTierAndReasoningEffortEnums(unittest.TestCase):
     """Verify the enum values are populated and used correctly."""
@@ -740,6 +788,7 @@ class TestServiceTierAndReasoningEffortEnums(unittest.TestCase):
 # ─────────────────────────────────────────────────────────────────────────────
 # System → Developer role translation for reasoning models
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class TestSystemToDeveloperTranslation(unittest.TestCase):
     """For reasoning-capable models (gpt-5.x+, gpt-6.x, o-series),
@@ -792,21 +841,21 @@ class TestSystemToDeveloperTranslation(unittest.TestCase):
 # Plugin manifest validation
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestPluginManifest(unittest.TestCase):
     """The plugin.json should validate against the v0.2 schema and
     follow the same structure as the OpenRouter / ZAI / Gemini / HF plugins."""
 
     def test_manifest_is_v02_form(self):
-        import json
         from pathlib import Path
+
         from agentkthx.plugins._loader import (
             CANONICAL_SCHEMA,
-            EXT_NAMESPACE,
             _parse_manifest,
         )
+
         manifest_path = (
-            Path(__file__).resolve().parents[1]
-            / "agentkthx" / "plugins" / "openai" / "plugin.json"
+            Path(__file__).resolve().parents[1] / "agentkthx" / "plugins" / "openai" / "plugin.json"
         )
         assert manifest_path.exists(), f"Missing {manifest_path}"
         m = _parse_manifest(manifest_path, root_kind="builtin")
@@ -818,9 +867,9 @@ class TestPluginManifest(unittest.TestCase):
     def test_manifest_provides_openai_backend(self):
         import json
         from pathlib import Path
+
         manifest_path = (
-            Path(__file__).resolve().parents[1]
-            / "agentkthx" / "plugins" / "openai" / "plugin.json"
+            Path(__file__).resolve().parents[1] / "agentkthx" / "plugins" / "openai" / "plugin.json"
         )
         with open(manifest_path) as f:
             m = json.load(f)
@@ -835,9 +884,9 @@ class TestPluginManifest(unittest.TestCase):
         defaults defined in agentkthx/config.py."""
         import json
         from pathlib import Path
+
         manifest_path = (
-            Path(__file__).resolve().parents[1]
-            / "agentkthx" / "plugins" / "openai" / "plugin.json"
+            Path(__file__).resolve().parents[1] / "agentkthx" / "plugins" / "openai" / "plugin.json"
         )
         with open(manifest_path) as f:
             m = json.load(f)
@@ -854,6 +903,7 @@ class TestPluginManifest(unittest.TestCase):
 # Plugin discovery & loading integration
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestPluginDiscovery(unittest.TestCase):
     """The openai plugin should be discoverable and loadable
     via PluginManager alongside the other built-in plugins."""
@@ -865,9 +915,8 @@ class TestPluginDiscovery(unittest.TestCase):
         a redundant safety net to call out openai explicitly."""
         import json
         from pathlib import Path
-        plugins_dir = (
-            Path(__file__).resolve().parents[1] / "agentkthx" / "plugins"
-        )
+
+        plugins_dir = Path(__file__).resolve().parents[1] / "agentkthx" / "plugins"
         names = set()
         for entry in sorted(plugins_dir.iterdir()):
             mpath = entry / "plugin.json"
@@ -877,11 +926,19 @@ class TestPluginDiscovery(unittest.TestCase):
                 names.add(m["name"])
         assert "openai" in names
         # Verify the existing built-in plugins are still present
-        assert {"bitnet", "zai", "openrouter", "turboquant", "acp",
-                "test-plugin", "huggingface"} <= names
+        assert {
+            "bitnet",
+            "zai",
+            "openrouter",
+            "turboquant",
+            "acp",
+            "test-plugin",
+            "huggingface",
+        } <= names
 
     def test_plugin_manager_loads_openai(self):
         from agentkthx.plugins._loader import PluginManager
+
         os.environ["OPENAI_API_KEY"] = "sk-proj-fake_test_token_for_scaffold"
         try:
             pm = PluginManager()
@@ -904,6 +961,7 @@ class TestPluginDiscovery(unittest.TestCase):
 # R07.03 polish: _NON_CHAT_PATTERNS filter + expanded catalog
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestNonChatPatterns(unittest.TestCase):
     """The _NON_CHAT_PATTERNS filter should exclude obvious non-chat
     models (embeddings, TTS, image gen, video gen, moderation, ASR,
@@ -912,76 +970,136 @@ class TestNonChatPatterns(unittest.TestCase):
 
     def test_embeddings_filtered(self):
         from agentkthx.plugins.openai.openai import _is_chat_model
+
         for m in ("text-embedding-3-large", "text-embedding-3-small", "text-embedding-ada-002"):
             assert _is_chat_model(m) is False, f"{m} should be filtered as non-chat"
 
     def test_tts_filtered(self):
         from agentkthx.plugins.openai.openai import _is_chat_model
-        for m in ("tts-1", "tts-1-hd", "tts-1-1106", "gpt-4o-mini-tts", "gpt-4o-mini-tts-2025-12-15"):
+
+        for m in (
+            "tts-1",
+            "tts-1-hd",
+            "tts-1-1106",
+            "gpt-4o-mini-tts",
+            "gpt-4o-mini-tts-2025-12-15",
+        ):
             assert _is_chat_model(m) is False, f"{m} should be filtered as non-chat"
 
     def test_transcribe_filtered(self):
         from agentkthx.plugins.openai.openai import _is_chat_model
-        for m in ("gpt-4o-transcribe", "gpt-4o-transcribe-diarize",
-                  "gpt-4o-mini-transcribe", "gpt-transcribe",
-                  "gpt-live-transcribe", "gpt-4o-mini-transcribe-2025-03-20"):
+
+        for m in (
+            "gpt-4o-transcribe",
+            "gpt-4o-transcribe-diarize",
+            "gpt-4o-mini-transcribe",
+            "gpt-transcribe",
+            "gpt-live-transcribe",
+            "gpt-4o-mini-transcribe-2025-03-20",
+        ):
             assert _is_chat_model(m) is False, f"{m} should be filtered as non-chat"
 
     def test_whisper_filtered(self):
         from agentkthx.plugins.openai.openai import _is_chat_model
+
         assert _is_chat_model("whisper-1") is False
 
     def test_image_gen_filtered(self):
         from agentkthx.plugins.openai.openai import _is_chat_model
-        for m in ("gpt-image-1", "gpt-image-1-mini", "gpt-image-1.5",
-                  "gpt-image-2", "gpt-image-2.5-flare",
-                  "gpt-image-2.5-sunburst", "chatgpt-image-latest",
-                  "gpt-image-2-2026-04-21"):
+
+        for m in (
+            "gpt-image-1",
+            "gpt-image-1-mini",
+            "gpt-image-1.5",
+            "gpt-image-2",
+            "gpt-image-2.5-flare",
+            "gpt-image-2.5-sunburst",
+            "chatgpt-image-latest",
+            "gpt-image-2-2026-04-21",
+        ):
             assert _is_chat_model(m) is False, f"{m} should be filtered as non-chat"
 
     def test_sora_filtered(self):
         from agentkthx.plugins.openai.openai import _is_chat_model
+
         for m in ("sora-2", "sora-2-pro"):
             assert _is_chat_model(m) is False, f"{m} should be filtered as non-chat"
 
     def test_moderation_filtered(self):
         from agentkthx.plugins.openai.openai import _is_chat_model
+
         for m in ("omni-moderation-latest", "omni-moderation-2024-09-26"):
             assert _is_chat_model(m) is False, f"{m} should be filtered as non-chat"
 
     def test_legacy_completions_filtered(self):
         from agentkthx.plugins.openai.openai import _is_chat_model
+
         for m in ("babbage-002", "davinci-002"):
-            assert _is_chat_model(m) is False, f"{m} should be filtered as non-chat (legacy /completions, not /chat/completions)"
+            assert (
+                _is_chat_model(m) is False
+            ), f"{m} should be filtered as non-chat (legacy /completions, not /chat/completions)"
 
     def test_chat_models_pass_through(self):
         from agentkthx.plugins.openai.openai import _is_chat_model
+
         for m in (
-            "gpt-6-astra", "gpt-6-sol", "gpt-6-luna",
-            "gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.6-terra",
-            "gpt-5.5", "gpt-5.5-pro",
-            "gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-5-pro", "gpt-5-codex",
-            "gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano",
-            "gpt-3.5-turbo", "gpt-3.5-turbo-16k",
-            "o1", "o3", "o3-mini", "o4-mini",
+            "gpt-6-astra",
+            "gpt-6-sol",
+            "gpt-6-luna",
+            "gpt-5.6-sol",
+            "gpt-5.6-luna",
+            "gpt-5.6-terra",
+            "gpt-5.5",
+            "gpt-5.5-pro",
+            "gpt-5",
+            "gpt-5-mini",
+            "gpt-5-nano",
+            "gpt-5-pro",
+            "gpt-5-codex",
+            "gpt-4o",
+            "gpt-4o-mini",
+            "gpt-4.1",
+            "gpt-4.1-mini",
+            "gpt-4.1-nano",
+            "gpt-3.5-turbo",
+            "gpt-3.5-turbo-16k",
+            "o1",
+            "o3",
+            "o3-mini",
+            "o4-mini",
             "chat-latest",
-            "gpt-5.3-codex", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano", "gpt-5.4-pro",
+            "gpt-5.3-codex",
+            "gpt-5.4",
+            "gpt-5.4-mini",
+            "gpt-5.4-nano",
+            "gpt-5.4-pro",
         ):
             assert _is_chat_model(m) is True, f"{m} should pass through as chat-capable"
 
     def test_dated_snapshots_pass_through(self):
         from agentkthx.plugins.openai.openai import _is_chat_model
+
         for m in (
-            "gpt-4o-2024-05-13", "gpt-4o-2024-08-06", "gpt-4o-2024-11-20",
-            "gpt-5-2025-08-07", "gpt-5.4-2026-03-05",
-            "gpt-4o-mini-2024-07-18", "o3-2025-04-16", "o4-mini-2025-04-16",
+            "gpt-4o-2024-05-13",
+            "gpt-4o-2024-08-06",
+            "gpt-4o-2024-11-20",
+            "gpt-5-2025-08-07",
+            "gpt-5.4-2026-03-05",
+            "gpt-4o-mini-2024-07-18",
+            "o3-2025-04-16",
+            "o4-mini-2025-04-16",
         ):
-            assert _is_chat_model(m) is True, f"{m} should pass through (dated snapshot of chat model)"
+            assert (
+                _is_chat_model(m) is True
+            ), f"{m} should pass through (dated snapshot of chat model)"
 
     def test_search_preview_passes_through(self):
         from agentkthx.plugins.openai.openai import _is_chat_model
+
         for m in ("gpt-4o-search-preview", "gpt-4o-mini-search-preview", "gpt-5-search-api"):
-            assert _is_chat_model(m) is True, f"{m} should pass through (search-preview is chat-capable)"
+            assert (
+                _is_chat_model(m) is True
+            ), f"{m} should pass through (search-preview is chat-capable)"
 
 
 class TestExpandedCatalog(unittest.TestCase):
@@ -990,40 +1108,50 @@ class TestExpandedCatalog(unittest.TestCase):
 
     def test_catalog_includes_o_series(self):
         from agentkthx.plugins.openai.openai import OPENAI_MODELS
+
         for m in ("o1", "o3", "o3-mini", "o4-mini"):
             assert m in OPENAI_MODELS, f"{m} should be in expanded catalog"
 
     def test_catalog_includes_gpt5_family(self):
         from agentkthx.plugins.openai.openai import OPENAI_MODELS
+
         for m in ("gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-5-pro"):
             assert m in OPENAI_MODELS, f"{m} should be in expanded catalog"
 
     def test_catalog_includes_gpt56_daybreak_expanded(self):
         from agentkthx.plugins.openai.openai import OPENAI_MODELS
+
         for m in ("gpt-5.6-luna", "gpt-5.6-terra"):
-            assert m in OPENAI_MODELS, f"{m} should be in expanded catalog (discovered via live API)"
+            assert (
+                m in OPENAI_MODELS
+            ), f"{m} should be in expanded catalog (discovered via live API)"
 
     def test_catalog_includes_gpt54_expanded(self):
         from agentkthx.plugins.openai.openai import OPENAI_MODELS
+
         for m in ("gpt-5.4-mini", "gpt-5.4-nano", "gpt-5.4-pro"):
             assert m in OPENAI_MODELS, f"{m} should be in expanded catalog"
 
     def test_catalog_includes_gpt55_pro(self):
         from agentkthx.plugins.openai.openai import OPENAI_MODELS
+
         assert "gpt-5.5-pro" in OPENAI_MODELS, "gpt-5.5-pro should be in expanded catalog"
 
     def test_catalog_includes_gpt41_family(self):
         from agentkthx.plugins.openai.openai import OPENAI_MODELS
+
         for m in ("gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano"):
             assert m in OPENAI_MODELS, f"{m} should be in expanded catalog"
 
     def test_catalog_includes_legacy_gpt35(self):
         from agentkthx.plugins.openai.openai import OPENAI_MODELS
+
         for m in ("gpt-3.5-turbo", "gpt-3.5-turbo-16k"):
             assert m in OPENAI_MODELS, f"{m} should be in catalog (legacy but chat-capable)"
 
     def test_catalog_size_grew(self):
         from agentkthx.plugins.openai.openai import OPENAI_MODELS
+
         assert len(OPENAI_MODELS) >= 33, (
             f"Catalog should have grown to 33+ models after R07.03 polish, "
             f"got {len(OPENAI_MODELS)} (was 15 before)"

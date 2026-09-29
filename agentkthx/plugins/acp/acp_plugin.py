@@ -72,12 +72,11 @@ from __future__ import annotations
 
 import base64
 import json
-import random
 import time
-import urllib.request
 import urllib.error
+import urllib.request
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Callable, Generator
 
 # Default retry configuration
@@ -97,9 +96,8 @@ except ImportError:
 
 # Import centralized config
 from agentkthx.config import ACP_BASE_URL as DEFAULT_ACP_URL
-from agentkthx.config import ACP_USER as DEFAULT_ACP_USER
 from agentkthx.config import ACP_PASS as DEFAULT_ACP_PASS
-
+from agentkthx.config import ACP_USER as DEFAULT_ACP_USER
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # COST ESTIMATION (Merged from acp_streaming.py)
@@ -125,14 +123,15 @@ MODEL_COSTS = {
 @dataclass
 class CostTracker:
     """Track approximate costs for API calls."""
+
     input_tokens: int = 0
     output_tokens: int = 0
     model: str = "local"
-    
+
     @property
     def total_tokens(self) -> int:
         return self.input_tokens + self.output_tokens
-    
+
     @property
     def estimated_cost(self) -> float:
         """Return estimated cost in USD."""
@@ -140,7 +139,7 @@ class CostTracker:
         input_cost = (self.input_tokens / 1_000_000) * costs["input"]
         output_cost = (self.output_tokens / 1_000_000) * costs["output"]
         return input_cost + output_cost
-    
+
     def add(self, input_tokens: int, output_tokens: int):
         self.input_tokens += input_tokens
         self.output_tokens += output_tokens
@@ -149,12 +148,13 @@ class CostTracker:
 @dataclass
 class SessionHealth:
     """Track session health metrics."""
+
     acp_connected: bool = True
     last_successful_heartbeat: float = 0.0
     failed_requests: int = 0
     total_requests: int = 0
     last_error: str | None = None
-    
+
     @property
     def health_score(self) -> float:
         """Return 0.0-1.0 health score."""
@@ -162,7 +162,7 @@ class SessionHealth:
             return 1.0
         success_rate = 1.0 - (self.failed_requests / self.total_requests)
         return success_rate
-    
+
     @property
     def is_healthy(self) -> bool:
         return self.health_score > 0.8 and self.acp_connected
@@ -238,17 +238,21 @@ class ACPPlugin:
         endpoint: str | None = None,
     ):
         self.base_url = base_url if base_url else DEFAULT_ACP_URL
-        self.auth = base64.b64encode(f"{user or DEFAULT_ACP_USER}:{password or DEFAULT_ACP_PASS}".encode()).decode()
+        self.auth = base64.b64encode(
+            f"{user or DEFAULT_ACP_USER}:{password or DEFAULT_ACP_PASS}".encode()
+        ).decode()
         self.enabled = enabled
         self.on_stop = on_stop
-        self.on_hint = on_hint          # v1.0.3: Hints callback
-        self.on_nudge = on_nudge        # v1.0.3: Nudge callback
-        self.on_orphan = on_orphan      # v1.0.3: Orphan callback
+        self.on_hint = on_hint  # v1.0.3: Hints callback
+        self.on_nudge = on_nudge  # v1.0.3: Nudge callback
+        self.on_orphan = on_orphan  # v1.0.3: Orphan callback
         self.on_a2a_message = on_a2a_message  # v1.0.4: A2A message notification callback
         self.debug = debug
         self.agent_name = agent_name
         self.model_name = model_name
-        self._capabilities_override = capabilities  # Store for later, derive from tools if not provided
+        self._capabilities_override = (
+            capabilities  # Store for later, derive from tools if not provided
+        )
         self.endpoint = endpoint  # v1.0.4: A2A endpoint
 
         # 1.0.6: CSRF disabled by default per spec §4.2
@@ -432,7 +436,7 @@ class ACPPlugin:
             "jsonrpc": "2.0",
             "id": self._jsonrpc_id,
             "method": method,
-            "params": params or {}
+            "params": params or {},
         }
 
         headers = {
@@ -666,7 +670,7 @@ class ACPPlugin:
     def _process_response_fields(self, resp: dict) -> None:
         """
         Process ACP response fields: hints, orphan_warning, nudge, a2a.
-        
+
         This is called after every /api/action request to handle
         all the important response fields per ACP spec.
         """
@@ -681,7 +685,7 @@ class ACPPlugin:
                 self._log(f"⚠️ Loop detected: {hints.get('loop_count')} repetitions")
                 if hints.get("suggestion"):
                     self._log(f"Suggestion: {hints['suggestion']}")
-            
+
             # v1.0.4: Process A2A hints (pending messages notification)
             a2a_hints = hints.get("a2a")
             if a2a_hints:
@@ -722,10 +726,14 @@ class ACPPlugin:
         for orphan in orphans:
             orphan_id = orphan.get("id")
             if orphan_id:
-                self._request("/api/complete", "POST", {
-                    "activity_id": orphan_id,
-                    "result": "[Completed by orphan handler]",
-                })
+                self._request(
+                    "/api/complete",
+                    "POST",
+                    {
+                        "activity_id": orphan_id,
+                        "result": "[Completed by orphan handler]",
+                    },
+                )
                 self._log(f"Completed orphan: {orphan_id}")
 
     # ------------------------------------------------------------------ #
@@ -771,12 +779,16 @@ class ACPPlugin:
         cmd_truncated = command[:500] if command else ""
         preview_truncated = output_preview[:200] if output_preview else ""
 
-        return self._request("/api/shell/add", "POST", {
-            "command": cmd_truncated,
-            "status": "error" if error else status,
-            "output_preview": preview_truncated,
-            "metadata": metadata,
-        })
+        return self._request(
+            "/api/shell/add",
+            "POST",
+            {
+                "command": cmd_truncated,
+                "status": "error" if error else status,
+                "output_preview": preview_truncated,
+                "metadata": metadata,
+            },
+        )
 
     def check_nudge(self) -> dict:
         """
@@ -846,7 +858,7 @@ class ACPPlugin:
 
         step_type = getattr(step, "type", None)
         # Handle both enum and string types
-        step_type_value = step_type.value if hasattr(step_type, 'value') else str(step_type)
+        step_type_value = step_type.value if hasattr(step_type, "value") else str(step_type)
         self._log(f"Step {self._step_count}: type={step_type_value}")
 
         # Handle different step types
@@ -862,13 +874,13 @@ class ACPPlugin:
     def _handle_tool_call(self, step: StepResult) -> None:
         """
         Log a tool call to ACP using combined /api/action endpoint.
-        
+
         Uses the recommended combined endpoint that can complete previous
         activity AND start new one in a single request (more efficient).
         """
         tool_call = getattr(step, "tool_call", None)
         tool_result = getattr(step, "tool_result", None)
-        
+
         # Extract tool name and args from tool_call if available
         if tool_call:
             tool_name = tool_call.name
@@ -889,13 +901,17 @@ class ACPPlugin:
 
         # Use combined /api/action endpoint (recommended per spec)
         # This checks stop_flag, starts new activity, returns hints/nudge/orphans
-        resp = self._request("/api/action", "POST", {
-            "action": action,
-            "target": target,
-            "details": f"AgentKthx tool: {tool_name}",
-            "priority": "medium",
-            "metadata": metadata,
-        })
+        resp = self._request(
+            "/api/action",
+            "POST",
+            {
+                "action": action,
+                "target": target,
+                "details": f"AgentKthx tool: {tool_name}",
+                "priority": "medium",
+                "metadata": metadata,
+            },
+        )
 
         # Process response fields (hints, orphan_warning, nudge)
         self._process_response_fields(resp)
@@ -918,13 +934,13 @@ class ACPPlugin:
     def _handle_tool_result(self, step: StepResult) -> None:
         """
         Complete the current activity in ACP.
-        
+
         Uses combined /api/action endpoint for efficiency when possible,
         falls back to /api/complete for final completion.
         """
         content = getattr(step, "content", "")
         tool_result = getattr(step, "tool_result", None)
-        
+
         # Use tool_result if available, otherwise content
         result = str(tool_result) if tool_result is not None else content
 
@@ -949,12 +965,16 @@ class ACPPlugin:
             error = result[:200]  # Truncate error
 
         # Complete using dedicated complete endpoint
-        resp = self._request("/api/complete", "POST", {
-            "activity_id": activity_id,
-            "result": result[:500] if result else None,
-            "error": error,
-            "content_size": len(result) if result else 0,
-        })
+        self._request(
+            "/api/complete",
+            "POST",
+            {
+                "activity_id": activity_id,
+                "result": result[:500] if result else None,
+                "error": error,
+                "content_size": len(result) if result else 0,
+            },
+        )
 
         self._log(f"Completed activity: {activity_id}")
 
@@ -967,7 +987,7 @@ class ACPPlugin:
     def _handle_thought(self, step: StepResult) -> None:
         """
         Log agent thought process.
-        
+
         v1.0.3: Could optionally log as CHAT action for token tracking,
         but this may be noisy. Currently just debug logs.
         """
@@ -988,19 +1008,27 @@ class ACPPlugin:
         self.log_assistant_message(content)
 
         # Also log as note for persistence
-        self._request("/api/notes/add", "POST", {
-            "category": "context",
-            "content": f"AgentKthx final: {content[:2000]}",
-            "importance": "high",
-        })
+        self._request(
+            "/api/notes/add",
+            "POST",
+            {
+                "category": "context",
+                "content": f"AgentKthx final: {content[:2000]}",
+                "importance": "high",
+            },
+        )
 
         # Complete any orphaned activities
         while self._activity_stack:
             orphan_id = self._activity_stack.pop()
-            self._request("/api/complete", "POST", {
-                "activity_id": orphan_id,
-                "result": "[Completed by final handler]",
-            })
+            self._request(
+                "/api/complete",
+                "POST",
+                {
+                    "activity_id": orphan_id,
+                    "result": "[Completed by final handler]",
+                },
+            )
 
     def _format_target(self, tool_name: str, args: dict) -> str:
         """Format tool arguments as a target string for ACP."""
@@ -1078,13 +1106,17 @@ class ACPPlugin:
         preview = content[:200] if content else ""
 
         # Create activity - include full content in details (up to 4000 chars)
-        resp = self._request("/api/action", "POST", {
-            "action": "CHAT",
-            "target": f"{role.title()}: {preview[:50]}...",
-            "details": content[:4000] if content else "",
-            "priority": "normal",
-            "metadata": metadata,
-        })
+        resp = self._request(
+            "/api/action",
+            "POST",
+            {
+                "action": "CHAT",
+                "target": f"{role.title()}: {preview[:50]}...",
+                "details": content[:4000] if content else "",
+                "priority": "normal",
+                "metadata": metadata,
+            },
+        )
 
         # Process response fields
         self._process_response_fields(resp)
@@ -1092,10 +1124,14 @@ class ACPPlugin:
         activity_id = resp.get("activity_id")
         if activity_id and complete:
             # Complete immediately for non-streaming
-            self._request("/api/complete", "POST", {
-                "activity_id": activity_id,
-                "result": content[:2000] if content else "",
-            })
+            self._request(
+                "/api/complete",
+                "POST",
+                {
+                    "activity_id": activity_id,
+                    "result": content[:2000] if content else "",
+                },
+            )
             self._log(f"Logged {role} message")
 
         return resp
@@ -1124,7 +1160,7 @@ class ACPPlugin:
     def set_token_budget(self, budget: int, on_exceeded: Callable[[int, int], None] | None = None):
         """
         Set token budget limit for this session.
-        
+
         Parameters
         ----------
         budget : int
@@ -1146,20 +1182,20 @@ class ACPPlugin:
     def track_operation(self, action: str, target: str) -> Generator[str | None, None, None]:
         """
         Context manager for tracking an operation.
-        
+
         Usage:
             with acp.track_operation("READ", "/path/to/file") as activity_id:
                 # do work
                 result = read_file("/path/to/file")
             # Activity automatically completed on exit
-        
+
         Parameters
         ----------
         action : str
             ACP action type (READ, WRITE, BASH, etc.)
         target : str
             Target string (file path, command, etc.)
-        
+
         Yields
         ------
         str | None
@@ -1167,27 +1203,30 @@ class ACPPlugin:
         """
         activity_id = None
         start_time = time.time()
-        
+
         # Start activity
-        resp = self._request("/api/action", "POST", {
-            "action": action,
-            "target": target[:200],
-            "details": f"Tracked operation: {action}",
-            "priority": "medium",
-            "metadata": {"agent_name": self.agent_name}
-        })
+        resp = self._request(
+            "/api/action",
+            "POST",
+            {
+                "action": action,
+                "target": target[:200],
+                "details": f"Tracked operation: {action}",
+                "priority": "medium",
+                "metadata": {"agent_name": self.agent_name},
+            },
+        )
         activity_id = resp.get("activity_id")
         if activity_id:
             self._activity_stack.append(activity_id)
-        
+
         try:
             yield activity_id
         except Exception as e:
             if activity_id:
-                self._request("/api/complete", "POST", {
-                    "activity_id": activity_id,
-                    "result": f"Error: {e}"
-                })
+                self._request(
+                    "/api/complete", "POST", {"activity_id": activity_id, "result": f"Error: {e}"}
+                )
                 if activity_id in self._activity_stack:
                     self._activity_stack.remove(activity_id)
             raise
@@ -1195,10 +1234,11 @@ class ACPPlugin:
             # Completed successfully
             if activity_id:
                 elapsed = time.time() - start_time
-                self._request("/api/complete", "POST", {
-                    "activity_id": activity_id,
-                    "result": f"Completed in {elapsed:.1f}s"
-                })
+                self._request(
+                    "/api/complete",
+                    "POST",
+                    {"activity_id": activity_id, "result": f"Completed in {elapsed:.1f}s"},
+                )
                 if activity_id in self._activity_stack:
                     self._activity_stack.remove(activity_id)
 
@@ -1206,7 +1246,7 @@ class ACPPlugin:
     def summary(self) -> dict:
         """
         Get plugin session summary.
-        
+
         Returns
         -------
         dict
@@ -1231,7 +1271,7 @@ class ACPPlugin:
 
     def sync_todos(self, todos: list[dict]) -> dict:
         """Sync TODO list to ACP.
-        
+
         v1.0.3: Each TODO can include metadata with agent_name, tool, skill.
         """
         # Ensure each todo has metadata with agent attribution
@@ -1298,9 +1338,13 @@ class ACPPlugin:
                 op["details"] = act["details"]
             operations.append(op)
 
-        resp = self._request("/api/activity/batch", "POST", {
-            "operations": operations,
-        })
+        resp = self._request(
+            "/api/activity/batch",
+            "POST",
+            {
+                "operations": operations,
+            },
+        )
 
         # Process response fields
         self._process_response_fields(resp)
@@ -1357,16 +1401,18 @@ class ACPPlugin:
                 op["error"] = comp["error"]
             operations.append(op)
 
-        resp = self._request("/api/activity/batch", "POST", {
-            "operations": operations,
-        })
+        resp = self._request(
+            "/api/activity/batch",
+            "POST",
+            {
+                "operations": operations,
+            },
+        )
 
         # Remove from activity stack
         if resp.get("success"):
             completed_ids = {c.get("activity_id") for c in completions}
-            self._activity_stack = [
-                aid for aid in self._activity_stack if aid not in completed_ids
-            ]
+            self._activity_stack = [aid for aid in self._activity_stack if aid not in completed_ids]
 
         return resp
 
@@ -1410,9 +1456,13 @@ class ACPPlugin:
             if op.get("type") == "start":
                 op["metadata"] = self._build_metadata(op.get("tool"))
 
-        resp = self._request("/api/activity/batch", "POST", {
-            "operations": operations,
-        })
+        resp = self._request(
+            "/api/activity/batch",
+            "POST",
+            {
+                "operations": operations,
+            },
+        )
 
         self._process_response_fields(resp)
 
@@ -1471,10 +1521,14 @@ class ACPPlugin:
         # Unregister from A2A first (v1.0.4)
         self.a2a_unregister()
 
-        resp = self._request("/api/shutdown", "POST", {
-            "reason": reason,
-            "export_summary": export_summary,
-        })
+        resp = self._request(
+            "/api/shutdown",
+            "POST",
+            {
+                "reason": reason,
+                "export_summary": export_summary,
+            },
+        )
 
         self._log(f"Shutdown requested: {reason}")
 
@@ -1510,11 +1564,15 @@ class ACPPlugin:
         >>> acp.add_todo("Fix the login bug", priority="high")
         >>> acp.add_todo("Run tests", priority="low", status="in_progress")
         """
-        metadata = self._build_metadata()
-        return self._request("/api/todos/add", "POST", {
-            "todo": {"content": content, "priority": priority, "status": status},
-            "agent_name": self.agent_name,
-        })
+        self._build_metadata()
+        return self._request(
+            "/api/todos/add",
+            "POST",
+            {
+                "todo": {"content": content, "priority": priority, "status": status},
+                "agent_name": self.agent_name,
+            },
+        )
 
     def bootstrap(self, claim_primary: bool = True) -> dict:
         """
@@ -1564,20 +1622,29 @@ class ACPPlugin:
 
         # 3. Log bootstrap activity (always, regardless of primary claim)
         if not result["stop_flag"]:
-            resp = self._request("/api/action", "POST", {
-                "action": "CHAT",
-                "target": f"{self.agent_name}: Session bootstrap",
-                "details": f"Connecting to ACP session" + ("(claiming primary)" if claim_primary else "(secondary agent)"),
-                "metadata": self._build_metadata(),
-            })
+            resp = self._request(
+                "/api/action",
+                "POST",
+                {
+                    "action": "CHAT",
+                    "target": f"{self.agent_name}: Session bootstrap",
+                    "details": "Connecting to ACP session"
+                    + ("(claiming primary)" if claim_primary else "(secondary agent)"),
+                    "metadata": self._build_metadata(),
+                },
+            )
             self._process_response_fields(resp)
             if resp.get("success") and resp.get("activity_id"):
                 # Complete immediately
-                self._request("/api/complete", "POST", {
-                    "activity_id": resp["activity_id"],
-                    "result": "Bootstrap complete",
-                })
-                self._log(f"Bootstrap: Logged bootstrap activity")
+                self._request(
+                    "/api/complete",
+                    "POST",
+                    {
+                        "activity_id": resp["activity_id"],
+                        "result": "Bootstrap complete",
+                    },
+                )
+                self._log("Bootstrap: Logged bootstrap activity")
 
         # 4. Handle primary agent claim
         if claim_primary and not result["stop_flag"]:
@@ -1585,10 +1652,10 @@ class ACPPlugin:
             if current_primary is None:
                 # Try to claim primary via bootstrap activity
                 result["primary_claimed"] = True  # We were first to log
-                self._log(f"Bootstrap: Claimed primary agent status")
+                self._log("Bootstrap: Claimed primary agent status")
             elif current_primary == self.agent_name:
                 result["primary_claimed"] = True
-                self._log(f"Bootstrap: Already primary agent")
+                self._log("Bootstrap: Already primary agent")
             else:
                 result["warnings"].append(f"Primary agent is {current_primary}")
                 self._log(f"Bootstrap: Primary agent is {current_primary}")
@@ -1598,7 +1665,7 @@ class ACPPlugin:
             a2a_result = self.a2a_register()
             result["a2a_registered"] = a2a_result.get("success", False)
             if a2a_result.get("success"):
-                self._log(f"Bootstrap: Registered with A2A")
+                self._log("Bootstrap: Registered with A2A")
 
         return result
 
@@ -1639,7 +1706,7 @@ class ACPPlugin:
 
         # Get skills (custom or auto-generated)
         skills = self.get_skills()
-        
+
         params = {
             "agent_name": self.agent_name,
             "capabilities": self.capabilities,
@@ -1679,9 +1746,13 @@ class ACPPlugin:
         if not self.enabled:
             return {"success": False, "error": "Plugin disabled"}
 
-        resp = self._request("/api/agents/unregister", "POST", {
-            "agent_name": self.agent_name,
-        })
+        resp = self._request(
+            "/api/agents/unregister",
+            "POST",
+            {
+                "agent_name": self.agent_name,
+            },
+        )
 
         if resp.get("success"):
             self._log(f"A2A: Unregistered {self.agent_name}")
@@ -1754,7 +1825,7 @@ class ACPPlugin:
                     "action": action,
                     "target_agent": to_agent,
                     "priority": priority,  # str: "normal"|"high"|"urgent" per spec §3.12
-                }
+                },
             }
 
             resp = self._jsonrpc_request("SendMessage", {"message": message})
@@ -1860,12 +1931,7 @@ class _BatchContext:
         **kwargs
             Additional fields (content_size, priority, etc.)
         """
-        self._activities.append({
-            "action": action,
-            "target": target,
-            "details": details,
-            **kwargs
-        })
+        self._activities.append({"action": action, "target": target, "details": details, **kwargs})
 
     def add_read(self, path: str, content_size: int = 0) -> None:
         """Add a READ activity for a file."""
@@ -1909,16 +1975,16 @@ class _BatchContext:
         # Start all activities in batch
         result = self._acp.batch_start(self._activities)
         self._results = result.get("results", [])
-        self._activity_ids = [
-            r.get("activity_id") for r in self._results if r.get("activity_id")
-        ]
+        self._activity_ids = [r.get("activity_id") for r in self._results if r.get("activity_id")]
 
         # Track activities
         for aid in self._activity_ids:
             if aid:
                 self._acp._activity_stack.append(aid)
 
-        self._acp._log(f"Batch started: {len(self._activity_ids)} activities for '{self._description}'")
+        self._acp._log(
+            f"Batch started: {len(self._activity_ids)} activities for '{self._description}'"
+        )
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -1931,10 +1997,12 @@ class _BatchContext:
             completions = []
             for aid in self._activity_ids:
                 result = "Completed" if exc_type is None else f"Error: {exc_val}"
-                completions.append({
-                    "activity_id": aid,
-                    "result": result,
-                })
+                completions.append(
+                    {
+                        "activity_id": aid,
+                        "result": result,
+                    }
+                )
 
             self._acp.batch_complete(completions)
             self._acp._log(f"Batch completed: {len(self._activity_ids)} activities")

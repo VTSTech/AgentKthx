@@ -30,17 +30,16 @@ from agentkthx.core.agentic_loop import _LoopState
 from agentkthx.core.api_resilience import is_transient_api_error
 from agentkthx.core.error_recovery import is_error_result
 from agentkthx.core.memory import Memory, MemoryConfig, _estimate_tokens
+from agentkthx.core.models import Tool
 from agentkthx.core.openresponses import ResponseStatus
 from agentkthx.core.tool_parse import ToolParser
-from agentkthx.core.models import Tool, ToolParam
 from agentkthx.tools import make_builtin_registry
-
 from tests.test_loop_resilience import StubBackend
-
 
 # ============================================================================
 # ROB-01 — Ctrl+C during tool execution must terminate the whole run
 # ============================================================================
+
 
 def _make_interrupt_tool() -> Tool:
     """A tool whose execution raises KeyboardInterrupt (user hit Ctrl+C)."""
@@ -74,12 +73,14 @@ class TestROB01CancellationPropagates:
     def test_ctrl_c_during_tool_exec_stops_run(self, monkeypatch):
         """The outer step loop must NOT call the model again after a
         cancellation during tool execution (pre-fix: half-cancelled run)."""
-        agent, backend = _make_agent([
-            {"content": "Action: interrupt\nAction Input: {}"},
-            # If the bug regresses, the outer loop samples this and keeps
-            # running with a cancelled response in hand.
-            {"content": "Final Answer: ran anyway"},
-        ])
+        agent, backend = _make_agent(
+            [
+                {"content": "Action: interrupt\nAction Input: {}"},
+                # If the bug regresses, the outer loop samples this and keeps
+                # running with a cancelled response in hand.
+                {"content": "Final Answer: ran anyway"},
+            ]
+        )
         result = agent.run("hi")
 
         assert result.success is False
@@ -89,7 +90,8 @@ class TestROB01CancellationPropagates:
             "— the outer loop continued past the cancellation (ROB-01 regression)"
         )
         cancel_steps = [
-            s for s in result.steps
+            s
+            for s in result.steps
             if getattr(s, "error", None) == "Cancelled by user during tool execution"
         ]
         assert cancel_steps, "cancellation ERROR step missing from result.steps"
@@ -97,10 +99,12 @@ class TestROB01CancellationPropagates:
     def test_cancelled_response_stays_cancelled(self, monkeypatch):
         """The stored Response keeps CANCELLED status — the post-cancellation
         finalize path must not flip it to COMPLETED."""
-        agent, _ = _make_agent([
-            {"content": "Action: interrupt\nAction Input: {}"},
-            {"content": "Final Answer: ran anyway"},
-        ])
+        agent, _ = _make_agent(
+            [
+                {"content": "Action: interrupt\nAction Input: {}"},
+                {"content": "Final Answer: ran anyway"},
+            ]
+        )
         agent.run("hi")
 
         assert agent._response_history, "no response stored in history"
@@ -110,19 +114,20 @@ class TestROB01CancellationPropagates:
     def test_history_stays_api_valid_after_cancel(self, monkeypatch):
         """After the cancelled run, memory must still be a legal
         ChatCompletions sequence (no dangling tool_calls)."""
-        agent, _ = _make_agent([
-            {"content": "Action: interrupt\nAction Input: {}"},
-            {"content": "Final Answer: ran anyway"},
-        ])
+        agent, _ = _make_agent(
+            [
+                {"content": "Action: interrupt\nAction Input: {}"},
+                {"content": "Final Answer: ran anyway"},
+            ]
+        )
         agent.run("hi")
 
         msgs = agent.memory.get_messages()
         for msg in msgs:
-            for tc in (msg.get("tool_calls") or []):
+            for tc in msg.get("tool_calls") or []:
                 cid = tc.get("id")
                 assert any(
-                    m.get("role") == "tool" and m.get("tool_call_id") == cid
-                    for m in msgs
+                    m.get("role") == "tool" and m.get("tool_call_id") == cid for m in msgs
                 ), f"dangling tool_call {cid} after cancelled run"
 
     def test_terminated_flag_is_what_the_caller_checks(self):
@@ -139,30 +144,37 @@ class TestROB01CancellationPropagates:
 # ROB-07 — alternative traceback framings are recognized as errors
 # ============================================================================
 
+
 class TestROB07TracebackFirstLineFormats:
-    @pytest.mark.parametrize("first_line", [
-        # Exception-chain headers (exception chains in python_repl output,
-        # typically appearing as the first line after output clipping)
-        "During handling of the above exception, another exception occurred:",
-        "  During handling of the above exception, another exception occurred:",
-        "The above exception was the direct cause of the following exception:",
-        # Truncated tracebacks whose captured head is a bare File frame
-        '  File "/tmp/audit_script.py", line 42, in <module>',
-        'File "/usr/lib/python3.12/runpy.py", line 198, in _run_module_as_main',
-        # The classic full header (pre-existing behavior — keep pinned)
-        "Traceback (most recent call last):",
-    ])
+    @pytest.mark.parametrize(
+        "first_line",
+        [
+            # Exception-chain headers (exception chains in python_repl output,
+            # typically appearing as the first line after output clipping)
+            "During handling of the above exception, another exception occurred:",
+            "  During handling of the above exception, another exception occurred:",
+            "The above exception was the direct cause of the following exception:",
+            # Truncated tracebacks whose captured head is a bare File frame
+            '  File "/tmp/audit_script.py", line 42, in <module>',
+            'File "/usr/lib/python3.12/runpy.py", line 198, in _run_module_as_main',
+            # The classic full header (pre-existing behavior — keep pinned)
+            "Traceback (most recent call last):",
+        ],
+    )
     def test_traceback_formats_classified_as_errors(self, first_line):
         assert is_error_result(first_line) is True
 
-    @pytest.mark.parametrize("first_line", [
-        # Prose containing the same words must NOT be misclassified
-        "Filed a report about the incident",
-        'The file "notes.txt" contains the requested data',
-        'Profile "settings" updated successfully',
-        "total 124\ndrwxrwxr-x 14 vtstech vtstech",
-        "scanned tree\n(note: File not found: x was expected)",
-    ])
+    @pytest.mark.parametrize(
+        "first_line",
+        [
+            # Prose containing the same words must NOT be misclassified
+            "Filed a report about the incident",
+            'The file "notes.txt" contains the requested data',
+            'Profile "settings" updated successfully',
+            "total 124\ndrwxrwxr-x 14 vtstech vtstech",
+            "scanned tree\n(note: File not found: x was expected)",
+        ],
+    )
     def test_prose_not_misclassified(self, first_line):
         assert is_error_result(first_line) is False
 
@@ -181,6 +193,7 @@ class TestROB07TracebackFirstLineFormats:
 # ============================================================================
 # ROB-08 — MemoryConfig.max_tokens is a real (opt-in) token-based tier
 # ============================================================================
+
 
 class TestROB08TokenPruningTier:
     def test_tier_disabled_by_default(self):
@@ -224,18 +237,18 @@ class TestROB08TokenPruningTier:
         """A tool result whose announcing assistant call was dropped must
         not start the kept window (and no orphan results overall)."""
         m = Memory(MemoryConfig(max_messages=1000, max_tokens=300))
-        m.add_tool_call("assistant", "calling", [
-            {"id": "c1", "name": "shell", "arguments": {"command": "ls"}}
-        ])
+        m.add_tool_call(
+            "assistant", "calling", [{"id": "c1", "name": "shell", "arguments": {"command": "ls"}}]
+        )
         m.add_tool_result("c1", "shell", "out")
         for i in range(10):
             m.add("user", "X" * 400 + f" msg {i}")
 
         msgs = m.get_messages()
         non_system = [x for x in msgs if x["role"] != "system"]
-        assert non_system[0]["role"] != "tool", (
-            "window starts with an orphan tool result (pairing unsafe)"
-        )
+        assert (
+            non_system[0]["role"] != "tool"
+        ), "window starts with an orphan tool result (pairing unsafe)"
 
     def test_large_budget_leaves_history_untouched(self):
         """The pattern used by the compaction test-suite
@@ -276,16 +289,20 @@ class TestROB08TokenPruningTier:
 # ROB-10 — permanent-error body patterns beat the "500" transient marker
 # ============================================================================
 
+
 class TestROB10PermanentBodyPatterns:
-    @pytest.mark.parametrize("msg", [
-        # 500 with a JSON body naming a permanent condition (the exact
-        # shape backends raise: RuntimeError(f"... HTTP error 500: {body}"))
-        'ZAI HTTP error 500: {"error":{"type":"invalid_request_error",'
-        '"code":"context_length_exceeded"}}',
-        'OpenRouter API error 500: {"error":{"code":"model_not_found"}}',
-        'HTTP error 500: {"error":{"code":"invalid_api_key"}}',
-        'Provider error 500: {"error":{"type":"invalid_request_error"}}',
-    ])
+    @pytest.mark.parametrize(
+        "msg",
+        [
+            # 500 with a JSON body naming a permanent condition (the exact
+            # shape backends raise: RuntimeError(f"... HTTP error 500: {body}"))
+            'ZAI HTTP error 500: {"error":{"type":"invalid_request_error",'
+            '"code":"context_length_exceeded"}}',
+            'OpenRouter API error 500: {"error":{"code":"model_not_found"}}',
+            'HTTP error 500: {"error":{"code":"invalid_api_key"}}',
+            'Provider error 500: {"error":{"type":"invalid_request_error"}}',
+        ],
+    )
     def test_500_with_permanent_body_is_permanent(self, msg):
         assert is_transient_api_error(RuntimeError(msg)) is False
 
@@ -293,20 +310,27 @@ class TestROB10PermanentBodyPatterns:
         """The optional second arg: a caller holding the raw body can pass
         it even when the exception message omits it."""
         exc = RuntimeError("HTTP 500")
-        assert is_transient_api_error(
-            exc, body='{"error":{"code":"context_length_exceeded"}}') is False
-        assert is_transient_api_error(
-            exc, body='{"error":{"code":"model_not_found"}}') is False
-        assert is_transient_api_error(
-            exc, body='{"error":{"type":"invalid_request_error"}}') is False
+        assert (
+            is_transient_api_error(exc, body='{"error":{"code":"context_length_exceeded"}}')
+            is False
+        )
+        assert is_transient_api_error(exc, body='{"error":{"code":"model_not_found"}}') is False
+        assert (
+            is_transient_api_error(exc, body='{"error":{"type":"invalid_request_error"}}') is False
+        )
 
     def test_plain_500_stays_transient(self):
         """A genuine server-side 500 (clean body) is still retryable."""
-        assert is_transient_api_error(
-            RuntimeError("ZAI HTTP error 500: Internal Server Error")) is True
-        assert is_transient_api_error(
-            RuntimeError("HTTP 500"),
-            body='{"error":{"message":"please retry soon"}}') is True
+        assert (
+            is_transient_api_error(RuntimeError("ZAI HTTP error 500: Internal Server Error"))
+            is True
+        )
+        assert (
+            is_transient_api_error(
+                RuntimeError("HTTP 500"), body='{"error":{"message":"please retry soon"}}'
+            )
+            is True
+        )
 
     def test_body_does_not_create_transient_classification(self):
         """The body is only consulted for PERMANENT patterns — a transient
@@ -317,15 +341,17 @@ class TestROB10PermanentBodyPatterns:
 
     def test_prose_forms_still_work(self):
         """Pre-existing prose markers keep winning (regression guard)."""
-        assert is_transient_api_error(
-            RuntimeError("HTTP 500: model not found on this deployment")) is False
-        assert is_transient_api_error(
-            RuntimeError("HTTP 500: invalid request body")) is False
+        assert (
+            is_transient_api_error(RuntimeError("HTTP 500: model not found on this deployment"))
+            is False
+        )
+        assert is_transient_api_error(RuntimeError("HTTP 500: invalid request body")) is False
 
 
 # ============================================================================
 # ROB-13 — the tool-parse fallback chain is logged under debug
 # ============================================================================
+
 
 class TestROB13ParseFailureChain:
     TEXT = "Action: shell\nAction Input: {definitely-not-json"

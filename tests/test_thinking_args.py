@@ -25,12 +25,13 @@ Written by VTSTech — https://www.vts-tech.org
 from __future__ import annotations
 
 import argparse
-import pytest
 
+import pytest
 
 # ─────────────────────────────────────────────────────────────────────
 # Fixtures
 # ─────────────────────────────────────────────────────────────────────
+
 
 @pytest.fixture(autouse=True)
 def _set_dummy_api_keys(monkeypatch):
@@ -43,9 +44,11 @@ def _set_dummy_api_keys(monkeypatch):
 # 1. ThinkingLevel enum
 # ─────────────────────────────────────────────────────────────────────
 
+
 def test_thinking_level_enum_exists():
     """ThinkingLevel enum should be defined in core.types."""
     from agentkthx.core.types import ThinkingLevel
+
     assert hasattr(ThinkingLevel, "OFF")
     assert hasattr(ThinkingLevel, "AUTO")
     assert hasattr(ThinkingLevel, "LOW")
@@ -56,6 +59,7 @@ def test_thinking_level_enum_exists():
 def test_thinking_level_values():
     """ThinkingLevel members should have lowercase string values."""
     from agentkthx.core.types import ThinkingLevel
+
     assert ThinkingLevel.OFF.value == "off"
     assert ThinkingLevel.AUTO.value == "auto"
     assert ThinkingLevel.LOW.value == "low"
@@ -66,6 +70,7 @@ def test_thinking_level_values():
 def test_thinking_level_parses_from_string():
     """ThinkingLevel('off') etc. should construct correctly."""
     from agentkthx.core.types import ThinkingLevel
+
     assert ThinkingLevel("off") == ThinkingLevel.OFF
     assert ThinkingLevel("auto") == ThinkingLevel.AUTO
     assert ThinkingLevel("medium") == ThinkingLevel.MEDIUM
@@ -75,51 +80,60 @@ def test_thinking_level_parses_from_string():
 # 2. parse_thinking_arg()
 # ─────────────────────────────────────────────────────────────────────
 
+
 def test_parse_thinking_arg_off():
     """'off' should map to (False, None) — disable thinking."""
     from agentkthx.core.types import parse_thinking_arg
+
     assert parse_thinking_arg("off") == (False, None)
 
 
 def test_parse_thinking_arg_auto():
     """'auto' should map to (None, None) — let model decide."""
     from agentkthx.core.types import parse_thinking_arg
+
     assert parse_thinking_arg("auto") == (None, None)
 
 
 def test_parse_thinking_arg_low():
     """'low' should map to (True, 'low')."""
     from agentkthx.core.types import parse_thinking_arg
+
     assert parse_thinking_arg("low") == (True, "low")
 
 
 def test_parse_thinking_arg_medium():
     """'medium' should map to (True, 'medium')."""
     from agentkthx.core.types import parse_thinking_arg
+
     assert parse_thinking_arg("medium") == (True, "medium")
 
 
 def test_parse_thinking_arg_high():
     """'high' should map to (True, 'high')."""
     from agentkthx.core.types import parse_thinking_arg
+
     assert parse_thinking_arg("high") == (True, "high")
 
 
 def test_parse_thinking_arg_none():
     """None should map to (None, None) — default behavior."""
     from agentkthx.core.types import parse_thinking_arg
+
     assert parse_thinking_arg(None) == (None, None)
 
 
 def test_parse_thinking_arg_empty_string():
     """Empty string should map to (None, None)."""
     from agentkthx.core.types import parse_thinking_arg
+
     assert parse_thinking_arg("") == (None, None)
 
 
 def test_parse_thinking_arg_case_insensitive():
     """Should accept uppercase / mixed case."""
     from agentkthx.core.types import parse_thinking_arg
+
     assert parse_thinking_arg("OFF") == (False, None)
     assert parse_thinking_arg("High") == (True, "high")
 
@@ -127,6 +141,7 @@ def test_parse_thinking_arg_case_insensitive():
 def test_parse_thinking_arg_unknown_falls_back_to_auto():
     """Unknown strings should fall back to (None, None), not raise."""
     from agentkthx.core.types import parse_thinking_arg
+
     assert parse_thinking_arg("bogus") == (None, None)
     assert parse_thinking_arg("turbo") == (None, None)
 
@@ -134,6 +149,7 @@ def test_parse_thinking_arg_unknown_falls_back_to_auto():
 def test_parse_thinking_arg_accepts_enum():
     """Should accept ThinkingLevel enum values directly."""
     from agentkthx.core.types import ThinkingLevel, parse_thinking_arg
+
     assert parse_thinking_arg(ThinkingLevel.OFF) == (False, None)
     assert parse_thinking_arg(ThinkingLevel.HIGH) == (True, "high")
     assert parse_thinking_arg(ThinkingLevel.AUTO) == (None, None)
@@ -143,9 +159,11 @@ def test_parse_thinking_arg_accepts_enum():
 # 3. CLI --thinking accepts valid values
 # ─────────────────────────────────────────────────────────────────────
 
+
 def _make_parser():
     """Build a parser with add_agent_args."""
     from agentkthx.shared_args import add_agent_args
+
     parser = argparse.ArgumentParser()
     add_agent_args(parser, tools_default="calculator")
     return parser
@@ -176,6 +194,7 @@ def test_cli_thinking_rejects_invalid_value():
 def test_cli_thinking_choices_in_help():
     """Help string should mention all 5 levels."""
     from agentkthx.shared_args import add_agent_args
+
     parser = argparse.ArgumentParser()
     add_agent_args(parser, tools_default="calculator")
     help_text = parser.format_help()
@@ -186,6 +205,7 @@ def test_cli_thinking_choices_in_help():
 # ─────────────────────────────────────────────────────────────────────
 # 4. CLI --think boolean flag
 # ─────────────────────────────────────────────────────────────────────
+
 
 def test_cli_think_flag_default_false():
     """--think should default to False."""
@@ -213,9 +233,11 @@ def test_cli_thinking_and_think_can_combine():
 # 5. Agent.__init__() accepts new params
 # ─────────────────────────────────────────────────────────────────────
 
+
 def _make_agent(**kwargs):
     """Build a minimal Agent for testing without running it."""
     from agentkthx import Agent
+
     defaults = {"model": "qwen2.5:0.5b"}
     defaults.update(kwargs)
     return Agent(**defaults)
@@ -290,10 +312,12 @@ def test_agent_thinking_level_default_is_auto():
 # 6. StepResult carries reasoning_content
 # ─────────────────────────────────────────────────────────────────────
 
+
 def test_step_result_has_reasoning_content_field():
     """StepResult dataclass should have reasoning_content field."""
     from agentkthx.core.models import StepResult
     from agentkthx.core.types import StepResultType
+
     sr = StepResult(type=StepResultType.FINAL_ANSWER)
     assert hasattr(sr, "reasoning_content")
 
@@ -302,6 +326,7 @@ def test_step_result_reasoning_content_default_empty():
     """StepResult.reasoning_content should default to empty string."""
     from agentkthx.core.models import StepResult
     from agentkthx.core.types import StepResultType
+
     sr = StepResult(type=StepResultType.FINAL_ANSWER)
     assert sr.reasoning_content == ""
 
@@ -310,6 +335,7 @@ def test_step_result_accepts_reasoning_content():
     """StepResult should accept reasoning_content in constructor."""
     from agentkthx.core.models import StepResult
     from agentkthx.core.types import StepResultType
+
     sr = StepResult(
         type=StepResultType.FINAL_ANSWER,
         content="spam",
@@ -322,10 +348,12 @@ def test_step_result_accepts_reasoning_content():
 # 7. _print_agent_steps accepts show_reasoning kwarg
 # ─────────────────────────────────────────────────────────────────────
 
+
 def test_print_agent_steps_accepts_show_reasoning_kwarg():
     """_print_agent_steps() should accept show_reasoning kwarg without error."""
     from agentkthx.cli import _print_agent_steps
     from agentkthx.core.models import AgentRun
+
     # Empty AgentRun — function should early-return because steps list is empty
     result = AgentRun(final_answer="test")
     # Should not raise
@@ -336,6 +364,7 @@ def test_print_agent_steps_accepts_show_reasoning_kwarg():
 # ─────────────────────────────────────────────────────────────────────
 # 8. OllamaBackend response carries reasoning_content
 # ─────────────────────────────────────────────────────────────────────
+
 
 def test_ollama_backend_response_dict_has_reasoning_content_key():
     """OllamaBackend.generate_completions response should have reasoning_content key.
@@ -348,15 +377,21 @@ def test_ollama_backend_response_dict_has_reasoning_content_key():
     # _parse_jev_response (which doesn't help here). Instead, verify by
     # inspecting the source for the field name.
     import inspect
+
     from agentkthx.backends.ollama import OllamaBackend
+
     src = inspect.getsource(OllamaBackend.generate_completions)
-    assert "reasoning_content" in src, "OllamaBackend.generate_completions should reference reasoning_content"
+    assert (
+        "reasoning_content" in src
+    ), "OllamaBackend.generate_completions should reference reasoning_content"
 
 
 def test_ollama_backend_native_response_has_reasoning_content_key():
     """OllamaBackend.generate (native /api/chat) response should have reasoning_content key."""
     import inspect
+
     from agentkthx.backends.ollama import OllamaBackend
+
     src = inspect.getsource(OllamaBackend.generate)
     assert "reasoning_content" in src
 
@@ -364,7 +399,9 @@ def test_ollama_backend_native_response_has_reasoning_content_key():
 def test_jev_decision_envelope_has_reasoning_content_key():
     """generate_decision() return dict should include reasoning_content field."""
     import inspect
+
     from agentkthx.backends.ollama import OllamaBackend
+
     src = inspect.getsource(OllamaBackend.generate_decision)
     assert "reasoning_content" in src, "generate_decision should surface reasoning_content"
 
@@ -373,13 +410,14 @@ def test_jev_decision_envelope_has_reasoning_content_key():
 # 9. End-to-end CLI arg flow
 # ─────────────────────────────────────────────────────────────────────
 
+
 def test_cli_args_to_agent_thinking_flow():
     """Simulate: parse CLI args → resolve via parse_thinking_arg → pass to Agent.
 
     This is the same flow cli.py uses in _create_agent_from_args().
     """
-    from agentkthx.core.types import parse_thinking_arg
     from agentkthx import Agent
+    from agentkthx.core.types import parse_thinking_arg
 
     parser = _make_parser()
     args = parser.parse_args(["--thinking", "off", "--think", "-m", "qwen2.5:0.5b"])
@@ -406,8 +444,8 @@ def test_cli_args_to_agent_thinking_flow():
 
 def test_cli_args_to_agent_thinking_high_flow():
     """End-to-end: --thinking high → Agent with reasoning_effort='high'."""
-    from agentkthx.core.types import parse_thinking_arg
     from agentkthx import Agent
+    from agentkthx.core.types import parse_thinking_arg
 
     parser = _make_parser()
     args = parser.parse_args(["--thinking", "high", "-m", "qwen2.5:0.5b"])
@@ -426,4 +464,5 @@ def test_cli_args_to_agent_thinking_high_flow():
 
 if __name__ == "__main__":
     import sys
+
     sys.exit(pytest.main([__file__, "-v"]))

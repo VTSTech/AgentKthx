@@ -26,7 +26,7 @@ Example Usage:
 
     result = agent.run("What is 15 * 8?")
     print(result.final_answer)
-    
+
     # With Soul Spec (disabled by default)
     agent = Agent(model="qwen2.5:0.5b", soul="/path/to/soul/package")
 """
@@ -63,14 +63,11 @@ def _get_git_short_hash() -> str:
             git_path = os.path.join(check_dir, ".git")
             if os.path.exists(git_path):  # dir, or a file (worktree/submodule)
                 # Attribution guard: only trust OUR repository.
-                origin = _run(
-                    ["git", "-C", check_dir, "remote", "get-url", "origin"]
-                )
+                origin = _run(["git", "-C", check_dir, "remote", "get-url", "origin"])
                 url = origin.stdout.strip().lower() if origin.returncode == 0 else ""
                 if "vtstech/agentkthx" in url:
                     desc = _run(
-                        ["git", "-C", check_dir, "describe", "--always",
-                         "--dirty", "--abbrev=7"]
+                        ["git", "-C", check_dir, "describe", "--always", "--dirty", "--abbrev=7"]
                     )
                     if desc.returncode == 0 and desc.stdout.strip():
                         return desc.stdout.strip()
@@ -87,6 +84,7 @@ def _get_git_short_hash() -> str:
     # --- 2. commit baked at build time (PyPI / git+https wheels) --------
     try:
         from . import _git_meta
+
         if _git_meta.SOURCE_COMMIT:
             return _git_meta.SOURCE_COMMIT
     except ImportError:
@@ -102,33 +100,42 @@ if _git_hash:
 
 from .agent import Agent
 from .agent_mode import AgentMode, AgentState, TaskPlan
-from .orchestrator import Orchestrator, AgentCard
-from .core.models import StepResult, AgentRun, Tool, ToolParam
-from .core.types import StepResultType, ToolSupportLevel, BackendType
-from .tools import ToolRegistry, make_builtin_registry, BUILTIN_REGISTRY
 from .backends import (
-    BaseBackend, OllamaBackend, LlamaServerBackend,
-    get_default_backend, get_backend, get_backend_choices,
+    BaseBackend,
+    LlamaServerBackend,
+    OllamaBackend,
+    get_backend,
+    get_backend_choices,
+    get_default_backend,
 )
-from .config import Config, get_config
 from .config import (
-    OLLAMA_BASE_URL,
-    BITNET_BASE_URL,
-    ZAI_BASE_URL,
-    OPENROUTER_BASE_URL,
-    OPENROUTER_API_KEY,
-    OPENROUTER_DEFAULT_MODEL,
     ACP_BASE_URL,
-    ACP_USER,
     ACP_PASS,
-    DEFAULT_MODEL,
+    ACP_USER,
     AGENTKTHX_BACKEND,
+    BITNET_BASE_URL,
+    DEFAULT_MODEL,
+    OLLAMA_BASE_URL,
+    OPENROUTER_API_KEY,
+    OPENROUTER_BASE_URL,
+    OPENROUTER_DEFAULT_MODEL,
+    ZAI_BASE_URL,
+    Config,
+    get_config,
 )
+from .core.models import AgentRun, StepResult, Tool, ToolParam
+from .core.types import BackendType, StepResultType, ToolSupportLevel
 from .model_discovery import (
-    get_models, get_available_models, pick_best_model,
-    pick_models_for_benchmark, model_exists, get_client,
+    get_available_models,
+    get_client,
+    get_models,
+    model_exists,
+    pick_best_model,
+    pick_models_for_benchmark,
 )
+from .orchestrator import AgentCard, Orchestrator
 from .shared_args import SharedConfig, add_shared_args, parse_shared_args
+from .tools import BUILTIN_REGISTRY, ToolRegistry, make_builtin_registry
 
 # Persistent memory (graceful import for minimal installs)
 try:
@@ -145,8 +152,13 @@ except ImportError:
 # Optional Soul Spec support (graceful import)
 try:
     from .soul import (
-        SoulManifest, SoulLoader, load_soul, build_system_prompt,
-        Environment, InteractionMode, HardwareConstraints,
+        Environment,
+        HardwareConstraints,
+        InteractionMode,
+        SoulLoader,
+        SoulManifest,
+        build_system_prompt,
+        load_soul,
     )
 except ImportError:
     SoulManifest = None  # type: ignore

@@ -19,7 +19,7 @@ import sys
 import unittest
 import urllib.error
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -28,19 +28,19 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from agentkthx.core.models import Tool, ToolParam
+from agentkthx.core.types import BackendType
+from agentkthx.plugins.mistral import register, unregister
 from agentkthx.plugins.mistral.mistral import (
-    MistralBackend,
     MISTRAL_MODELS,
+    MistralBackend,
     _is_free_model,
 )
-from agentkthx.plugins.mistral import register, unregister
-from agentkthx.core.types import BackendType, ApiMode
-from agentkthx.core.models import Tool, ToolParam
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_tool(name: str = "shell") -> Tool:
     return Tool(
@@ -59,20 +59,14 @@ def _make_backend(api_key: str = "x" * 32) -> MistralBackend:
 # Manifest compliance (v0.2 form)
 # ---------------------------------------------------------------------------
 
+
 class TestManifestCompliance(unittest.TestCase):
     """The plugin.json must parse as a v0.2 manifest."""
 
     def setUp(self):
-        self.plugin_dir = (
-            Path(__file__).resolve().parents[1]
-            / "agentkthx"
-            / "plugins"
-            / "mistral"
-        )
+        self.plugin_dir = Path(__file__).resolve().parents[1] / "agentkthx" / "plugins" / "mistral"
         self.manifest_path = self.plugin_dir / "plugin.json"
-        self.manifest = json.loads(
-            self.manifest_path.read_text(encoding="utf-8")
-        )
+        self.manifest = json.loads(self.manifest_path.read_text(encoding="utf-8"))
 
     def test_manifest_has_v02_schema(self):
         """The $schema field must point at the v0.2 schema."""
@@ -93,21 +87,22 @@ class TestManifestCompliance(unittest.TestCase):
         """Manifest declares the 'mistral' backend."""
         ext = self.manifest["extensions"]["org.vts-tech.agentkthx"]
         assert "mistral" in ext["provides"]["backends"]
-        assert (
-            ext["provides"]["backends"]["mistral"]
-            == "mistral.MistralBackend"
-        )
+        assert ext["provides"]["backends"]["mistral"] == "mistral.MistralBackend"
 
     def test_manifest_does_not_use_legacy_top_level_fields(self):
         """v0.2 form: type/entrypoint/provides/etc. live under extensions."""
         legacy_fields = {
-            "display_name", "type", "entrypoint", "depends",
-            "optional_depends", "config", "provides", "compatibility",
+            "display_name",
+            "type",
+            "entrypoint",
+            "depends",
+            "optional_depends",
+            "config",
+            "provides",
+            "compatibility",
         }
         used_legacy = legacy_fields & set(self.manifest.keys())
-        assert not used_legacy, (
-            f"manifest still uses legacy top-level fields: {used_legacy}"
-        )
+        assert not used_legacy, f"manifest still uses legacy top-level fields: {used_legacy}"
 
     def test_manifest_does_not_use_agentnova_compat_key(self):
         """Compatibility block must use 'agentkthx', not the legacy
@@ -129,6 +124,7 @@ class TestManifestCompliance(unittest.TestCase):
 # Catalog integrity
 # ---------------------------------------------------------------------------
 
+
 class TestCatalog(unittest.TestCase):
     """The MISTRAL_MODELS catalog must satisfy CloudBackend's contract."""
 
@@ -142,9 +138,9 @@ class TestCatalog(unittest.TestCase):
             "codestral-latest",
             "devstral-latest",
         }
-        assert required <= set(MISTRAL_MODELS.keys()), (
-            f"missing required models: {required - set(MISTRAL_MODELS.keys())}"
-        )
+        assert required <= set(
+            MISTRAL_MODELS.keys()
+        ), f"missing required models: {required - set(MISTRAL_MODELS.keys())}"
 
     def test_every_catalog_entry_has_required_fields(self):
         """CloudBackend requires context_length, default_max_tokens,
@@ -164,38 +160,29 @@ class TestCatalog(unittest.TestCase):
         (CloudBackend._is_free_model reads them)."""
         for name, meta in MISTRAL_MODELS.items():
             pricing = meta.get("pricing", {})
-            assert "input" in pricing, (
-                f"model {name!r} pricing missing 'input' field"
-            )
-            assert "output" in pricing, (
-                f"model {name!r} pricing missing 'output' field"
-            )
+            assert "input" in pricing, f"model {name!r} pricing missing 'input' field"
+            assert "output" in pricing, f"model {name!r} pricing missing 'output' field"
 
     def test_labs_models_are_free(self):
         """All labs-* models must be priced at $0 input / $0 output."""
         for name, meta in MISTRAL_MODELS.items():
             if name.startswith("labs-"):
                 pricing = meta["pricing"]
-                assert pricing["input"] == 0.0, (
-                    f"labs model {name!r} has non-zero input price"
-                )
-                assert pricing["output"] == 0.0, (
-                    f"labs model {name!r} has non-zero output price"
-                )
+                assert pricing["input"] == 0.0, f"labs model {name!r} has non-zero input price"
+                assert pricing["output"] == 0.0, f"labs model {name!r} has non-zero output price"
 
     def test_context_lengths_are_reasonable(self):
         """All catalog context lengths must be in the [32K, 1M] band —
         anything outside that range is a catalog typo."""
         for name, meta in MISTRAL_MODELS.items():
             ctx = meta["context_length"]
-            assert 32768 <= ctx <= 1_048_576, (
-                f"model {name!r} context_length {ctx} is out of band"
-            )
+            assert 32768 <= ctx <= 1_048_576, f"model {name!r} context_length {ctx} is out of band"
 
 
 # ---------------------------------------------------------------------------
 # _is_free_model helper
 # ---------------------------------------------------------------------------
+
 
 class TestIsFreeModel(unittest.TestCase):
     """The free-tier classifier drives MISTRAL_FREE_ONLY enforcement."""
@@ -222,6 +209,7 @@ class TestIsFreeModel(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # Backend identity
 # ---------------------------------------------------------------------------
+
 
 class TestBackendIdentity(unittest.TestCase):
     """Smoke tests for backend instantiation + identity."""
@@ -284,6 +272,7 @@ class TestBackendIdentity(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # Request body construction — Mistral wire-format deltas
 # ---------------------------------------------------------------------------
+
 
 class TestBuildMistralBody(unittest.TestCase):
     """The request builder must apply every Mistral delta vs OpenAI."""
@@ -405,12 +394,15 @@ class TestBuildMistralBody(unittest.TestCase):
             max_completion_tokens=200,
         )
         for forbidden in (
-            "logprobs", "top_logprobs", "top_k", "user",
+            "logprobs",
+            "top_logprobs",
+            "top_k",
+            "user",
             "max_completion_tokens",
         ):
-            assert forbidden not in body, (
-                f"OpenAI-only field {forbidden!r} leaked into Mistral body"
-            )
+            assert (
+                forbidden not in body
+            ), f"OpenAI-only field {forbidden!r} leaked into Mistral body"
 
     def test_reasoning_effort_passed_through_including_xhigh(self):
         """Mistral's reasoning_effort ladder includes the 'xhigh' rung —
@@ -543,6 +535,7 @@ class TestBuildMistralBody(unittest.TestCase):
 # Response parser — Mistral error envelope + tool-call tolerance
 # ---------------------------------------------------------------------------
 
+
 class TestParseMistralResponse(unittest.TestCase):
     """The response parser must handle Mistral's wire format deltas."""
 
@@ -552,11 +545,13 @@ class TestParseMistralResponse(unittest.TestCase):
             "object": "chat.completion",
             "created": 1700000000,
             "model": "mistral-small-latest",
-            "choices": [{
-                "index": 0,
-                "message": {"role": "assistant", "content": "Hello!"},
-                "finish_reason": "stop",
-            }],
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": "Hello!"},
+                    "finish_reason": "stop",
+                }
+            ],
             "usage": {"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7},
         }
         out = MistralBackend._parse_mistral_response(raw)
@@ -567,20 +562,24 @@ class TestParseMistralResponse(unittest.TestCase):
 
     def test_parses_tool_calls_with_string_arguments(self):
         raw = {
-            "choices": [{
-                "message": {
-                    "content": None,
-                    "tool_calls": [{
-                        "id": "D681PevKs",
-                        "type": "function",
-                        "function": {
-                            "name": "shell",
-                            "arguments": '{"command": "echo hi"}',
-                        },
-                    }],
-                },
-                "finish_reason": "tool_calls",
-            }],
+            "choices": [
+                {
+                    "message": {
+                        "content": None,
+                        "tool_calls": [
+                            {
+                                "id": "D681PevKs",
+                                "type": "function",
+                                "function": {
+                                    "name": "shell",
+                                    "arguments": '{"command": "echo hi"}',
+                                },
+                            }
+                        ],
+                    },
+                    "finish_reason": "tool_calls",
+                }
+            ],
             "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
         }
         out = MistralBackend._parse_mistral_response(raw)
@@ -594,20 +593,24 @@ class TestParseMistralResponse(unittest.TestCase):
     def test_parses_tool_calls_with_object_arguments(self):
         """Mistral spec allows arguments as object — must tolerate."""
         raw = {
-            "choices": [{
-                "message": {
-                    "content": "",
-                    "tool_calls": [{
-                        "id": "xyz",
-                        "type": "function",
-                        "function": {
-                            "name": "calc",
-                            "arguments": {"expression": "2+2"},
-                        },
-                    }],
-                },
-                "finish_reason": "tool_calls",
-            }],
+            "choices": [
+                {
+                    "message": {
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "id": "xyz",
+                                "type": "function",
+                                "function": {
+                                    "name": "calc",
+                                    "arguments": {"expression": "2+2"},
+                                },
+                            }
+                        ],
+                    },
+                    "finish_reason": "tool_calls",
+                }
+            ],
         }
         out = MistralBackend._parse_mistral_response(raw)
         assert out["tool_calls"][0]["arguments"] == {"expression": "2+2"}
@@ -616,60 +619,70 @@ class TestParseMistralResponse(unittest.TestCase):
         """Mistral's schema default for tool_call.id is the literal 'null' —
         synthesize a fallback ID so the agent loop can pair tool messages."""
         raw = {
-            "choices": [{
-                "message": {
-                    "content": "",
-                    "tool_calls": [{
-                        # no "id" field at all
-                        "type": "function",
-                        "function": {"name": "x", "arguments": "{}"},
-                    }],
-                },
-                "finish_reason": "tool_calls",
-            }],
+            "choices": [
+                {
+                    "message": {
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                # no "id" field at all
+                                "type": "function",
+                                "function": {"name": "x", "arguments": "{}"},
+                            }
+                        ],
+                    },
+                    "finish_reason": "tool_calls",
+                }
+            ],
         }
         out = MistralBackend._parse_mistral_response(raw)
         assert out["tool_calls"][0]["id"] == "mistral_tc_0"
 
     def test_malformed_arguments_surfaces_raw_fallback(self):
         raw = {
-            "choices": [{
-                "message": {
-                    "content": "",
-                    "tool_calls": [{
-                        "id": "bad",
-                        "type": "function",
-                        "function": {
-                            "name": "shell",
-                            "arguments": "not-valid-json{",
-                        },
-                    }],
-                },
-                "finish_reason": "tool_calls",
-            }],
+            "choices": [
+                {
+                    "message": {
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "id": "bad",
+                                "type": "function",
+                                "function": {
+                                    "name": "shell",
+                                    "arguments": "not-valid-json{",
+                                },
+                            }
+                        ],
+                    },
+                    "finish_reason": "tool_calls",
+                }
+            ],
         }
         out = MistralBackend._parse_mistral_response(raw)
-        assert out["tool_calls"][0]["arguments"] == {
-            "_raw_arguments": "not-valid-json{"
-        }
+        assert out["tool_calls"][0]["arguments"] == {"_raw_arguments": "not-valid-json{"}
 
     def test_mistral_error_envelope_raises(self):
         """Mistral envelope: {"object": "error", "message": ...}."""
         with pytest.raises(RuntimeError, match="Provider rate limited"):
-            MistralBackend._parse_mistral_response({
-                "object": "error",
-                "message": "Provider rate limited",
-                "type": "rate_limit_error",
-                "code": "rate_limit",
-            })
+            MistralBackend._parse_mistral_response(
+                {
+                    "object": "error",
+                    "message": "Provider rate limited",
+                    "type": "rate_limit_error",
+                    "code": "rate_limit",
+                }
+            )
 
     def test_openai_style_error_envelope_also_raises(self):
         """Some gateways wrap errors in OpenAI's {"error": {...}} form —
         the parser must handle both envelope shapes."""
         with pytest.raises(RuntimeError, match="Upstream error"):
-            MistralBackend._parse_mistral_response({
-                "error": {"message": "Upstream error", "code": 500},
-            })
+            MistralBackend._parse_mistral_response(
+                {
+                    "error": {"message": "Upstream error", "code": 500},
+                }
+            )
 
     def test_no_choices_raises(self):
         with pytest.raises(RuntimeError, match="no choices"):
@@ -680,22 +693,24 @@ class TestParseMistralResponse(unittest.TestCase):
         with type=thinking + type=text. The parser must extract text and
         route thinking into reasoning_content."""
         raw = {
-            "choices": [{
-                "message": {
-                    "role": "assistant",
-                    "content": [
-                        {
-                            "type": "thinking",
-                            "thinking": [
-                                {"type": "text", "text": "The user asked..."},
-                            ],
-                            "signature": "EQAA...",
-                        },
-                        {"type": "text", "text": "It's currently 18°C."},
-                    ],
-                },
-                "finish_reason": "stop",
-            }],
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "thinking",
+                                "thinking": [
+                                    {"type": "text", "text": "The user asked..."},
+                                ],
+                                "signature": "EQAA...",
+                            },
+                            {"type": "text", "text": "It's currently 18°C."},
+                        ],
+                    },
+                    "finish_reason": "stop",
+                }
+            ],
         }
         out = MistralBackend._parse_mistral_response(raw)
         assert out["content"] == "It's currently 18°C."
@@ -705,10 +720,12 @@ class TestParseMistralResponse(unittest.TestCase):
         """Mistral's distinct finish_reason for context overflow —
         the agent loop's context-recovery path should match on it."""
         raw = {
-            "choices": [{
-                "message": {"content": "..."},
-                "finish_reason": "model_length",
-            }],
+            "choices": [
+                {
+                    "message": {"content": "..."},
+                    "finish_reason": "model_length",
+                }
+            ],
         }
         out = MistralBackend._parse_mistral_response(raw)
         assert out["finish_reason"] == "model_length"
@@ -717,6 +734,7 @@ class TestParseMistralResponse(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # _iter_sse_lines — streaming transport (R07.09.1 hotfix)
 # ---------------------------------------------------------------------------
+
 
 class TestIterSseLines(unittest.TestCase):
     """The streaming transport hook required by OpenAICompatibleBackend.
@@ -749,18 +767,20 @@ class TestIterSseLines(unittest.TestCase):
             b'data: {"choices":[{"delta":{"content":"Hello"}}]}\n',
             b'data: {"choices":[{"delta":{"content":", world"}}]}\n',
             b'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n',
-            b'data: [DONE]\n',
+            b"data: [DONE]\n",
         ]
         fake_response = MagicMock()
         fake_response.__iter__ = MagicMock(return_value=iter(sse_lines))
         fake_response.close = MagicMock()
 
         with patch("urllib.request.urlopen", return_value=fake_response):
-            result = list(backend._iter_sse_lines(
-                url="https://api.mistral.ai/v1/chat/completions",
-                body={"model": "mistral-small-latest", "messages": []},
-                headers={"Authorization": "Bearer x"},
-            ))
+            result = list(
+                backend._iter_sse_lines(
+                    url="https://api.mistral.ai/v1/chat/completions",
+                    body={"model": "mistral-small-latest", "messages": []},
+                    headers={"Authorization": "Bearer x"},
+                )
+            )
 
         # Must yield the raw bytes — NOT pre-parsed dicts (the base class
         # does the parsing)
@@ -782,11 +802,13 @@ class TestIterSseLines(unittest.TestCase):
 
         with patch("urllib.request.urlopen", side_effect=fake_401):
             with pytest.raises(RuntimeError, match="MISTRAL_API_KEY"):
-                list(backend._iter_sse_lines(
-                    url="https://api.mistral.ai/v1/chat/completions",
-                    body={"model": "mistral-small-latest", "messages": []},
-                    headers={"Authorization": "Bearer bad"},
-                ))
+                list(
+                    backend._iter_sse_lines(
+                        url="https://api.mistral.ai/v1/chat/completions",
+                        body={"model": "mistral-small-latest", "messages": []},
+                        headers={"Authorization": "Bearer bad"},
+                    )
+                )
 
     def test_429_retries_with_backoff(self):
         """429 rate-limit must honor Retry-After (or fall back to
@@ -806,19 +828,24 @@ class TestIterSseLines(unittest.TestCase):
         fake_429.headers = {"Retry-After": "0"}  # honor immediately
 
         fake_response = MagicMock()
-        fake_response.__iter__ = MagicMock(return_value=iter([
-            b'data: {"choices":[{"delta":{"content":"ok"}}]}\n',
-            b'data: [DONE]\n',
-        ]))
+        fake_response.__iter__ = MagicMock(
+            return_value=iter(
+                [
+                    b'data: {"choices":[{"delta":{"content":"ok"}}]}\n',
+                    b"data: [DONE]\n",
+                ]
+            )
+        )
         fake_response.close = MagicMock()
 
-        with patch("urllib.request.urlopen",
-                   side_effect=[fake_429, fake_response]) as m:
-            result = list(backend._iter_sse_lines(
-                url="https://api.mistral.ai/v1/chat/completions",
-                body={"model": "mistral-small-latest", "messages": []},
-                headers={"Authorization": "Bearer x"},
-            ))
+        with patch("urllib.request.urlopen", side_effect=[fake_429, fake_response]) as m:
+            result = list(
+                backend._iter_sse_lines(
+                    url="https://api.mistral.ai/v1/chat/completions",
+                    body={"model": "mistral-small-latest", "messages": []},
+                    headers={"Authorization": "Bearer x"},
+                )
+            )
 
         # Retried at least twice (first 429, then success)
         assert m.call_count == 2
@@ -833,7 +860,7 @@ class TestIterSseLines(unittest.TestCase):
         # First call returns 400 with context-length message
         ctx_msg = (
             b'{"object":"error","message":"This model\'s maximum context '
-            b'length is 262144 tokens. However, your messages resulted in '
+            b"length is 262144 tokens. However, your messages resulted in "
             b'300000 tokens of text input."}'
         )
         fake_400 = urllib.error.HTTPError(
@@ -846,10 +873,14 @@ class TestIterSseLines(unittest.TestCase):
 
         # Second call succeeds
         fake_response = MagicMock()
-        fake_response.__iter__ = MagicMock(return_value=iter([
-            b'data: {"choices":[{"delta":{"content":"ok"}}]}\n',
-            b'data: [DONE]\n',
-        ]))
+        fake_response.__iter__ = MagicMock(
+            return_value=iter(
+                [
+                    b'data: {"choices":[{"delta":{"content":"ok"}}]}\n',
+                    b"data: [DONE]\n",
+                ]
+            )
+        )
         fake_response.close = MagicMock()
 
         body = {
@@ -858,19 +889,20 @@ class TestIterSseLines(unittest.TestCase):
             "max_tokens": 8192,
         }
 
-        with patch("urllib.request.urlopen",
-                   side_effect=[fake_400, fake_response]):
-            list(backend._iter_sse_lines(
-                url="https://api.mistral.ai/v1/chat/completions",
-                body=body,
-                headers={"Authorization": "Bearer x"},
-            ))
+        with patch("urllib.request.urlopen", side_effect=[fake_400, fake_response]):
+            list(
+                backend._iter_sse_lines(
+                    url="https://api.mistral.ai/v1/chat/completions",
+                    body=body,
+                    headers={"Authorization": "Bearer x"},
+                )
+            )
 
         # The shared _handle_context_length_400 helper should have
         # reduced the max_tokens in the body
-        assert body["max_tokens"] < 8192, (
-            "ARCH-03 context-length recovery should have reduced max_tokens"
-        )
+        assert (
+            body["max_tokens"] < 8192
+        ), "ARCH-03 context-length recovery should have reduced max_tokens"
 
     def test_4xx_non_retryable_raises_immediately(self):
         """HTTP 400/401/403/404/422 must NOT retry — surface as RuntimeError
@@ -891,11 +923,13 @@ class TestIterSseLines(unittest.TestCase):
 
         with patch("urllib.request.urlopen", side_effect=fake_422) as m:
             with pytest.raises(RuntimeError, match="unknown field: top_k"):
-                list(backend._iter_sse_lines(
-                    url="https://api.mistral.ai/v1/chat/completions",
-                    body={"model": "mistral-small-latest", "messages": []},
-                    headers={"Authorization": "Bearer x"},
-                ))
+                list(
+                    backend._iter_sse_lines(
+                        url="https://api.mistral.ai/v1/chat/completions",
+                        body={"model": "mistral-small-latest", "messages": []},
+                        headers={"Authorization": "Bearer x"},
+                    )
+                )
         # Only ONE call — no retry on 422
         assert m.call_count == 1
 
@@ -921,11 +955,13 @@ class TestIterSseLines(unittest.TestCase):
 
         with patch("urllib.request.urlopen", side_effect=fake_429):
             with pytest.raises(RuntimeError) as exc_info:
-                list(backend._iter_sse_lines(
-                    url="https://api.mistral.ai/v1/chat/completions",
-                    body={"model": "mistral-small-latest", "messages": []},
-                    headers={"Authorization": "Bearer x"},
-                ))
+                list(
+                    backend._iter_sse_lines(
+                        url="https://api.mistral.ai/v1/chat/completions",
+                        body={"model": "mistral-small-latest", "messages": []},
+                        headers={"Authorization": "Bearer x"},
+                    )
+                )
         # Must surface the upstream message, not raw bytes
         assert "Rate limit exceeded" in str(exc_info.value)
         assert "1300" in str(exc_info.value) or "429" in str(exc_info.value)
@@ -934,6 +970,7 @@ class TestIterSseLines(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # Plugin registration
 # ---------------------------------------------------------------------------
+
 
 class TestPluginRegistration(unittest.TestCase):
     """The register/unregister functions must work with a stub manager."""
@@ -944,9 +981,7 @@ class TestPluginRegistration(unittest.TestCase):
         # Two register_backend calls: 'mistral' + 'mst' alias
         assert manager.register_backend.call_count == 2
         manager.register_backend.assert_any_call("mistral", MistralBackend)
-        manager.register_backend.assert_any_call(
-            "mst", MistralBackend, alias_of="mistral"
-        )
+        manager.register_backend.assert_any_call("mst", MistralBackend, alias_of="mistral")
 
     def test_unregister_calls_manager_unregister_backend(self):
         manager = MagicMock()
@@ -959,6 +994,7 @@ class TestPluginRegistration(unittest.TestCase):
 # Plugin loader integration — discover() + load()
 # ---------------------------------------------------------------------------
 
+
 class TestPluginLoaderIntegration(unittest.TestCase):
     """The PluginManager must discover and load the bundled plugin."""
 
@@ -967,15 +1003,8 @@ class TestPluginLoaderIntegration(unittest.TestCase):
         the v0.2 spec rules — name/dir match, required fields, etc.)."""
         from agentkthx.plugins._loader import _parse_manifest
 
-        plugin_dir = (
-            Path(__file__).resolve().parents[1]
-            / "agentkthx"
-            / "plugins"
-            / "mistral"
-        )
-        manifest = _parse_manifest(
-            plugin_dir / "plugin.json", root_kind="builtin"
-        )
+        plugin_dir = Path(__file__).resolve().parents[1] / "agentkthx" / "plugins" / "mistral"
+        manifest = _parse_manifest(plugin_dir / "plugin.json", root_kind="builtin")
         assert manifest.name == "mistral"
         assert manifest.type == "backend"
         assert manifest.entrypoint == "__init__"
@@ -984,17 +1013,10 @@ class TestPluginLoaderIntegration(unittest.TestCase):
     def test_builtin_manifest_in_v02_form(self):
         """The bundled manifest must use the v0.2 $schema and NOT rely on
         legacy top-level fields (spec compliance)."""
-        from agentkthx.plugins._loader import _parse_manifest, CANONICAL_SCHEMA
+        from agentkthx.plugins._loader import CANONICAL_SCHEMA, _parse_manifest
 
-        plugin_dir = (
-            Path(__file__).resolve().parents[1]
-            / "agentkthx"
-            / "plugins"
-            / "mistral"
-        )
-        manifest = _parse_manifest(
-            plugin_dir / "plugin.json", root_kind="builtin"
-        )
+        plugin_dir = Path(__file__).resolve().parents[1] / "agentkthx" / "plugins" / "mistral"
+        manifest = _parse_manifest(plugin_dir / "plugin.json", root_kind="builtin")
         assert manifest.schema == CANONICAL_SCHEMA
         assert manifest.legacy_fields_used == []
         assert "agentnova" not in manifest.compatibility
@@ -1032,12 +1054,14 @@ class TestLiveAPI:
 
     def test_streaming_yields_content(self):
         backend = MistralBackend()
-        chunks = list(backend.generate_stream(
-            model="mistral-small-latest",
-            messages=[{"role": "user", "content": "Count from 1 to 5."}],
-            temperature=0.0,
-            max_tokens=100,
-        ))
+        chunks = list(
+            backend.generate_stream(
+                model="mistral-small-latest",
+                messages=[{"role": "user", "content": "Count from 1 to 5."}],
+                temperature=0.0,
+                max_tokens=100,
+            )
+        )
         assert len(chunks) >= 2
         # Concatenate and check that digits 1-5 appear
         full = "".join(chunks)

@@ -29,55 +29,59 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from agentkthx.core.helpers import is_safe_url, sanitize_command
-from agentkthx.tools.builtins import _SSRFSafeRedirectHandler, http_get
 from agentkthx.plugins._loader import PluginManager
-
+from agentkthx.tools.builtins import _SSRFSafeRedirectHandler, http_get
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _fake_dns(monkeypatch, answers: list[str]):
     """Make helpers' getaddrinfo return the given IPs for any hostname."""
+
     def fake_getaddrinfo(host, port, *args, **kwargs):
-        return [
-            (socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 0))
-            for ip in answers
-        ]
-    monkeypatch.setattr(
-        "agentkthx.core.helpers.socket.getaddrinfo", fake_getaddrinfo
-    )
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 0)) for ip in answers]
+
+    monkeypatch.setattr("agentkthx.core.helpers.socket.getaddrinfo", fake_getaddrinfo)
 
 
 # ---------------------------------------------------------------------------
 # SEC-03: address-level SSRF checks
 # ---------------------------------------------------------------------------
 
+
 class TestSec03IPLiteralEncodings:
     """Decimal/hex/octal/short IPv4 spellings of loopback are blocked."""
 
-    @pytest.mark.parametrize("url", [
-        "http://2130706433",          # decimal 127.0.0.1
-        "http://0x7f000001",          # hex 127.0.0.1
-        "http://017700000001",        # octal 127.0.0.1
-        "http://0177.0.0.1",          # per-octet octal
-        "http://0x7f.0.0.1",          # mixed hex/dec
-        "http://127.1",               # shortened quad
-    ])
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "http://2130706433",  # decimal 127.0.0.1
+            "http://0x7f000001",  # hex 127.0.0.1
+            "http://017700000001",  # octal 127.0.0.1
+            "http://0177.0.0.1",  # per-octet octal
+            "http://0x7f.0.0.1",  # mixed hex/dec
+            "http://127.1",  # shortened quad
+        ],
+    )
     def test_obfuscated_loopback_blocked(self, url):
         is_safe, err = is_safe_url(url)
         assert not is_safe, f"{url} must be blocked (SEC-03)"
         assert "non-public" in err
 
-    @pytest.mark.parametrize("url", [
-        "http://[::1]",
-        "http://[::]",                    # unspecified
-        "http://[::ffff:7f00:1]",         # IPv4-mapped loopback (hex form)
-        "http://[::ffff:127.0.0.1]",      # IPv4-mapped loopback (dotted form)
-        "http://[fe80::abcd]",            # link-local (no "::1" substring!)
-        "http://[fd00::1]",               # unique-local (private)
-        "http://[0:0:0:0:0:0:0:1]",       # expanded loopback
-    ])
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "http://[::1]",
+            "http://[::]",  # unspecified
+            "http://[::ffff:7f00:1]",  # IPv4-mapped loopback (hex form)
+            "http://[::ffff:127.0.0.1]",  # IPv4-mapped loopback (dotted form)
+            "http://[fe80::abcd]",  # link-local (no "::1" substring!)
+            "http://[fd00::1]",  # unique-local (private)
+            "http://[0:0:0:0:0:0:0:1]",  # expanded loopback
+        ],
+    )
     def test_ipv6_forms_blocked(self, url):
         is_safe, _ = is_safe_url(url)
         assert not is_safe, f"{url} must be blocked (SEC-03)"
@@ -110,11 +114,11 @@ class TestSec03DnsResolution:
 
     def test_unresolvable_name_fails_open(self, monkeypatch):
         """Unresolvable hostnames fail open — the fetch itself will fail."""
+
         def fake_getaddrinfo(host, port, *args, **kwargs):
             raise socket.gaierror("name resolution failure")
-        monkeypatch.setattr(
-            "agentkthx.core.helpers.socket.getaddrinfo", fake_getaddrinfo
-        )
+
+        monkeypatch.setattr("agentkthx.core.helpers.socket.getaddrinfo", fake_getaddrinfo)
         is_safe, _ = is_safe_url("http://does-not-resolve.example/")
         assert is_safe
 
@@ -133,16 +137,13 @@ class TestSec03RedirectRevalidation:
     def test_redirect_to_loopback_blocked(self):
         req = urllib.request.Request("https://public.example/start")
         with pytest.raises(urllib.error.URLError, match="SSRF protection"):
-            self._handler().redirect_request(
-                req, None, 302, "Found", {}, "http://127.0.0.1/steal"
-            )
+            self._handler().redirect_request(req, None, 302, "Found", {}, "http://127.0.0.1/steal")
 
     def test_redirect_to_metadata_ip_blocked(self):
         req = urllib.request.Request("https://public.example/start")
         with pytest.raises(urllib.error.URLError, match="SSRF protection"):
             self._handler().redirect_request(
-                req, None, 302, "Found", {},
-                "http://169.254.169.254/latest/meta-data/"
+                req, None, 302, "Found", {}, "http://169.254.169.254/latest/meta-data/"
             )
 
     def test_redirect_to_resolved_private_blocked(self, monkeypatch):
@@ -164,9 +165,7 @@ class TestSec03RedirectRevalidation:
     def test_http_get_opener_includes_ssrf_handler(self):
         """The opener used by http_get carries the SSRF redirect guard."""
         opener = urllib.request.build_opener(_SSRFSafeRedirectHandler())
-        assert any(
-            isinstance(h, _SSRFSafeRedirectHandler) for h in opener.handlers
-        )
+        assert any(isinstance(h, _SSRFSafeRedirectHandler) for h in opener.handlers)
 
     def test_http_get_blocks_private_target_before_connecting(self):
         result = http_get("http://127.0.0.1:9/secret")
@@ -178,19 +177,23 @@ class TestSec03RedirectRevalidation:
 # SEC-04: shells + heredocs in sanitize_command
 # ---------------------------------------------------------------------------
 
+
 class TestSec04ShellBlock:
     """Invoking a shell by name executes arbitrary strings — blocked."""
 
-    @pytest.mark.parametrize("cmd", [
-        "bash -c 'rm -rf /tmp/x'",
-        "sh -c id",
-        "zsh -c echo pwned",
-        "ksh -c ls",
-        "fish -c whoami",
-        "/bin/bash -c 'cat /etc/shadow'",   # path prefix must be stripped
-        "/usr/bin/sh -c id",
-        "BASH -c echo",                      # case-insensitive
-    ])
+    @pytest.mark.parametrize(
+        "cmd",
+        [
+            "bash -c 'rm -rf /tmp/x'",
+            "sh -c id",
+            "zsh -c echo pwned",
+            "ksh -c ls",
+            "fish -c whoami",
+            "/bin/bash -c 'cat /etc/shadow'",  # path prefix must be stripped
+            "/usr/bin/sh -c id",
+            "BASH -c echo",  # case-insensitive
+        ],
+    )
     def test_shells_blocked(self, cmd):
         ok, err, _ = sanitize_command(cmd)
         assert not ok, f"{cmd!r} must be blocked (SEC-04)"
@@ -205,12 +208,15 @@ class TestSec04ShellBlock:
 class TestSec04HeredocDetection:
     """Heredocs smuggle multi-line script bodies — explicitly detected."""
 
-    @pytest.mark.parametrize("cmd", [
-        "python3 - <<'EOF'",
-        "python3 - <<EOF",
-        'cat <<\'EOF\' /etc/passwd',
-        "python3 - <<'PY' import os",
-    ])
+    @pytest.mark.parametrize(
+        "cmd",
+        [
+            "python3 - <<'EOF'",
+            "python3 - <<EOF",
+            "cat <<'EOF' /etc/passwd",
+            "python3 - <<'PY' import os",
+        ],
+    )
     def test_heredoc_blocked(self, cmd):
         ok, err, _ = sanitize_command(cmd)
         assert not ok, f"{cmd!r} must be blocked (SEC-04)"
@@ -231,16 +237,19 @@ class TestSec04HeredocDetection:
 class TestSec04LegitCommandsStillPass:
     """Everyday commands must not regress when the denylist grows."""
 
-    @pytest.mark.parametrize("cmd", [
-        "echo hello",
-        "ls -la",
-        "git status",
-        "python script.py",
-        "python3 --version",
-        "tar -czf out.tar.gz dir/",
-        "awk '{print $1}' /etc/hosts",
-        "grep -rn pattern .",
-    ])
+    @pytest.mark.parametrize(
+        "cmd",
+        [
+            "echo hello",
+            "ls -la",
+            "git status",
+            "python script.py",
+            "python3 --version",
+            "tar -czf out.tar.gz dir/",
+            "awk '{print $1}' /etc/hosts",
+            "grep -rn pattern .",
+        ],
+    )
     def test_safe_commands(self, cmd):
         ok, err, _ = sanitize_command(cmd)
         assert ok, f"{cmd!r} unexpectedly rejected: {err}"
@@ -252,6 +261,7 @@ class TestSec04SecurityOffEscapeHatch:
     @pytest.fixture
     def security_off(self):
         from agentkthx.core.helpers import get_security_mode, set_security_mode
+
         previous = get_security_mode()
         set_security_mode("off")
         yield
@@ -275,8 +285,9 @@ def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def _make_plugin(base: Path, name: str, manifest: dict, code: str = PLUGIN_CODE,
-                 extra_files: dict | None = None) -> Path:
+def _make_plugin(
+    base: Path, name: str, manifest: dict, code: str = PLUGIN_CODE, extra_files: dict | None = None
+) -> Path:
     d = base / name
     d.mkdir()
     (d / "__init__.py").write_text(code)
@@ -325,11 +336,14 @@ class TestSec06Sha256Pin:
     def test_dict_pin_all_files_verified(self, tmp_path):
         sub = "helper_value = 42\n"
         _make_plugin(
-            tmp_path, "pin-dict",
-            {"sha256": {
-                "__init__.py": _sha256(PLUGIN_CODE.encode()),
-                "helper.py": _sha256(sub.encode()),
-            }},
+            tmp_path,
+            "pin-dict",
+            {
+                "sha256": {
+                    "__init__.py": _sha256(PLUGIN_CODE.encode()),
+                    "helper.py": _sha256(sub.encode()),
+                }
+            },
             extra_files={"helper.py": sub},
         )
         pm = PluginManager(str(tmp_path))
@@ -339,11 +353,14 @@ class TestSec06Sha256Pin:
     def test_dict_pin_tampered_submodule_fails(self, tmp_path):
         sub = "helper_value = 42\n"
         _make_plugin(
-            tmp_path, "pin-dict-bad",
-            {"sha256": {
-                "__init__.py": _sha256(PLUGIN_CODE.encode()),
-                "helper.py": _sha256(sub.encode()),
-            }},
+            tmp_path,
+            "pin-dict-bad",
+            {
+                "sha256": {
+                    "__init__.py": _sha256(PLUGIN_CODE.encode()),
+                    "helper.py": _sha256(sub.encode()),
+                }
+            },
             extra_files={"helper.py": "helper_value = 666\n"},  # tampered
         )
         pm = PluginManager(str(tmp_path))
@@ -353,7 +370,8 @@ class TestSec06Sha256Pin:
 
     def test_dict_pin_missing_file_fails(self, tmp_path):
         _make_plugin(
-            tmp_path, "pin-missing",
+            tmp_path,
+            "pin-missing",
             {"sha256": {"nope.py": _sha256(b"nothing")}},
         )
         pm = PluginManager(str(tmp_path))
@@ -361,15 +379,18 @@ class TestSec06Sha256Pin:
         assert plugin is None or not plugin.loaded
         assert "missing file" in pm._failed.get("pin-missing", "")
 
-    @pytest.mark.parametrize("bad_pin", [
-        "deadbeef",           # not 64 hex chars
-        "z" * 64,             # not hex
-        "",                   # empty string
-        123,                  # wrong type
-        {},                   # empty dict
-        {"../outside.py": _sha256(b"x")},       # traversal
-        {"/etc/passwd": _sha256(b"x")},          # absolute
-    ])
+    @pytest.mark.parametrize(
+        "bad_pin",
+        [
+            "deadbeef",  # not 64 hex chars
+            "z" * 64,  # not hex
+            "",  # empty string
+            123,  # wrong type
+            {},  # empty dict
+            {"../outside.py": _sha256(b"x")},  # traversal
+            {"/etc/passwd": _sha256(b"x")},  # absolute
+        ],
+    )
     def test_malformed_pin_fails_closed_at_parse(self, tmp_path, bad_pin):
         """A malformed pin must disable the plugin, never skip verification."""
         _make_plugin(tmp_path, "pin-malformed", {"sha256": bad_pin})
@@ -391,8 +412,7 @@ class TestSec06LoosePermsWarning:
             pm = PluginManager(str(tmp_path))
             plugin = pm.load("perms-loose")
             assert plugin is not None and plugin.loaded  # advisory only
-            assert any("writable" in w and "trusted paths" in w
-                       for w in pm.warnings)
+            assert any("writable" in w and "trusted paths" in w for w in pm.warnings)
         finally:
             os.chmod(d, 0o755)
 
@@ -423,6 +443,7 @@ class TestSec06LoosePermsWarning:
 # ---------------------------------------------------------------------------
 # Cross-cutting: unpinned plugins keep working (no behavior change)
 # ---------------------------------------------------------------------------
+
 
 class TestSec06UnpinnedStillLoads:
     def test_unpinned_plugin_loads_normally(self, tmp_path):

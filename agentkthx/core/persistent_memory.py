@@ -20,11 +20,8 @@ import threading
 import uuid
 import weakref
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import Optional
 
 from .memory import Memory, MemoryConfig, Message
-
 
 _DEFAULT_DB_DIR = os.path.join(os.path.expanduser("~"), ".agentkthx")
 _DEFAULT_DB_NAME = "memory.db"
@@ -422,14 +419,16 @@ class PersistentMemory(Memory):
                     meta = json.loads(row[5]) if row[5] else {}
                 except Exception:
                     pass
-                sessions.append({
-                    "session_id": row[0],
-                    "model": row[1],
-                    "created_at": row[2],
-                    "updated_at": row[3],
-                    "message_count": row[4],
-                    "metadata": meta,
-                })
+                sessions.append(
+                    {
+                        "session_id": row[0],
+                        "model": row[1],
+                        "created_at": row[2],
+                        "updated_at": row[3],
+                        "message_count": row[4],
+                        "metadata": meta,
+                    }
+                )
             return sessions
         finally:
             conn.close()
@@ -448,9 +447,7 @@ class PersistentMemory(Memory):
         conn = sqlite3.connect(path)
         try:
             _init_db(conn)
-            cursor = conn.execute(
-                "DELETE FROM sessions WHERE session_id = ?", (session_id,)
-            )
+            cursor = conn.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
             conn.commit()
             return cursor.rowcount > 0
         finally:
@@ -504,7 +501,9 @@ class PersistentMemory(Memory):
             ).fetchone()
             seq = (row[0] if row else 0) + 1
 
-            tool_calls_json = json.dumps(kwargs.get("tool_calls")) if kwargs.get("tool_calls") else None
+            tool_calls_json = (
+                json.dumps(kwargs.get("tool_calls")) if kwargs.get("tool_calls") else None
+            )
 
             conn.execute(
                 """INSERT INTO messages (session_id, seq, role, content, tool_calls, tool_call_id, name, timestamp)

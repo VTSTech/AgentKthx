@@ -7,13 +7,10 @@ from __future__ import annotations
 import argparse
 import sys
 
-from ...colors import yellow, dim, red
+from ...colors import dim, red, yellow
 from ...config import get_config
-
 from ..headers import _print_run_header, _print_run_summary
 from ..utils import _print_agent_steps
-
-
 
 
 def cmd_run(args: argparse.Namespace) -> int:
@@ -33,7 +30,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     agent = _cli._build_agent(args, config)
 
     # Print run info header
-    if not getattr(args, 'quiet', False):
+    if not getattr(args, "quiet", False):
         _print_run_header(agent, args, config)
 
     try:
@@ -41,8 +38,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         # explicit --stream / --no-stream from the user.
         # R06.57 (MAINT-05): replaced hardcoded [OPENROUTER, ZAI, GEMINI] list
         # with backend.is_cloud — a 5th cloud backend will automatically stream.
-        is_cloud_provider = getattr(agent.backend, 'is_cloud', False)
-        explicit_stream = getattr(args, 'stream', None)
+        is_cloud_provider = getattr(agent.backend, "is_cloud", False)
+        explicit_stream = getattr(args, "stream", None)
         if explicit_stream is True:
             stream = True
         elif explicit_stream is False:
@@ -65,18 +62,21 @@ def cmd_run(args: argparse.Namespace) -> int:
         return 1
     # Print tool-call summary so the user sees what the agent did,
     # not just the final answer. Skipped in quiet mode (debug shows verbose steps).
-    if not getattr(args, 'quiet', False):
-        _print_agent_steps(result, debug=agent.debug, show_reasoning=getattr(agent, '_show_reasoning', False))
+    if not getattr(args, "quiet", False):
+        _print_agent_steps(
+            result, debug=agent.debug, show_reasoning=getattr(agent, "_show_reasoning", False)
+        )
 
     # Display reasoning_content under the answer when --think is set
     # (only if the model emitted reasoning_content). Same logic as chat mode.
-    show_reasoning = getattr(agent, '_show_reasoning', False)
+    show_reasoning = getattr(agent, "_show_reasoning", False)
     reasoning_content = ""
     if show_reasoning and result.steps:
         from ...core.types import StepResultType
+
         for step in reversed(result.steps):
             if step.type == StepResultType.FINAL_ANSWER:
-                reasoning_content = getattr(step, 'reasoning_content', '') or ""
+                reasoning_content = getattr(step, "reasoning_content", "") or ""
                 break
 
     # PERF-01: when streaming, the final answer was already printed by
@@ -104,11 +104,11 @@ def cmd_run(args: argparse.Namespace) -> int:
         print(result.final_answer)
 
     # Print run summary (unless quiet)
-    if not getattr(args, 'quiet', False):
+    if not getattr(args, "quiet", False):
         _print_run_summary(result, agent)
 
     # Ensure persistent memory is flushed and closed
-    if getattr(agent, '_is_persistent', False) and hasattr(agent.memory, 'close'):
+    if getattr(agent, "_is_persistent", False) and hasattr(agent.memory, "close"):
         agent.memory.close()
 
     # Log to ACP

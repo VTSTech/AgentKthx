@@ -6,10 +6,8 @@ from __future__ import annotations
 
 import argparse
 
-from ...colors import yellow, dim, cyan, bright_green, bright_cyan
+from ...colors import bright_cyan, bright_green, cyan, dim, yellow
 from ...tools import make_builtin_registry
-
-
 
 
 def cmd_tools(args: argparse.Namespace) -> int:

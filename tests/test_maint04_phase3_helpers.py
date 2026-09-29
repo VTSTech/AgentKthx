@@ -18,19 +18,16 @@ import inspect
 import time
 from unittest.mock import MagicMock
 
-import pytest
-
 from agentkthx.agent import Agent
 from agentkthx.core.models import StepResult, StepResultType
 from agentkthx.core.openresponses import ResponseStatus, ToolChoiceType
-
 
 # ---------------------------------------------------------------------------
 # Helper factories
 # ---------------------------------------------------------------------------
 
-def _make_agent(tool_choice_type=ToolChoiceType.AUTO, tool_choice_name=None,
-                debug=False):
+
+def _make_agent(tool_choice_type=ToolChoiceType.AUTO, tool_choice_name=None, debug=False):
     """Build a minimal Agent stub with the attrs the helpers touch.
 
     Note: ``_is_comp_mode`` is a read-only property on Agent that reads
@@ -65,6 +62,7 @@ def _make_response():
 # Phase 3a: _check_tool_choice_required
 # ===========================================================================
 
+
 class TestCheckToolChoiceRequired:
 
     def test_auto_mode_never_needs_tool(self):
@@ -86,16 +84,14 @@ class TestCheckToolChoiceRequired:
         assert reason == ""
 
     def test_specific_mode_needs_named_tool_when_zero_calls(self):
-        agent = _make_agent(tool_choice_type=ToolChoiceType.SPECIFIC,
-                            tool_choice_name="calculator")
+        agent = _make_agent(tool_choice_type=ToolChoiceType.SPECIFIC, tool_choice_name="calculator")
         needs, reason = agent._check_tool_choice_required(0)
         assert needs is True
         assert "calculator" in reason
         assert "specific" in reason.lower() or "requires" in reason.lower()
 
     def test_specific_mode_satisfied_when_calls_exist(self):
-        agent = _make_agent(tool_choice_type=ToolChoiceType.SPECIFIC,
-                            tool_choice_name="calculator")
+        agent = _make_agent(tool_choice_type=ToolChoiceType.SPECIFIC, tool_choice_name="calculator")
         needs, _ = agent._check_tool_choice_required(1)
         assert needs is False
 
@@ -103,6 +99,7 @@ class TestCheckToolChoiceRequired:
 # ===========================================================================
 # Phase 3b: _parse_tool_calls
 # ===========================================================================
+
 
 class TestParseToolCalls:
 
@@ -187,6 +184,7 @@ class TestParseToolCalls:
 # Phase 3c: _finalize_run + _extract_last_final_answer
 # ===========================================================================
 
+
 class TestFinalizeRun:
 
     def test_returns_agent_run_with_correct_fields(self):
@@ -218,8 +216,12 @@ class TestFinalizeRun:
         response = _make_response()
 
         agent._finalize_run(
-            final_answer="x", steps=[], total_tokens=0,
-            start_time=time.time(), tool_calls=0, response=response,
+            final_answer="x",
+            steps=[],
+            total_tokens=0,
+            start_time=time.time(),
+            tool_calls=0,
+            response=response,
         )
         assert response.id in agent._response_history
         assert agent._response_history[response.id] is response
@@ -230,8 +232,12 @@ class TestFinalizeRun:
         response = _make_response()
 
         agent._finalize_run(
-            final_answer="x", steps=[], total_tokens=42,
-            start_time=time.time(), tool_calls=0, response=response,
+            final_answer="x",
+            steps=[],
+            total_tokens=42,
+            start_time=time.time(),
+            tool_calls=0,
+            response=response,
         )
         assert response.usage["total_tokens"] == 42
 
@@ -242,8 +248,12 @@ class TestFinalizeRun:
         # response.status is IN_PROGRESS by default (from _make_response)
 
         agent._finalize_run(
-            final_answer="x", steps=[], total_tokens=0,
-            start_time=time.time(), tool_calls=0, response=response,
+            final_answer="x",
+            steps=[],
+            total_tokens=0,
+            start_time=time.time(),
+            tool_calls=0,
+            response=response,
             mark_completed=True,
         )
         response.mark_completed.assert_called_once()
@@ -256,8 +266,12 @@ class TestFinalizeRun:
         response = _make_response()
 
         agent._finalize_run(
-            final_answer="", steps=[], total_tokens=0,
-            start_time=time.time(), tool_calls=0, response=response,
+            final_answer="",
+            steps=[],
+            total_tokens=0,
+            start_time=time.time(),
+            tool_calls=0,
+            response=response,
             success=False,
             mark_completed=False,
         )
@@ -293,6 +307,7 @@ class TestExtractLastFinalAnswer:
 # Source-level verification: both call sites use the helpers
 # ===========================================================================
 
+
 class TestCallSitesUseHelpers:
 
     def test_run_core_uses_all_three_helpers(self):
@@ -325,6 +340,6 @@ class TestCallSitesUseHelpers:
 
     def test_no_remaining_duplicated_finalize_blocks_in_streaming(self):
         src = inspect.getsource(Agent._run_core_streaming)
-        assert "return AgentRun(" not in src, (
-            "_run_core_streaming still has a direct 'return AgentRun(' call"
-        )
+        assert (
+            "return AgentRun(" not in src
+        ), "_run_core_streaming still has a direct 'return AgentRun(' call"

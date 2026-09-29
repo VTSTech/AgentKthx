@@ -22,8 +22,6 @@ import inspect
 import sys
 from pathlib import Path
 
-import pytest
-
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from agentkthx.agent_mode import _step_tool_stats
@@ -49,20 +47,26 @@ class _FakeRun:
 
 class TestStepToolStats:
     def test_counts_tool_call_steps(self):
-        run = _FakeRun([
-            _tool("shell", {"command": "uname -r"}),
-            _tool("shell", {"command": "free -h"}),
-            StepResult(type=StepResultType.FINAL_ANSWER, content="done"),
-        ])
+        run = _FakeRun(
+            [
+                _tool("shell", {"command": "uname -r"}),
+                _tool("shell", {"command": "free -h"}),
+                StepResult(type=StepResultType.FINAL_ANSWER, content="done"),
+            ]
+        )
         count, names = _step_tool_stats(run)
         assert count == 2
         assert names == ["shell"]
 
     def test_names_deduped_first_seen_order(self):
-        run = _FakeRun([
-            _tool("shell"), _tool("calculator"), _tool("shell"),
-            StepResult(type=StepResultType.FINAL_ANSWER, content="done"),
-        ])
+        run = _FakeRun(
+            [
+                _tool("shell"),
+                _tool("calculator"),
+                _tool("shell"),
+                StepResult(type=StepResultType.FINAL_ANSWER, content="done"),
+            ]
+        )
         count, names = _step_tool_stats(run)
         assert count == 3
         assert names == ["shell", "calculator"]
@@ -77,10 +81,12 @@ class TestStepToolStats:
         """A TOOL_CALL step with tool_call=None still counts (it happened),
         but contributes no name — matches the old loop's shape except the
         count now actually works."""
-        run = _FakeRun([
-            StepResult(type=StepResultType.TOOL_CALL, content="no field"),
-            _tool("shell"),
-        ])
+        run = _FakeRun(
+            [
+                StepResult(type=StepResultType.TOOL_CALL, content="no field"),
+                _tool("shell"),
+            ]
+        )
         count, names = _step_tool_stats(run)
         assert count == 2
         assert names == ["shell"]
@@ -89,7 +95,10 @@ class TestStepToolStats:
         """Same helper must accept the real AgentRun dataclass."""
         run = AgentRun(
             final_answer="done",
-            steps=[_tool("web_search"), StepResult(type=StepResultType.FINAL_ANSWER, content="done")],
+            steps=[
+                _tool("web_search"),
+                StepResult(type=StepResultType.FINAL_ANSWER, content="done"),
+            ],
             total_tokens=10,
             total_ms=123.0,
         )

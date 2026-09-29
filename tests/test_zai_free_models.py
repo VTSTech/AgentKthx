@@ -31,7 +31,7 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from agentkthx.plugins.zai.zai import ZaiBackend, ZAI_MODELS
+from agentkthx.plugins.zai.zai import ZAI_MODELS, ZaiBackend
 
 
 def _make_zai_backend():
@@ -59,6 +59,7 @@ def _fake_urlopen_response(payload: dict):
 # Catalog pricing ground truth (ZAI official per-1M-token table)
 # ---------------------------------------------------------------------------
 
+
 class TestCatalogPricing(unittest.TestCase):
     """Catalog pricing must match ZAI's official per-1M-token table."""
 
@@ -69,7 +70,8 @@ class TestCatalogPricing(unittest.TestCase):
         glm-4.7-flash. If this fails, either pricing drifted or a model
         was added with placeholder 0.0 pricing."""
         zero_priced = {
-            name for name, meta in ZAI_MODELS.items()
+            name
+            for name, meta in ZAI_MODELS.items()
             if meta.get("pricing", {}).get("input") == 0.0
             and meta.get("pricing", {}).get("output") == 0.0
         }
@@ -114,6 +116,7 @@ class TestCatalogPricing(unittest.TestCase):
 # _is_free_model classification
 # ---------------------------------------------------------------------------
 
+
 class TestIsFreeModel(unittest.TestCase):
     """_is_free_model must classify per catalog pricing."""
 
@@ -124,8 +127,14 @@ class TestIsFreeModel(unittest.TestCase):
 
     def test_paid_models_false(self):
         b = _make_zai_backend()
-        for name in ("glm-5.1", "glm-5.3-flash", "glm-5.3-flashx",
-                     "glm-4.7-flashx", "glm-4.6", "glm-4.5-air"):
+        for name in (
+            "glm-5.1",
+            "glm-5.3-flash",
+            "glm-5.3-flashx",
+            "glm-4.7-flashx",
+            "glm-4.6",
+            "glm-4.5-air",
+        ):
             self.assertFalse(b._is_free_model(name), f"{name} must be paid")
 
     def test_unknown_model_false(self):
@@ -143,6 +152,7 @@ class TestIsFreeModel(unittest.TestCase):
 # list_models() free_tier wiring
 # ---------------------------------------------------------------------------
 
+
 class TestListModelsFreeTier(unittest.TestCase):
     """list_models() must set details.free_tier on every entry."""
 
@@ -151,8 +161,8 @@ class TestListModelsFreeTier(unittest.TestCase):
         b = _make_zai_backend()
         api_payload = {
             "data": [
-                {"id": "glm-5.1"},            # paid
-                {"id": "glm-4.7-flash"},      # free
+                {"id": "glm-5.1"},  # paid
+                {"id": "glm-4.7-flash"},  # free
                 {"id": "zai/glm-4.5-flash"},  # free, with provider prefix
             ],
         }
@@ -168,8 +178,7 @@ class TestListModelsFreeTier(unittest.TestCase):
         """When discovery fails, catalog-only entries still carry
         free_tier (exactly two True)."""
         b = _make_zai_backend()
-        with patch("urllib.request.urlopen",
-                   side_effect=urllib.error.URLError("network down")):
+        with patch("urllib.request.urlopen", side_effect=urllib.error.URLError("network down")):
             models = b.list_models()
 
         self.assertGreater(len(models), 0)
@@ -183,8 +192,7 @@ class TestListModelsFreeTier(unittest.TestCase):
         """The /models free filter (details.free_tier == True) returns
         exactly glm-4.5-flash and glm-4.7-flash."""
         b = _make_zai_backend()
-        with patch("urllib.request.urlopen",
-                   side_effect=urllib.error.URLError("network down")):
+        with patch("urllib.request.urlopen", side_effect=urllib.error.URLError("network down")):
             models = b.list_models()
 
         free_models = [m for m in models if m.get("details", {}).get("free_tier", False)]
@@ -197,6 +205,7 @@ class TestListModelsFreeTier(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # get_model_info() free_tier wiring
 # ---------------------------------------------------------------------------
+
 
 class TestGetModelInfoFreeTier(unittest.TestCase):
     """get_model_info() must expose free_tier for catalog hits."""

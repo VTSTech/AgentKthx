@@ -141,7 +141,7 @@ def test_closed_detail_full_not_truncated():
     sec05 = findings["SEC-05"]
     assert sec05["status"] == "CLOSED"
     assert sec05["detail"].startswith("FULL-CLOSURE-NOTE-SEC-05")
-    assert len(sec05["detail"]) > 500          # well past the old 300 cap
+    assert len(sec05["detail"]) > 500  # well past the old 300 cap
     assert sec05["detail"].endswith("x" * 20)  # the tail survives
     assert sec05["file"] == "agentkthx/core/old.py:9-12"
 
@@ -181,8 +181,7 @@ def test_no_title_echo_override_for_open_findings():
 
 def test_summary_payload_keeps_closures_key_empty():
     findings = gad.parse_findings(AUDIT_MD, DELTAS_MD)
-    payload = gad._summary_payload(
-        {"release": "R07.13"}, findings, "2026-09-28T00:00:00Z")
+    payload = gad._summary_payload({"release": "R07.13"}, findings, "2026-09-28T00:00:00Z")
     assert payload["closures"] == []
     assert payload["totals"]["total"] == 5
     assert payload["totals"]["closed"] == 1
@@ -193,22 +192,35 @@ def test_envelope_has_no_closures_dependency():
     findings = gad.parse_findings(AUDIT_MD, DELTAS_MD)
     env = gad._endpoint_envelope({"release": "R07.13"}, findings, "t")
     assert env["total"] == 5
-    assert "closures" not in env or env.get("closures") in (None, [],) or True
+    assert (
+        "closures" not in env
+        or env.get("closures")
+        in (
+            None,
+            [],
+        )
+        or True
+    )
     assert env["open"] == 3 and env["closed"] == 1 and env["wontfix"] == 1
 
 
 def test_generated_html_has_no_timeline_and_embeds_full_details():
     findings = gad.parse_findings(AUDIT_MD, DELTAS_MD)
-    meta = {"release": "R07.13", "version": "0.7.13", "pypi": "0.7.13",
-            "tests": 42, "repo": "https://github.com/x", "pypiUrl": "https://pypi.org/x"}
+    meta = {
+        "release": "R07.13",
+        "version": "0.7.13",
+        "pypi": "0.7.13",
+        "tests": 42,
+        "repo": "https://github.com/x",
+        "pypiUrl": "https://pypi.org/x",
+    }
     html = gad.generate_html(findings, meta)
     assert "Closure timeline" not in html
     assert "renderTimeline" not in html
     assert "__CLOSURES__" not in html and "CLOSURES" not in html
-    assert "FULL-CLOSURE-NOTE-SEC-05" in html   # full detail embedded
+    assert "FULL-CLOSURE-NOTE-SEC-05" in html  # full detail embedded
     assert "Second analysis paragraph" in html  # multi-paragraph prose
     # JSON inside the page parses back cleanly
     blob = html.split("const FINDINGS = ")[1].split(";\n")[0]
     parsed = json.loads(blob)
-    assert {f["id"] for f in parsed} == {"SEC-01", "SEC-02", "ROB-01",
-                                         "SEC-05", "ARCH-01"}
+    assert {f["id"] for f in parsed} == {"SEC-01", "SEC-02", "ROB-01", "SEC-05", "ARCH-01"}
