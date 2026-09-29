@@ -122,6 +122,7 @@ def cmd_turbo(args: argparse.Namespace) -> int:
                 server_path=args.server,
                 port=args.port,
                 ctx=args.ctx,
+                num_predict=getattr(args, "num_predict", None),
                 cache_type_k=args.turbo_k,
                 cache_type_v=args.turbo_v,
                 flash_attn=getattr(args, "flash_attn", False),

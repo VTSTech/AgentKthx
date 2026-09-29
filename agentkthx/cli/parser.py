@@ -253,7 +253,16 @@ def create_parser() -> argparse.ArgumentParser:
         "--ctx",
         type=int,
         default=None,
-        help=f"Context window (default: {os.environ.get('TURBOQUANT_CTX', '8192')})",
+        help="Context window (default: model's context_length from the Ollama "
+        "catalog, falls back to TURBOQUANT_CTX env or 8192)",
+    )
+    turbo_start_parser.add_argument(
+        "--num-predict",
+        type=int,
+        default=None,
+        help="Max tokens to predict (default: ctx // 32 per R06.55 empirical "
+        "finding; pass 0 to disable the cap and let the server use its "
+        "own default of -1 / unlimited)",
     )
     turbo_start_parser.add_argument(
         "--turbo-k",

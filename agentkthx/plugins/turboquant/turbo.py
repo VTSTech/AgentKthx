@@ -86,6 +86,7 @@ class TurboState:
     blob_path: str = ""
     port: int = 0
     ctx: int = 0
+    num_predict: int = 0  # max tokens to predict (0 = unlimited / server default)
     cache_type_k: str = ""
     cache_type_v: str = ""
     turbo_mode: str = ""
@@ -103,6 +104,7 @@ class TurboState:
             "blob_path": self.blob_path,
             "port": self.port,
             "ctx": self.ctx,
+            "num_predict": self.num_predict,
             "cache_type_k": self.cache_type_k,
             "cache_type_v": self.cache_type_v,
             "turbo_mode": self.turbo_mode,
@@ -246,6 +248,7 @@ def _build_command(
     flash_attn: bool = False,
     sparsity: float = 0.0,
     num_threads: int = 0,
+    num_predict: int = 0,
     extra_args: Optional[list[str]] = None,
 ) -> list[str]:
     """Build the llama-server command line."""
@@ -260,6 +263,11 @@ def _build_command(
         "--host",
         "0.0.0.0",
     ]
+
+    # Max tokens to predict (num_ctx // 32 by default per R06.55 empirical finding).
+    # llama-server accepts --n-predict (long form, alias of -n / --predict).
+    if num_predict > 0:
+        cmd.extend(["--n-predict", str(num_predict)])
 
     # TurboQuant KV cache types
     if cache_type_k:
@@ -291,6 +299,7 @@ def start_server(
     server_path: Optional[str] = None,
     port: Optional[int] = None,
     ctx: Optional[int] = None,
+    num_predict: Optional[int] = None,
     cache_type_k: Optional[str] = None,
     cache_type_v: Optional[str] = None,
     flash_attn: bool = False,
@@ -307,7 +316,12 @@ def start_server(
         model_name: Ollama model name (e.g. "qwen2.5:7b") or path to a GGUF file
         server_path: Path to llama-server binary (default: TURBOQUANT_SERVER_PATH)
         port: Server port (default: TURBOQUANT_DEFAULT_PORT)
-        ctx: Context window size (default: TURBOQUANT_DEFAULT_CTX)
+        ctx: Context window size (default: model's context_length from GGUF
+            metadata reported by the Ollama catalog; falls back to
+            TURBOQUANT_DEFAULT_CTX when missing or for direct GGUF paths)
+        num_predict: Max tokens to predict (default: ctx // 32 per the R06.55
+            empirical finding for safe max_tokens cap; pass 0 to disable the
+            cap and let the server use its own default of -1 / unlimited)
         cache_type_k: K cache type (default: auto-detected from weight quant)
         cache_type_v: V cache type (default: auto-detected from weight quant)
         flash_attn: Enable flash attention
@@ -406,7 +420,21 @@ def start_server(
 
     # Apply defaults
     port = port or TURBOQUANT_DEFAULT_PORT
-    ctx = ctx or TURBOQUANT_DEFAULT_CTX
+    # Default ctx: use the model's reported context_length from the Ollama
+    # catalog (read from GGUF metadata in discover_models). Falls back to
+    # TURBOQUANT_DEFAULT_CTX when the model metadata is missing (e.g. a
+    # direct GGUF file path with no parsed metadata, or a legacy GGUF that
+    # does not declare a context_length key).
+    if ctx is None:
+        if ollama_model is not None and ollama_model.context_length > 0:
+            ctx = ollama_model.context_length
+        else:
+            ctx = TURBOQUANT_DEFAULT_CTX
+    # Default num_predict: ctx // 32 per R06.55 empirical finding (this
+    # matches the cloud-backend max_tokens cap in agent.py / openai_compat).
+    # Pass 0 explicitly to disable the cap (server default is -1 / unlimited).
+    if num_predict is None:
+        num_predict = ctx // 32
     host = "localhost"
 
     # R06.57: Free the port before starting — kill any stale/zombie
@@ -427,6 +455,7 @@ def start_server(
         flash_attn=flash_attn,
         sparsity=sparsity,
         num_threads=num_threads,
+        num_predict=num_predict,
         extra_args=extra_args,
     )
 
@@ -439,6 +468,10 @@ def start_server(
     if turbo_mode != "custom":
         print(f"  Auto-config: {dim(auto_reason)}")
     print(f"  Context:     {ctx} tokens")
+    if num_predict > 0:
+        print(f"  Predict:     {num_predict} tokens (max)")
+    else:
+        print(f"  Predict:     {dim('unlimited')}")
     print(f"  Port:        {port}")
     print(f"  Flash Attn:  {'ON' if flash_attn else dim('off')}")
     if sparsity > 0:
@@ -465,6 +498,7 @@ def start_server(
         blob_path=model_path,
         port=port,
         ctx=ctx,
+        num_predict=num_predict,
         cache_type_k=cache_type_k,
         cache_type_v=cache_type_v,
         turbo_mode=turbo_mode,
@@ -730,6 +764,8 @@ def print_status(state: TurboState) -> None:
         f"  KV Cache:   {bright_magenta(f'{state.cache_type_k}/{state.cache_type_v}')} ({state.turbo_mode})"
     )
     print(f"  Context:    {state.ctx} tokens")
+    if state.num_predict > 0:
+        print(f"  Predict:    {state.num_predict} tokens (max)")
     print(f"  Uptime:     {uptime_str}")
     print(f"  Server:     {dim(state.server_path)}")
     if state.flash_attn:
