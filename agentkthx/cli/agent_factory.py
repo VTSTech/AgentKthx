@@ -224,11 +224,79 @@ def _build_agent(args: argparse.Namespace, config) -> Agent:
     # --think flag controls DISPLAY of reasoning_content in CLI output
     show_reasoning = getattr(args, "show_reasoning", False)
 
+    # ── Local-backend tool-support auto-detection ──────────────────────────
+    # For local backends (llama-server, ollama, bitnet), query the cached
+    # test_tool_support result. If the cache says REACT (the user ran
+    # `agentkthx models` which force-tests every model), or UNTESTED (no
+    # cache entry yet — safer to assume ReAct for unknown local models),
+    # default force_react=True so the system prompt uses ReAct format
+    # (Action:/Action Input:/Final Answer:) instead of assuming the model
+    # supports OpenAI native function calling.
+    #
+    # Cloud backends are unaffected — they almost universally support
+    # native function calling, so the existing comp_mode → native-tools
+    # behavior is preserved.
+    #
+    # The user's explicit --force-react flag still wins (if True, stays True).
+    # To explicitly opt INTO native tools on a local backend despite the
+    # cache saying REACT, clear the cache (~/.agentkthx/tool_support.json)
+    # or set AGENTKTHX_FORCE_REACT=0 + run `agentkthx models --no-test`
+    # (when that flag exists — currently no opt-out beyond cache clearing).
+    effective_force_react = bool(getattr(args, "force_react", False))
+    if not effective_force_react and not getattr(backend, "is_cloud", False) and tools:
+        try:
+            from ..core.types import ToolSupportLevel
+
+            support = backend.test_tool_support(model, force_test=False)
+            if support == ToolSupportLevel.NATIVE:
+                if args.debug:
+                    print(
+                        f"[AgentKthx] Tool support for '{model}': NATIVE (cached) "
+                        f"→ using OpenAI native function calling"
+                    )
+            elif support == ToolSupportLevel.REACT:
+                effective_force_react = True
+                if args.debug:
+                    print(
+                        f"[AgentKthx] Tool support for '{model}': REACT (cached) "
+                        f"→ switching to ReAct text-based prompting "
+                        f"(use --force-react=False to suppress, or clear "
+                        f"~/.agentkthx/tool_support.json to re-test)"
+                    )
+            elif support == ToolSupportLevel.NONE:
+                # Model can't call tools at all — keep force_react=False so
+                # the agent still passes tools but the model just won't use
+                # them. (Setting force_react=True here wouldn't help — the
+                # model can't emit ReAct format either.)
+                if args.debug:
+                    print(
+                        f"[AgentKthx] Tool support for '{model}': NONE (cached) "
+                        f"→ tools will be passed but the model can't call them"
+                    )
+            else:  # UNTESTED — no cache entry yet
+                # For local backends, default to ReAct (safer for small
+                # CPU models that typically aren't trained on native
+                # function calling). For cloud backends we'd default to
+                # native, but this branch only fires when is_cloud=False.
+                effective_force_react = True
+                if args.debug:
+                    print(
+                        f"[AgentKthx] Tool support for '{model}': UNTESTED (no cache) "
+                        f"→ defaulting to ReAct for local backend "
+                        f"(run `agentkthx models` to populate the cache)"
+                    )
+        except Exception as e:
+            if args.debug:
+                print(
+                    f"[AgentKthx] test_tool_support lookup failed ({e}); "
+                    f"using args.force_react={effective_force_react}"
+                )
+
     agent = Agent(
         model=model,
         tools=tools,
         backend=backend,
-        force_react=args.force_react,
+        force_react=effective_force_react,
         debug=args.debug,
         soul=getattr(args, "soul", None),
         soul_level=getattr(args, "soul_level", 2),

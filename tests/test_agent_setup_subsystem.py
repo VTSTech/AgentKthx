@@ -101,9 +101,10 @@ def test_agent_construction_via_mixin_initializes_attributes():
 class _PromptHost(AgentSetupMixin):
     """Minimal host exposing only what _build_default_prompt reads."""
 
-    def __init__(self, is_bitnet=False, is_comp_mode=False):
+    def __init__(self, is_bitnet=False, is_comp_mode=False, force_react=False):
         self._is_bitnet = is_bitnet
         self._comp = is_comp_mode
+        self.force_react = force_react
 
     @property
     def _is_comp_mode(self):
@@ -126,3 +127,12 @@ def test_build_default_prompt_all_four_variants():
     react = host._build_default_prompt(True)
     assert "Action:" in react and "Action Input:" in react
     assert "Final Answer:" in react and "**CRITICAL RULES:**" in react
+    # 5. Comp mode + force_react=True → falls back to ReAct format
+    #    (the local-backend auto-detection path: when test_tool_support
+    #    cache says REACT, _build_agent sets force_react=True even in
+    #    comp mode, so the system prompt switches to ReAct text format
+    #    instead of assuming native function calling).
+    comp_react = _PromptHost(is_comp_mode=True, force_react=True)._build_default_prompt(True)
+    assert "function calls" not in comp_react
+    assert "Action:" in comp_react and "Action Input:" in comp_react
+    assert "Final Answer:" in comp_react
