@@ -448,65 +448,206 @@ def _get_cloud_catalog_defaults(backend, model: str) -> dict:
 def _get_local_catalog_defaults(backend, model: str) -> dict:
     """Local-backend catalog defaults (llama-server / ollama / bitnet).
 
-    Precedence:
+    Precedence depends on whether the backend base_url is local or remote:
+
+    **Local base_url** (localhost / 127.x / 192.168.x / 10.x):
       1. Running TurboQuant server state (~/.agentkthx/turbo.state) —
          reflects what the server actually has allocated via `-c` and
-         `--n-predict`. This is the best source of truth when the user
-         just ran `agentkthx turbo start <model>` and is now chatting
-         against it via `--backend llama-server`.
+         `--n-predict`. Best source of truth when the user just ran
+         `agentkthx turbo start <model>` and is now chatting against it
+         via `--backend llama-server`.
       2. Ollama catalog GGUF metadata for the model name —
          ``context_length`` from the model's GGUF header (parsed by
-         ``discover_models`` in ``ollama_registry.py``), with
-         ``num_predict = ctx // 32`` per the R06.55 empirical finding.
+         ``discover_models`` in ``ollama_registry.py``).
       3. Empty dict — chat falls back to ``config.num_ctx`` (pre-R08
-         behavior, e.g. when the user is targeting their own llama-server
-         with a direct GGUF path that isn't an Ollama model name).
+         behavior, e.g. when targeting a custom llama-server with a
+         direct GGUF path that isn't an Ollama model name).
+
+    **Remote base_url** (anything else — Cloudflare tunnel, public IP,
+    hostname, LAN IP outside the RFC1918 ranges above):
+      1. Probe the remote backend's ``list_models()`` — works for both
+         llama-server (reads ``details.n_ctx`` parsed from
+         ``/v1/models data[0].meta.n_ctx`` — the runtime ctx from
+         ``-c``) and Ollama (reads ``details.context_length`` parsed
+         from ``/api/tags`` — the GGUF-trained ctx per model). Tries
+         exact name match first, falls back to first-loaded-model
+         (llama-server only has one loaded anyway — name is a SHA256
+         hash that won't match the Ollama-style ``model`` arg).
+      2. Empty dict — chat falls back to ``config.num_ctx``.
+
+    For both paths, ``num_predict`` is derived as ``ctx // 32`` per the
+    R06.55 empirical finding (matches ``agentkthx turbo start`` behavior).
 
     All imports are lazy so agent_factory startup doesn't pay the cost
     unless this code path actually fires.
     """
-    # 1) Running TurboQuant server state
-    try:
-        from ..plugins.turboquant.turbo import TurboState, _is_process_alive
+    base_url = getattr(backend, "base_url", "") or ""
 
-        state = TurboState.load()
-        if state is not None and state.pid > 0 and state.ctx > 0:
-            # Verify the PID is still alive so we don't trust a stale state
-            # file left over from a crashed/killed server. _is_process_alive
-            # also handles zombie detection on Linux via /proc/<pid>/stat.
-            if _is_process_alive(state.pid):
-                # Prefer the saved num_predict; if it's 0 (legacy state file
-                # from before R08), derive ctx // 32 so chat matches what
-                # `turbo start` would have computed for the same ctx.
-                num_predict = (
-                    state.num_predict
-                    if state.num_predict > 0
-                    else state.ctx // 32
-                )
+    # ── Local address path: TurboState + local Ollama catalog ──────────
+    if _is_local_base_url(base_url):
+        # 1) Running TurboQuant server state
+        try:
+            from ..plugins.turboquant.turbo import TurboState, _is_process_alive
+
+            state = TurboState.load()
+            if state is not None and state.pid > 0 and state.ctx > 0:
+                # Verify the PID is still alive so we don't trust a stale state
+                # file left over from a crashed/killed server. _is_process_alive
+                # also handles zombie detection on Linux via /proc/<pid>/stat.
+                if _is_process_alive(state.pid):
+                    # Prefer the saved num_predict; if it's 0 (legacy state file
+                    # from before R08), derive ctx // 32 so chat matches what
+                    # `turbo start` would have computed for the same ctx.
+                    num_predict = (
+                        state.num_predict
+                        if state.num_predict > 0
+                        else state.ctx // 32
+                    )
+                    return {
+                        "num_ctx": state.ctx,
+                        "num_predict": num_predict,
+                    }
+        except Exception:
+            pass  # Fall through to Ollama catalog lookup
+
+        # 2) Local Ollama catalog GGUF metadata (works for any Ollama-pulled
+        #    model, regardless of which local backend the user picked)
+        try:
+            from ..backends.ollama_registry import find_model
+
+            ollama_model = find_model(model)
+            if ollama_model is not None and ollama_model.context_length > 0:
+                ctx = ollama_model.context_length
                 return {
-                    "num_ctx": state.ctx,
-                    "num_predict": num_predict,
+                    "num_ctx": ctx,
+                    "num_predict": ctx // 32,
                 }
-    except Exception:
-        pass  # Fall through to Ollama catalog lookup
+        except Exception:
+            pass
 
-    # 2) Ollama catalog GGUF metadata (works for any Ollama-pulled model,
-    #    regardless of which local backend the user picked)
+        # 3) Local fallback: empty dict (chat will use config.num_ctx)
+        return {}
+
+    # ── Remote address path: probe the running backend directly ─────────
+    # When the user points at a remote llama-server (e.g. Cloudflare tunnel
+    # to Colab) or a remote Ollama instance, there's no local TurboState
+    # file and no local Ollama catalog. But the remote backend KNOWS its
+    # own runtime ctx (llama-server via /v1/models meta.n_ctx) or its
+    # models' trained ctx (Ollama via /api/tags details.context_length).
+    # Query it directly via the backend's existing list_models() method.
+    return _probe_remote_catalog(backend, model)
+
+
+def _is_local_base_url(url: str) -> bool:
+    """Return True if the backend base URL points at a local address.
+
+    Local = ``localhost``, ``::1``, ``127.x.x.x``, ``192.168.x.x``,
+    or ``10.x.x.x``. Remote = anything else (Cloudflare tunnel, public
+    IP, hostname, LAN IP outside the RFC1918 ranges above).
+
+    Used by ``_get_local_catalog_defaults`` to decide whether to consult
+    the local TurboQuant state file / local Ollama catalog (only valid
+    when the backend is local) vs. probing the remote backend directly
+    via its HTTP API.
+    """
+    if not url:
+        # Conservative: treat unknown/empty as local so we try the local
+        # paths first (they no-op silently when files don't exist).
+        return True
+    url_lower = url.lower().strip()
+    # Strip protocol
+    for proto in ("http://", "https://"):
+        if url_lower.startswith(proto):
+            url_lower = url_lower[len(proto):]
+            break
+    # Strip path (keep host[:port])
+    host = url_lower.split("/", 1)[0]
+    # Strip port (but be careful with IPv6 brackets)
+    if host.startswith("["):
+        # IPv6 literal: [::1]:port
+        host = host.split("]", 1)[0].lstrip("[")
+    else:
+        host = host.split(":", 1)[0]
+    # Local checks
+    if host in ("localhost", "::1"):
+        return True
+    if host.startswith("127."):
+        return True
+    if host.startswith("192.168."):
+        return True
+    if host.startswith("10."):
+        return True
+    # Note: 172.16.0.0/12 is also RFC1918 private but the user didn't
+    # list it — leave it as remote (will probe, which is safe).
+    return False
+
+
+def _probe_remote_catalog(backend, model: str) -> dict:
+    """Probe a remote backend's HTTP API for the loaded model's context.
+
+    Calls ``backend.list_models()`` (already implemented per backend —
+    hits ``/v1/models`` for llama-server, ``/api/tags`` for Ollama).
+    Works for both:
+
+    - **llama-server / TurboQuant llama.cpp fork**: ``/v1/models`` returns
+      ``data[0].meta.n_ctx`` = the runtime ``-c`` value the server was
+      started with. ``LlamaServerBackend.list_models()`` parses this into
+      ``details.n_ctx``.
+    - **Ollama**: ``/api/tags`` returns ``models[].details.context_length``
+      = the GGUF-trained context per model. ``OllamaBackend.list_models()``
+      parses this into ``details.context_length``.
+
+    Strategy:
+      1. Try exact name match first (works for Ollama where the user
+         passes ``llama3.2:1b`` and the catalog has an entry with that
+         exact name).
+      2. Fall back to the first loaded model's ctx (works for llama-server
+         which only has one model loaded — but its ``name`` is a SHA256
+         hash that won't match the Ollama-style ``model`` arg).
+
+    Returns:
+        ``{"num_ctx": <int>, "num_predict": <int>}`` where ``num_predict``
+        is derived as ``ctx // 32`` per the R06.55 empirical finding,
+        matching ``agentkthx turbo start`` behavior. Empty dict if the
+        probe fails or returns no usable context info.
+    """
     try:
-        from ..backends.ollama_registry import find_model
-
-        ollama_model = find_model(model)
-        if ollama_model is not None and ollama_model.context_length > 0:
-            ctx = ollama_model.context_length
-            return {
-                "num_ctx": ctx,
-                "num_predict": ctx // 32,
-            }
+        models = backend.list_models()
+        if not models:
+            return {}
+        # 1) Exact name match (Ollama-style: model arg matches catalog name)
+        for m in models:
+            if m.get("name") == model:
+                ctx = _extract_ctx_from_model_entry(m)
+                if ctx > 0:
+                    return {"num_ctx": ctx, "num_predict": ctx // 32}
+        # 2) Fallback: take the first loaded model's ctx (llama-server-style:
+        #    only one model loaded, name is a SHA256 hash that won't match)
+        ctx = _extract_ctx_from_model_entry(models[0])
+        if ctx > 0:
+            return {"num_ctx": ctx, "num_predict": ctx // 32}
     except Exception:
         pass
-
-    # 3) Fall back to empty dict (chat will use config.num_ctx)
     return {}
+
+
+def _extract_ctx_from_model_entry(m: dict) -> int:
+    """Extract context length from a ``list_models()`` entry.
+
+    Handles both llama-server (``details.n_ctx`` from ``/v1/models meta.n_ctx``)
+    and Ollama (``details.context_length`` from ``/api/tags``) entry shapes.
+    Returns 0 if neither field is present/positive.
+    """
+    details = m.get("details", {}) or {}
+    # llama-server runtime ctx (from /v1/models meta.n_ctx — the -c value)
+    ctx = details.get("n_ctx", 0) or 0
+    if ctx > 0:
+        return ctx
+    # Ollama trained ctx (from /api/tags details.context_length)
+    ctx = details.get("context_length", 0) or 0
+    if ctx > 0:
+        return ctx
+    return 0
 
 
 def apply_model_switch(agent, new_model: str) -> dict:
