@@ -33,14 +33,14 @@ Inspired by the architecture of OpenClaw, rebuilt from scratch for local-first o
 
 | Document | Description |
 |----------|-------------|
-| [USAGE.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/USAGE.md) | **Usage guide** — CLI commands, backend configurations (OpenRouter/Gemini/HuggingFace/ZAI/TurboQuant), Python API, persistent memory, security modes, environment variables, full CLI options table |
 | [ARCH.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/ARCH.md) | Technical documentation for developers (directory structure, core design, orchestrator modes) |
 | [CHANGELOG.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/CHANGELOG.md) | Version history and release notes (includes LocalClaw history) |
-| [TESTS.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/TESTS.md) | Benchmark results, model recommendations, and testing guide |
-| [PLUGIN_SPEC_v0.2.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/PLUGIN_SPEC_v0.2.md) | Plugin spec v0.2 — lifecycle hooks, plugin tools API, external plugin roots, dual-form manifests, migration guide from v0.1 |
-| [JEV_API_MODE.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/JEV_API_MODE.md) | JEV API mode — System-One decisions via any free LLM (Jev-compatible shape) |
-| [docs/api/](https://github.com/VTSTech/AgentKthx/blob/main/docs/api/) | **API Technical References** — one deep-dive per provider, all in one folder: ZAI, OpenRouter, Gemini, Hugging Face Router, OpenAI, Mistral, Pollinations, OrcaRouter (auth & endpoints, request/response schemas, model catalogs, function calling, streaming, error codes & recovery, rate limits, free-tier behavior, AgentKthx `Backend` + `plugin.json` blueprints, troubleshooting matrices) |
 | [CREDITS.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/CREDITS.md) | Acknowledges every project, inspiration, API, model creator, and specification that makes AgentKthx possible |
+| [docs/api/](https://github.com/VTSTech/AgentKthx/blob/main/docs/api/) | **API Technical References** — one deep-dive per provider, all in one folder: ZAI, OpenRouter, Gemini, Hugging Face Router, OpenAI, Mistral, Pollinations, OrcaRouter (auth & endpoints, request/response schemas, model catalogs, function calling, streaming, error codes & recovery, rate limits, free-tier behavior, AgentKthx `Backend` + `plugin.json` blueprints, troubleshooting matrices) |
+| [JEV_API_MODE.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/JEV_API_MODE.md) | JEV API mode — System-One decisions via any free LLM (Jev-compatible shape) |
+| [PLUGIN_SPEC_v0.2.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/PLUGIN_SPEC_v0.2.md) | Plugin spec v0.2 — lifecycle hooks, plugin tools API, external plugin roots, dual-form manifests, migration guide from v0.1 |
+| [USAGE.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/USAGE.md) | **Usage guide** — CLI commands, backend configurations (OpenRouter/Gemini/HuggingFace/ZAI/TurboQuant), Python API, persistent memory, security modes, environment variables, full CLI options table |
+| [TESTS.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/TESTS.md) | Benchmark results, model recommendations, and testing guide |
 
 ## Features
 
