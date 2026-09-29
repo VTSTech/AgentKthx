@@ -5,7 +5,7 @@ All notable changes to AgentKthx will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [R07.15] - 2026-09-29 12:59:33 AM
+## [R07.15] - 2026-09-29 2:14:18 PM
 
 **Push history (github.com/VTSTech/AgentKthx, branch `main`):** `30cbe4f` — this release (six-finding closure batch) · `4e1555e` — intra-release amendment 1 (`openrouter/free` free-models listing) · `7579e3c` — intra-release amendment 2 (agent-mode tool-call counter + audit header sync) · `7f59a8d` — docs-only amendment 3 (push-history annotations) · `53916a5` — intra-release amendment 4 (four-finding closure batch: TEST-06, FEAT-02, ROB-11, ROB-22) · `ea98951` — intra-release amendment 5 (chat per-response stats + dynamic `--backend` help) · `8b86fb7` — intra-release amendment 6 (pyyaml dev extra: CI-pinning tests run in CI) · `00ad56a` — ruff config key migration (`select` → `lint.select`) · `8d0b8c7` — lint burn-down (ruff+black across the tree, lint job promoted to REQUIRED). All nine commits are titled "R07.15".
 
