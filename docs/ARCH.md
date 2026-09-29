@@ -181,7 +181,8 @@ agentkthx/
 │                             # - Color class with ANSI codes
 │                             # - Color functions: green, yellow, cyan, etc.
 │                             # - Utility: visible_len, pad_colored
-├── config.py                 # Core framework config (OLLAMA_BASE_URL, LLAMA_SERVER_BASE_URL)
+├── config.py                 # Core framework config (OLLAMA_BASE_URL, TURBOQUANT_BASE_URL;
+│                             # LLAMA_SERVER_BASE_URL kept as backward-compat alias)
 │                             # Plugin-owned config (BitNet, ZAI, ACP, TurboQuant) reads from
 │                             # env vars with defaults defined in each plugin's plugin.json
 ├── cli/                      # CLI package (R07.00 Phase 8 — was the 4270-line
@@ -621,7 +622,7 @@ Extends `OllamaBackend` with llama.cpp server support. Used for both standard ll
 - **`/props` fallback** -- When model name is unknown, queries `/props` endpoint for model discovery
 - **Family-aware prompt formatting** -- Adjusts prompt structure based on detected model family
 - **Turn-bleed guards** -- Stop tokens `\nUser:` and `\nAssistant:` prevent the model from generating additional conversation turns
-- **Default URL**: `LLAMA_SERVER_BASE_URL` defaults to `http://localhost:8764`
+- **Default URL**: `TURBOQUANT_BASE_URL` defaults to `http://localhost:8764` (R07.16: renamed from `LLAMA_SERVER_BASE_URL`; old name still read as backward-compat fallback)
 
 ### BitNet Backend (`plugins/bitnet/`) (R04.2, plugin in R05.0)
 
@@ -1877,7 +1878,7 @@ Final Answer: 1024
 | `temperature` | 0.7 | Model temperature (varies by model) |
 | `retry_on_error` | `true` | Retry failed tool calls with error feedback |
 | `max_tool_retries` | 2 | Maximum retries per tool call failure |
-| `LLAMA_SERVER_BASE_URL` | `http://localhost:8764` | LlamaServer / TurboQuant endpoint |
+| `TURBOQUANT_BASE_URL` | `http://localhost:8764` | TurboQuant / LlamaServer endpoint (R07.16: renamed from `LLAMA_SERVER_BASE_URL`; old name still accepted as backward-compat alias) |
 | `TURBOQUANT_SERVER_PATH` | `llama-server` | Path to llama-server binary |
 | `TURBOQUANT_PORT` | `8764` | TurboQuant listen port |
 | `TURBOQUANT_CTX` | `8192` | TurboQuant context window size |

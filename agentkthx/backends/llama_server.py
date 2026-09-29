@@ -22,7 +22,7 @@ import os
 import time
 from typing import Generator
 
-from ..config import BITNET_BASE_URL, LLAMA_SERVER_BASE_URL
+from ..config import BITNET_BASE_URL, TURBOQUANT_BASE_URL
 from ..core.models import Tool, ToolParam
 from ..core.types import ApiMode, BackendType, ToolSupportLevel
 from .base import BackendConfig
@@ -77,7 +77,7 @@ class LlamaServerBackend(OllamaBackend):
         elif bitnet_mode:
             resolved_url = BITNET_BASE_URL.rstrip("/")
         else:
-            resolved_url = LLAMA_SERVER_BASE_URL.rstrip("/")
+            resolved_url = TURBOQUANT_BASE_URL.rstrip("/")
 
         # Set API mode
         if api_mode is None:

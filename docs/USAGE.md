@@ -600,10 +600,10 @@ Environment variables:
 ```bash
 # Backend URLs and per-backend settings
 OLLAMA_BASE_URL=https://your-ollama-server.com    # Default: http://localhost:11434
-LLAMA_SERVER_BASE_URL=http://localhost:8764     # TurboQuant backend URL (default: 8764).
-#                                                 # Despite the env var name, this points
-#                                                 # at the TurboQuant backend (formerly the
-#                                                 # `llama-server` backend — R07.16 rename).
+TURBOQUANT_BASE_URL=http://localhost:8764     # TurboQuant backend URL (default: 8764).
+#                                                 # R07.16: renamed from LLAMA_SERVER_BASE_URL.
+#                                                 # The old name is still read as a backward-compat
+#                                                 # fallback (TURBOQUANT_BASE_URL wins if both set).
 #                                                 # The binary itself is still `llama-server`.
 
 # BitNet plugin

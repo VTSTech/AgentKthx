@@ -42,6 +42,7 @@ def cmd_config(args: argparse.Namespace) -> int:
         OPENAI_DEFAULT_MODEL,
         OPENAI_FREE_FALLBACK_MODEL,
         OPENAI_FREE_ONLY,
+        TURBOQUANT_BASE_URL,
         OPENAI_ORGANIZATION_ID,
         OPENAI_PROJECT_ID,
         OPENAI_REASONING_EFFORT,
@@ -66,7 +67,7 @@ def cmd_config(args: argparse.Namespace) -> int:
         urls = [
             ("OLLAMA_BASE_URL", OLLAMA_BASE_URL),
             ("BITNET_BASE_URL", BITNET_BASE_URL),
-            ("LLAMA_SERVER_BASE_URL", LLAMA_SERVER_BASE_URL),
+            ("TURBOQUANT_BASE_URL", TURBOQUANT_BASE_URL),
             ("ZAI_BASE_URL", ZAI_BASE_URL),
             ("OPENROUTER_BASE_URL", OPENROUTER_BASE_URL),
             ("GEMINI_BASE_URL", GEMINI_BASE_URL),
@@ -89,7 +90,7 @@ def cmd_config(args: argparse.Namespace) -> int:
             "URLs": [
                 ("OLLAMA_BASE_URL", OLLAMA_BASE_URL),
                 ("BITNET_BASE_URL", BITNET_BASE_URL),
-                ("LLAMA_SERVER_BASE_URL", LLAMA_SERVER_BASE_URL),
+                ("TURBOQUANT_BASE_URL", TURBOQUANT_BASE_URL),
                 ("ZAI_BASE_URL", ZAI_BASE_URL),
                 ("OPENROUTER_BASE_URL", OPENROUTER_BASE_URL),
                 ("GEMINI_BASE_URL", GEMINI_BASE_URL),
@@ -182,7 +183,7 @@ def cmd_config(args: argparse.Namespace) -> int:
         urls={
             "Ollama": OLLAMA_BASE_URL,
             "BitNet": BITNET_BASE_URL,
-            "llama-server": LLAMA_SERVER_BASE_URL,
+            "turboquant": TURBOQUANT_BASE_URL,
             "ZAI": ZAI_BASE_URL,
             "OpenRouter": OPENROUTER_BASE_URL,
             "Gemini": GEMINI_BASE_URL,
@@ -324,7 +325,8 @@ def _print_config_summary(
         ("OLLAMA_NUM_CTX", "Ollama context window size"),
         ("BITNET_BASE_URL", "BitNet server URL"),
         ("BITNET_TUNNEL", "BitNet remote tunnel URL"),
-        ("LLAMA_SERVER_BASE_URL", "llama-server URL"),
+        ("TURBOQUANT_BASE_URL", "TurboQuant backend URL (R07.16 primary; LLAMA_SERVER_BASE_URL also accepted as backward-compat alias)"),
+        ("LLAMA_SERVER_BASE_URL", "(Deprecated alias for TURBOQUANT_BASE_URL — still read as backward-compat fallback)"),
         # ── ZAI ──
         ("ZAI_BASE_URL", "ZAI API URL"),
         ("ZAI_API_KEY", "ZAI API key"),

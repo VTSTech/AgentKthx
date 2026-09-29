@@ -30,15 +30,33 @@ if _ollama_env:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# LLAMA-SERVER CONFIGURATION (native backend)
+# TURBOQUANT CONFIGURATION (native backend)
 # ═══════════════════════════════════════════════════════════════════════════════
-# Default for local llama-server (native backend, always available)
-LLAMA_SERVER_BASE_URL = "http://localhost:8764"
+# Default for local TurboQuant backend (native, always available).
+# R07.16: env var renamed LLAMA_SERVER_BASE_URL → TURBOQUANT_BASE_URL to match
+# the backend rename (llama-server → turboquant). The old env var name is still
+# read as a backward-compat fallback so existing setups keep working — set
+# EITHER name in your shell, the new one (TURBOQUANT_BASE_URL) wins if both
+# are set. The binary itself is still `llama-server` (llama.cpp upstream name);
+# only the AgentKthx backend name and this env var changed.
+TURBOQUANT_BASE_URL = "http://localhost:8764"
 
-# Override via environment variable
-_llama_server_env = os.environ.get("LLAMA_SERVER_BASE_URL")
-if _llama_server_env:
-    LLAMA_SERVER_BASE_URL = _llama_server_env
+# Override via environment variable (new name takes precedence; old name is
+# backward-compat fallback for existing user setups).
+_turboquant_env = os.environ.get("TURBOQUANT_BASE_URL")
+if _turboquant_env:
+    TURBOQUANT_BASE_URL = _turboquant_env
+else:
+    # Backward-compat: fall back to the old LLAMA_SERVER_BASE_URL env var
+    # if the user hasn't set the new TURBOQUANT_BASE_URL.
+    _llama_server_env = os.environ.get("LLAMA_SERVER_BASE_URL")
+    if _llama_server_env:
+        TURBOQUANT_BASE_URL = _llama_server_env
+
+# Backward-compat alias: keep LLAMA_SERVER_BASE_URL exported from this module
+# so any code that does `from ..config import LLAMA_SERVER_BASE_URL` still
+# works. It points at the same value as TURBOQUANT_BASE_URL.
+LLAMA_SERVER_BASE_URL = TURBOQUANT_BASE_URL
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

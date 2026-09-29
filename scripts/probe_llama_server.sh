@@ -3,7 +3,8 @@
 # probe_llama_server.sh — Validate llama-server Backend (expanded)
 # ═══════════════════════════════════════════════════════════════════════════
 # GET-only probe (local backend; no inference calls, no tokens burned).
-# Requires: llama-server running on localhost:8764 (or LLAMA_SERVER_BASE_URL set)
+# Requires: llama-server running on localhost:8764 (or TURBOQUANT_BASE_URL set;
+#             LLAMA_SERVER_BASE_URL also accepted as backward-compat alias)
 # Usage:    bash probe_llama_server.sh
 # Output:   /tmp/agentkthx_probe_llama_server.json        (raw /v1/models body)
 #           /tmp/agentkthx_probe_llama_server_slots.json  (raw /slots body)
@@ -27,7 +28,9 @@
 # ═══════════════════════════════════════════════════════════════════════════
 set -euo pipefail
 
-BASE_URL="${LLAMA_SERVER_BASE_URL:-http://localhost:8764}"
+# R07.16: TURBOQUANT_BASE_URL is the primary env var (renamed from
+# LLAMA_SERVER_BASE_URL). Old name is kept as backward-compat fallback.
+BASE_URL="${TURBOQUANT_BASE_URL:-${LLAMA_SERVER_BASE_URL:-http://localhost:8764}}"
 
 CYAN='\033[0;36m'; BOLD='\033[1m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; RED='\033[0;31m'; NC='\033[0m'
 
@@ -60,7 +63,8 @@ if [ "$HTTP_CODE" != "200" ]; then
     fi
     echo -e "  ${YELLOW}Hint:${NC} llama-server not running at ${BASE_URL}"
     echo "    Start it directly:  llama-server -m your-model.gguf --port 8764"
-    echo "    Or set:             export LLAMA_SERVER_BASE_URL=http://host:port"
+    echo "    Or set:             export TURBOQUANT_BASE_URL=http://host:port"
+    echo "    (R07.16: LLAMA_SERVER_BASE_URL also accepted as backward-compat alias)"
     echo ""
     echo "  Also try the TurboQuant path:"
     echo "    agentkthx turbo start qwen2.5:7b"

@@ -11,7 +11,7 @@ Written by VTSTech — https://www.vts-tech.org
 
 from __future__ import annotations
 
-from ..config import AGENTKTHX_BACKEND, LLAMA_SERVER_BASE_URL, OLLAMA_BASE_URL
+from ..config import AGENTKTHX_BACKEND, OLLAMA_BASE_URL, TURBOQUANT_BASE_URL
 from ..core.types import ApiMode
 from .base import BaseBackend
 
@@ -112,8 +112,10 @@ def get_backend(
         elif name_lower in ("turboquant", "llama-server", "llama_server"):
             # R07.16: turboquant is the primary name; llama-server and
             # llama_server are backward-compat aliases. All three resolve
-            # to LlamaServerBackend and use the same LLAMA_SERVER_BASE_URL.
-            kwargs["base_url"] = LLAMA_SERVER_BASE_URL
+            # to LlamaServerBackend and use the same TURBOQUANT_BASE_URL
+            # (formerly LLAMA_SERVER_BASE_URL — both env var names still
+            # work, with TURBOQUANT_BASE_URL taking precedence).
+            kwargs["base_url"] = TURBOQUANT_BASE_URL
         # Plugin backends set their own defaults in their __init__
 
     # BitNet-specific: route to llama-server with bitnet_mode=True
