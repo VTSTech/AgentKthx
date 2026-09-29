@@ -4,12 +4,12 @@
 
 **Repository:** https://github.com/VTSTech/AgentKthx  
 **Author:** VTSTech | **License:** MIT | **Date:** 2026-09-29  
-**Commit:** 4b69989 | **Test Suite:** 1900 passed / 16 skipped  
+**Commit:** 4b69989 | **Test Suite:** 1917 passed / 16 skipped  
 40 Open Findings | 7 Categories | SEC, ROB, MAINT, PERF, FEAT, ARCH, TEST  
 Severity: 0 High | 17 Medium | 23 Low  
 40 OPEN (CLOSED + WONTFIX archived in deltas.md — generate_audit_dash.py merges both for the dashboard)
 
-> **Split:** 64 CLOSED/WONTFIX findings moved to `deltas.md`. `generate_audit_dash.py` reads both `audit.md` (open) and `deltas.md` (closed/wontfix) and merges them into the full register. The dashboard shows all 104 findings (40 open + 64 closed/wontfix).
+> **Split:** 65 CLOSED/WONTFIX findings moved to `deltas.md`. `generate_audit_dash.py` reads both `audit.md` (open) and `deltas.md` (closed/wontfix) and merges them into the full register. The dashboard shows all 105 findings (40 open + 65 closed/wontfix).
 
 ---
 

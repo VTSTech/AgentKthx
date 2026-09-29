@@ -1081,7 +1081,10 @@ class Agent(AgentSetupMixin, CompactionMixin, ToolExecutionMixin, StreamingMixin
         # is reachable — and would have silently swallowed an init-order
         # bug (a parser rebuilt before the constructor set the flag would
         # quietly run with debug=False instead of failing loudly).
-        self._parser = ToolParser(self.tools.names(), debug=self.debug)
+        # ROB-32 (R07.14): keep the force_react flag on the re-created
+        # parser too (same init-order reasoning as ROB-19).
+        self._parser = ToolParser(self.tools.names(), debug=self.debug,
+                                  force_react=self.force_react)
         self._rebuild_system_prompt_with_tools()
 
     def _rebuild_system_prompt_with_tools(self) -> None:
