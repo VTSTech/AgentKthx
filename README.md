@@ -47,7 +47,7 @@ Inspired by the architecture of OpenClaw, rebuilt from scratch for local-first o
 - **Zero dependencies** — Uses Python stdlib only (urllib for HTTP)
 - **Plugin system** — Manifest-based plugin discovery, lazy loading, and dependency resolution (R05.0)
 - **Plugin Spec v0.2 (R06.5)** — Lifecycle hooks (`on_init`/`on_run_start`/`on_run_end`/`on_error`/`on_shutdown`), plugin-provided tools, external plugin roots (`~/.agentkthx/plugins/`, `$AGENTKTHX_PLUGIN_PATH`), dual-form manifests (`extensions` block) with deprecation warnings for legacy fields, optional `sha256` content pinning (R07.05 SEC-06), `plugins --load/--unload/--reload/--json/--verbose` management
-- **Native + plugin backends** — Ollama + llama-server built-in; OpenRouter, BitNet, ZAI, ACP, TurboQuant, Gemini, OrcaRouter, Mistral, HuggingFace, OpenAI, Pollinations as plugins
+- **Native + plugin backends** — Ollama + TurboQuant built-in; OpenRouter, BitNet, ZAI, ACP, Gemini, OrcaRouter, Mistral, HuggingFace, OpenAI, Pollinations as plugins. (The TurboQuant backend uses llama.cpp's `llama-server` binary under the hood — `--backend turboquant` is the primary name; `--backend llama-server` remains as a backward-compat alias.)
 - **Multi-cloud support** — Access to 500+ models from OpenRouter, OpenAI, Anthropic, Google (Gemini + Gemma), Cohere, plus 11 upstream providers via OrcaRouter's zero-markup gateway
 - **CloudBackend base class** (R07.05 MAINT-02) — shared cloud-backend boilerplate consolidated; new cloud backends are ~100 LOC instead of ~1500 LOC
 - **Dual API support** — OpenResponses (`--api openre`) and OpenAI Chat-Completions (`--api openai`)

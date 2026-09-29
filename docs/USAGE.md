@@ -66,7 +66,12 @@ agentkthx update
 ```bash
 # Native backends (always available)
 agentkthx chat -m qwen2.5:0.5b --backend ollama         # Ollama (default)
-agentkthx chat -m qwen2.5:7b --backend llama-server      # llama.cpp / TurboQuant
+agentkthx chat -m qwen2.5:7b --backend turboquant        # TurboQuant / llama.cpp (R07.16 primary name)
+#                                                         # `--backend llama-server` also works
+#                                                         # as a backward-compat alias.
+#                                                         # The binary itself is still `llama-server`
+#                                                         # (llama.cpp upstream name) — set its path
+#                                                         # via TURBOQUANT_SERVER_PATH env var.
 
 # Plugin backends (loaded on demand)
 agentkthx chat -m poolside/laguna-xs-2.1:free --backend openrouter     # OpenRouter (free tier, plugin)
@@ -595,7 +600,11 @@ Environment variables:
 ```bash
 # Backend URLs and per-backend settings
 OLLAMA_BASE_URL=https://your-ollama-server.com    # Default: http://localhost:11434
-LLAMA_SERVER_BASE_URL=http://localhost:8764     # llama-server URL (default: 8764)
+LLAMA_SERVER_BASE_URL=http://localhost:8764     # TurboQuant backend URL (default: 8764).
+#                                                 # Despite the env var name, this points
+#                                                 # at the TurboQuant backend (formerly the
+#                                                 # `llama-server` backend — R07.16 rename).
+#                                                 # The binary itself is still `llama-server`.
 
 # BitNet plugin
 BITNET_BASE_URL=http://localhost:8765              # BitNet server URL
@@ -638,12 +647,19 @@ ORCAROUTER_FALLBACK_MODELS=model1,model2,model3    # Optional (up to 5; extra_bo
 ORCAROUTER_INCLUDE_COST=1                          # Optional (X-OrcaRouter-Include-Cost header → usage.cost_usd)
 
 # TurboQuant plugin
-TURBOQUANT_SERVER_PATH=llama-server                # llama-server binary path
+TURBOQUANT_SERVER_PATH=llama-server                # llama-server binary path (llama.cpp upstream name;
+#                                                   # the binary is unchanged by the R07.16 backend rename —
+#                                                   # only the user-facing backend name changed from
+#                                                   # `llama-server` to `turboquant`)
 TURBOQUANT_PORT=8764                               # TurboQuant server port
-TURBOQUANT_CTX=8192                                # Context window size
+TURBOQUANT_CTX=8192                                # Context window size (R07.16: defaults to the
+#                                                   # model's GGUF context_length when not specified —
+#                                                   # use --ctx to override on `turbo start`)
 
 # Agent settings
-AGENTKTHX_BACKEND=ollama      # Default backend: ollama, llama-server, bitnet, zai, gemini, ...
+AGENTKTHX_BACKEND=ollama      # Default backend: ollama, turboquant, bitnet, zai, gemini, ...
+#                             # (R07.16: `turboquant` is the primary name; `llama-server`
+#                             # and `llama_server` still work as backward-compat aliases)
 AGENTKTHX_MODEL=qwen2.5:0.5b  # Default model
 AGENTKTHX_MAX_STEPS=10        # Maximum reasoning steps
 AGENTKTHX_DEBUG=false         # Enable debug output
