@@ -747,6 +747,12 @@ from agentkthx.tools.builtins import http_get, web_search  # noqa: E402
 
 class TestTest06CILintJob:
     def _workflow(self):
+        # pyyaml ships in the [dev] extras (pyproject.toml) — these pins
+        # exist to verify the CI workflow shape, so they must RUN in CI,
+        # never skip: an importorskip here would leave CI unable to
+        # check itself. (First CI failure this caused: pyyaml was
+        # missing from [dev] and every pytest job went red with
+        # ModuleNotFoundError: No module named 'yaml'.)
         import yaml
         return yaml.safe_load(
             (Path(agentic_loop_module.__file__).parents[2]
