@@ -254,21 +254,42 @@ def cmd_chat(args: argparse.Namespace) -> int:
                 # Import readline for arrow-key / line-editing support in input().
                 # We do NOT read or write a history file — that caused unbounded
                 # growth (600MB+ reported). In-memory recall only.
-                import readline
+                #
+                # NOTE: stdlib `readline` is Unix-only (wraps GNU readline /
+                # libedit). On Windows it doesn't exist — Python's built-in
+                # input() falls back to plain text entry, which still works
+                # (just no arrow-key history / line editing). If the user has
+                # installed `pyreadline3` (a third-party drop-in), it registers
+                # itself as `readline` on Windows and `import readline` will
+                # succeed transparently.
+                try:
+                    import readline
+                except ImportError:
+                    readline = None  # Windows without pyreadline3
 
-                # Force horizontal-scroll-mode OFF so long input wraps to a new
-                # visual line instead of scrolling horizontally within one line.
-                # Default is OFF, but an ~/.inputrc could enable it. Without this,
-                # input at the `You:` prompt would overwrite the rightmost column
-                # instead of scrolling the scroll region up for a new input line.
-                readline.parse_and_bind("set horizontal-scroll-mode off")
+                if readline is not None:
+                    # Force horizontal-scroll-mode OFF so long input wraps to a new
+                    # visual line instead of scrolling horizontally within one line.
+                    # Default is OFF, but an ~/.inputrc could enable it. Without this,
+                    # input at the `You:` prompt would overwrite the rightmost column
+                    # instead of scrolling the scroll region up for a new input line.
+                    readline.parse_and_bind("set horizontal-scroll-mode off")
 
                 # Prompt uses \001 ... \002 (readline's RL_PROMPT_START_IGNORE /
                 # RL_PROMPT_END_IGNORE) around ANSI escape codes so readline
                 # counts them as zero-width. Without these markers, readline
                 # treats `\033[33m` + `You:` + `\033[0m` + ` ` as 14 visible
                 # chars, miscounting the prompt width and breaking wrap detection.
-                user_input = input("\001\033[33m\002You:\001\033[0m\002 ").strip()
+                # On Windows without readline, these markers are passed through
+                # to the terminal as raw bytes — Windows Terminal / modern
+                # consoles handle ANSI escapes natively, but the SOH/STX (0x01/
+                # 0x02) control chars can render as little boxes. Use a clean
+                # ANSI-only prompt when readline isn't available.
+                if readline is not None:
+                    _prompt = "\001\033[33m\002You:\001\033[0m\002 "
+                else:
+                    _prompt = "\033[33mYou:\033[0m "
+                user_input = input(_prompt).strip()
 
                 # Track last user_input for in-session recall (replaces file-based history)
                 if user_input:

@@ -39,6 +39,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **New `scripts/probe_llama_server_tools.py`** (stdlib-only, 11KB): probes a running llama-server with 7 different request shapes (GET /health, GET /v1/models, bare chat, OpenAI tools, tools+tool_choice=auto, tools+tool_choice=required, GET /tools) and dumps the raw HTTP status + headers + body for each. Bypasses AgentKthx's chat-side code path entirely — so if an error appears in the probe output, it's confirmed to be from llama-server/the model, not from AgentKthx. Auto-reads `~/.agentkthx/turbo.state` for the model name + port.
 
+### Cross-platform: Windows `readline` graceful fallback (`agentkthx/cli/commands/chat.py`)
+
+- `cmd_chat` previously did `import readline` at module top-level (well, inside the REPL loop, but bare). The stdlib `readline` module is Unix-only — it wraps GNU readline (libreadline on Linux, libedit on macOS) which doesn't exist on Windows. Result: `agentkthx chat` crashed with `ModuleNotFoundError: No module named 'readline'` on Windows before the REPL loop even started.
+- Fix: wrapped `import readline` in `try/except ImportError` — on Windows (or any platform without readline), `readline = None` and the `parse_and_bind` call is skipped. Python's built-in `input()` automatically falls back to plain text entry when readline isn't importable, so the chat REPL still works — just without arrow-key history / line-editing.
+- The `You:` prompt was previously hardcoded with `\001`/`\002` (SOH/STX) markers around ANSI escape codes (readline's RL_PROMPT_START_IGNORE / RL_PROMPT_END_IGNORE signals for zero-width escape counting). On Windows without readline, these control characters get passed to the terminal as raw bytes and can render as little boxes. Fix: build the prompt conditionally — use the `\001`/`\002`-wrapped form when `readline is not None`, fall back to a clean ANSI-only prompt (`\033[33mYou:\033[0m `) otherwise. Windows Terminal handles ANSI escapes natively, so colors still render.
+- Optional Windows-side opt-in: if the user has installed `pyreadline3` (a third-party drop-in), it registers itself as `readline` on Windows and `import readline` will succeed transparently — full arrow-key history / line-editing is restored. We don't *require* it (preserves the zero-dep guarantee), but the integration works automatically when present.
+
 ### Tests + version
 
 - New 5th variant in `test_build_default_prompt_all_four_variants` (`tests/test_agent_setup_subsystem.py`): comp_mode + `force_react=True` should fall back to ReAct format (not native function calling). `_PromptHost` fixture updated to accept the `force_react` kwarg.
