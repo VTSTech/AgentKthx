@@ -24,10 +24,16 @@ from .ollama import OllamaBackend
 # ---------------------------------------------------------------------------
 # Native backend registry (always available, no plugin overhead)
 # ---------------------------------------------------------------------------
+# R07.16: turboquant is the primary user-facing name (the user types
+# `--backend turboquant`). `llama-server` and `llama_server` remain as
+# backward-compat aliases — they map to the same LlamaServerBackend class.
+# The binary itself is still called `llama-server` (that's llama.cpp's
+# upstream binary name; TURBOQUANT_SERVER_PATH env var controls its path).
 _BACKENDS: dict[str, type[BaseBackend]] = {
     "ollama": OllamaBackend,
-    "llama-server": LlamaServerBackend,
-    "llama_server": LlamaServerBackend,  # alias
+    "turboquant": LlamaServerBackend,  # R07.16 primary name
+    "llama-server": LlamaServerBackend,  # backward-compat alias
+    "llama_server": LlamaServerBackend,  # backward-compat alias (underscore form)
 }
 
 
@@ -103,7 +109,10 @@ def get_backend(
     if "base_url" not in kwargs:
         if name_lower == "ollama":
             kwargs["base_url"] = OLLAMA_BASE_URL
-        elif name_lower == "llama-server":
+        elif name_lower in ("turboquant", "llama-server", "llama_server"):
+            # R07.16: turboquant is the primary name; llama-server and
+            # llama_server are backward-compat aliases. All three resolve
+            # to LlamaServerBackend and use the same LLAMA_SERVER_BASE_URL.
             kwargs["base_url"] = LLAMA_SERVER_BASE_URL
         # Plugin backends set their own defaults in their __init__
 

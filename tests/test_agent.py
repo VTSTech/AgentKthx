@@ -47,7 +47,10 @@ class TestTypes:
 
     def test_backend_type(self):
         assert BackendType.OLLAMA.value == "ollama"
-        assert BackendType.LLAMA_SERVER.value == "llama_server"
+        # R07.16: TURBOQUANT is the new primary name; LLAMA_SERVER is kept
+        # as a backward-compat alias (still present in the enum).
+        assert BackendType.TURBOQUANT.value == "turboquant"
+        assert BackendType.LLAMA_SERVER.value == "llama_server"  # backward compat
         assert BackendType.BITNET.value == "bitnet"
 
 

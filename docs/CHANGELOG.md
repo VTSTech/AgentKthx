@@ -46,6 +46,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **New `scripts/probe_llama_server_tools.py`** (stdlib-only, 11KB): probes a running llama-server with 7 different request shapes (GET /health, GET /v1/models, bare chat, OpenAI tools, tools+tool_choice=auto, tools+tool_choice=required, GET /tools) and dumps the raw HTTP status + headers + body for each. Bypasses AgentKthx's chat-side code path entirely — so if an error appears in the probe output, it's confirmed to be from llama-server/the model, not from AgentKthx. Auto-reads `~/.agentkthx/turbo.state` for the model name + port.
 
+### Backend rename: `llama-server` → `turboquant` (`agentkthx/backends/__init__.py`, `agentkthx/core/types.py`, `agentkthx/backends/llama_server.py`)
+
+- **`turboquant` is now the primary user-facing backend name.** `agentkthx chat --backend turboquant` works (new primary). The chat banner shows `Backend: turboquant (...)` and the footer shows `🔌 turboquant` (was `🔌 llama_server`).
+- **Backward compat preserved**: `--backend llama-server` and `--backend llama_server` (underscore form) still work — they're aliases mapping to the same `LlamaServerBackend` class. Existing scripts that pass `--backend llama-server` continue to function.
+- **The binary itself is still `llama-server`** — that's llama.cpp's upstream binary name. `TURBOQUANT_SERVER_PATH` env var controls its path (unchanged). Only the user-facing AgentKthx backend name changed.
+- **`BackendType` enum**: added new value `TURBOQUANT = "turboquant"` (primary). `LLAMA_SERVER = "llama_server"` kept as a deprecated alias for backward compat — any third-party code that checks `backend_type == BackendType.LLAMA_SERVER` still works.
+- `LlamaServerBackend.backend_type` now returns `BackendType.TURBOQUANT` for non-BitNet mode (was `BackendType.LLAMA_SERVER`). `BackendType.BITNET` still returned when `_bitnet_mode=True` (unchanged).
+- `get_backend()` URL-setting check now accepts `turboquant`, `llama-server`, AND `llama_server` — all three resolve to `LLAMA_SERVER_BASE_URL`.
+- Tests updated: `tests/test_agent.py:test_backend_type` now asserts both `TURBOQUANT.value == "turboquant"` (new) AND `LLAMA_SERVER.value == "llama_server"` (backward compat preserved).
+
+### ReAct parser: markdown-bold keyword handling (`agentkthx/core/tool_parse.py`)
+
+- **Bug fix**: small local models (e.g., `nemotron-3-nano:4b` on Windows) sometimes decorate the ReAct format keywords with markdown bold markers — emitting `**Thought:**`, `**Action:**`, `**Action Input:**`, `**Final Answer:**` instead of plain `Thought:` / `Action:` / `Action Input:` / `Final Answer:`. The ReAct parser regexes only matched the plain form, so the parser reported "No tool calls detected" and treated the model's emission as final answer text — chat completely failed to dispatch tools on Windows even though the same model on Linux emitted plain keywords and worked.
+- Fix: added `\*{0,2}` quantifier on each side of every keyword in `_THOUGHT_RE`, `_ACTION_RE`, `_ACTION_RE_SAMELINE`, `_FINAL_RE`, plus the `is_final_answer()` and `extract_final_answer()` patterns. The quantifier matches 0–2 asterisks, so both `Action:` and `**Action:**` parse identically.
+- Verified against the user's actual Windows output (the exact `**Action:** shell\n**Action Input:** {"command": "pwd", "timeout": 10}` text the model emitted) — parser now correctly extracts the `shell` tool call with `{"command": "pwd", "timeout": 10}` arguments.
+
 ### Cross-platform: Windows `readline` graceful fallback (`agentkthx/cli/commands/chat.py`)
 
 - `cmd_chat` previously did `import readline` at module top-level (well, inside the REPL loop, but bare). The stdlib `readline` module is Unix-only — it wraps GNU readline (libreadline on Linux, libedit on macOS) which doesn't exist on Windows. Result: `agentkthx chat` crashed with `ModuleNotFoundError: No module named 'readline'` on Windows before the REPL loop even started.

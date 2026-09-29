@@ -70,7 +70,15 @@ class BackendType(Enum):
     """Supported backend types."""
 
     OLLAMA = "ollama"
-    LLAMA_SERVER = "llama_server"
+    # R07.16: TURBOQUANT is the primary user-facing name. The binary itself
+    # is still `llama-server` (llama.cpp upstream name) — TURBOQUANT_SERVER_PATH
+    # env var controls its path. The LlamaServerBackend class returns this
+    # value from `backend_type`, so the chat footer shows `🔌 turboquant`.
+    # `LLAMA_SERVER` is kept for backward compat (any third-party code that
+    # checks `backend_type == BackendType.LLAMA_SERVER` still works — but
+    # the active backend_type value is now TURBOQUANT).
+    TURBOQUANT = "turboquant"
+    LLAMA_SERVER = "llama_server"  # deprecated alias; kept for backward compat
     BITNET = "bitnet"
     ZAI = "zai"
     OPENROUTER = "openrouter"

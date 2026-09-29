@@ -95,7 +95,12 @@ class LlamaServerBackend(OllamaBackend):
 
     @property
     def backend_type(self) -> BackendType:
-        return BackendType.BITNET if self._bitnet_mode else BackendType.LLAMA_SERVER
+        # R07.16: return TURBOQUANT (the new primary user-facing name) for
+        # non-BitNet mode. The chat footer will show `🔌 turboquant`. The
+        # `LLAMA_SERVER` enum value is kept for backward compat (any
+        # third-party code that checks `== BackendType.LLAMA_SERVER` still
+        # works) but is no longer returned as the active backend_type.
+        return BackendType.BITNET if self._bitnet_mode else BackendType.TURBOQUANT
 
     # ─────────────────────────────────────────────────────────────────────
     # Server Management — llama-server endpoints (not Ollama)

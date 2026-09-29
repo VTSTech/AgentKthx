@@ -16,17 +16,23 @@ from .models import ToolCall
 # ------------------------------------------------------------------ #
 #  Regex patterns for ReAct parsing                                   #
 # ------------------------------------------------------------------ #
+#
+# R07.16: keywords may optionally be wrapped in markdown bold markers
+# (``**Action:**`` instead of ``Action:``). Some models (nemotron-3-nano:4b
+# on Windows) decorate the format keywords thinking it makes them more
+# visible. The ``\*{0,2}`` quantifier matches 0–2 asterisks on each
+# side, so both ``Action:`` and ``**Action:**`` parse identically.
 
-_THOUGHT_RE = re.compile(r"Thought:\s*(.*?)(?=Action:|Final Answer:|$)", re.DOTALL | re.IGNORECASE)
+_THOUGHT_RE = re.compile(r"\*{0,2}Thought:\*{0,2}\s*(.*?)(?=\*{0,2}(?:Action|Final Answer):\*{0,2}|$)", re.DOTALL | re.IGNORECASE)
 _ACTION_RE = re.compile(
-    r"Action:\s*[`\"']?(\w+)[`\"']?\s*\n?\s*Action Input:\s*(.*?)(?=\n\s*(?:Observation:|Thought:|Final Answer:|Action:|Example)|$)",
+    r"\*{0,2}Action:\*{0,2}\s*[`\"']?(\w+)[`\"']?\s*\n?\s*\*{0,2}Action Input:\*{0,2}\s*(.*?)(?=\n\s*(?:Observation:|\*{0,2}(?:Thought|Final Answer|Action):\*{0,2}|Example)|$)",
     re.DOTALL | re.IGNORECASE,
 )
 _ACTION_RE_SAMELINE = re.compile(
-    r"Action:\s*[`\"']?(\w+)[`\"']?\s+Action Input:\s*(.*?)(?=\n\s*(?:Observation:|Thought:|Final Answer:|Action:|Example)|$)",
+    r"\*{0,2}Action:\*{0,2}\s*[`\"']?(\w+)[`\"']?\s+\*{0,2}Action Input:\*{0,2}\s*(.*?)(?=\n\s*(?:Observation:|\*{0,2}(?:Thought|Final Answer|Action):\*{0,2}|Example)|$)",
     re.DOTALL | re.IGNORECASE,
 )
-_FINAL_RE = re.compile(r"Final Answer:\s*(.*?)$", re.DOTALL | re.IGNORECASE)
+_FINAL_RE = re.compile(r"\*{0,2}Final Answer:\*{0,2}\s*(.*?)$", re.DOTALL | re.IGNORECASE)
 _PYTHON_CODE_RE = re.compile(r"```(?:python)?\s*\n(.*?)```", re.DOTALL | re.IGNORECASE)
 
 
@@ -617,9 +623,10 @@ class ToolParser:
         Overly broad patterns like "Result:" or "Therefore," cause small models to
         bypass tool calling when they shouldn't.
         """
-        # Only match explicit ReAct format markers (matching main branch behavior)
+        # Only match explicit ReAct format markers (matching main branch behavior).
+        # R07.16: keywords may optionally be wrapped in markdown bold (**Final Answer:**).
         patterns = [
-            r"Final Answer:",  # Standard ReAct marker
+            r"\*{0,2}Final Answer:\*{0,2}",  # Standard ReAct marker (with optional ** bold)
         ]
 
         for pattern in patterns:
@@ -635,8 +642,9 @@ class ToolParser:
         is_final_answer(). Falls back to "Answer:" and "Result:" only if no
         "Final Answer:" marker is found, preferring the more specific match.
         """
-        # Primary: use the same conservative marker as is_final_answer()
-        match = re.search(r"Final Answer:\s*([\s\S]+)", text, re.IGNORECASE)
+        # Primary: use the same conservative marker as is_final_answer().
+        # R07.16: handles optional markdown bold (**Final Answer:**).
+        match = re.search(r"\*{0,2}Final Answer:\*{0,2}\s*([\s\S]+)", text, re.IGNORECASE)
         if match:
             return match.group(1).strip()
 
