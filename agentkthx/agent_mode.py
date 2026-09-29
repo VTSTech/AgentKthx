@@ -27,6 +27,26 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from .colors import dim
+from .core.types import StepResultType
+
+
+def _step_tool_stats(run) -> tuple[int, list[str]]:
+    """Count tool-call steps + unique tool names from an AgentRun.
+
+    R07.15 fix (user-reported during VM smoke testing): the old inline
+    check compared ``step.type`` against the STRING ``"tool_call"`` — but
+    ``StepResult.type`` is a ``StepResultType`` ENUM member
+    (``StepResultType.TOOL_CALL``), so the comparison was always False and
+    the verbose footer always printed "0 tool calls" even when tool calls
+    were visible in the transcript. It also read a nonexistent
+    ``tool_name`` attribute (the real path is ``step.tool_call.name``).
+    Same pattern as cli/utils.py's step summary:
+    ``step.type == StepResultType.TOOL_CALL`` + ``step.tool_call``.
+    Names are deduplicated preserving first-seen order.
+    """
+    calls = [s for s in run.steps if s.type == StepResultType.TOOL_CALL]
+    names = list(dict.fromkeys(s.tool_call.name for s in calls if s.tool_call))
+    return len(calls), names
 
 
 class AgentState(Enum):
@@ -639,9 +659,8 @@ Example: [{{"description": "Step 1"}}, {{"description": "Step 2"}}]"""
             
             # Debug output: show step completion info
             if self.verbose and run:
-                tool_calls = [s for s in run.steps if hasattr(s, 'type') and s.type == "tool_call"]
-                tool_names = list(set(getattr(s, 'tool_name', '') for s in tool_calls if hasattr(s, 'tool_name')))
-                print(dim(f"    ⏱️ {len(run.steps)} steps, {len(tool_calls)} tool calls, {run.total_ms:.0f}ms"))
+                tool_call_count, tool_names = _step_tool_stats(run)
+                print(dim(f"    ⏱️ {len(run.steps)} steps, {tool_call_count} tool calls, {run.total_ms:.0f}ms"))
                 if tool_names:
                     print(dim(f"    🔧 Tools used: {', '.join(tool_names)}"))
             

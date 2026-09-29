@@ -1,7 +1,7 @@
 # Codebase Intelligence Brief: AgentKthx
 
-> Generated: 2026-09-29 | Auditor: Super-Z (GLM) via `codebase-audit` v0.2.0 | Commit: `95ab504` (R07.15 base, PyPI 0.7.15)
-> Supersedes: R07.12 brief (2026-09-28) — updated in the R07.15 closure pass: maintainability closure batch (6 CLOSED: MAINT-07/08/10/15/19 + PERF-03), suite 1935 → 1988 passed (+53), register 105 findings (34 open / 64 closed / 7 wontfix, 68% archived). Full regeneration still due (R07.13/R07.14 shipped without one) — this pass refreshed the header, suite counts, and the TEST-01 note.
+> Generated: 2026-09-29 | Auditor: Super-Z (GLM) via `codebase-audit` v0.2.0 | Commit: `4e1555e` (R07.15 + intra-release amendments, PyPI 0.7.15)
+> Supersedes: R07.12 brief (2026-09-28) — updated in the R07.15 closure pass: maintainability closure batch (6 CLOSED: MAINT-07/08/10/15/19 + PERF-03), suite 1935 → 1988 passed (+53), register 105 findings (34 open / 64 closed / 7 wontfix, 68% archived). Full regeneration still due (R07.13/R07.14 shipped without one) — this pass refreshed the header, suite counts, and the TEST-01 note. Post-push amendment pass (2026-09-29): commit synced to 4e1555e; suite 1988 → 2004 (+10 openrouter/free listing regression tests, +6 agent-mode tool-call counter tests).
 
 ---
 
@@ -13,7 +13,7 @@
 | **Tech Stack** | Python >= 3.12, **zero runtime dependencies** (`dependencies = []` — stdlib `urllib`/`json`/`sqlite3`/`ast`/`subprocess`/`socket`/`ipaddress`/`threading` only); dev: pytest/black/ruff |
 | **Entry Point** | Console script `agentkthx` → `agentkthx.cli:main` → `cli/main.py:main()` → `cli/parser.py` dispatch → `cli/commands/<cmd>.py` |
 | **Build/Run** | `pip install agentkthx` (PyPI 0.7.06) or `pip install -e .` from source; `agentkthx chat`, `agentkthx version`, `agentkthx models`, etc. (84+ CLI flags across 15 subcommands) |
-| **Test Command** | `python -m pytest tests/ -q` → **1988 passed / 16 skipped in ~10s** (was 1935 / 16 at R07.14; +53 in the R07.15 closure batch `tests/test_r07_15_maint_batch.py`); CI matrix Python 3.12 / 3.13 in `.github/workflows/ci.yml`, parallel `coverage` job uploads 30-day `coverage.xml` artifact |
+| **Test Command** | `python -m pytest tests/ -q` → **2004 passed / 16 skipped in ~10s** (was 1935 / 16 at R07.14; +53 in the R07.15 closure batch `tests/test_r07_15_maint_batch.py`, +10 `tests/test_r07_15_openrouter_free_listing.py`, +6 `tests/test_r07_15_agent_mode_tool_counter.py`); CI matrix Python 3.12 / 3.13 in `.github/workflows/ci.yml`, parallel `coverage` job uploads 30-day `coverage.xml` artifact |
 
 ---
 
@@ -323,7 +323,7 @@ Key coupling points:
 
 ## What's Missing / Incomplete
 
-1. **No integration tests** — All 1988 tests are mocked unit tests. TEST-01 still open. Coverage baseline: 42.7% line coverage (R07.01).
+1. **No integration tests** — All 2004 tests are mocked unit tests. TEST-01 still open. Coverage baseline: 42.7% line coverage (R07.01).
 2. **No `black --check` or `ruff check` in CI** — TEST-06 still open.
 3. **No `mypy` / type checking** — `pyproject.toml` has no `[tool.mypy]` section.
 4. **No `CONTRIBUTING.md`** — `docs/CREDITS.md` lists contributors but no guide.
