@@ -18,8 +18,11 @@
 #    reproducible.
 #  - The `test` job does NOT run with coverage — keeps PR feedback at ~3s
 #    instead of ~5s. Coverage runs once per push (Python 3.12 only).
-#  - We don't gate on black/ruff here yet — that's an ARCH-02-tier decision
-#    (separate "lint" job is a clean extension point if/when wanted).
+#  - Audit TEST-06 (R07.15): a separate non-blocking `lint` job runs
+#    `ruff check` + `black --check` so style drift is surfaced on every
+#    push instead of being caught by review. It is NOT gating
+#    (continue-on-error: true) — promoting it to a required check is an
+#    explicit follow-up decision once the existing drift is burned down.
 
 name: CI
 
@@ -109,4 +112,36 @@ jobs:
           path: coverage.xml
           retention-days: 30
           if-no-files-found: error
+
+  lint:
+    name: lint (ruff + black, non-blocking)
+    runs-on: ubuntu-latest
+    # TEST-06 (R07.15): the pyproject configures [tool.black] and
+    # [tool.ruff] but nothing ever invoked them — style drift went
+    # undetected. Surface it on every push WITHOUT blocking PRs: the
+    # repo predates the tooling and a gating switch would fail on the
+    # first run. Turn continue-on-error off once the reported drift is
+    # fixed (or pinned as intentional via ruff per-rule ignores).
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install linters
+        # Lint-only job: no package install needed — ruff + black only,
+        # pinned to the versions the pyproject config targets.
+        run: python -m pip install ruff black
+
+      - name: Ruff check
+        run: python -m ruff check agentkthx/ tests/
+
+      - name: Black check
+        run: python -m black --check agentkthx/ tests/
 

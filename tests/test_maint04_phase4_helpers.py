@@ -309,14 +309,23 @@ class TestNoRemainingDuplication:
         assert "_run_loop_iteration" in wrapper_src
 
     def test_run_core_uses_handle_blocked_tool_call(self):
-        # R07.00 Phase 5: per-call dispatch lives in _execute_single_tool_call
-        src = inspect.getsource(Agent._execute_single_tool_call)
-        assert "_handle_blocked_tool_call" in src
+        # R07.00 Phase 5: per-call dispatch lives in _execute_single_tool_call.
+        # FEAT-02 (R07.15): the blocked-call handler moved INTO the shared
+        # gate helper (_gate_and_prepare_tool_call) so the sequential path
+        # and the parallel batch path run it VERBATIM — deduplication got
+        # tighter, not looser. Pin both halves of the delegation.
+        gate_src = inspect.getsource(Agent._gate_and_prepare_tool_call)
+        assert "_handle_blocked_tool_call" in gate_src
+        dispatch_src = inspect.getsource(Agent._execute_single_tool_call)
+        assert "_gate_and_prepare_tool_call" in dispatch_src
 
     def test_run_core_streaming_uses_handle_blocked_tool_call(self):
-        # R07.00 Phase 5: single unified dispatch covers both paths
-        src = inspect.getsource(Agent._execute_single_tool_call)
-        assert "_handle_blocked_tool_call" in src
+        # R07.00 Phase 5 + FEAT-02 (R07.15): single unified gate covers
+        # both paths (see note above).
+        gate_src = inspect.getsource(Agent._gate_and_prepare_tool_call)
+        assert "_handle_blocked_tool_call" in gate_src
+        parallel_src = inspect.getsource(Agent._execute_tool_calls_parallel)
+        assert "_gate_and_prepare_tool_call" in parallel_src
 
     def test_run_core_uses_reject_for_tool_choice(self):
         # R07.00 Phase 5: loop body lives in AgenticLoopMixin._run_loop_iteration

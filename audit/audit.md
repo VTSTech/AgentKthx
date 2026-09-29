@@ -4,12 +4,12 @@
 
 **Repository:** https://github.com/VTSTech/AgentKthx  
 **Author:** VTSTech | **License:** MIT | **Date:** 2026-09-29  
-**Commit:** 7579e3c (R07.15 + intra-release amendments) | **Test Suite:** 2004 passed / 16 skipped  
-34 Open Findings | 7 Categories | SEC, ROB, MAINT, PERF, FEAT, ARCH, TEST  
-Severity: 0 High | 15 Medium | 19 Low  
-34 OPEN (CLOSED + WONTFIX archived in deltas.md — generate_audit_dash.py merges both for the dashboard)
+**Commit:** 7579e3c (R07.15 + intra-release amendments) | **Test Suite:** 2031 passed / 16 skipped  
+30 Open Findings | 7 Categories | SEC, ROB, MAINT, PERF, FEAT, ARCH, TEST  
+Severity: 0 High | 13 Medium | 17 Low  
+30 OPEN (CLOSED + WONTFIX archived in deltas.md — generate_audit_dash.py merges both for the dashboard)
 
-> **Split:** 71 CLOSED/WONTFIX findings moved to `deltas.md`. `generate_audit_dash.py` reads both `audit.md` (open) and `deltas.md` (closed/wontfix) and merges them into the full register. The dashboard shows all 105 findings (34 open + 71 closed/wontfix).
+> **Split:** 71 CLOSED/WONTFIX findings moved to `deltas.md`. `generate_audit_dash.py` reads both `audit.md` (open) and `deltas.md` (closed/wontfix) and merges them into the full register. The dashboard shows all 105 findings (30 open + 75 closed/wontfix).
 
 ---
 
@@ -36,6 +36,8 @@ Cumulative closure state: **48 CLOSED + 7 WONTFIX of 104 findings (55 archived, 
 
 **R07.15 update (maintainability closure batch, v0.7.15):** six findings closed — MAINT-08 (`_generate_stream` extracted into `StreamAccumulator` + `StreamRenderer`, ~90 lines of orchestration remaining), MAINT-10 (router prompt hardened: XML-wrapped escaped agent blocks, data-not-instructions system frame, strict exact-match validation with one re-prompt, keyword fallback), MAINT-07 (family resolution deterministic: explicit `qwen2.5` entry, documented alias map, longest-first partial match, detect/get sweep test), MAINT-15 (per-DB-path write-lock registry via realpath-keyed `WeakValueDictionary`), MAINT-19 (class-level `list_models` caches across OpenAI/OpenRouter/HuggingFace via `type(self)` writes), and PERF-03 (stdlib `html.parser` DuckDuckGo parsing, per the corrected R07.14 recommendation). 53 regression tests in `tests/test_r07_15_maint_batch.py`; suite 1935 → **1988 passed, 16 skipped, 0 failures**. Cumulative: **64 CLOSED + 7 WONTFIX of 105 findings (71 archived, 68%)** — the Performance category is now 0 OPEN and Maintainability has 4 OPEN findings (all Medium: MAINT-01, MAINT-03, MAINT-22, MAINT-23).
 
+**R07.15 second closure batch (intra-release, four findings):** TEST-06 (a non-blocking CI `lint` job — `ruff check` + `black --check` over `agentkthx/` and `tests/`, `continue-on-error: true` until the pre-existing drift is burned down), FEAT-02 (per-tool `timeout` parameters for `http_get`/`web_search` — clamped 1–300 s — plus concurrent execution of INDEPENDENT tool-call batches: gates + FunctionCallItem creation run in call order, handlers execute on a 4-worker `ThreadPoolExecutor`, results commit in ORIGINAL call order so the transcript is byte-identical to the sequential path; shell/write_file/edit_file/todo stay strictly sequential, duplicate (tool, args) pairs are excluded to protect the R06.52 repeat-guard, and `AGENTKTHX_PARALLEL_TOOLS=0` is the escape hatch), ROB-11 (transactional plugin registration — a `_PluginTransaction` records an undo for every imperative `register_backend`/`register_tool`/`register_cli_command`/`register_hook` call made during `register()` and rolls them back LIFO with prev-value-restore semantics when a load fails, closing the gap where a missing/raising/incomplete plugin `unregister()` left partial registrations alive), and ROB-22 (OrcaRouter's `_iter_sse_lines` gains the post-loop exhaustion raise matching the non-streaming path — a bounded retry generator now ALWAYS ends in yield-or-raise, so the silent-empty-stream drift hole is closed). 27 regression tests in `tests/test_r07_15_rob11_rob22_feat02_test06.py`; suite 2004 → **2031 passed, 16 skipped, 0 failures**. Cumulative: **68 CLOSED + 7 WONTFIX of 105 findings (75 archived, 71%)** — OPEN by category: Security 2, Robustness 12, Maintainability 4, New Features 5, Testing 7.
+
 ## Findings Summary
 
 | ID | Severity | Category | Status | Title |
@@ -47,17 +49,13 @@ Cumulative closure state: **48 CLOSED + 7 WONTFIX of 104 findings (55 archived, 
 | ROB-15 | Medium | Robustness | OPEN | PersistentMemory.add() does two separate lock acquisitions (_write_message + _touch_session) — interleaving risk + 2× commit per message |
 | MAINT-01 | Medium | Maintainability | OPEN | cmd_chat is a 1,199-line single function with 25+ nested closures and no slash-command dispatcher |
 | MAINT-03 | Medium | Maintainability | OPEN | normalize_args strategy 5 (prefix/substring matching) is dangerously permissive — {"e": "..."} matches expression |
-| FEAT-02 | Medium | New Features | OPEN | Per-tool timeout parameter and concurrent tool execution |
 | FEAT-03 | Medium | New Features | OPEN | Tool output schema validation via JSON Schema |
 | TEST-01 | Medium | Testing | OPEN | No integration tests — all 984 tests are mocked unit tests; slash-command dispatcher untested |
 | TEST-03 | Medium | Testing | OPEN | FakeBackend in test_agentic_loop_subsystem.py omits generate_completions_stream — streaming callbacks unexercised |
-| TEST-06 | Medium | Testing | OPEN | CI doesn't run black --check or ruff check — code style drift undetected |
 | ROB-09 | Low | Robustness | OPEN | validate_path uses os.path.abspath, doesn't follow symlinks — read_file("/tmp/symlink_to_etc_passwd") bypasses |
-| ROB-11 | Low | Robustness | OPEN | Plugin load-failure path calls unregister() which may itself fail — leaves partial registrations |
 | ROB-17 | Low | Robustness | OPEN | Token-tier pruning can leave a single over-budget message (loop exits when len-1) — documented gap |
 | ROB-18 | Low | Robustness | OPEN | threading.Lock (not RLock) — brittle if future code adds nested locked calls |
 | ROB-20 | Low | Robustness | OPEN | agent.num_ctx (public) vs agent._num_predict (private) naming inconsistency in apply_model_switch |
-| ROB-22 | Low | Robustness | OPEN | _iter_sse_lines has no exhaustion-raise matching non-streaming path — minor UX inconsistency |
 | ROB-25 | Low | Robustness | OPEN | generate() vs _generate_with_auth() signature defaults mismatch (None vs 0.7/2048) — confusing |
 | FEAT-05 | Low | New Features | OPEN | Plugin sandboxing via restricted register() namespace + audit hooks |
 | FEAT-06 | Low | New Features | OPEN | Streaming tool-call argument deltas (function_call_arguments.delta SSE events) |
@@ -173,22 +171,6 @@ Recommendation: Use `os.path.realpath(path)` instead of `os.path.abspath(path)` 
 ---
 
 ---
-
----
-
-#### ROB-11: Plugin load-failure path calls `unregister()` which may itself fail — leaves partial registrations
-
-| Property | Value |
-|----------|-------|
-| **Severity** | Low |
-| **Category** | Robustness |
-| **File(s)** | `agentkthx/plugins/_loader.py:896-920` |
-
-When `_load_plugin` catches an exception during `module.register(self)` (line 864), it sets `plugin.failed = True` and calls `plugin.module.unregister(self)` (line 905) inside a try/except. If `unregister` also raises, the warning is logged but the partial state left by `register()` (e.g., backends, CLI commands, tools) is left in place — the `_purge_provides(manifest)` call (line 911) only removes manifest-declared provides, not imperative registrations via `manager.register_backend()` etc.
-
-Recommendation: Track all `register_*` calls during `register()` execution in a per-plugin transaction, and roll them back on failure. Use a `PluginTransaction` context manager that records every `register_backend`, `register_tool`, `register_cli_command`, `register_hook` call.
-
-**Impact:** Partially-loaded plugins leave orphan registrations in the PluginManager — a backend may be registered but its module is `None`, causing confusion.
 
 ---
 
@@ -344,22 +326,6 @@ Recommendation: generalize the ROB-29 fix — lift a `CloudBackend` retry-loop p
 
 
 ### New Features
-
-#### FEAT-02: Per-tool `timeout` parameter and concurrent tool execution
-
-| Property | Value |
-|----------|-------|
-| **Severity** | Medium |
-| **Category** | New Feature |
-| **File(s)** | `agentkthx/tools/builtins.py:171, 360, 536`, `agentkthx/core/agentic_loop.py:285-298` |
-
-Grounded in observation: `shell(command, timeout=30)` has a per-call timeout, but `http_get` (line 360) has a hard-coded `timeout=30` and `web_search` (line 536) has `timeout=15`. The agentic loop executes tool calls sequentially (`agentic_loop.py:285-298`). For multi-tool assistant messages (e.g., 3 parallel `http_get` calls to different URLs), the agent waits for each to complete serially, adding 30s × 3 = 90s.
-
-Proposal: Add `timeout` to `ToolParam` schema so the model can specify per-call timeouts. For independent tool calls (multiple `http_get` to different URLs in one assistant message), execute them concurrently via `concurrent.futures.ThreadPoolExecutor(max_workers=4)`. Detecting call independence: calls to different tools are independent; calls to the same tool with different args are independent; calls to `shell`/`write_file`/`edit_file` are always sequential (filesystem state mutations).
-
-**Impact:** Reduces wall-clock latency for multi-tool messages by N× for N independent calls; enables longer-running tool operations without blocking the loop.
-
----
 
 ---
 
@@ -569,22 +535,6 @@ Recommendation: Extract the version-bump logic into a Python function (`scripts/
 
 ---
 
-#### TEST-06: CI doesn't run `black --check` or `ruff check` — code style drift undetected
-
-| Property | Value |
-|----------|-------|
-| **Severity** | Medium |
-| **Category** | Testing |
-| **File(s)** | `.github/workflows/ci.yml:66-69` |
-
-The CI workflow (line 66-69) runs only `python -m pytest tests/ -q`. The `pyproject.toml` configures `[tool.black]` and `[tool.ruff]` (line 82-88) but neither is invoked in CI. The comment at line 21-22 says "We don't gate on black/ruff here yet — that's an ARCH-02-tier decision."
-
-Recommendation: Add a `lint` job that runs `ruff check agentkthx/ tests/` and `black --check agentkthx/ tests/`. Make it a non-blocking job initially (continue-on-error: true) to surface issues without blocking PRs.
-
-**Impact:** Code style drift goes undetected; reviewers waste time on style nits that the linter should catch.
-
----
-
 ---
 
 ---
@@ -650,8 +600,8 @@ Recommendation: a live-gated contract test (skips without `POLLINATIONS_API_KEY`
 | Timeline | Findings |
 |----------|----------|
 | **Near term (R07.05–R07.06)** | ~~SEC-02~~ ✓R07.04, ~~SEC-10/FEAT-01~~ ✓R07.04, ~~MAINT-02~~ ✓R07.04, ~~SEC-07~~ ✓R07.05, ~~ROB-03~~ ✓R07.05, ~~ROB-04~~ ✓R07.05, ~~MAINT-04~~ ✓R07.05, ~~MAINT-05~~ ✓R07.05, ~~MAINT-06~~ ✓R07.05, ~~SEC-03~~ ✓R07.05 (ipaddress address-level checks + redirect re-validation), ~~SEC-04~~ ✓R07.05 (shells blocked + heredoc detection), SEC-09 (warn on non-HTTPS ACP), MAINT-01 (extract `ChatSession`), ~~ROB-05~~ ⊘WONTFIX (intentional per owner), TEST-01 (integration test tier) |
-| **Short term (R07.07–R07.10)** | ~~SEC-11/SEC-17/ROB-27~~ ✓R07.12 (bounded DNS + redirect budget), ~~ROB-23~~ ✓R07.12 (live -free convention), ~~ROB-24~~ ✓R07.12 (honest placeholder), ~~SEC-18/SEC-19~~ ⊘WONTFIX R07.12, SEC-01 (drop unsafe builtins from sandbox), ~~SEC-06~~ ✓R07.05 (sha256 pinning + perms advisory + trust-boundary docs), ROB-02 (join worker threads), ROB-09 (`realpath` for symlinks), ~~ROB-10~~ ✓R07.06 (permanent-body patterns + optional body arg), MAINT-03 (drop strategy 5 of `normalize_args`), ~~MAINT-08~~ ✓R07.15 (extract `StreamAccumulator`), ~~MAINT-10~~ ✓R07.15 (escape router prompt), ~~PERF-01/PERF-02~~ ✓R07.14 (cache sanitized state), ARCH-01 (unify backend locations), ~~ARCH-05~~ ✓R07.13 (kwargs promoted to named params), TEST-03 (add `FakeStreamingBackend`), TEST-06 (add lint job), ROB-31 (entitlement-aware fallback filter), MAINT-23 (lift retry-loop skeleton to CloudBackend — closes ROB-29 family) |
-| **Medium term (R08.00+)** | SEC-08 (chmod audit log), SEC-05 (strip ANSI), FEAT-02 (per-tool timeouts + concurrent execution), FEAT-03 (tool output schema), FEAT-04 (`--dry-run`), FEAT-05 (plugin sandbox), FEAT-06 (streaming args delta), FEAT-07 (conversation export), ~~MAINT-07/MAINT-09~~ ✓R07.15/R07.07 (MAINT-07: family-resolution determinism; MAINT-09 closed R07.07), ~~ARCH-02~~ ✓R07.13 (SSEEventBuilder extracted), ~~ARCH-03~~ ✓R07.13 (AgentMode event integration), TEST-04 (rollback tests), TEST-05 (rewrite bump-version test), TEST-07 (update_check failure paths), TEST-08 (sandbox adversarial tests), ~~SEC-19~~ ⊘WONTFIX R07.12 (owner decision — trusted providers, response channel dominates; with SEC-18), ROB-30 (narrow catalog catch-all), FEAT-08 (paid_only tier filter mode), TEST-10 (live-shape contract test) |
+| **Short term (R07.07–R07.10)** | ~~SEC-11/SEC-17/ROB-27~~ ✓R07.12 (bounded DNS + redirect budget), ~~ROB-23~~ ✓R07.12 (live -free convention), ~~ROB-24~~ ✓R07.12 (honest placeholder), ~~SEC-18/SEC-19~~ ⊘WONTFIX R07.12, SEC-01 (drop unsafe builtins from sandbox), ~~SEC-06~~ ✓R07.05 (sha256 pinning + perms advisory + trust-boundary docs), ROB-02 (join worker threads), ROB-09 (`realpath` for symlinks), ~~ROB-10~~ ✓R07.06 (permanent-body patterns + optional body arg), MAINT-03 (drop strategy 5 of `normalize_args`), ~~MAINT-08~~ ✓R07.15 (extract `StreamAccumulator`), ~~MAINT-10~~ ✓R07.15 (escape router prompt), ~~PERF-01/PERF-02~~ ✓R07.14 (cache sanitized state), ARCH-01 (unify backend locations), ~~ARCH-05~~ ✓R07.13 (kwargs promoted to named params), TEST-03 (add `FakeStreamingBackend`), ~~TEST-06~~ ✓R07.15 (non-blocking lint job), ROB-31 (entitlement-aware fallback filter), MAINT-23 (lift retry-loop skeleton to CloudBackend — closes ROB-29 family) |
+| **Medium term (R08.00+)** | SEC-08 (chmod audit log), SEC-05 (strip ANSI), ~~FEAT-02~~ ✓R07.15 (per-tool timeouts + parallel independent batches), FEAT-03 (tool output schema), FEAT-04 (`--dry-run`), FEAT-05 (plugin sandbox), FEAT-06 (streaming args delta), FEAT-07 (conversation export), ~~MAINT-07/MAINT-09~~ ✓R07.15/R07.07 (MAINT-07: family-resolution determinism; MAINT-09 closed R07.07), ~~ARCH-02~~ ✓R07.13 (SSEEventBuilder extracted), ~~ARCH-03~~ ✓R07.13 (AgentMode event integration), TEST-04 (rollback tests), TEST-05 (rewrite bump-version test), TEST-07 (update_check failure paths), TEST-08 (sandbox adversarial tests), ~~SEC-19~~ ⊘WONTFIX R07.12 (owner decision — trusted providers, response channel dominates; with SEC-18), ROB-30 (narrow catalog catch-all), FEAT-08 (paid_only tier filter mode), TEST-10 (live-shape contract test) |
 
 Guidelines for timeline assignment:
 - **Near term** — High severity findings and the most impactful Medium severity findings; should be fixed in the next 1-2 releases

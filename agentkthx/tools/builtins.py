@@ -398,19 +398,32 @@ class _SSRFSafeRedirectHandler(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
-def http_get(url: str, headers: dict | None = None) -> str:
+def http_get(url: str, headers: dict | None = None, timeout: int = 30) -> str:
     """
     Make an HTTP GET request (up to 256 KB response).
 
     Args:
         url: URL to fetch
         headers: Optional headers dict
+        timeout: Per-call timeout in seconds (default 30, clamped 1-300).
+            FEAT-02 (R07.15): was a hard-coded 30 — the model can now
+            request a longer window for slow endpoints without blocking
+            the whole loop budget on every call.
 
     Returns:
         Response body (truncated if large) or error message
     """
     import urllib.request
     import urllib.error
+
+    # FEAT-02: clamp the model-supplied timeout. urlopen with timeout <= 0
+    # means non-blocking/forever depending on platform — never let a
+    # model-supplied value near that boundary.
+    try:
+        timeout = int(timeout)
+    except (TypeError, ValueError):
+        timeout = 30
+    timeout = max(1, min(timeout, 300))
 
     # Validate URL for SSRF
     is_safe, error = is_safe_url(url)
@@ -433,7 +446,7 @@ def http_get(url: str, headers: dict | None = None) -> str:
         # SEC-03: open through a redirect handler that re-validates every
         # hop, so a 30x from a public URL cannot bounce us at localhost.
         opener = urllib.request.build_opener(_SSRFSafeRedirectHandler())
-        with opener.open(req, timeout=30) as response:
+        with opener.open(req, timeout=timeout) as response:
             raw = response.read(MAX_HTTP_BYTES + 1)
             truncated = len(raw) > MAX_HTTP_BYTES
 
@@ -669,7 +682,7 @@ def _collect_ddg_results(entries: list[dict], num_results: int) -> list[dict]:
     return out
 
 
-def web_search(query: str, num_results: int | None = None) -> str:
+def web_search(query: str, num_results: int | None = None, timeout: int = 15) -> str:
     """
     Search the web using DuckDuckGo (HTML version, no API key required).
 
@@ -681,6 +694,8 @@ def web_search(query: str, num_results: int | None = None) -> str:
     Args:
         query: Search query string
         num_results: Maximum number of results to return (default: 5, max: 10)
+        timeout: Per-call timeout in seconds for each endpoint attempt
+            (default: 15, clamped 1-300)
 
     Returns:
         Formatted search results with titles, URLs, and snippets,
@@ -693,6 +708,15 @@ def web_search(query: str, num_results: int | None = None) -> str:
     if num_results is None:
         num_results = MAX_SEARCH_RESULTS
     num_results = max(1, min(num_results, 10))
+
+    # FEAT-02 (R07.15): per-call timeout (was hard-coded 15 on both
+    # endpoint attempts). Same clamp rationale as http_get — a
+    # model-supplied timeout <= 0 must never reach urlopen.
+    try:
+        timeout = int(timeout)
+    except (TypeError, ValueError):
+        timeout = 15
+    timeout = max(1, min(timeout, 300))
 
     try:
         encoded_query = urllib.parse.urlencode({"q": query})
@@ -723,7 +747,7 @@ def web_search(query: str, num_results: int | None = None) -> str:
             req.add_header("Origin", "https://html.duckduckgo.com")
             req.add_header("Referer", "https://html.duckduckgo.com/html/")
 
-            with urllib.request.urlopen(req, timeout=15) as response:
+            with urllib.request.urlopen(req, timeout=timeout) as response:
                 html = response.read().decode("utf-8", errors="replace")
 
             # Parse HTML results — DuckDuckGo's html endpoint uses
@@ -759,7 +783,7 @@ def web_search(query: str, num_results: int | None = None) -> str:
                 req2.add_header("Origin", "https://lite.duckduckgo.com")
                 req2.add_header("Referer", "https://lite.duckduckgo.com/lite/")
 
-                with urllib.request.urlopen(req2, timeout=15) as response:
+                with urllib.request.urlopen(req2, timeout=timeout) as response:
                     html2 = response.read().decode("utf-8", errors="replace")
 
                 # Parse lite endpoint results — different HTML structure:
@@ -1411,6 +1435,7 @@ def make_builtin_registry() -> ToolRegistry:
         params=[
             ToolParam(name="url", type="string", description="URL to fetch"),
             ToolParam(name="headers", type="object", description="Optional headers dict", required=False),
+            ToolParam(name="timeout", type="integer", description="Per-call timeout in seconds (default 30, max 300)", required=False, default=30),
         ],
         handler=http_get,
         category="network",
@@ -1477,6 +1502,7 @@ def make_builtin_registry() -> ToolRegistry:
                 required=False,
                 default=5,
             ),
+            ToolParam(name="timeout", type="integer", description="Per-call timeout in seconds (default 15, max 300)", required=False, default=15),
         ],
         handler=web_search,
         category="network",

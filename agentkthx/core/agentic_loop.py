@@ -56,8 +56,10 @@ callbacks) the CompactionMixin + footer state.
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
@@ -68,6 +70,52 @@ from .openresponses import (
     create_message_item, create_function_call_item, create_function_call_output,
 )
 from .types import StepResultType
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# FEAT-02 (R07.15): per-tool timeouts + concurrent tool execution
+# ═══════════════════════════════════════════════════════════════════════
+
+# Worker cap for the parallel path. 4 covers the common multi-http_get
+# batch without unbounded thread spawn on pathological (30+ call) turns.
+_TOOL_POOL_MAX_WORKERS = 4
+
+# Tools whose calls mutate shared filesystem/state — ALWAYS executed
+# sequentially, even in an otherwise-independent batch. The audit named
+# shell/write_file/edit_file (filesystem mutations); ``todo`` is included
+# for the same reason (it rewrites the todo state file). python_repl is
+# deliberately NOT here — it runs in a sandboxed subprocess with file
+# system and network access blocked.
+_SEQUENTIAL_ONLY_TOOLS = frozenset({"shell", "write_file", "edit_file", "todo"})
+
+
+def _calls_independent(tool_calls: list) -> bool:
+    """FEAT-02: can this batch of tool calls run concurrently?
+
+    Rules (from the audit's proposal, plus one hardening rule):
+      - calls to DIFFERENT tools are independent
+      - calls to the same tool with DIFFERENT arguments are independent
+      - identical (tool, arguments) pairs are NOT — the R06.52
+        identical-repeat guard counts per (tool, args); letting a
+        duplicate run concurrently with its twin would race the tracker
+      - any call to a _SEQUENTIAL_ONLY_TOOLS member forces the whole
+        batch sequential (filesystem/state mutations must not interleave)
+
+    Note the memory-ordering caveat that makes this safe: results are
+    always committed (memory, step records, callbacks) in ORIGINAL call
+    order after all executions complete, so the transcript is
+    byte-identical to the sequential path regardless of completion order.
+    """
+    seen: set = set()
+    for tc in tool_calls:
+        name = tc.get("name", "")
+        if name in _SEQUENTIAL_ONLY_TOOLS:
+            return False
+        key = (name, json.dumps(tc.get("arguments", {}), sort_keys=True, default=str))
+        if key in seen:
+            return False
+        seen.add(key)
+    return True
 
 
 @dataclass
@@ -282,22 +330,24 @@ class AgenticLoopMixin:
                 else:
                     self.memory.add("assistant", content)
 
-                for tc in tool_calls_found:
-                    action = self._execute_single_tool_call(
-                        tc,
-                        state,
-                        prompt=prompt,
-                        step_num=step_num,
-                        tokens=tokens,
-                        content=content,
-                        native_tool_calls=native_tool_calls,
-                        steps=steps,
-                        response=response,
-                        callbacks=callbacks,
-                        calls_this_step=len(tool_calls_found),
-                    )
-                    if action == "break":
-                        break
+                # FEAT-02 (R07.15): batch dispatch — sequential per-call
+                # lifecycle unless the batch is independent and parallel
+                # tools are enabled; parallel batches gate first, execute
+                # concurrently (max 4 workers), and commit in call order.
+                action = self._execute_tool_calls(
+                    tool_calls_found,
+                    state=state,
+                    prompt=prompt,
+                    step_num=step_num,
+                    tokens=tokens,
+                    content=content,
+                    native_tool_calls=native_tool_calls,
+                    steps=steps,
+                    response=response,
+                    callbacks=callbacks,
+                )
+                if action == "break":
+                    break
 
                 # R06.52: if the run was terminated inside the tool loop,
                 # stop the WHOLE run. The old code only broke the inner loop
@@ -481,36 +531,32 @@ class AgenticLoopMixin:
             mark_completed=False,
         )
 
-    def _execute_single_tool_call(
+    def _gate_and_prepare_tool_call(
         self,
         tc: dict,
         state: _LoopState,
         *,
-        prompt: str,
-        step_num: int,
-        tokens: int,
-        content: str,
         native_tool_calls: list,
         steps: list,
         response: "Response",
-        callbacks: LoopCallbacks,
-        calls_this_step: int = 1,
-    ) -> str:
-        """Dispatch ONE tool call from the model's response.
+        step_num: int,
+        tokens: int,
+    ) -> tuple[str, Any]:
+        """Model-visible gates + FunctionCallItem creation for ONE call.
 
-        Covers the full per-call lifecycle: allowed_tools gate →
-        identical-repeat guard → FunctionCallItem creation → execution
-        (with Ctrl+C handling) → streaming inline print hook →
-        error-recovery tracking + memory commit → step record →
-        between-calls compaction hook.
+        FEAT-02 (R07.15) extraction: the batch dispatcher needs to run
+        these for every call BEFORE submitting any execution to the
+        worker pool, so both the sequential and parallel paths share
+        this method verbatim (no gate drift). Performs: final_answer
+        stash → allowed_tools gate → R06.52 identical-repeat guard →
+        FunctionCallItem creation.
 
         Returns:
-            "continue" — process the next tool call in this step
-            "break"    — stop processing tool calls. Every "break" path
-                         also sets ``state.terminated`` (terminal tool
-                         failure, repeat-guard, or Ctrl+C cancellation —
-                         ROB-01), so the caller stops the WHOLE run, not
-                         just the inner tool loop.
+            ("run", fc_item)     — approved for execution
+            ("continue", None)   — blocked (not allowed / repeat guard),
+                                   bookkeeping already done
+            ("break", None)      — terminal (repeat-guard termination);
+                                   ``state.terminated`` already set
         """
         tool_name = tc["name"]
         tool_args = tc["arguments"]
@@ -533,7 +579,7 @@ class AgenticLoopMixin:
                 )
             else:
                 self.memory.add("user", f"Observation: Error: {error_msg}")
-            return "continue"
+            return "continue", None
 
         # R06.52: identical-repeat guard. If this exact call
         # (tool + arguments) already failed max_identical_failures
@@ -554,8 +600,8 @@ class AgenticLoopMixin:
             )
             if _term:
                 state.terminated = True
-                return "break"
-            return "continue"
+                return "break", None
+            return "continue", None
 
         # Create FunctionCallItem
         fc_item = create_function_call_item(tool_name, tool_args, tool_call_id)
@@ -565,6 +611,59 @@ class AgenticLoopMixin:
         if self.debug and not self._is_comp_mode:
             print(f"  [OpenResponses] FunctionCallItem created: id={fc_item.id}, call_id={fc_item.call_id}")
             print(f"  [OpenResponses] FunctionCallItem status: {fc_item.status.value}")
+
+        return "run", fc_item
+
+    def _execute_single_tool_call(
+        self,
+        tc: dict,
+        state: _LoopState,
+        *,
+        prompt: str,
+        step_num: int,
+        tokens: int,
+        content: str,
+        native_tool_calls: list,
+        steps: list,
+        response: "Response",
+        callbacks: LoopCallbacks,
+        calls_this_step: int = 1,
+    ) -> str:
+        """Dispatch ONE tool call from the model's response.
+
+        Covers the full per-call lifecycle: gates + FunctionCallItem
+        creation (``_gate_and_prepare_tool_call``) → execution (with
+        Ctrl+C handling) → streaming inline print hook → error-recovery
+        tracking + memory commit → step record → between-calls compaction
+        hook (``_commit_tool_result``).
+
+        FEAT-02 (R07.15): the batch dispatcher (``_execute_tool_calls``)
+        runs this for sequential batches and drives the gate/execute/
+        commit phases itself for parallel batches — the per-call
+        semantics are identical either way.
+
+        Returns:
+            "continue" — process the next tool call in this step
+            "break"    — stop processing tool calls. Every "break" path
+                         also sets ``state.terminated`` (terminal tool
+                         failure, repeat-guard, or Ctrl+C cancellation —
+                         ROB-01), so the caller stops the WHOLE run, not
+                         just the inner tool loop.
+        """
+        tool_name = tc["name"]
+        tool_args = tc["arguments"]
+        tool_call_id = tc.get("id", "") or ""
+
+        action, fc_item = self._gate_and_prepare_tool_call(
+            tc, state,
+            native_tool_calls=native_tool_calls,
+            steps=steps,
+            response=response,
+            step_num=step_num,
+            tokens=tokens,
+        )
+        if action != "run":
+            return action
 
         try:
             result = self._execute_tool(tool_name, tool_args)
@@ -590,6 +689,55 @@ class AgenticLoopMixin:
             ))
             return "break"
 
+        return self._commit_tool_result(
+            result,
+            fc_item,
+            state=state,
+            steps=steps,
+            tool_name=tool_name,
+            tool_args=tool_args,
+            tool_call_id=tool_call_id,
+            step_num=step_num,
+            tokens=tokens,
+            content=content,
+            native_tool_calls=native_tool_calls,
+            response=response,
+            callbacks=callbacks,
+            calls_this_step=calls_this_step,
+        )
+
+    def _commit_tool_result(
+        self,
+        result: Any,
+        fc_item,
+        *,
+        state: _LoopState,
+        steps: list,
+        tool_name: str,
+        tool_args: dict,
+        tool_call_id: str,
+        step_num: int,
+        tokens: int,
+        content: str,
+        native_tool_calls: list,
+        response: "Response",
+        callbacks: LoopCallbacks,
+        calls_this_step: int = 1,
+    ) -> str:
+        """Post-execution bookkeeping for ONE tool call, in call order.
+
+        FEAT-02 (R07.15) extraction: streaming inline print hook →
+        tool-call counter → error-recovery tracking + memory commit →
+        terminal check → step record → debug prints → between-calls
+        compaction hook. Shared verbatim by the sequential path and the
+        parallel path's commit phase (which always commits in ORIGINAL
+        call order — memory pairing and the step timeline stay
+        deterministic regardless of worker completion order).
+
+        Returns:
+            "continue" — process the next tool call in this step
+            "break"    — terminal tool failure; ``state.terminated`` set
+        """
         # Streaming path: print tool call + result inline so the user
         # sees progress as it happens — no-op on the non-streaming path.
         if callbacks.on_tool_executed is not None:
@@ -633,6 +781,201 @@ class AgenticLoopMixin:
         if callbacks.on_tool_result_committed is not None:
             callbacks.on_tool_result_committed(calls_this_step)
 
+        return "continue"
+
+    def _execute_tool_calls(
+        self,
+        tool_calls_found: list,
+        *,
+        state: _LoopState,
+        prompt: str,
+        step_num: int,
+        tokens: int,
+        content: str,
+        native_tool_calls: list,
+        steps: list,
+        response: "Response",
+        callbacks: LoopCallbacks,
+    ) -> str:
+        """FEAT-02 (R07.15): dispatch a step's tool calls.
+
+        Sequential (unchanged per-call lifecycle) unless ALL of:
+          - the batch has ≥ 2 calls,
+          - AGENTKTHX_PARALLEL_TOOLS is not disabled (default: enabled),
+          - the batch is independent per ``_calls_independent``
+            (no stateful tools, no duplicate (tool, args) pairs).
+
+        Parallel path: gates + FunctionCallItem creation run first in
+        call order, the tool handlers execute concurrently in a
+        ThreadPoolExecutor (max 4 workers), and post-processing commits
+        in ORIGINAL call order — the transcript is byte-identical to the
+        sequential path; only wall-clock latency shrinks.
+
+        Returns:
+            "continue" — all calls processed
+            "break"    — stop; ``state.terminated`` set (terminal gate,
+                         terminal tool failure, or Ctrl+C — ROB-01 parity)
+        """
+        parallel_enabled = os.environ.get("AGENTKTHX_PARALLEL_TOOLS", "1").lower() in (
+            "1", "true", "yes"
+        )
+        if (
+            not parallel_enabled
+            or len(tool_calls_found) < 2
+            or not _calls_independent(tool_calls_found)
+        ):
+            for tc in tool_calls_found:
+                action = self._execute_single_tool_call(
+                    tc,
+                    state,
+                    prompt=prompt,
+                    step_num=step_num,
+                    tokens=tokens,
+                    content=content,
+                    native_tool_calls=native_tool_calls,
+                    steps=steps,
+                    response=response,
+                    callbacks=callbacks,
+                    calls_this_step=len(tool_calls_found),
+                )
+                if action == "break":
+                    return "break"
+            return "continue"
+
+        return self._execute_tool_calls_parallel(
+            tool_calls_found,
+            state=state,
+            step_num=step_num,
+            tokens=tokens,
+            content=content,
+            native_tool_calls=native_tool_calls,
+            steps=steps,
+            response=response,
+            callbacks=callbacks,
+        )
+
+    def _execute_tool_calls_parallel(
+        self,
+        tool_calls_found: list,
+        *,
+        state: _LoopState,
+        step_num: int,
+        tokens: int,
+        content: str,
+        native_tool_calls: list,
+        steps: list,
+        response: "Response",
+        callbacks: LoopCallbacks,
+    ) -> str:
+        """FEAT-02 parallel execution phase (only reached for independent
+        batches — see ``_execute_tool_calls``).
+
+        Phase 1 — gates + FunctionCallItem creation, call order
+            (``_gate_and_prepare_tool_call``; a terminal gate aborts the
+            batch BEFORE any execution, matching sequential semantics).
+        Phase 2 — tool handlers run concurrently via
+            ThreadPoolExecutor(max_workers=min(4, batch size)). Each
+            worker runs the same ``_execute_tool`` the sequential path
+            uses (registry lookup, dangerous-tool gate, argument
+            normalization, error formatting).
+        Phase 3 — ``_commit_tool_result`` per call in ORIGINAL order.
+
+        Ctrl+C parity (ROB-01): a KeyboardInterrupt while collecting
+        results cancels pending futures, abandons in-flight workers
+        (threads cannot be killed — their tool calls run to their own
+        timeout), marks the response CANCELLED, records the ERROR step,
+        and breaks the run exactly like the sequential path.
+        """
+        calls_this_step = len(tool_calls_found)
+
+        # ---- Phase 1: gates + FunctionCallItem creation (call order) ----
+        approved: list[tuple[dict, Any]] = []  # (tc, fc_item)
+        for tc in tool_calls_found:
+            action, fc_item = self._gate_and_prepare_tool_call(
+                tc, state,
+                native_tool_calls=native_tool_calls,
+                steps=steps,
+                response=response,
+                step_num=step_num,
+                tokens=tokens,
+            )
+            if action == "break":
+                return "break"
+            if action == "continue":
+                continue
+            approved.append((tc, fc_item))
+
+        if len(approved) < 2:
+            # Gates swallowed the batch down to a single runnable call —
+            # no pool needed; finish it sequentially for identical
+            # lifecycle (Ctrl+C handling included).
+            for tc, _fc in approved:
+                action = self._execute_single_tool_call(
+                    tc, state,
+                    prompt="",
+                    step_num=step_num,
+                    tokens=tokens,
+                    content=content,
+                    native_tool_calls=native_tool_calls,
+                    steps=steps,
+                    response=response,
+                    callbacks=callbacks,
+                    calls_this_step=calls_this_step,
+                )
+                if action == "break":
+                    return "break"
+            return "continue"
+
+        # ---- Phase 2: concurrent execution ----
+        results: dict[int, Any] = {}
+        executor = ThreadPoolExecutor(
+            max_workers=min(_TOOL_POOL_MAX_WORKERS, len(approved)),
+            thread_name_prefix="agentkthx-tool",
+        )
+        futures = {
+            idx: executor.submit(self._execute_tool, tc["name"], tc["arguments"])
+            for idx, (tc, _fc) in enumerate(approved)
+        }
+        try:
+            for idx, fut in futures.items():
+                results[idx] = fut.result()
+        except KeyboardInterrupt:
+            executor.shutdown(wait=False, cancel_futures=True)
+            state.terminated = True
+            for _tc, fc_item in approved:
+                fc_item.status = ItemStatus.FAILED
+            response.mark_cancelled(debug=self.debug)
+            steps.append(StepResult(
+                type=StepResultType.ERROR,
+                error="Cancelled by user during tool execution",
+            ))
+            return "break"
+        except BaseException:
+            # Never leak a half-alive pool on unexpected errors.
+            executor.shutdown(wait=False, cancel_futures=True)
+            raise
+        executor.shutdown(wait=True)
+
+        # ---- Phase 3: commit in ORIGINAL call order ----
+        for idx, (tc, fc_item) in enumerate(approved):
+            action = self._commit_tool_result(
+                results[idx],
+                fc_item,
+                state=state,
+                steps=steps,
+                tool_name=tc["name"],
+                tool_args=tc["arguments"],
+                tool_call_id=tc.get("id", "") or "",
+                step_num=step_num,
+                tokens=tokens,
+                content=content,
+                native_tool_calls=native_tool_calls,
+                response=response,
+                callbacks=callbacks,
+                calls_this_step=calls_this_step,
+            )
+            if action == "break":
+                return "break"
         return "continue"
 
     def _process_tool_result(

@@ -1110,6 +1110,23 @@ class OrcaRouterBackend(CloudBackend):
                     pass
             return  # success — don't retry
 
+        # ROB-22 (R07.15): exhaustion-raise matching the non-streaming
+        # path's post-loop raise (see ``_generate_with_auth`` above). The
+        # retry-continue paths (429 free-rate, free_quota_exhausted swap,
+        # context-length 400, no-tools 400) are all attempt-bounded today,
+        # so the loop cannot currently fall off the end — but that
+        # invariant was enforced only by convention. One future drift (a
+        # new retry-continue without an attempt guard — the same
+        # copy-paste drift that produced this finding and the ROB-29/
+        # MAINT-23 skeleton family) would silently END the generator: the
+        # caller sees an empty stream (zero chunks, no error) while the
+        # non-streaming path raises "exhausted retries". Belt and braces:
+        # a bounded retry generator ALWAYS ends in yield-or-raise.
+        raise RuntimeError(
+            f"OrcaRouter-Stream: exhausted retries (4 attempts) for model "
+            f"{body.get('model')!r}. Last body: {json.dumps(body)[:500]}"
+        )
+
     # ─────────────────────────────────────────────────────────────────────
     # Streaming variant — apply FREE_ONLY gate before delegating
     # ─────────────────────────────────────────────────────────────────────

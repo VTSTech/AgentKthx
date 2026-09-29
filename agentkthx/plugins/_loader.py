@@ -568,6 +568,84 @@ class Plugin:
 # Plugin Manager
 # ---------------------------------------------------------------------------
 
+class _PluginTransaction:
+    """Per-plugin registration transaction (ROB-11, R07.15).
+
+    Records UNDO callables for every imperative ``register_*`` call a
+    plugin makes while its ``register()`` runs, so a failed load can
+    roll the partial registrations back. The audit's complaint: the
+    load-failure path relied on the plugin's own ``unregister()`` (which
+    may be missing, raise, or be incomplete) plus ``_purge_provides``
+    (which only removes manifest-DECLARED provides) — imperative
+    registrations via ``register_backend`` / ``register_tool`` /
+    ``register_cli_command`` / ``register_hook`` survived a failed load
+    and polluted the manager for every later plugin.
+
+    Semantics:
+      - LIFO rollback (undo in reverse registration order)
+      - prev-value-restore, not blind delete: an undo only mutates state
+        if the slot still holds EXACTLY what the transaction set
+        (identity check), restoring what was there before — so a
+        pre-existing same-name registration from another plugin survives
+      - best-effort: an undo that raises is warned and skipped so one
+        bad rollback step can't leave the remaining ones unrun
+    """
+
+    def __init__(self, plugin_name: str, warnings: list[str] | None = None):
+        self.plugin_name = plugin_name
+        self.warnings = warnings
+        self._undo: list[Callable[[], None]] = []
+
+    def add_undo(self, fn: Callable[[], None]) -> None:
+        self._undo.append(fn)
+
+    def rollback(self) -> int:
+        """Run recorded undos LIFO. Returns the number executed."""
+        executed = 0
+        for fn in reversed(self._undo):
+            try:
+                fn()
+                executed += 1
+            except Exception as e:
+                _warn(
+                    self.warnings,
+                    f"rollback step failed for '{self.plugin_name}': {e}",
+                )
+        self._undo.clear()
+        return executed
+
+
+def _restore_dict_entry(store: dict, key: str, set_value, prev_value) -> Callable[[], None]:
+    """Build an undo callable with prev-value-restore semantics (ROB-11).
+
+    The undo only mutates the slot if it still holds EXACTLY the value the
+    transaction set (identity check — ``is``), restoring what was there
+    before. Blind ``pop()`` would destroy a same-name registration an
+    earlier plugin had already made when a later plugin overwrites it and
+    then fails to load.
+    """
+
+    def _undo() -> None:
+        if store.get(key) is set_value:
+            if prev_value is None:
+                store.pop(key, None)
+            else:
+                store[key] = prev_value
+
+    return _undo
+
+
+def _remove_list_item(store: dict, key: str, item) -> Callable[[], None]:
+    """Build an undo callable removing an appended list entry by identity."""
+
+    def _undo() -> None:
+        entries = store.get(key)
+        if entries:
+            store[key] = [e for e in entries if e is not item]
+
+    return _undo
+
+
 class PluginManager:
     """
     Central plugin registry.  Singleton via ``get_plugin_manager()``.
@@ -619,8 +697,21 @@ class PluginManager:
         self._tools: dict[str, dict] = {}                 # name -> {tool, owner}
         self._hooks: dict[str, list[dict]] = {}           # event -> [entry]
 
+        # ROB-11 (R07.15): stack of active registration transactions.
+        # A transaction is pushed while a plugin's register() runs and
+        # records undo callables for every imperative register_* call,
+        # so a failed load can roll the partial registrations back.
+        self._txn_stack: list[_PluginTransaction] = []
+
         # Collected warnings (also printed); inspectable by tests/tooling.
         self.warnings: list[str] = []
+
+    def _record_undo(self, undo: Callable[[], None]) -> None:
+        """ROB-11 (R07.15): record an undo callable on the active plugin
+        transaction (no-op outside a register() call — e.g. host code
+        calling register_backend directly is NOT transactional)."""
+        if self._txn_stack:
+            self._txn_stack[-1].add_undo(undo)
 
     # ------------------------------------------------------------------ #
     #  Plugin roots                                                       #
@@ -1085,6 +1176,7 @@ class PluginManager:
                 f"cannot create plugin data dir for '{manifest.name}': {e}",
             )
 
+        _txn = None  # ROB-11: set once the registration transaction opens
         try:
             module = self._import_entrypoint(manifest, plugin_dir)
             plugin.module = module
@@ -1094,7 +1186,17 @@ class PluginManager:
                     f"entrypoint module {manifest.entrypoint!r} has no register() function"
                 )
 
-            module.register(self)
+            # ROB-11 (R07.15): transactional registration. Every
+            # imperative register_* call made while register() runs is
+            # recorded; if the load fails, the except path below rolls
+            # them back AFTER the plugin's own unregister() attempt.
+            _txn = _PluginTransaction(manifest.name, warnings=self.warnings)
+            self._txn_stack.append(_txn)
+            try:
+                module.register(self)
+            finally:
+                if self._txn_stack and self._txn_stack[-1] is _txn:
+                    self._txn_stack.pop()
 
             plugin.loaded = True
             self._plugins[manifest.name] = plugin
@@ -1141,6 +1243,16 @@ class PluginManager:
                         self.warnings,
                         f"unregister() also failed for '{manifest.name}': {ue}",
                     )
+            # ROB-11 (R07.15): roll back the imperative registrations the
+            # transaction recorded. Runs AFTER the plugin's own
+            # unregister() (which may clean more than registrations) and
+            # BEFORE _purge_provides (which handles the manifest-declared
+            # provides). Best-effort by design — see _PluginTransaction.
+            # NOTE: _txn is None when the failure fired BEFORE register()
+            # (import error, missing register(), sha256 pin mismatch) —
+            # nothing was transactionally registered yet.
+            if _txn is not None:
+                _txn.rollback()
             self._purge_provides(manifest)
             # Purge config registered before the failure (imperative or merged)
             env_prefix = manifest.config.get("env_prefix") if manifest.config else None
@@ -1290,7 +1402,10 @@ class PluginManager:
         types / §Failure boundaries).
         """
         if alias_of:
+            prev_alias = self._backend_aliases.get(name)
             self._backend_aliases[name] = alias_of
+            self._record_undo(_restore_dict_entry(
+                self._backend_aliases, name, alias_of, prev_alias))
             return
         try:
             from ..backends.base import BaseBackend
@@ -1306,7 +1421,11 @@ class PluginManager:
                 f"backend '{name}' rejected: BaseBackend unavailable to verify",
             )
             return
-        self._backend_classes[name] = (cls, plugin)
+        prev_cls = self._backend_classes.get(name)
+        entry = (cls, plugin)
+        self._backend_classes[name] = entry
+        self._record_undo(_restore_dict_entry(
+            self._backend_classes, name, entry, prev_cls))
 
     def unregister_backend(self, name: str) -> None:
         """Remove a plugin-registered backend."""
@@ -1366,11 +1485,14 @@ class PluginManager:
         plugin: str | None = None,
     ) -> None:
         """Register a CLI subcommand provided by a plugin."""
+        prev_cmd = self._cli_commands.get(name)
         self._cli_commands[name] = {
             "handler": handler,
             "setup_parser": setup_parser,
             "owner": plugin,
         }
+        self._record_undo(_restore_dict_entry(
+            self._cli_commands, name, self._cli_commands[name], prev_cmd))
 
     def unregister_cli_command(self, name: str) -> None:
         """Remove a plugin-registered CLI command."""
@@ -1409,6 +1531,8 @@ class PluginManager:
             )
             return False
         self._tools[name] = {"tool": tool, "owner": plugin}
+        self._record_undo(_restore_dict_entry(
+            self._tools, name, self._tools[name], None))
         return True
 
     def unregister_tool(self, name: str) -> None:
@@ -1454,9 +1578,9 @@ class PluginManager:
                 f"unknown hook event '{event}' from '{plugin}' "
                 f"(known: {sorted(KNOWN_HOOK_EVENTS)})",
             )
-        self._hooks.setdefault(event, []).append(
-            {"plugin": plugin, "fn": fn, "spec": None, "resolved": True, "failed": False}
-        )
+        entry = {"plugin": plugin, "fn": fn, "spec": None, "resolved": True, "failed": False}
+        self._hooks.setdefault(event, []).append(entry)
+        self._record_undo(_remove_list_item(self._hooks, event, entry))
 
     def unregister_hook(self, event: str, fn: Callable) -> None:
         """Remove a specific handler from an event."""
