@@ -70,8 +70,15 @@ def cmd_models(args: argparse.Namespace) -> int:
     from ...config import OPENROUTER_FREE_ONLY, ZAI_FREE_ONLY
     
     if backend_name == "openrouter" and OPENROUTER_FREE_ONLY:
-        # OpenRouter free models have :free suffix
-        models = [m for m in models if m["name"].endswith(":free")]
+        # R07.15 fix: use the plugin's shared _is_free_model() instead of
+        # the bare ``:free``-suffix check. The named ``openrouter/free``
+        # router (the plugin's default model) is also a free model, but
+        # ``"openrouter/free".endswith(":free")`` is False, so the old
+        # suffix check stripped it here even though the backend's own
+        # R07.09 filter had correctly accepted it. Mirrors the ZAI
+        # branch's helper-based filter below.
+        from ...plugins.openrouter.openrouter import _is_free_model
+        models = [m for m in models if _is_free_model(m["name"])]
         if not models:
             print("No free models found on OpenRouter.")
             return 0

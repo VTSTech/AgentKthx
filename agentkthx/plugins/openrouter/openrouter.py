@@ -187,6 +187,47 @@ def _is_free_model(model_id: str) -> bool:
     return model_id.endswith(":free")
 
 
+def _free_router_entry() -> dict:
+    """Synthetic listing entry for OpenRouter's named Free Models Router.
+
+    The ``/v1/models`` endpoint does not reliably include ``openrouter/free``
+    — public listings currently show it, but its presence has proven flaky
+    (the R07.10 note about router models returning null fields in this same
+    endpoint predates responses that omit the router entirely). Since the
+    router is the plugin's default model (``OPENROUTER_DEFAULT_MODEL``) and
+    is always chat-capable and $0, ``list_models()`` injects this entry
+    whenever the API response omits it, so it is always selectable from
+    ``agentkthx models --backend openrouter``.
+
+    Metadata mirrors the live API (verified 2026-09-29): context 200000,
+    $0/$0 pricing, ``max_completion_tokens`` null → coerced to 4096 per
+    the R07.10 fix. ``model_data`` keeps a minimal original-response shape
+    so downstream consumers of that field don't KeyError.
+    """
+    return {
+        "name": "openrouter/free",
+        "size": 0,  # OpenRouter doesn't provide size info
+        "details": {
+            "family": "openrouter",
+            "backend": "openrouter",
+            "context_length": 200000,
+            "max_completion_tokens": 4096,
+            "free_tier": True,
+            "is_chat_model": True,
+            "is_free_suffix": False,
+            "is_free_api": False,
+            "is_zero_pricing": True,
+            "pricing": {"prompt": 0.0, "completion": 0.0},
+        },
+        "model_data": {
+            "id": "openrouter/free",
+            "context_length": 200000,
+            "top_provider": {"max_completion_tokens": None},
+            "pricing": {"prompt": "0", "completion": "0"},
+        },
+    }
+
+
 class OpenRouterBackend(OpenAICompatibleBackend):
     """
     Backend for OpenRouter cloud API.
@@ -410,6 +451,15 @@ class OpenRouterBackend(OpenAICompatibleBackend):
                         }
                     })
             
+            # R07.15: guarantee the named Free Models Router appears in
+            # listings. The /models endpoint does not reliably return
+            # ``openrouter/free`` — it is the plugin's default model and
+            # always free, so inject it when the response omits it (the
+            # CLI free-only filter also uses _is_free_model(), which
+            # whitelists the router, so the entry survives both layers).
+            if not any(m["name"] == "openrouter/free" for m in available_models):
+                available_models.append(_free_router_entry())
+            
             # Filter models if OPENROUTER_FREE_ONLY is enabled
             if OPENROUTER_FREE_ONLY:
                 # R07.09 fix: use the shared _is_free_model() helper so the
@@ -445,6 +495,12 @@ class OpenRouterBackend(OpenAICompatibleBackend):
                 }
                 parsed_model = self._parse_openrouter_model(mock_model_data)
                 catalog_models.append(parsed_model)
+            
+            # R07.15: the static catalog contains no free models at all, so
+            # without the router a FREE_ONLY fallback list would be empty.
+            # Same guarantee as the live path above.
+            if not any(m["name"] == "openrouter/free" for m in catalog_models):
+                catalog_models.append(_free_router_entry())
             
             if OPENROUTER_FREE_ONLY:
                 # R07.09 fix: replaced the prior substring hack ("free" in
