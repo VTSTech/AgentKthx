@@ -410,7 +410,11 @@ def get_tool_prompt(tools: list, tool_support: str = "react", family: str | None
                 if p_type == "string":
                     param_pairs.append(f'"{p_name}": "..."')
                 elif p_type in ("number", "integer", "float"):
-                    param_pairs.append(f'"{p_name}": 0')
+                    # Use 10 (not 0) for numeric examples — see soul/loader.py
+                    # _build_tool_section for the rationale (small local models
+                    # copy the value verbatim; 0 caused instant timeouts for
+                    # shell/http_get/python_repl tools' timeout param).
+                    param_pairs.append(f'"{p_name}": 10')
                 else:
                     param_pairs.append(f'"{p_name}": ...')
             args_example = "{" + ", ".join(param_pairs) + "}"

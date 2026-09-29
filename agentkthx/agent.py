@@ -1138,7 +1138,7 @@ class Agent(AgentSetupMixin, CompactionMixin, ToolExecutionMixin, StreamingMixin
         if has_tools:
             from .soul.loader import _build_tool_section
 
-            tool_section = _build_tool_section(self.tools.all(), native_tools=self._is_comp_mode)
+            tool_section = _build_tool_section(self.tools.all(), native_tools=self._use_native_tools)
             # Find and replace tool section in system prompt
             if "### Tool Reference" in self._custom_system_prompt:
                 # Replace existing tool section

@@ -749,7 +749,13 @@ def _build_tool_section(tools: list, native_tools: bool = False) -> str:
                 if p_type == "string":
                     param_pairs.append(f'"{p_name}": "..."')
                 elif p_type in ("number", "integer", "float"):
-                    param_pairs.append(f'"{p_name}": 0')
+                    # Use 10 (not 0) for numeric examples. Small local models
+                    # copy the example value verbatim — 0 was causing instant
+                    # timeouts when the model emitted `{"timeout": 0}` for
+                    # the shell/http_get/python_repl tools (which all use a
+                    # timeout param). 10 seconds is a sensible default that
+                    # gives the tool enough time to actually run.
+                    param_pairs.append(f'"{p_name}": 10')
                 else:
                     param_pairs.append(f'"{p_name}": ...')
             args_example = "{" + ", ".join(param_pairs) + "}"
@@ -768,14 +774,15 @@ def _build_tool_section(tools: list, native_tools: bool = False) -> str:
         "**CRITICAL RULE**: If a tool is NOT in the available tools list, do NOT try to use it. Respond directly instead."
     )
 
-    if not native_tools:
-        # ReAct format instructions — only for text-parsing models
-        lines.append("")
-        lines.append("When you need to use a tool, follow this EXACT format:")
-        lines.append("```")
-        lines.append("Action: <tool_name>")
-        lines.append("Action Input: <JSON arguments>")
-        lines.append("```")
+    # Note: ReAct format instructions (Action:/Action Input:/Final Answer:) are
+    # NOT duplicated here. They're already provided by either:
+    #   - the no-soul default prompt (agent_setup.py:_build_default_prompt, ReAct branch), OR
+    #   - the soul's SOUL.md content (e.g., nova-helper/SOUL.md ships with a
+    #     full "When you need to use a tool, follow this EXACT format:" block).
+    # Appending another format block here caused a duplicate that confused
+    # models — they'd see two different format blocks and emit mixed/atypical
+    # Action sequences. The tool reference table + CRITICAL RULE above is
+    # all this section needs to contribute.
 
     return "\n".join(lines)
 

@@ -179,11 +179,25 @@ def shell(command: str, timeout: int = 30) -> str:
 
     Args:
         command: Shell command to execute
-        timeout: Timeout in seconds (default 30)
+        timeout: Timeout in seconds (default 30, max 300)
 
     Returns:
         Command output or error message
     """
+    # FEAT-02: clamp the model-supplied timeout. subprocess.run(timeout=0)
+    # means "wait 0 seconds" — it raises TimeoutExpired IMMEDIATELY, before
+    # the subprocess even starts executing. Small local models emit
+    # ``{"timeout": 0}`` (matching the example value 0) or sometimes
+    # ``{"timeout": "10"}`` (string, not int) — both must be normalized
+    # before reaching subprocess.run. Same clamp rationale as http_get and
+    # python_repl: max(1, min(timeout, 300)) — never let a non-positive
+    # timeout near subprocess.run.
+    try:
+        timeout = int(timeout)
+    except (TypeError, ValueError):
+        timeout = 30
+    timeout = max(1, min(timeout, 300))
+
     # Fix for tiny models that add a spurious leading '=' (e.g., ="pwd" instead of "pwd")
     if command.startswith("="):
         command = command[1:].strip()
