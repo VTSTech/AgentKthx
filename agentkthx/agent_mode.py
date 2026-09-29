@@ -49,6 +49,41 @@ def _step_tool_stats(run) -> tuple[int, list[str]]:
     return len(calls), names
 
 
+def _format_response_stats(run, indent: str = "    ") -> list[str]:
+    """Build the per-run ⏱️ stats lines for a completed AgentRun.
+
+    R07.15 amendment (user request): chat mode now shows the same
+    per-response stats agent mode's verbose footer has shown since the
+    ``_step_tool_stats`` fix — step count, tool-call count and
+    wall-clock ms — so both interactive modes report identically.
+    Extracted here (library layer, next to ``_step_tool_stats``) so
+    ``agent_mode.py`` and the chat CLI render ONE shared format instead
+    of drifting copies. Steps/tool calls are singularized when 1
+    ("1 step", "1 tool call") — agent mode's multi-step runs always
+    said "steps" even for a single step.
+
+    Args:
+        run: An AgentRun (or duck-typed object with .steps and .total_ms).
+        indent: Leading whitespace for each line ("    " nests under
+                agent mode's "⟳ Executing:" line; chat mode passes "  ").
+
+    Returns:
+        Lines WITHOUT color codes (caller applies styling):
+        ["⏱️ N step(s), M tool call(s), Xms"] plus, when tools ran,
+        ["🔧 Tools used: name1, name2"].
+    """
+    tool_call_count, tool_names = _step_tool_stats(run)
+    step_count = len(run.steps)
+    lines = [
+        f"{indent}⏱️ {step_count} {'step' if step_count == 1 else 'steps'}, "
+        f"{tool_call_count} {'tool call' if tool_call_count == 1 else 'tool calls'}, "
+        f"{getattr(run, 'total_ms', 0.0):.0f}ms"
+    ]
+    if tool_names:
+        lines.append(f"{indent}🔧 Tools used: {', '.join(tool_names)}")
+    return lines
+
+
 class AgentState(Enum):
     """Agent execution states."""
     IDLE = "idle"           # Ready for new tasks
@@ -659,10 +694,8 @@ Example: [{{"description": "Step 1"}}, {{"description": "Step 2"}}]"""
             
             # Debug output: show step completion info
             if self.verbose and run:
-                tool_call_count, tool_names = _step_tool_stats(run)
-                print(dim(f"    ⏱️ {len(run.steps)} steps, {tool_call_count} tool calls, {run.total_ms:.0f}ms"))
-                if tool_names:
-                    print(dim(f"    🔧 Tools used: {', '.join(tool_names)}"))
+                for _stats_line in _format_response_stats(run):
+                    print(dim(_stats_line))
             
             # Log step completion
             step.status = "done"

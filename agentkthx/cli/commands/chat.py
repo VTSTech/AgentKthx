@@ -10,6 +10,7 @@ import sys
 import threading
 
 from ... import __version__
+from ...agent_mode import _format_response_stats
 from ...colors import bold, magenta, yellow, dim, green, cyan, bright_green, red, bright_cyan
 from ...config import get_config
 from ...tools import make_builtin_registry
@@ -1157,6 +1158,19 @@ def cmd_chat(args: argparse.Namespace) -> int:
                 print()
             else:
                 print(f"\n{bright_green('AgentKthx')}: {result.final_answer}\n")
+
+        # R07.15 amendment (user request): per-response stats line, the
+        # chat counterpart of agent mode's verbose ⏱️ footer. One dim
+        # line under EVERY completed response — streaming and
+        # non-streaming, debug and non-debug — showing step count,
+        # tool-call count and wall-clock ms for this turn (plus the
+        # tools used when the run made tool calls). Shared format via
+        # agent_mode._format_response_stats; kept OUTSIDE the
+        # empty-answer branch so a throttled/failed turn still reports
+        # how long it burned. Printed before the footer refresh so the
+        # persistent footer stays the last visual element.
+        for _stats_line in _format_response_stats(result, indent="  "):
+            print(dim(_stats_line))
 
         # Refresh the persistent footer with updated token counts.
         # The footer lives on the reserved bottom line (scroll region)

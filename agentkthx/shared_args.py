@@ -138,6 +138,34 @@ def add_shared_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _backend_choices_for_help() -> list[str]:
+    """Return the merged ``--backend`` choices for help text.
+
+    R07.15 amendment (user-reported during VM smoke testing): the help
+    string was hardcoded and had drifted — plugin backends mistral,
+    orcarouter and pollinations (plus every alias) were accepted at
+    runtime but invisible in ``chat -h`` / ``agent -h`` / ``run -h``.
+    The CLI's main() loads all plugins BEFORE create_parser(), so
+    get_backend_choices() sees the full native + plugin registry at
+    help-render time. Falls back to the core native names when called
+    outside the CLI (standalone example scripts) where plugins have
+    not been loaded yet.
+    """
+    try:
+        from .backends import get_backend_choices
+
+        names = list(get_backend_choices())
+    except Exception:
+        names = []
+    if not names:
+        names = [
+            "ollama", "bitnet", "llama-server", "zai", "openrouter",
+            "huggingface", "gemini", "openai", "mistral", "orcarouter",
+            "pollinations",
+        ]
+    return names
+
+
 def add_agent_args(
     parser: argparse.ArgumentParser,
     tools_default: str = "",
@@ -163,7 +191,7 @@ def add_agent_args(
     parser.add_argument(
         "--backend",
         default=None,
-        help="Backend to use (ollama, bitnet, llama-server, zai, openrouter, huggingface, gemini, openai)",
+        help="Backend to use (" + ", ".join(_backend_choices_for_help()) + ")",
     )
     parser.add_argument(
         "--api",
