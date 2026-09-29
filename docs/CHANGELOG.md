@@ -5,7 +5,7 @@ All notable changes to AgentKthx will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [R07.16] - 2026-09-30
+## [R07.16] - 2026-09-29 7:59:32 PM
 
 **TurboQuant handling + llama-server tool-calling improvements.** First release in a collaboration pass with VTSTech focused on making `agentkthx turbo start` + `agentkthx chat --backend llama-server` work end-to-end on the TurboQuant llama.cpp fork (CPU-only Colab, 12GB RAM, models like `nemotron-3-nano:4b` and `llama3.2:1b`).
 
