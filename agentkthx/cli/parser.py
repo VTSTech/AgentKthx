@@ -283,7 +283,42 @@ def create_parser() -> argparse.ArgumentParser:
         "--sparsity", type=float, default=0.0, help="Sparse V decoding threshold (0.0=off)"
     )
     turbo_start_parser.add_argument(
-        "--threads", type=int, default=0, help="CPU thread count (0=auto)"
+        "--threads", type=int, default=0, help="CPU thread count for generation (0=auto, -t)"
+    )
+    turbo_start_parser.add_argument(
+        "--threads-batch",
+        type=int,
+        default=0,
+        help="CPU thread count for prompt/batch processing (0=same as --threads, -tb). "
+        "Often set 2x higher than --threads since prompt eval is more parallelizable.",
+    )
+    turbo_start_parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=0,
+        help="Logical batch size for prompt processing (0=server default 2048, -b). "
+        "Larger values = fewer iterations but more memory.",
+    )
+    turbo_start_parser.add_argument(
+        "--ubatch-size",
+        type=int,
+        default=0,
+        help="Physical ubatch size for matmul parallelism (0=server default 512, -ub). "
+        "Larger values = better CPU cache utilization in matmuls.",
+    )
+    turbo_start_parser.add_argument(
+        "--mlock",
+        action="store_true",
+        help="Pin model in RAM (prevent swap). Recommended for systems with "
+        "tight RAM (e.g. Colab CPU 12GB) where swap = death.",
+    )
+    turbo_start_parser.add_argument(
+        "--numa",
+        choices=["distribute", "isolate", "numactl"],
+        default=None,
+        help="NUMA optimization mode. distribute=spread execution evenly; "
+        "isolate=only use CPUs on the starting node; numactl=use numactl CPU map. "
+        "Single-socket VMs (e.g. Colab) sometimes still benefit from 'distribute'.",
     )
     turbo_start_parser.add_argument(
         "--no-wait", action="store_true", help="Don't wait for server to be ready"

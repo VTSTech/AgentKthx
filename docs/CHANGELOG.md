@@ -5,6 +5,62 @@ All notable changes to AgentKthx will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [R07.16] - 2026-09-30
+
+**TurboQuant handling + llama-server tool-calling improvements.** First release in a collaboration pass with VTSTech focused on making `agentkthx turbo start` + `agentkthx chat --backend llama-server` work end-to-end on the TurboQuant llama.cpp fork (CPU-only Colab, 12GB RAM, models like `nemotron-3-nano:4b` and `llama3.2:1b`).
+
+### TurboQuant server lifecycle (`agentkthx/plugins/turboquant/turbo.py`, `agentkthx/cli/commands/turbo.py`, `agentkthx/cli/parser.py`)
+
+- **`turbo start` now auto-derives `--ctx` and `--num-predict`** from the model's GGUF metadata (`context_length` field, already parsed by `discover_models` in `agentkthx/backends/ollama_registry.py`). The previous hardcoded `8192` default caused every model to launch with an 8K context regardless of what the model was actually trained for. Now `agentkthx turbo start nemotron-3-nano:4b` launches with `-c 262144 --n-predict 8192` (= 262144 // 32, matching the R06.55 empirical cap on cloud-backend `max_tokens`). Both flags remain overridable via the existing `--ctx` flag and the new `--num-predict` flag (`--num-predict 0` disables the cap entirely). `TurboState` gained a `num_predict` field; old state files still load via `from_dict`'s dataclass-field filter (no schema version bump needed).
+- **`turbo start` gained llama-server CPU speedup knobs**: `--threads-batch N` (`-tb`), `--batch-size N` (`-b`), `--ubatch-size N` (`-ub`), `--mlock`, `--numa {distribute,isolate,numactl}`. These plus the existing `--threads` / `--flash-attn` / `--sparsity` cover the Tier-1 safe speedups for CPU-only inference. Anything else can still be passed through via the `--` passthrough (e.g. `agentkthx turbo start model -- -fa on -mg 0`). The startup banner now lists every flag it applied + prints a tip that extra args can be appended after `--`.
+- **`turbo list` / `turbo status`** unchanged; the `print_status` helper now also shows `Predict: N tokens (max)` when `state.num_predict > 0`.
+
+### Chat-side ctx/predict auto-derive (`agentkthx/cli/agent_factory.py`)
+
+- **`agentkthx chat --backend llama-server` (and `ollama` / `bitnet`) now auto-derives `--num-ctx` and `--num-predict`** to match the running TurboQuant server. Previously, the chat command always fell back to `config.num_ctx` (hardcoded 8K) for any non-cloud backend, so the agent's memory window was 8K while the server was actually running 256K — causing premature compaction and a mismatched `max_tokens` cap. New `_get_local_catalog_defaults` helper consults: (1) the running TurboQuant server state file (`~/.agentkthx/turbo.state`, PID verified alive via `_is_process_alive` which also handles Linux zombie detection) — best source of truth since it reflects what the server actually has allocated via `-c` and `--n-predict`; (2) the Ollama catalog GGUF metadata (`find_model(model_name)` → `OllamaModel.context_length` parsed from the GGUF header) — fallback when no server is running; (3) returns `{}` — chat falls back to `config.num_ctx` (the pre-R08 behavior, e.g. for custom llama-server with a direct GGUF path that isn't an Ollama model name). Cloud backends unchanged (still use cloud catalog logic).
+
+### llama-server tool-calling auto-detection (`agentkthx/core/agent_setup.py`, `agentkthx/cli/agent_factory.py`, `agentkthx/agent.py`)
+
+- **New `_use_native_tools` property** = `_is_comp_mode and not force_react`. The 3 behavior-affecting usages of `_is_comp_mode` in `agent_setup.py` (lines 494, 522, 596) now use `_use_native_tools` instead. This means: when `force_react=True`, the system prompt is built with ReAct format instructions (`Action:` / `Action Input:` / `Final Answer:`) even in OpenAI Chat-Completions mode — the `tools` array is still sent in the request body (harmless for backends that ignore it), but the system prompt tells the model how to emit tool calls as text.
+- **Local-backend tool-support auto-detection in `_build_agent`**: for non-cloud backends (llama-server, ollama, bitnet) with tools, query `backend.test_tool_support(model, force_test=False)` — fast, just reads the cache populated by `agentkthx models`. If NATIVE → keep `force_react=False`. If REACT → set `force_react=True` (switches to ReAct prompting). If UNTESTED → default `force_react=True` for local backends (safer for small CPU models that typically aren't trained on native function calling). If NONE → keep `force_react=False` (model can't call tools either way). Cloud backends unchanged (still default to native). User's explicit `--force-react` flag still wins. Debug print shows the decision: `[AgentKthx] Tool support for 'X': REACT (cached) → switching to ReAct text-based prompting`.
+- **Bug fix in `Agent._rebuild_system_prompt_with_tools`** (`agentkthx/agent.py:1141`): was using `self._is_comp_mode` (always True for OpenAI api_mode) instead of `self._use_native_tools`. The `rebuild_system_prompt` / `add_tool` mid-session path was still emitting the native-tools prompt even when `force_react` was set. Fixed.
+- **Verified end-to-end on `nemotron-3-nano:4b`** (model doesn't natively support OpenAI function calling per `/v1/models` capabilities = `["completion"]` only): with the auto-detection, the agent picks REACT, builds a ReAct system prompt, and the model successfully emits `Action: shell\nAction Input: {"command": "...", "timeout": 10}` which the parser dispatches. Without the fix, the model emitted confused text like `Tool 'shell' is not available. Available tools: none.` because the system prompt was telling it to "call them naturally as function calls" via the API, but the model's chat template doesn't know how to do that.
+
+### System prompt de-duplication + numeric example fix (`agentkthx/soul/loader.py`, `agentkthx/core/prompts.py`)
+
+- **Removed the duplicate ReAct format block** from `soul/loader.py:_build_tool_section` (lines 771-778). The function was appending a second `Action:` / `Action Input:` format block at the end of the tool reference table, but the same instructions were already provided either by the no-soul default prompt's ReAct branch (`agent_setup.py:_build_default_prompt`) or by the soul's `SOUL.md` content (e.g., `nova-helper/SOUL.md` ships its own ReAct format block). The duplication was confusing small models — they'd see two different format blocks (one with `Thought:` and `Final Answer:`, one without) and emit mixed Action sequences.
+- **Numeric example value `0` → `10`** in both `_build_tool_section` implementations (`soul/loader.py` active path + `core/prompts.py` dead-code-but-kept-for-consistency). Small local models copy the example value verbatim — `0` was causing instant `subprocess.run(timeout=0)` → `TimeoutExpired` before the command even ran, for the `shell` / `http_get` / `python_repl` tools (all of which use a numeric `timeout` parameter). `10` is a sensible default that gives the tool enough time to actually run.
+
+### Defensive `shell()` timeout clamping (`agentkthx/tools/builtins.py`)
+
+- The `shell()` tool was passing `timeout` straight to `subprocess.run(timeout=timeout)` with no normalization. Added the same `int(timeout)` conversion + `max(1, min(timeout, 300))` clamp that `http_get` and `python_repl` already use. Now handles: `timeout=0` (was: instant TimeoutExpired, now clamped to 1s minimum), `timeout="10"` (string, what `llama3.2:1b` emitted, now coerced via `int("10")` to 10), `timeout=-5` (clamped to 1s), `timeout=None` (defaults to 30s).
+
+### Diagnostics
+
+- **New `scripts/probe_llama_server_tools.py`** (stdlib-only, 11KB): probes a running llama-server with 7 different request shapes (GET /health, GET /v1/models, bare chat, OpenAI tools, tools+tool_choice=auto, tools+tool_choice=required, GET /tools) and dumps the raw HTTP status + headers + body for each. Bypasses AgentKthx's chat-side code path entirely — so if an error appears in the probe output, it's confirmed to be from llama-server/the model, not from AgentKthx. Auto-reads `~/.agentkthx/turbo.state` for the model name + port.
+
+### Tests + version
+
+- New 5th variant in `test_build_default_prompt_all_four_variants` (`tests/test_agent_setup_subsystem.py`): comp_mode + `force_react=True` should fall back to ReAct format (not native function calling). `_PromptHost` fixture updated to accept the `force_react` kwarg.
+- Suite: **2051 passed, 16 skipped** (unchanged from R07.15 in count — all changes are behavior additions, no existing tests modified or removed).
+- Version bumped: `0.7.15` → `0.7.16` in both `agentkthx/__init__.py` and `pyproject.toml`.
+
+### Files modified (10 files, +272/-25 lines per `git diff --stat`)
+
+- `agentkthx/__init__.py` — version bump (R07.15 → R07.16)
+- `agentkthx/agent.py` — `_use_native_tools` in `_rebuild_system_prompt_with_tools`
+- `agentkthx/cli/agent_factory.py` — `_get_local_catalog_defaults` (TurboState + Ollama catalog) + local-backend tool-support auto-detection
+- `agentkthx/cli/commands/turbo.py` — pass new speedup flags through to `start_server`
+- `agentkthx/cli/parser.py` — new `--num-predict` flag (turbo start) + 5 new speedup flags (`--threads-batch`, `--batch-size`, `--ubatch-size`, `--mlock`, `--numa`)
+- `agentkthx/core/agent_setup.py` — `_use_native_tools` property + 3 usage replacements
+- `agentkthx/core/prompts.py` — numeric example `0` → `10` (dead-code `_build_tool_section` for consistency)
+- `agentkthx/plugins/turboquant/turbo.py` — `TurboState.num_predict` + `_build_command` new flags (`-tb`, `-b`, `-ub`, `--mlock`, `--numa`) + `start_server` signature + startup banner additions
+- `agentkthx/soul/loader.py` — removed duplicate ReAct block + numeric example `0` → `10`
+- `agentkthx/tools/builtins.py` — `shell()` timeout clamp
+- `pyproject.toml` — version bump
+- `tests/test_agent_setup_subsystem.py` — 5th test variant + `_PromptHost` fixture update
+- `scripts/probe_llama_server_tools.py` — new diagnostic probe (11KB, stdlib-only)
+
 ## [R07.15] - 2026-09-29 2:14:18 PM
 
 **Push history (github.com/VTSTech/AgentKthx, branch `main`):** `30cbe4f` — this release (six-finding closure batch) · `4e1555e` — intra-release amendment 1 (`openrouter/free` free-models listing) · `7579e3c` — intra-release amendment 2 (agent-mode tool-call counter + audit header sync) · `7f59a8d` — docs-only amendment 3 (push-history annotations) · `53916a5` — intra-release amendment 4 (four-finding closure batch: TEST-06, FEAT-02, ROB-11, ROB-22) · `ea98951` — intra-release amendment 5 (chat per-response stats + dynamic `--backend` help) · `8b86fb7` — intra-release amendment 6 (pyyaml dev extra: CI-pinning tests run in CI) · `00ad56a` — ruff config key migration (`select` → `lint.select`) · `8d0b8c7` — lint burn-down (ruff+black across the tree, lint job promoted to REQUIRED). All nine commits are titled "R07.15".

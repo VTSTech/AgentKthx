@@ -249,9 +249,19 @@ def _build_command(
     sparsity: float = 0.0,
     num_threads: int = 0,
     num_predict: int = 0,
+    threads_batch: int = 0,
+    batch_size: int = 0,
+    ubatch_size: int = 0,
+    mlock: bool = False,
+    numa: Optional[str] = None,
     extra_args: Optional[list[str]] = None,
 ) -> list[str]:
-    """Build the llama-server command line."""
+    """Build the llama-server command line.
+
+    All CPU-side speedup flags (threads-batch / batch-size / ubatch-size / mlock / numa)
+    are passed through to llama-server as their standard short flags. Pass 0/False/None
+    to skip a flag and let the server use its own default.
+    """
     cmd = [
         server_path,
         "-m",
@@ -283,11 +293,34 @@ def _build_command(
     if sparsity > 0.0:
         cmd.extend(["--flash-attn-sparsity", str(sparsity)])
 
-    # CPU threads (0 = auto-detect)
+    # CPU threads (0 = auto-detect) — generation threads
     if num_threads > 0:
         cmd.extend(["-t", str(num_threads)])
 
-    # Extra args passthrough
+    # CPU threads for batch / prompt processing. Often set 2x higher than -t
+    # since prompt eval is more parallelizable than decode. 0 = same as -t.
+    if threads_batch > 0:
+        cmd.extend(["-tb", str(threads_batch)])
+
+    # Logical batch size for prompt processing (default 2048 on the server).
+    # Larger = fewer iterations but more memory.
+    if batch_size > 0:
+        cmd.extend(["-b", str(batch_size)])
+
+    # Physical ubatch size for matmul parallelism (default 512 on the server).
+    # Larger = better CPU cache utilization in matmuls.
+    if ubatch_size > 0:
+        cmd.extend(["-ub", str(ubatch_size)])
+
+    # Pin model in RAM (prevent swap on tight-RAM systems like Colab CPU 12GB)
+    if mlock:
+        cmd.append("--mlock")
+
+    # NUMA optimization mode (distribute / isolate / numactl)
+    if numa:
+        cmd.extend(["--numa", numa])
+
+    # Extra args passthrough (everything after `--` on the CLI)
     if extra_args:
         cmd.extend(extra_args)
 
@@ -305,6 +338,11 @@ def start_server(
     flash_attn: bool = False,
     sparsity: float = 0.0,
     num_threads: int = 0,
+    threads_batch: int = 0,
+    batch_size: int = 0,
+    ubatch_size: int = 0,
+    mlock: bool = False,
+    numa: Optional[str] = None,
     wait_ready: bool = True,
     ready_timeout: int = 120,
     extra_args: Optional[list[str]] = None,
@@ -326,10 +364,22 @@ def start_server(
         cache_type_v: V cache type (default: auto-detected from weight quant)
         flash_attn: Enable flash attention
         sparsity: Sparse V decoding sparsity threshold (0.0 = disabled)
-        num_threads: CPU thread count (0 = auto-detect)
+        num_threads: CPU thread count for generation (0 = auto-detect, -t)
+        threads_batch: CPU thread count for batch/prompt processing (0 = same
+            as --threads, -tb). Often set 2x higher than --threads.
+        batch_size: Logical batch size for prompt processing (0 = server
+            default 2048, -b). Larger = fewer iterations but more memory.
+        ubatch_size: Physical ubatch size for matmul parallelism (0 = server
+            default 512, -ub). Larger = better CPU cache utilization.
+        mlock: Pin model in RAM (prevent swap). Recommended on tight-RAM
+            systems like Colab CPU 12GB.
+        numa: NUMA optimization mode — "distribute", "isolate", or "numactl".
+            None = no NUMA flag. Single-socket VMs may still benefit from
+            "distribute".
         wait_ready: Wait for server to be ready before returning
         ready_timeout: Max seconds to wait for server readiness
-        extra_args: Additional arguments to pass to llama-server
+        extra_args: Additional arguments to pass to llama-server (also
+            reachable via the `--` passthrough on the CLI)
         ollama_dir: Override Ollama models directory
 
     Returns:
@@ -456,6 +506,11 @@ def start_server(
         sparsity=sparsity,
         num_threads=num_threads,
         num_predict=num_predict,
+        threads_batch=threads_batch,
+        batch_size=batch_size,
+        ubatch_size=ubatch_size,
+        mlock=mlock,
+        numa=numa,
         extra_args=extra_args,
     )
 
@@ -476,7 +531,22 @@ def start_server(
     print(f"  Flash Attn:  {'ON' if flash_attn else dim('off')}")
     if sparsity > 0:
         print(f"  Sparse V:    {sparsity}")
+    if num_threads > 0:
+        print(f"  Threads:     {num_threads} (-t)")
+    if threads_batch > 0:
+        print(f"  ThreadsBatch:{threads_batch} (-tb)")
+    if batch_size > 0:
+        print(f"  Batch:       {batch_size} (-b)")
+    if ubatch_size > 0:
+        print(f"  Ubatch:      {ubatch_size} (-ub)")
+    if mlock:
+        print(f"  MLock:       {bright_green('ON')}")
+    if numa:
+        print(f"  NUMA:        {numa}")
     print(f"  Server:      {server_path}")
+    if extra_args:
+        print(f"  Extra:       {dim(' '.join(extra_args))}")
+    print(f"  {dim('Tip: additional llama-server args can be appended after `--` on the agentkthx CLI.')}")
     print()
 
     # Start the server
