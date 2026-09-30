@@ -228,7 +228,7 @@ wait_for_ollama_ready() {
 }
 
 start_server() {
-  echo ">>> Starting ollama with controlled env (ctx=$CTX_REQUESTED, kv=q8_0)..."
+  echo ">>> Starting ollama with controlled env (ctx=$CTX_REQUESTED, kv=q4_k_m)..."
 
   # Try graceful shutdown first, then force kill
   # CRITICAL: use -x for exact match — without it, `pkill ollama` would
@@ -269,11 +269,12 @@ start_server() {
 
   OLLAMA_DEBUG=1 \
   OLLAMA_NUM_PARALLEL=1 \
+  OLLAMA_NUM_THREADS=3 \
   OLLAMA_MAX_LOADED_MODELS=1 \
   OLLAMA_KEEP_ALIVE=2m \
   OLLAMA_FLASH_ATTENTION=true \
   OLLAMA_CONTEXT_LENGTH=$CTX_REQUESTED \
-  OLLAMA_KV_CACHE_TYPE=q8_0 \
+  OLLAMA_KV_CACHE_TYPE=q4_k_m \
   OLLAMA_VULKAN=false \
   ollama serve > "$LOG" 2>&1 < /dev/null &
   SERVER_PID=$!
@@ -413,7 +414,7 @@ diagnose_one() {
     echo "    ✓ Installed"
     echo "    File size: $file_size_display ($file_size_mb MB)"
     echo ""
-    echo ">>> [2/5] Server already running with controlled env (ctx=$CTX_REQUESTED, kv=q8_0)"
+    echo ">>> [2/5] Server already running with controlled env (ctx=$CTX_REQUESTED, kv=q4_k_m)"
     echo ""
     echo ">>> [3/5] Running inference test..."
     echo "    Prompt: \"Say hello in one short sentence.\""
@@ -431,7 +432,7 @@ diagnose_one() {
 
   local start_time end_time exit_code wall_time output
   start_time=$(date +%s.%N)
-  output=$(timeout 120 ollama run "$model" "Say hello in one short sentence." 2>&1 < /dev/null)
+  output=$(timeout 600 ollama run "$model" "Say hello in one short sentence." 2>&1 < /dev/null)
   exit_code=$?
   end_time=$(date +%s.%N)
   wall_time=$(echo "$end_time - $start_time" | bc)
