@@ -152,7 +152,7 @@ Output is a JSON decision envelope:
 }
 ```
 
-See [JEV_API_MODE.md](docs/JEV_API_MODE.md) for the full spec, Python API,
+See [JEV_API_MODE.md](JEV_API_MODE.md) for the full spec, Python API,
 and architecture details.
 
 ### Thinking Controls
@@ -368,7 +368,7 @@ agentkthx models --backend gemini
 GEMINI_FREE_ONLY=1 agentkthx models --backend gemini
 ```
 
-See [docs/api/GEMINI_API_TECHNICAL_REFERENCE.md](docs/api/GEMINI_API_TECHNICAL_REFERENCE.md) for the full 11-section reference (auth, models, function calling, streaming, error codes, rate limits, multimodal, thinking config, integration notes, troubleshooting, 71-model catalog with free-tier data transcribed from Google AI Studio).
+See [GEMINI_API_TECHNICAL_REFERENCE.md](api/GEMINI_API_TECHNICAL_REFERENCE.md) for the full 11-section reference (auth, models, function calling, streaming, error codes, rate limits, multimodal, thinking config, integration notes, troubleshooting, 71-model catalog with free-tier data transcribed from Google AI Studio).
 
 ### Hugging Face Configuration
 
@@ -429,7 +429,7 @@ HF_FREE_ONLY=1 agentkthx models --backend hf
 agentkthx chat --backend hf -m "meta-llama/Llama-3.3-70B-Instruct:groq"
 ```
 
-See [docs/api/HUGGINGFACE_API_TECHNICAL_REFERENCE.md](docs/api/HUGGINGFACE_API_TECHNICAL_REFERENCE.md) for the full 14-section reference (auth, request/response, sampling params, model catalog, function calling, streaming, provider routing, error codes, rate limits, free-tier behavior, multimodal, implementation notes, proposed plugin.json, troubleshooting matrix).
+See [HUGGINGFACE_API_TECHNICAL_REFERENCE.md](api/HUGGINGFACE_API_TECHNICAL_REFERENCE.md) for the full 14-section reference (auth, request/response, sampling params, model catalog, function calling, streaming, provider routing, error codes, rate limits, free-tier behavior, multimodal, implementation notes, proposed plugin.json, troubleshooting matrix).
 
 ### Chat-Completions Streaming
 
