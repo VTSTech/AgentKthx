@@ -69,7 +69,22 @@ class OllamaModel:
 
     @property
     def exists(self) -> bool:
-        """Check if the blob file exists on disk."""
+        """Check if the blob file exists on disk.
+
+        R07.16: returns False for API-discovered models that have no local
+        blob. ``turbo list`` builds OllamaModel entries for remote-catalog
+        models with ``blob_path=Path("")`` (empty path) and
+        ``model_digest=""``. The problem: ``Path("").exists()`` returns
+        ``True`` because the empty path resolves to the current working
+        directory — so without this guard, API-discovered models would
+        incorrectly show as ``● blob exists`` in the turbo list output
+        even though no local GGUF file is present. The ``name`` attribute
+        of an empty Path is also empty, so we use that as the sentinel.
+        """
+        # Empty Path → name == ""; check before .exists() to avoid the
+        # cwd-resolution trap.
+        if not self.blob_path or not self.blob_path.name:
+            return False
         return self.blob_path.exists()
 
 

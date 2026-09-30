@@ -89,12 +89,28 @@ def cmd_turbo(args: argparse.Namespace) -> int:
                 if not name:
                     continue
                 if name in local_lookup:
+                    # Model is pulled locally — use the local OllamaModel with
+                    # full GGUF header metadata (weight_quant, context_length,
+                    # architecture, head_dim, etc.).
                     models.append(local_lookup[name])
                 else:
-                    # Not pulled locally — create minimal OllamaModel from API data
+                    # Not pulled locally, but available on the REMOTE backend
+                    # (returned by the Ollama API). Extract what we can from
+                    # the API response's `details` block — it includes
+                    # quantization_level, context_length, family, etc. This
+                    # fixes the misleading "not pulled" label that previously
+                    # appeared for every remote-catalog model.
                     repo, tag = name, "latest"
                     if ":" in name:
                         repo, tag = name.rsplit(":", 1)
+                    api_details = api_m.get("details", {}) or {}
+                    weight_quant = api_details.get("quantization_level", "") or "not pulled"
+                    context_length = api_details.get("context_length", 0) or 0
+                    architecture = api_details.get("family", "") or ""
+                    # embedding_length + head_count would let us compute
+                    # head_dim — but Ollama's /api/tags doesn't expose
+                    # head_count, so leave head_dim=0 (only used for the
+                    # removed head_dim>=128 check, no longer required).
                     models.append(
                         OllamaModel(
                             name=name,
@@ -102,9 +118,11 @@ def cmd_turbo(args: argparse.Namespace) -> int:
                             tag=tag,
                             blob_path=Path(""),
                             size_bytes=api_m.get("size", 0),
-                            weight_quant="not pulled",
+                            weight_quant=weight_quant,
                             manifest_path=Path(""),
-                            model_digest="",
+                            model_digest=api_m.get("digest", ""),
+                            architecture=architecture,
+                            context_length=context_length,
                         )
                     )
             models.sort(key=lambda m: m.name)

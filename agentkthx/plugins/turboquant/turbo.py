@@ -792,7 +792,15 @@ def print_model_list(
     print(dim("  " + "-" * (name_w + size_w + quant_w + turbo_w + 6)))
 
     for model in models:
-        exists_marker = bright_green("●") if model.exists else bright_red("✗")
+        # R07.16: dot logic now considers `source` — for source="api"
+        # (remote Ollama/llama-server responded), the model is available
+        # on the REMOTE backend even if no local blob exists, so always
+        # show ●. For source="local" (filesystem discovery only), ●
+        # requires a local blob.
+        if source == "api":
+            exists_marker = bright_green("●")
+        else:
+            exists_marker = bright_green("●") if model.exists else bright_red("✗")
         name_str = f"{exists_marker} {model.name}"
         size_str = model.size_human
         quant_str = model.weight_quant
@@ -834,7 +842,11 @@ def print_model_list(
     if n_not_pulled:
         print(dim(f"  {n_not_pulled} not pulled locally (pull with: ollama pull <name>)"))
     if source == "api":
-        print(dim("  ● = blob exists  ✗ = blob missing / not pulled"))
+        # Remote backend responded — every listed model is available on
+        # the remote (the API returned it). The local blob may or may not
+        # exist; the ● reflects "available on the queried backend", not
+        # "local file exists".
+        print(dim("  ● = available on remote backend"))
     else:
         print(dim("  ● = blob exists  ✗ = blob missing"))
     print()
