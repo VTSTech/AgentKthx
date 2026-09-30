@@ -169,20 +169,24 @@ wait_for_port_free() {
   return 1
 }
 
-# Wait for ollama process to actually exit (or become a defunct zombie)
-# A zombie/defunct process is already dead — it's just waiting for its parent
-# to reap it. That's "dead enough" for our purposes (port is free, memory reclaimed).
+# Wait for ollama to be truly gone — by checking the port.
+# We don't try to parse ps output for zombies (too brittle across ps versions).
+# A zombie process can't hold a port, so if port 11434 is free, we're good.
 wait_for_ollama_dead() {
   local max_wait="${1:-15}"
   local i=0
   while [ $i -lt $max_wait ]; do
-    # Use -x for exact match — avoids killing this script itself!
-    # (script name contains "ollama" as substring)
-    # Then filter out zombies (state Z / <defunct>) since those are harmless.
-    local live_ollama live_llama
-    live_ollama=$(pgrep -x ollama 2>/dev/null | xargs -I{} ps -o pid,stat,comm -p {} 2>/dev/null | grep -v '<defunct>' | grep -v '^PID' | wc -l)
-    live_llama=$(pgrep -x llama-server 2>/dev/null | xargs -I{} ps -o pid,stat,comm -p {} 2>/dev/null | grep -v '<defunct>' | grep -v '^PID' | wc -l)
-    if [ "$live_ollama" -eq 0 ] && [ "$live_llama" -eq 0 ]; then
+    # Check if port 11434 has any listener
+    if ! ss -ltn 2>/dev/null | grep -q ":11434 "; then
+      # Also try to kill any zombie ollama children we may have spawned
+      # (silent — best-effort, doesn't matter if it fails)
+      for pid in $(pgrep -x ollama 2>/dev/null); do
+        state=$(awk '/^State:/ {print $2}' /proc/$pid/status 2>/dev/null)
+        if [ "$state" = "Z" ]; then
+          # It's a zombie — already dead, just unreaped. Ignore.
+          :
+        fi
+      done
       return 0
     fi
     sleep 1
@@ -241,8 +245,13 @@ start_server() {
 
   # Wait for processes to actually exit
   if ! wait_for_ollama_dead 15; then
-    echo "    ✗ Existing ollama/llama-server won't die after 15s"
-    ps -eo pid,rss,comm | grep -E 'ollama|llama-server' || true
+    echo "    ✗ Port 11434 still in use after 15s"
+    echo "    Processes still listening:"
+    ss -ltnp 2>/dev/null | grep 11434 || echo "    (couldn't read process info)"
+    echo ""
+    echo "    Note: zombie/defunct ollama processes are harmless and"
+    echo "    will be reaped automatically. If port 11434 is free,"
+    echo "    you can safely ignore this error."
     exit 3
   fi
 
