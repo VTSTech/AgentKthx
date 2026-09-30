@@ -510,7 +510,7 @@ echo "model,verdict,exit_code,file_mb,peak_rss_mib,expansion_ratio,actual_ctx,ge
   > "$RESULTS_CSV"
 
 # Start server once
-start_server
+#start_server
 echo ">>> Server PID=$SERVER_PID up. Free mem: $(free_mem_mib) MiB"
 echo ""
 
