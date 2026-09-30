@@ -174,6 +174,8 @@ wait_for_ollama_dead() {
   local max_wait="${1:-15}"
   local i=0
   while [ $i -lt $max_wait ]; do
+    # Use -x for exact match — avoids killing this script itself!
+    # (script name contains "ollama" as substring)
     if ! pgrep -x ollama >/dev/null 2>&1 && ! pgrep -x llama-server >/dev/null 2>&1; then
       return 0
     fi
@@ -219,14 +221,16 @@ start_server() {
   echo ">>> Starting ollama with controlled env (ctx=$CTX_REQUESTED, kv=q8_0)..."
 
   # Try graceful shutdown first, then force kill
+  # CRITICAL: use -x for exact match — without it, `pkill ollama` would
+  # match this script itself (whose name contains "ollama" as substring)!
   echo "    Stopping any existing ollama..."
-  pkill -TERM ollama 2>/dev/null
-  pkill -TERM llama-server 2>/dev/null
+  pkill -TERM -x ollama 2>/dev/null
+  pkill -TERM -x llama-server 2>/dev/null
   sleep 2
   if pgrep -x ollama >/dev/null 2>&1 || pgrep -x llama-server >/dev/null 2>&1; then
     echo "    Forcing kill..."
-    pkill -9 ollama 2>/dev/null
-    pkill -9 llama-server 2>/dev/null
+    pkill -9 -x ollama 2>/dev/null
+    pkill -9 -x llama-server 2>/dev/null
   fi
 
   # Wait for processes to actually exit
@@ -407,7 +411,7 @@ diagnose_one() {
   log_start=$((log_start + 1))
 
   # Unload any previous model
-  pkill -9 llama-server 2>/dev/null
+  pkill -9 -x llama-server 2>/dev/null
   sleep 2
 
   local start_time end_time exit_code wall_time output
@@ -651,7 +655,7 @@ diagnose_one() {
 if [ "$ALL_MODE" = "false" ]; then
   start_server
   diagnose_one "$SINGLE_MODEL" true
-  pkill -9 llama-server 2>/dev/null
+  pkill -9 -x llama-server 2>/dev/null
   exit $DIAG_EXIT_CODE
 fi
 
