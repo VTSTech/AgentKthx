@@ -1,7 +1,7 @@
 # Codebase Intelligence Brief: AgentKthx
 
-> Generated: 2026-09-29 | Auditor: Super-Z (GLM) via `codebase-audit` v0.2.0 | Commit: `8d0b8c7` (R07.15 + intra-release amendments, PyPI 0.7.15)
-> Supersedes: R07.12 brief (2026-09-28) — updated in the R07.15 closure pass: maintainability closure batch (6 CLOSED: MAINT-07/08/10/15/19 + PERF-03), suite 1935 → 1988 passed (+53), register 105 findings (34 open / 64 closed / 7 wontfix, 68% archived). Full regeneration still due (R07.13/R07.14 shipped without one) — this pass refreshed the header, suite counts, and the TEST-01 note. Post-push amendment pass (2026-09-29): commit synced to 4e1555e; suite 1988 → 2004 (+10 openrouter/free listing regression tests, +6 agent-mode tool-call counter tests). Second post-push pass (2026-09-29): commit re-synced to 7579e3c; CHANGELOG R07.15 entry annotated with the full push-history chain (30cbe4f → 4e1555e → 7579e3c) — docs-only, suite unchanged. Four-finding closure batch (2026-09-29): TEST-06/FEAT-02/ROB-11/ROB-22 closed, suite 2004 → 2031 (+27), register 34 → 30 open (75 archived, 71%). Third amendment pass (2026-09-29): commit synced to 53916a5; chat-mode per-response stats + dynamic --backend help text, suite 2031 → 2051 (+20). Fourth amendment pass (2026-09-29): commit synced to 00ad56a; lint drift burn-down (~2.8k → 0) and lint job promoted to a required check — suite unchanged. Fifth amendment pass (2026-09-29): commit synced to 8d0b8c7; pre-publish docs accuracy pass — README and docs/ARCH.md re-verified against the codebase (stale counts, missing plugins/backends/skills, dead module references corrected), suite unchanged.
+> Generated: 2026-09-30 | Auditor: Super-Z (GLM) via `codebase-audit` v0.2.0 | Commit: `52d2f56` (R07.16, PyPI 0.7.16)
+> Full regeneration — supersedes the R07.15-amended R07.12 brief in its entirety. Every section below was re-verified against the R07.16 tree (suite 2051 passed / 16 skipped). Register: 109 findings — 34 OPEN (in `audit/audit.md`) + 75 archived (68 CLOSED / 7 WONTFIX in `audit/deltas.md`, 69%). Dashboard: `python3 audit/generate_audit_dash.py --audit audit/audit.md --deltas audit/deltas.md --brief audit/brief.md --output dashboard.html`.
 
 ---
 
@@ -9,56 +9,57 @@
 
 | Field | Value |
 |-------|-------|
-| **Purpose** | A minimal, hackable, stdlib-only agentic framework + CLI for autonomous LLM agents with local and cloud backends, tool calling, streaming, plugins, and skills |
-| **Tech Stack** | Python >= 3.12, **zero runtime dependencies** (`dependencies = []` — stdlib `urllib`/`json`/`sqlite3`/`ast`/`subprocess`/`socket`/`ipaddress`/`threading` only); dev: pytest/black/ruff |
+| **Purpose** | A minimal, hackable, stdlib-only agentic framework + CLI for autonomous LLM agents with local and cloud backends, tool calling, streaming, plugins, souls, and skills |
+| **Tech Stack** | Python >= 3.12, **zero runtime dependencies** (`dependencies = []` — stdlib `urllib`/`json`/`sqlite3`/`ast`/`subprocess`/`socket`/`ipaddress`/`threading`/`weakref` only); dev: pytest/black/ruff |
 | **Entry Point** | Console script `agentkthx` → `agentkthx.cli:main` → `cli/main.py:main()` → `cli/parser.py` dispatch → `cli/commands/<cmd>.py` |
-| **Build/Run** | `pip install agentkthx` (PyPI 0.7.06) or `pip install -e .` from source; `agentkthx chat`, `agentkthx version`, `agentkthx models`, etc. (84+ CLI flags across 15 subcommands) |
-| **Test Command** | `python -m pytest tests/ -q` → **2031 passed / 16 skipped in ~14s** (was 1935 / 16 at R07.14; +53 in the R07.15 closure batch `tests/test_r07_15_maint_batch.py`, +10 `tests/test_r07_15_openrouter_free_listing.py`, +6 `tests/test_r07_15_agent_mode_tool_counter.py`, +27 `tests/test_r07_15_rob11_rob22_feat02_test06.py`); CI matrix Python 3.12 / 3.13 in `.github/workflows/ci.yml`, parallel `coverage` job uploads 30-day `coverage.xml` artifact |
+| **Build/Run** | `pip install agentkthx` (PyPI 0.7.16) or `pip install -e .`; `agentkthx chat`, `agentkthx turbo start <model>`, `agentkthx models`, `agentkthx version`, ... (84+ CLI flags across 15 subcommands) |
+| **Test Command** | `python -m pytest tests/ -q` → **2051 passed / 16 skipped in ~12s**; CI matrix Python 3.12/3.13 in `.github/workflows/ci.yml` + parallel coverage job + **required `lint` job** (`ruff check` + `black --check`, promoted to required in R07.15) |
 
 ---
 
 ## Architecture Map
 
 ```
-agentkthx/agent.py            → Agent class — 5-mixin composition (1089 LOC; stable since R07.00)
-agentkthx/agent_mode.py       → AgentMode + TaskPlan/Step/Action with rollback (822 LOC)
-agentkthx/orchestrator.py     → Multi-agent orchestrator (sequential + parallel + LLM-router, 461 LOC)
-agentkthx/core/               → 20 modules (was 21; args_normal.py + model_config.py deleted in R07.05), ~9,150 LOC
-  ├─ agentic_loop.py          → Unified loop body (794 LOC); ROB-01 Ctrl+C → state.terminated=True (R07.06)
-  ├─ streaming.py             → SSE streaming + OpenResponses event generator (862 LOC; unchanged in R07.05/06)
-  ├─ compaction.py            → Context-window compaction mixin (199 LOC)
-  ├─ tool_parse.py            → ReAct / native-JSON / XML tool-call parser (546 LOC; SEC-02 ast removal + ROB-13 debug chain R07.05/06)
-  ├─ tool_execution.py       → Tool dispatch entrypoint (103 LOC)
-  ├─ agent_setup.py           → Agent.__init__ (22 params + **kwargs) + soul loading + 3 system-prompt variants (529 LOC)
-  ├─ openresponses.py         → OpenResponses spec: Response state machine, items, 9 SSE event types (1053 LOC)
-  ├─ api_resilience.py        → Transient-vs-permanent classifier + backoff w/ Retry-After + ±20% jitter; ROB-10 body-arg + snake_case markers (235 LOC)
-  ├─ error_recovery.py        → ErrorRecoveryTracker, is_error_result, _is_simple_result; ROB-07 alt-traceback regex (923 LOC)
-  ├─ helpers.py               → Security primitives (validate_path, sanitize_command, is_safe_url with new _iter_hostname_ips, sanitize_tool_output new in R07.05) + normalize_args + safe_eval re-export (1384 LOC, +270 since R07.04)
-  ├─ safe_eval.py             → AST-walking eval replacement (rejects Attribute/Subscript/Lambda/comprehensions) (263 LOC)
-  ├─ memory.py                → Sliding-window + sanitize_history; ROB-08 token-tier pruning, default max_tokens=0 (432 LOC)
-  ├─ persistent_memory.py     → SQLite-backed PersistentMemory(Memory); ROB-03 _write_lock + SEC-07 0o600/0o700 (500 LOC)
-  ├─ model_family_config.py  → Per-family stop tokens / temperature / no-think directives (479 LOC)
-  └─ types.py                 → BackendType enum incl. ORCAROUTER (9 values, R07.05) (188 LOC)
+agentkthx/agent.py            → Agent class — 5-mixin composition (~1,093 LOC; stable since R07.00)
+agentkthx/agent_mode.py       → AgentMode + TaskPlan/Step/Action with rollback (822 LOC, untested — TEST-04)
+agentkthx/orchestrator.py     → Multi-agent orchestrator (sequential + parallel + LLM-router, ~461 LOC)
+agentkthx/core/               → 19 files incl. __init__, ~9,600 LOC
+  ├─ agentic_loop.py          → Unified loop body; Ctrl+C → state.terminated (R07.06 ROB-01)
+  ├─ streaming.py             → SSE streaming + OpenResponses event generator (1,065 LOC; R07.15 MAINT-08 split StreamAccumulator/StreamRenderer)
+  ├─ compaction.py            → Context-window compaction mixin (~200 LOC)
+  ├─ tool_parse.py            → ReAct / native-JSON / XML parser (661 LOC; R07.16: markdown-bold-tolerant ReAct regexes)
+  ├─ tool_execution.py        → Tool dispatch + R07.15 FEAT-02 parallel independent tool-call batches
+  ├─ agent_setup.py           → Agent.__init__ + soul loading + prompt variants (654 LOC; R07.16: _use_native_tools property)
+  ├─ openresponses.py         → OpenResponses spec: Response state machine, items, SSE events (~1,050 LOC)
+  ├─ api_resilience.py        → Transient-vs-permanent classifier + backoff w/ Retry-After + jitter (235 LOC)
+  ├─ error_recovery.py        → ErrorRecoveryTracker, is_error_result (~920 LOC)
+  ├─ helpers.py               → Security primitives (validate_path, sanitize_command, is_safe_url w/ bounded DNS, sanitize_tool_output) + normalize_args (~1,384 LOC)
+  ├─ safe_eval.py             → AST-walking eval replacement (~263 LOC)
+  ├─ memory.py                → Sliding-window + opt-in token-tier pruning (ROB-08); ROB-17 over-budget gap
+  ├─ persistent_memory.py     → SQLite PersistentMemory(Memory); per-DB-path write locks (R07.15 MAINT-15); ROB-15/18 open
+  ├─ model_family_config.py   → Per-family stop tokens / temperature / no-think directives (~480 LOC)
+  └─ types.py                 → BackendType enum (R07.16: TURBOQUANT primary, LLAMA_SERVER deprecated alias) + ToolSupportLevel
 agentkthx/cli/                → 23-file CLI package
-agentkthx/cli/commands/        → 15 command modules: chat (1230 LOC), test, config, models, agent, tools, soul, ...
-agentkthx/cli/agent_factory.py→ New apply_model_switch() (R07.06 ROB-14) re-derives per-model state on /model switch
-agentkthx/backends/           → cloud_base.py NEW (R07.05 MAINT-02, 488 LOC) + openai_compat (965 LOC) + ollama + llama_server + bitnet + ollama_registry + base
-agentkthx/plugins/            → 8 plugins (was 7; +orcarouter NEW in R07.05): acp, bitnet, gemini, huggingface, openai, openrouter, orcarouter, turboquant, zai — each with plugin.json + main .py
-  ├─ _loader.py               → PluginManager, manifest v0.2 parser, Kahn topological-sort dependency loader, sha256 pin verification (R07.05 SEC-06), perms advisory (1531 LOC, +139)
-  ├─ orcarouter/orcarouter.py→ NEW: 1156 LOC, free-tier error classification, fallback models, cost reporting
-  └─ zai/zai.py               → Migrated to CloudBackend base (1141 LOC, was 1162; ~30 LOC of __init__ collapsed)
+agentkthx/cli/commands/       → 15 command modules: chat (1,307 LOC — MAINT-01), test, config, models, agent, tools, soul, turbo, ...
+agentkthx/cli/agent_factory.py→ THE wiring file (735 LOC, +290 in R07.16): _build_agent (tool-support auto-detection), _get_catalog_defaults ladder (cloud/local/remote), apply_model_switch + insufficient-credits switch callback
+agentkthx/backends/           → cloud_base.py + openai_compat + ollama + llama_server (class LlamaServerBackend — user-facing name "turboquant") + bitnet + ollama_registry + base
+agentkthx/plugins/            → 12 plugins: acp, bitnet, gemini, huggingface, mistral, openai, openrouter, orcarouter, pollinations, turboquant, zai (+ test-plugin fixture) — each with plugin.json
+  ├─ _loader.py               → PluginManager, manifest v0.2, Kahn-topo dependency loader, sha256 pins (opt-in — SEC-13), R07.15 ROB-11 transactional registration (~1,530 LOC)
+  ├─ turboquant/turbo.py      → llama-server lifecycle: TurboState (now with num_predict, str flash_attn), _build_command (R07.16 speedup flags), _is_process_alive (ROB-33), start_server with GGUF-derived ctx (923 LOC)
+  ├─ mistral/ + pollinations/ → carry the copy-paste retry-loop family (ROB-29/MAINT-23, ~160 LOC dup)
+  └─ zai/ + orcarouter/       → CloudBackend-based; _generate_with_auth (ROB-25 defaults mismatch)
 agentkthx/skills/             → 4 bundled skills (codebase-audit, crypto-signals, skill-creator, test-harness) + loader.py
-agentkthx/soul/                → Soul Spec v0.5 persona packages: loader.py, types.py
+agentkthx/soul/               → Soul Spec v0.5 persona packages: loader.py (_build_tool_section — MAINT-24), types.py
 agentkthx/souls/              → 3 bundled souls: nova-helper, nova-skills, nova-trading
-agentkthx/tools/               → builtins.py (1363 LOC, +25: _SSRFSafeRedirectHandler new in R07.05), registry.py, sandboxed_repl.py (521 LOC)
-agentkthx/update_check.py    → Live PyPI + GitHub version check on EVERY CLI invocation (3 HTTPS requests; intentional per owner, ROB-05 WONTFIX)
-agentkthx/config.py            → Env-var-derived singletons
-audit/                         → This brief + audit.md (R07.06 baseline; R07.07 delta appended for new findings)
-docs/                          → ARCH.md, PLUGIN_SPEC.md, *_API_TECHNICAL_REFERENCE.md (now under docs/api/), CHANGELOG.md, TESTS.md
-tests/                         → 43 files, ~18,263 LOC (was 14,300), 1461 tests (was 984); biggest: test_orcarouter_backend (949 LOC NEW), test_cloud_backend_base (533 LOC NEW), test_r07_05_sec_fixes (433 LOC NEW), test_r07_06_rob_fixes (387 LOC NEW), test_model_switch_context (247 LOC NEW), test_zai_free_models (225 LOC NEW), test_openrouter_free_models (298 LOC NEW), test_get_model_max_context (207 LOC NEW), test_tool_output_sanitization (268 LOC NEW), test_r07_05_audit_fixes (364 LOC NEW)
-scripts/                       → probe_{ollama,openai,gemini,zai,openrouter,huggingface,llama_server,bitnet}.sh, bump-version.sh
-patches/                       → 2 llama.cpp turboquant patches + standalone .py applier
-schemas/v0.2/                  → plugin.schema.json (declared but NOT validated by code — ad-hoc dict-shape checks instead)
+agentkthx/tools/              → builtins.py (shell timeout clamp R07.16; _SSRFSafeRedirectHandler 5-hop budget), registry.py, sandboxed_repl.py (521 LOC)
+agentkthx/update_check.py     → Live PyPI + GitHub check on EVERY CLI invocation (intentional, ROB-05 WONTFIX; opt out AGENTKTHX_NO_UPDATE_CHECK=1)
+agentkthx/config.py           → Env-var-derived singletons; R07.16: TURBOQUANT_BASE_URL (old LLAMA_SERVER_BASE_URL still read as fallback)
+audit/                        → This brief + audit.md (open findings) + deltas.md (archive) + split/verify/dash tooling
+docs/                         → ARCH.md, USAGE.md (new R07.16), PLUGIN_SPEC.md(+v0.2), CHANGELOG.md, TESTS.md, docs/api/*_API_TECHNICAL_REFERENCE.md (8 backends)
+tests/                        → 70 files, ~30,285 LOC, 2051 tests — all mocked unit tests, no integration tier (TEST-01)
+scripts/                      → probe_{ollama,openai,gemini,zai,openrouter,huggingface,llama_server,bitnet,pollinations}.sh, probe_llama_server_tools.py (NEW R07.16 diagnostic), bump-version.sh
+patches/                      → llama.cpp turboquant patches + standalone .py applier
+schemas/v0.2/                 → plugin.schema.json (declared but NOT validated by code — ad-hoc dict-shape checks)
 ```
 
 ### Skip List
@@ -68,127 +69,97 @@ schemas/v0.2/                  → plugin.schema.json (declared but NOT validate
 - `agentkthx/plugins/test-plugin/` — fixture for plugin spec tests
 - `agentkthx/examples/` — 11 demo scripts (not run by pytest)
 - `AgentKthx.ipynb` — root-level notebook, not referenced in docs
-- `agentkthx/core/args_normal.py` and `agentkthx/core/model_config.py` — DELETED in R07.05 (MAINT-04, MAINT-06 closures)
-- `agentkthx/cli/utils.py`'s dead-code trio (`_load_tool_cache`, `_save_tool_cache`, `_get_cloud_model_size`) — DELETED in R07.05 (MAINT-05 closure)
+- `agentkthx/core/prompts.py` — dead-code-but-kept `_build_tool_section` duplicate (kept for consistency; R07.16 synced its numeric example to `10`)
 
 ---
 
 ## Critical Files Index
 
-The 10 most important files. Touch these for almost any meaningful change. 9 of 10 changed in R07.05-R07.06.
+The 10 most important files. Touch these for almost any meaningful change.
 
 | File | Purpose | Why It Matters |
 |------|---------|----------------|
-| `agentkthx/agent.py` (1089 LOC) | `Agent` class — 5-mixin composition. Holds `run()`, `_generate_with_retry()`, `_generate()`, `_run_core()`, `add_tool`/`register_tool`/`rebuild_system_prompt` (R07.05 split). | R07.05 split `add_tool` into 3 methods: `register_tool()` (no memory clear — safe mid-session), `rebuild_system_prompt()` (explicit clear+rebuild for soul swaps), and `add_tool()` (deprecated alias, still clears for backward compat). **`add_tool` does NOT emit `DeprecationWarning`** — third-party callers have no programmatic migration signal. |
-| `agentkthx/core/helpers.py` (1384 LOC, +270) | Security primitives + arg normalization + fuzzy matching + calc extraction. `validate_path`, `sanitize_command`, `is_safe_url` (now with `_iter_hostname_ips`/`_ip_address_blocked`), NEW `sanitize_tool_output` (R07.05 SEC-10). | Imported by 18+ modules. R07.05 added `sanitize_tool_output()` (8KB truncation + secret redaction + ANSI stripping) wired into every tool result. New SSRF defenses are DNS-resolution-based: R07.12 (SEC-11 closed): DNS resolution now bounded — daemon-thread `getaddrinfo` with 5s wall-clock budget, 32-record cap, fail-closed `__DNS_TIMEOUT__` sentinel; `sanitize_tool_output` wraps every tool result. |
-| `agentkthx/core/agentic_loop.py` (794 LOC, +34) | `_run_loop_iteration` — unified agentic loop body. Drives `Response` state machine, tool dispatch, error recovery, finish_reason handling. | R07.06 ROB-01: Ctrl+C in `_execute_single_tool_call` now sets `state.terminated = True` (was: returned `"break"` without flag, leaving the run half-cancelled). R07.05 SEC-10: `_process_tool_result` wraps every tool result via `sanitize_tool_output` BEFORE passing to memory / FunctionCallOutputItem / `build_enhanced_observation`. **`_is_simple_result` now sees `<tool_output>` wrapper as first line** — regex checks for numeric/date/time no longer fire on sanitized output; behavior mitigated by `< 200` length check + `simple_tools` set membership. |
-| `agentkthx/core/error_recovery.py` (923 LOC, +13) | `ErrorRecoveryTracker` state machine, `is_error_result` classifier, `should_terminate`, `build_enhanced_observation`, `_is_simple_result`. | R07.06 ROB-07: `_ERROR_FIRST_LINE_RE` expanded with alternative traceback framings (`During handling of the above exception`, `The above exception was the direct cause`, bare `File "...", line N`). **Residual risk**: prose containing `File "notes.txt"` in a tool result is still misclassified, but SEC-10 wrapping shields this — the wrapper tag is now the first line. |
-| `agentkthx/plugins/_loader.py` (1531 LOC, +139) | `PluginManager` singleton, manifest v0.2 parser, Kahn topological-sort dependency loader, hook dispatch with per-plugin failure isolation, external plugin import via `spec_from_file_location`. | R07.05 SEC-06: optional `sha256` field on `plugin.json` (string = `__init__.py` hash; dict = relative file paths). `_validate_sha256_pin` fails manifest parse on malformed pins; `_verify_sha256_pins` runs BEFORE `exec_module` (fail-closed on mismatch/missing/escaping path); `_warn_loose_plugin_perms` advisory on group/world-writable plugin dirs (POSIX only, built-ins skipped). **Pin is OPT-IN** — plugins without `sha256` field still load (NEW finding SEC-13: no `AGENTKTHX_REQUIRE_PLUGIN_PINS` enforcement mode). |
-| `agentkthx/backends/cloud_base.py` (488 LOC, NEW) | NEW `CloudBackend(OpenAICompatibleBackend)` base class consolidating ~5K LOC of structurally-duplicated cloud-backend boilerplate. | Class attributes subclasses MUST override: `MODELS`, `_api_key_env_var`, `_default_base_url`, `_default_model`, `_provider_label`. Optional hooks: `_validate_api_key`, `_extra_auth_headers`, `_catalog_family_name`, `_catalog_backend_name`. `backend_type` left as `raise NotImplementedError`. **Constructor mutates `os.environ["AGENTKTHX_API_MODE"]`** (line 173) — process-global side effect, last-instance-wins (NEW finding SEC-15, inherited ARCH-01 pattern). Hardcoded 128K context fallback. API-key min length 8 chars (weak). |
-| `agentkthx/core/api_resilience.py` (235 LOC, +6) | Transient-vs-permanent error classifier + backoff w/ Retry-After + ±20% jitter. | R07.06 ROB-10: `is_transient_api_error(exc, body=None)` accepts optional body arg. When provided, body is lowercased + checked against `_PERMANENT_MARKERS` FIRST. New markers: `invalid_request`, `context_length`, `model_not_found`, `invalid_api_key` (snake_case forms that prose-form markers never matched). **No backend currently passes `body`** — backends embed body in `RuntimeError(f"... {body}")` already, so the str(exc) check still catches it. Forward-looking API addition, unused today. |
-| `agentkthx/core/tool_parse.py` (546 LOC, +55) | `ToolParser.parse(text)` — tries native JSON, ReAct, XML; per-strategy `_parse_*` methods. | R07.05 SEC-02: `ast.literal_eval` fallback REMOVED. Replaced by regex-based Python-dict→JSON converter (single→double quotes, `True`→`true`, `False`→`false`, `None`→`null`). R07.06 ROB-13: `ToolParser(tool_names, debug=False)` now records failure-reason per level and prints full chain under `debug`. **HIGH-SEVERITY BUG**: the `\bTrue\b`/`\bFalse\b`/`\bNone\b` regex substitutions do NOT respect string-literal boundaries — `{"prompt": "None of the above is True"}` gets silently mangled to `{"prompt": "null of the above is true"}` (NEW finding MAINT-14, should be re-classified ROB-High). Verified by reproducer. |
-| `agentkthx/core/streaming.py` (862 LOC, unchanged) | `StreamingMixin._generate_stream` (354 lines!) + OpenResponses SSE event generator + reasoning-panel rendering. | Unchanged in R07.05/06. Still owns chat UX. Hard to test (side-effecting stdout writes). KeyboardInterrupt path closes the urllib response. MAINT-08 (extract `StreamAccumulator`) still open. |
-| `agentkthx/core/agent_setup.py` (529 LOC, +11) | `AgentSetupMixin.__init__` — 22 explicit params + `**kwargs` for 5 more. Soul loading, system prompt assembly (4 variants). | R07.06 ROB-13: `ToolParser(self.tools.names(), debug=self.debug)` threads debug flag. R07.05 SEC-10: all 3 system-prompt builders gained "untrusted tool output" instruction (duplicated verbatim 3× — NEW finding MAINT-17). **ARCH-05 `**kwargs` swallowing concern REMAINS OPEN** — typos in `response_format`, `confirm_dangerous`, `persistent`, `session_id`, `memory_db` are silently ignored. R07.05/06 did NOT address this. |
+| `agentkthx/cli/agent_factory.py` (735 LOC, +290 R07.16) | Wires CLI args → `Agent`. `_build_agent` (tool-support auto-detection), `_get_catalog_defaults` → `_get_cloud_catalog_defaults` / `_get_local_catalog_defaults` / `_probe_remote_catalog` / `_extract_ctx_from_model_entry`, `apply_model_switch`, `_register_model_switch_callback`. | The hottest file post-R07.16. Auto-detection (lines 227-290): for non-cloud backends with tools, reads the cached `test_tool_support` verdict — NATIVE keeps native, REACT/UNTESTED force `force_react=True`, NONE keeps native (model can't call tools either way); **no CLI opt-out (MAINT-25)** — the debug hint `--force-react=False` errors because the flag is `store_true`. The catalog ladder (lines ~448-580): local base_url → TurboState (PID-verified; **ROB-33: that check kills the server on Windows**) → Ollama GGUF `context_length` → `{}`; remote base_url → `list_models()` probe (exact name match, else first model; `n_ctx` for llama-server, `context_length` for Ollama; `num_predict = ctx // 32` per R06.55). `apply_model_switch` re-derives per-model state on `/model` AND on ZAI/OrcaRouter insufficient-credits fallback callbacks. |
+| `agentkthx/plugins/turboquant/turbo.py` (923 LOC) | llama-server (the binary keeps llama.cpp's name) lifecycle: `TurboState` dataclass + load/save/clear, `_build_command`, `start_server`, `print_model_list`, `_is_process_alive`, `_free_port`. | R07.16 additions: `TurboState.num_predict` (int) and `flash_attn` changed bool→str (`"on"/"off"/"auto"`; legacy bool state files still load via `from_dict`'s dataclass-field filter + `isinstance` back-compat path in `_build_command`); ctx auto-derives from GGUF `context_length` (fallback `TURBOQUANT_DEFAULT_CTX`); `num_predict = ctx // 32` (`--num-predict 0` disables); new speedup flags `-tb/-b/-ub/--mlock/--numa`; `-fa` now always emitted WITH a value (the fork v0.3.0 rejects bare `-fa`). `_is_process_alive` (159-183) is the ROB-33 site — `os.kill(pid, 0)` = TerminateProcess on Windows. |
+| `agentkthx/core/agent_setup.py` (654 LOC) | `AgentSetupMixin.__init__` — soul loading, memory wiring, system-prompt assembly. | R07.16: new `_use_native_tools` property = `_is_comp_mode and not force_react` — ALL behavior-affecting `_is_comp_mode` tool-prompt decisions now route through it. The no-soul default prompt has two variants: native ("call them naturally as function calls") vs ReAct (`Action:`/`Action Input:`/`Final Answer:`). `--force-react` (or the auto-detection) flips the prompt to ReAct while the `tools` array still ships in the request body (harmless for backends that ignore it). |
+| `agentkthx/core/tool_parse.py` (661 LOC) | `ToolParser.parse(text)` — tries native JSON, ReAct, XML; per-strategy `_parse_*` methods. | R07.16: every ReAct keyword regex gained `\*{0,2}` on both sides — `**Action:**`, `**Action Input:**`, `**Thought:**`, `**Final Answer:**` (markdown-bold decorations from small local models, e.g. nemotron-3-nano:4b on Windows) parse identically to the plain form. Applies to `_THOUGHT_RE`, `_ACTION_RE`, `_ACTION_RE_SAMELINE`, `_FINAL_RE`, `is_final_answer()`, `extract_final_answer()`. Historical note: the R07.07 MAINT-14 fix (string-literal-safe True/False/None handling) is closed — the old "mangles prose" landmine is gone. |
+| `agentkthx/cli/commands/chat.py` (1,307 LOC, grew from 1,199) | `cmd_chat` — the interactive REPL (MAINT-01: single function, 25+ nested closures, no slash-command dispatcher). | R07.16: `import readline` wrapped in try/except ImportError (Windows without pyreadline3 → `readline = None`, skip `parse_and_bind`); prompt built conditionally — readline form `"\001\033\002You:\001\033\002 "`, fallback `"\033You:\033 "` (**ROB-34: the fallback renders as `ou:` — bare `ESC Y` is a consumed 2-byte VT escape; verified in a terminal emulator; use plain `"You: "`**). Slash commands remain an inline if/elif chain; `/param`/`/model` behavior unchanged (see `apply_model_switch`). |
+| `agentkthx/agent.py` (~1,093 LOC) | `Agent(AgentSetupMixin, CompactionMixin, ToolExecutionMixin, StreamingMixin, AgenticLoopMixin)`. | R07.16: `_rebuild_system_prompt_with_tools` (mid-session `add_tool`/`rebuild_system_prompt` path) now uses `_use_native_tools` instead of `_is_comp_mode` — previously a mid-session tool addition reverted the prompt to native-tools text even under `force_react`. `add_tool` remains a deprecated alias that clears memory and emits NO DeprecationWarning (MAINT-16 open) — use `register_tool` mid-session. `_generate_with_retry` wraps every generate with `is_transient_api_error` classification + backoff. |
+| `agentkthx/core/helpers.py` (~1,384 LOC) | Security primitives + `normalize_args` + calc extraction. `validate_path`, `sanitize_command`, `is_safe_url` (bounded DNS via `_iter_hostname_ips`, R07.12), `sanitize_tool_output`. | Imported by 18+ modules — blast radius for any security change is huge. Open items here: ROB-09 (`validate_path` uses `abspath`, not `realpath` — symlink traversal), MAINT-03 (`normalize_args` strategy 5 prefix/substring matching is permissive; `CONTEXTUAL_ALIASES` mitigates known-ambiguous cases only). `sanitize_tool_output` wraps EVERY tool result (8KB truncation + secret redaction + ANSI strip; truncation-then-redaction order fixed R07.07, SEC-12 closed). |
+| `agentkthx/core/agentic_loop.py` (~800 LOC) | `_run_loop_iteration` — unified agentic loop body: Response state machine, tool dispatch, error recovery, finish_reason handling. | `_process_tool_result` wraps every tool result via `sanitize_tool_output` BEFORE memory / FunctionCallOutputItem / `build_enhanced_observation`. R07.15 FEAT-02 (in `tool_execution.py`): INDEPENDENT tool-call batches execute concurrently on a 4-worker ThreadPoolExecutor, results commit in ORIGINAL call order (byte-identical transcript); shell/write_file/edit_file/todo stay sequential; `AGENTKTHX_PARALLEL_TOOLS=0` is the escape hatch. Ctrl+C in `_execute_single_tool_call` sets `state.terminated = True` (ROB-01). |
+| `agentkthx/core/streaming.py` (1,065 LOC) | `StreamingMixin` — `_generate_stream` + OpenResponses SSE event generator + reasoning rendering. | R07.15 MAINT-08 split the 354-line orchestration into `StreamAccumulator` + `StreamRenderer`. KeyboardInterrupt path closes the stream generator (ROB-06 open: `.close()` may not deterministically release the TCP connection on Windows). Malformed tool-call argument JSON in streaming still falls back to `_raw_arguments` without the debug chain the ReAct path has. FEAT-06 open: `function_call_arguments.delta` SSE events not emitted. |
+| `agentkthx/plugins/_loader.py` (~1,530 LOC) | `PluginManager` singleton, manifest v0.2 parser, Kahn topological-sort dependency loader, hook dispatch, external plugin import. | R07.15 ROB-11: transactional registration — `_PluginTransaction` records undo for every imperative `register_*` call during plugin `register()` and rolls back LIFO on load failure (the old sys.modules-before-exec_module landmine is closed). sha256 pins: `_validate_sha256_pin` (64-hex, fail-closed when present) but **opt-in — no `AGENTKTHX_REQUIRE_PLUGIN_PINS` enforcement mode (SEC-13 open)**; a manifest without a pin loads silently. |
 
 ### Additional files of note
 
 | File | Why It Matters |
 |------|----------------|
-| `agentkthx/plugins/orcarouter/orcarouter.py` (1156 LOC, NEW) | 10th backend (6th cloud), first scaffolded from scratch on `CloudBackend`. Free-tier error classification distinguishes retryable (`err_free_rate`) from terminal (`err_free_used`, `free_quota_exhausted`). `ORCAROUTER_FALLBACK_MODELS` env var → `extra_body.models` (up to 5, `route: "fallback"`). `ORCAROUTER_INCLUDE_COST` → per-request cost reporting. Historical findings in this file: `time.sleep(retry_after)` unbounded (ROB-16, closed R07.07 — 60s cap); `_extract_buy_credits_url` phishing URL (SEC-16, closed R07.08); retry-logic duplication (MAINT-11, closed R07.08). R07.12: `_is_free_model` now honors the live upstream `-free` suffix convention (ROB-23 closed) — new free models surface under `ORCAROUTER_FREE_ONLY` without code updates; static whitelist kept as the outage-fallback floor. |
-| `agentkthx/plugins/zai/zai.py` (1141 LOC, refactored) | First plugin migrated to `CloudBackend` base. `__init__` collapsed to single `super().__init__()` call. Catalog updated: `glm-5.3-flash` correctly marked as NOT free (was bug). `get_model_info` returns default 128K entry for unknown models (ZAI accepts any model ID). |
-| `agentkthx/cli/agent_factory.py` (R07.06 +94 LOC) | NEW `apply_model_switch(agent, new_model) -> dict`. Re-derives `num_ctx`, `num_predict`, `model_config`, `model_family` on `/model` switch. `_build_agent` stashes `_num_ctx_explicit` / `_num_predict_explicit` flags; `/param num_ctx <v>` at runtime sets the flag too (chat.py:900). `/model` prints derived deltas. |
-| `agentkthx/tools/builtins.py` (1363 LOC, +25) | NEW `_SSRFSafeRedirectHandler` (R07.05 SEC-03). `http_get` opens through this handler so 30x redirects re-validate via `is_safe_url` on every hop. R07.12 (SEC-17 closed): explicit `_MAX_HOPS = 5` per-request redirect budget — the 6th hop raises URLError; per-hop validation cost is bounded by the R07.12 DNS timeout. |
-| `agentkthx/core/memory.py` (432 LOC, +6) | R07.06 ROB-08: `MemoryConfig.max_tokens` default flipped `4096 → 0` (was never enforced; turning it on would prune tool-heavy histories to ~2 results since `sanitize_tool_output` caps results at 8KB ≈ 2K est. tokens each). Token-tier pruning now real but opt-in. |
+| `agentkthx/soul/loader.py` | `_build_tool_section` builds the `### Tool Reference` table appended to soul prompts. R07.16: numeric param examples are `10` (was `0` — small models copy the example verbatim and `timeout: 0` meant instant TimeoutExpired); the ReAct format block was REMOVED from this function (dedup — provided by the default prompt or the soul's own SOUL.md). Docstring still claims it includes them (**MAINT-24**); custom souls with neither their own block nor example placeholders get zero format instructions under ReAct. Also `_build_tool_section`'s forced-ReAct helper strings ("You MUST call at least one tool...") live here. |
+| `agentkthx/backends/__init__.py` + `config.py` + `core/types.py` | R07.16 backend rename: `_BACKENDS` registry maps `"turboquant"` (primary) + `"llama-server"`/`"llama_server"` (aliases) → `LlamaServerBackend`; `BackendType.TURBOQUANT` is returned by `backend_type` (footer shows `🔌 turboquant`), `LLAMA_SERVER` enum value kept for third-party compat; `TURBOQUANT_BASE_URL` env var primary, `LLAMA_SERVER_BASE_URL` read as fallback, module alias exported. BitNet still routes through the same class with `_bitnet_mode=True` → `BackendType.BITNET`. |
+| `agentkthx/backends/ollama_registry.py` | `OllamaModel.exists` (R07.16 fix): returns False when `blob_path` is empty (`Path("").exists()` is True — resolves to CWD), so `turbo list` against a REMOTE Ollama correctly shows `✗ blob missing / not pulled` while `weight_quant`/`context_length` now come from the API `details` block. `discover_models` parses GGUF headers (the `context_length` that feeds both `turbo start` auto-ctx and the chat-side ladder). |
+| `agentkthx/tools/builtins.py` (~1,363 LOC) | R07.16: `shell()` clamps model-supplied timeout — `int(timeout)` with TypeError/ValueError → 30, then `max(1, min(timeout, 300))` (same clamp as `http_get`/`python_repl`; handles `timeout=0`, `"10"`, `-5`, `None`). Also `_SSRFSafeRedirectHandler` (R07.05 SEC-03, R07.12 5-hop budget) for `http_get`. `todo` store: `BUILTIN_REGISTRY` is a module-level singleton (shared across Agent instances in-process). |
+| `agentkthx/core/persistent_memory.py` | Per-DB-path write locks via realpath-keyed `WeakValueDictionary` (R07.15 MAINT-15). Open: ROB-15 (`add()` = two separate lock acquisitions, 2× commit), ROB-18 (locks are `threading.Lock`, not `RLock`). `0o600`/`0o700` file perms (SEC-07). No conversation export/import (FEAT-07). |
+| `agentkthx/plugins/pollinations/pollinations.py` | The only keyless backend. Open cluster: ROB-31 (`healthy_fallbacks()` ranks `paid_only` models the key can't generate under `POLLINATIONS_ANON_CATALOG=1`), ROB-30 (`_fetch_model_cards` bare `except Exception` → silent static-catalog degradation), MAINT-23 (retry-loop skeleton dup ×2, third backend in the family), FEAT-08 (free-TIER boundary on bare `/models` unreachable; FREE_ONLY exposes only 16 zero-cost models, not the ~102 Quest-Pollen-eligible), TEST-10 (no live-shape contract test). Zero-cost models are encoded as currency-only pricing dicts, NOT zero-valued fields. |
+| `scripts/probe_llama_server_tools.py` (NEW R07.16) | Stdlib-only diagnostic that hits a running llama-server with 7 request shapes (health, models, bare chat, tools, tool_choice auto/required, /tools) and dumps raw HTTP — bypasses AgentKthx's chat path so errors shown are the server's, not ours. Auto-reads `~/.agentkthx/turbo.state`. |
 
 ---
 
 ## Request / Execution Lifecycle
 
 ```
-1. `agentkthx chat`  ──────────────────────────────────────────────────────────
+1. `agentkthx chat` ──────────────────────────────────────────────────────────
    └─ cli/__main__.py → cli/main.py:main()
-       ├─ get_plugin_manager().load_all()  → plugins/_loader.py:_resolve_load_order (Kahn topological sort)
-       │     └─ _verify_sha256_pins() runs BEFORE exec_module (R07.05 SEC-06, fail-closed on mismatch)
-       │     └─ _warn_loose_plugin_perms() advisory (POSIX only, built-ins skipped)
-       ├─ atexit.register(emit on_shutdown)
-       ├─ create_parser()  → cli/parser.py (stashes private parser._subparsers_action — argparse internals hack)
-       ├─ plugin-discovered CLI commands → subparsers_action.add_parser()
-       ├─ _run_update_check()  → cli/banner.py:94  → update_check.py:check_for_update(timeout=1.0)
-       │     └─ 3 sequential HTTPS requests: pypi.org + GitHub commits API + raw GitHub __init__.py
-       │     (INTENTIONAL per owner — ROB-05 WONTFIX; opt out with AGENTKTHX_NO_UPDATE_CHECK=1)
-       └─ dispatch commands[command] → cli/commands/chat.py:cmd_chat
+       ├─ get_plugin_manager().load_all()  → plugins/_loader.py (Kahn topo sort;
+       │     sha256 pins verified BEFORE exec_module when present; R07.15 ROB-11
+       │     transactional registration rolls back partial loads)
+       ├─ _run_update_check() → 3 sequential HTTPS requests (pypi + GitHub commits
+       │     + raw __init__.py) unless AGENTKTHX_NO_UPDATE_CHECK=1 (intentional, ROB-05 WONTFIX)
+       └─ dispatch → cli/commands/chat.py:cmd_chat
 
-2. cmd_chat (chat.py:22, 1230 LOC, single function with 25+ nested closures)
-   ├─ _init_acp() / _build_agent()  → cli/agent_factory.py:104
-   │     └─ Agent(model, tools, backend, ...) → AgentSetupMixin.__init__ (agent_setup.py:54)
-   │           ├─ soul loader (soul/loader.py)  — try/except chain, falls back to _build_default_prompt()
-   │           ├─ memory_config → Memory or PersistentMemory(sqlite, 0o600 file mode R07.05 SEC-07)
-   │           ├─ max_steps, max_api_retries, max_tool_retries, retry_on_error flags
-   │           ├─ thinking_level / think / reasoning_effort → model_family_config.needs_no_think_directive()
-   │           ├─ ToolParser(self.tools.names(), debug=self.debug)  ← R07.06 ROB-13
-   │           └─ stashes _num_ctx_explicit / _num_predict_explicit for /model switch (R07.06 ROB-14)
-   ├─ _setup_footer_region()  → ANSI scroll-region escape (terminal-only)
-   └─ REPL loop:  input("\001\033\002You:\001\033\002 ")
-        ├─ slash command ("/help", "/tool", "/skill", "/param", "/model", ...) → inline if/elif chain (no dispatcher)
-        │     ├─ /param num_ctx <v>  → sets _num_ctx_explicit=True (chat.py:900, survives /model switch)
-        │     ├─ /param reset        → un-pins _num_ctx_explicit/_num_predict_explicit (chat.py:781)
-        │     └─ /model <name>       → apply_model_switch(agent, new_model) → re-derives per-model state (R07.06 ROB-14)
-        └─ agent.run(user_input, stream=True)
+2. cmd_chat → _build_agent (cli/agent_factory.py)  ── R07.16-heavy ──────────
+   ├─ backend = get_backend(name)  ("turboquant" primary; "llama-server"/"llama_server"
+   │     aliases; base_url from TURBOQUANT_BASE_URL, env LLAMA_SERVER_BASE_URL fallback)
+   ├─ TOOL-SUPPORT AUTO-DETECTION (agent_factory.py:227-290, non-cloud + tools only):
+   │     support = backend.test_tool_support(model, force_test=False)   # cached
+   │     NATIVE → keep native · REACT → force_react=True · UNTESTED → force_react=True
+   │     NONE → keep native (model can't call tools either way) · user --force-react wins
+   │     (no opt-out — MAINT-25; cache file: ~/.agentkthx/tool_support.json)
+   ├─ CATALOG LADDER for num_ctx/num_predict (_get_catalog_defaults):
+   │     cloud  → provider catalog (existing R06.57 logic, extracted)
+   │     local  → 1) TurboState.load() [PID-verified — ROB-33 Windows kill]
+   │               2) Ollama GGUF context_length (find_model)
+   │               3) {} → config.num_ctx
+   │     remote → _probe_remote_catalog: backend.list_models() — exact name match,
+   │               else first model; n_ctx (llama-server /v1/models meta) or
+   │               context_length (Ollama /api/tags); num_predict = ctx // 32
+   └─ Agent(model, tools, backend, force_react=effective, ...) → AgentSetupMixin.__init__
+         ├─ system prompt: _use_native_tools ? native-tools text : ReAct text
+         │   (soul path: soul/loader.py + _build_tool_section table; MAINT-24 caveat)
+         └─ memory: Memory or PersistentMemory (sqlite, 0o600)
 
-3. agent.run() (agent.py:100)  ─────────────────────────────────────────────────
-   ├─ emit on_run_start plugin hook (best-effort, silent on failure)
-   └─ _run_core(prompt, stream) (agent.py:698)
-        └─ if stream: _run_core_streaming (delegates to AgenticLoopMixin._run_loop_iteration
-              with generate_fn=self._generate_stream)
-           else: _run_loop_iteration(generate_fn=self._generate)
+3. REPL loop (chat.py) ──────────────────────────────────────────────────────
+   ├─ prompt: readline ? "\001\033\002You:\001\033\002 " : "\033You:\033 "  ← ROB-34
+   ├─ slash commands: inline if/elif chain (no dispatcher — MAINT-01)
+   │     /param num_ctx <v> → pins _num_ctx_explicit (survives /model)
+   │     /model <name>      → apply_model_switch → re-derive ctx/predict/family
+   └─ agent.run(user_input, stream=True)
 
-4. _run_loop_iteration (agentic_loop.py:134)  ─────────────────────────────────
-   ├─ Response(status=QUEUED)  → mark IN_PROGRESS
-   ├─ ErrorRecoveryTracker.reset()
-   └─ for step_num in range(self.max_steps):
-        ├─ callbacks.on_step_start(step_num)  → streaming-only compaction check
-        ├─ _generate_with_retry(generate_fn, step_num, ...) (agent.py:176)
-        │     ├─ gen_response = generate_fn()  → backend.generate(model, messages, tools, ...)
-        │     ├─ on Exception: is_transient_api_error(e) ?  ← R07.06 ROB-10 now checks body arg if passed
-        │     │     └─ yes + retries < max: backoff_delay() w/ Retry-After + ±20% jitter, retry
-        │     │     └─ no or exhausted: describe_terminal(e), _terminated=True, break
-        │     └─ on 400 context-length (streaming only): self.memory.compact_messages(keep_count=10), retry
-        ├─ parse gen_response → tool_calls / final_answer / neither
-        │     └─ if ReAct: _parse_react tries 4-level fallback chain:
-        │          1. json.loads(raw_args)
-        │          2. json.loads(_sanitize_model_json(raw_args))
-        │          3. regex python-dict→JSON conversion: single→double quotes, True→true, False→false, None→null (R07.05 SEC-02)
-        │             ⚠️ MAINT-14: \bTrue\b/\bFalse\b/\bNone\b substitutions corrupt values containing these words as prose
-        │          4. regex extraction of 'expression' field
-        │          5. fallback {"input": raw_args}
-        │          └─ R07.06 ROB-13: per-level failure reasons recorded + printed under debug
-        ├─ if tool_calls: for each call → _execute_single_tool_call (agentic_loop.py:484)
-        │     ├─ ToolExecutionMixin._execute_tool (tool_execution.py:33)
-        │     │     ├─ tool lookup
-        │     │     ├─ if tool.dangerous and confirm_dangerous: prompt user
-        │     │     ├─ normalize_args(args, tool.params, tool_name)  → helpers.py:144
-        │     │     └─ tool.execute(**normalized_args)
-        │     ├─ on KeyboardInterrupt: state.terminated = True; response.mark_cancelled; return "break"  ← R07.06 ROB-01
-        │     └─ _process_tool_result →
-        │          ├─ sanitized_output = sanitize_tool_output(result, tool_name, call_id, max_chars=8192)  ← R07.05 SEC-10
-        │          │   ├─ truncation to 8KB with [truncated, N more chars] marker
-        │          │   ├─ secret redaction: password=, api_key:, Bearer, AWS_ACCESS_KEY_ID=, aws_secret_access_key=, connection_string=
-        │          │   └─ ANSI escape stripping
-        │          ├─ create_function_call_output(sanitized_output)
-        │          ├─ memory.add_tool_result(sanitized_output)
-        │          ├─ build_enhanced_observation(sanitized_output)
-        │          └─ state.last_successful_result = sanitized_output
-        ├─ elif "Final Answer:" pattern → extract, break
-        └─ else: enforce final answer or accept as final
+4. agent.run() → _run_core → _run_loop_iteration (agentic_loop.py) ─────────
+   for step in range(max_steps):
+     ├─ _generate_with_retry (agent.py):
+     │    generate_fn() → backend.generate / generate_completions_stream
+     │    transient? → backoff (Retry-After + jitter) · 400 context-length? → compact
+     ├─ parse: native tool_calls OR ReAct 4-level fallback chain
+     │    (json → sanitized json → python-dict→JSON regex → expression → {"input": raw})
+     │    R07.16: ReAct keywords tolerate markdown bold (**Action:**)
+     ├─ tools: FEAT-02 — independent batches run on 4-worker pool, results commit
+     │    in call order; sequential for shell/write_file/edit_file/todo
+     └─ every result → sanitize_tool_output (8KB + secrets + ANSI) → memory
 
-5. backend.generate (ollama.py / openai_compat.py / zai.py / orcarouter.py / ...)
-   ├─ resolve thinking params (think, reasoning_effort, model_family_config.needs_no_think_directive)
-   ├─ cap max_tokens to num_ctx // 32 (empirical finding from R06.55)
-   ├─ POST to backend URL (e.g., http://localhost:11434/api/chat for ollama)
-   ├─ if streaming: yield SSE chunks, _iter_sse_lines() handles 429 retry + context-length 400 recovery
-   │     └─ OrcaRouter: _iter_sse_lines also handles free-tier retryable/terminal classification, fallback model swap,
-   │        Retry-After wait (UNBOUNDED — R07.06 candidate finding)
-   └─ return dict: {content, tool_calls, finish_reason, usage}
+5. backend.generate (ollama / llama_server(turboquant) / openai_compat / cloud_base)
+   ├─ cap max_tokens to num_ctx // 32 (R06.55); family stop tokens; no-think directives
+   └─ streaming: SSE chunks → StreamAccumulator/StreamRenderer (R07.15); KeyboardInterrupt
+        closes the generator (ROB-06: Windows conn release not deterministic)
 ```
 
 ---
@@ -197,38 +168,39 @@ The 10 most important files. Touch these for almost any meaningful change. 9 of 
 
 ```
 cli/commands/*  →  cli/agent_factory  →  Agent (agent.py)
-                                              │
-                ┌───────────────────────────────┤
-                ▼                               ▼
-       AgentSetupMixin                  AgenticLoopMixin ── ToolExecutionMixin ── CompactionMixin ── StreamingMixin
-       (agent_setup.py)                 (agentic_loop.py) (tool_execution.py)   (compaction.py)    (streaming.py)
-                │                               │                                   │
-                ▼                               ▼                                   ▼
-        soul/loader.py                   core/error_recovery.py            core/tool_parse.py
-                │                               │                                   │
-                ▼                               ▼                                   ▼
-        core/models.py ◄──── core/helpers.py ◄────────────────────────────── core/api_resilience.py
-                                  ▲                                      
-                                  │                                      
-                ┌─────────────────┴┴─────────────────┐
-                │                                   │
-        backends/base.py ◄── backends/cloud_base.py (NEW R07.05) ◄── plugins/{zai,openrouter,gemini,openai,huggingface,orcarouter}
-                │                                              ▲
-                ▼                                              │
-        backends/openai_compat.py ◄────────────────────────────┘
-                │
-                ▼
-        backends/ollama.py
-                │
-                ▼
-        config.py ◄─── referenced by EVERYTHING
+                                             │
+               ┌───────────────────────────────┤
+               ▼                               ▼
+      AgentSetupMixin                  AgenticLoopMixin ── ToolExecutionMixin ── CompactionMixin ── StreamingMixin
+      (agent_setup.py)                 (agentic_loop.py)  (tool_execution.py)  (compaction.py)   (streaming.py)
+               │                               │                                   │
+               ▼                               ▼                                   ▼
+       soul/loader.py                  core/error_recovery.py             core/tool_parse.py
+               │                               │                                   │
+               ▼                               ▼                                   ▼
+       core/models.py ◄──── core/helpers.py ◄────────────────────────────── core/api_resilience.py
+                                 ▲
+                                 │
+               ┌─────────────────┴┴─────────────────┐
+               │                                    │
+       backends/base.py ◄── backends/cloud_base.py ◄── plugins/{zai,openrouter,gemini,openai,huggingface,mistral,pollinations,orcarouter}
+               │                                             ▲
+               ▼                                             │
+       backends/openai_compat.py ◄───────────────────────────┘
+               │
+               ▼
+       backends/ollama.py ◄── backends/llama_server.py ◄── plugins/turboquant (lifecycle: TurboState, _build_command)
+               │
+               ▼
+       config.py ◄─── referenced by EVERYTHING (TURBOQUANT_BASE_URL, OLLAMA_BASE_URL, ACP_*, ...)
 ```
 
 Key coupling points:
 - `core/helpers.py` is imported by 18+ modules — blast radius for any security change is huge
-- `backends/cloud_base.py` is the new shared base for 6 cloud plugins (5 migrated + OrcaRouter NEW) — bug here × 6 backends
+- `backends/cloud_base.py` is the shared base for 8 cloud plugins — bug here × 8 backends
+- `cli/agent_factory.py` is now touched by BOTH chat startup paths (catalog ladder + tool detection) and the model-switch callback — changes here affect every backend launch
 - `plugins/_loader.py` PluginManager singleton loads at startup; failure cascades to all backends
-- `agentkthx/__init__.py` has 3 try/except optional imports (PersistentMemory, ACPPlugin, Soul) — silent `None` on failure
+- `agentkthx/__init__.py` has try/except optional imports (PersistentMemory, ACPPlugin, Soul) — silent `None` on failure
 
 ---
 
@@ -237,65 +209,54 @@ Key coupling points:
 | Aspect | Pattern |
 |--------|---------|
 | **Class composition** | Mixin pattern: `Agent(AgentSetupMixin, CompactionMixin, ToolExecutionMixin, StreamingMixin, AgenticLoopMixin)`. Mixins access host via `self.X` with docstring-declared "host contract" — no type-checker verification |
-| **Tool calling** | ReAct prompting for ALL models (`Action: tool_name\nAction Input: {json}`). No native-tool-call fallback — model must emit the format |
-| **Tool args parsing** | 4-level fallback chain (R07.05 SEC-02): `json.loads` → `json.loads(sanitized)` → regex python-dict→JSON conversion (single→double quotes, `True`→`true`, etc.) → regex `expression` extraction → `{"input": raw_args}`. **`ast.literal_eval` removed**. ⚠️ **MAINT-14 NEW**: regex substitutions mangle values containing `True`/`False`/`None` as prose |
-| **Tool arg normalization** | 5-strategy matcher in `helpers.py:normalize_args`: alias → direct → case-insensitive → generic alias → prefix/substring (last is dangerously permissive — MAINT-03 still open) |
-| **Tool output sanitization** (R07.05 NEW) | `sanitize_tool_output()` wraps every tool result in `<tool_output tool="X" call_id="Y">...</tool_output>` with 8KB truncation, secret redaction, ANSI stripping. All 3 system prompts updated with untrusted-data instruction |
-| **Error classification** | `is_error_result(result)` regex on first non-empty line — `traceback`, `error:`, `failed:` markers + R07.06 alternative traceback framings. `is_transient_api_error(e, body=None)` checks permanent markers in body FIRST (R07.06), then auth/404 (permanent), then 429/5xx (transient) |
-| **API retry** | `max_api_retries=5` default, exponential backoff with `Retry-After` honor + ±20% jitter. OrcaRouter: `time.sleep(retry_after)` UNBOUNDED (candidate finding) |
-| **Security** | Defense-in-depth: `validate_path` (allowed-prefix; **still uses abspath not realpath — ROB-09 open**), `sanitize_command` (regex denylist + R07.05 shell block + heredoc detection), `is_safe_url` (R07.05 `ipaddress`-based with DNS resolution; **NEW SEC-11 unbounded getaddrinfo**), `safe_eval` (AST walker), `sanitize_tool_output` (R07.05 tool-output wrapping), plugin `sha256` pin verification (R07.05, opt-in) |
-| **Optional features** | 3 try/except ImportError blocks in `__init__.py` (PersistentMemory, ACPPlugin, Soul) — silent `None` on failure, no warning |
-| **Plugin manifest** | Dual-form: legacy top-level fields + `extensions["org.vts-tech.agentkthx"]` namespace. `compatibility` constraints warn-only. **R07.05 NEW**: optional `sha256` field for content verification (string=package `__init__.py`; dict=relative file paths) |
-| **Backend abstraction** | `is_cloud: bool` attribute on `BaseBackend`. R07.05 NEW `CloudBackend` base class in `backends/cloud_base.py` consolidates ~5K LOC of duplicated cloud-backend boilerplate. New cloud backend = ~100 LOC instead of ~1500 LOC. Cloud backends as of R07.11 (7): zai, openrouter, gemini, openai, huggingface, mistral (R07.09), pollinations (R07.11 — the ONLY keyless/anonymous-tier backend; `poll` alias) |
-| **Memory** | Sliding window on message count (`max_messages`); R07.06 NEW token-based second pruning tier (`MemoryConfig.max_tokens`, default `0` = disabled, opt-in via `MemoryConfig(max_tokens=100000)`). Long agentic runs rely on `CompactionMixin` at 85% num_ctx |
-| **Soul loading** | 5-step path resolution: absolute → CWD-relative → `agentkthx.__file__` parent → `importlib.resources` → repeat with name suffix |
-| **File naming** | `snake_case.py` for modules, `PascalCase` for classes, `SCREAMING_SNAKE` for module constants |
-| **Tests** | Co-located in `tests/`, `test_*.py` naming, pytest fixtures; 1461 tests, all mocked unit tests — no integration tier (TEST-01 still open) |
-| **Comments** | Commit-message-style block comments at top of mixins documenting WHY extraction happened + line-count savings; closure deltas embedded as banner blocks in audit.md |
+| **Tool calling** | HYBRID since R07.16: native function-calling when `_use_native_tools` (comp mode AND not force_react — default for cloud backends); ReAct text prompting otherwise (`--force-react`, or local-backend auto-detection REACT/UNTESTED). The `tools` array always ships in the request body. Default prompt has a dedicated ReAct branch. |
+| **Tool-call parsing** | Native JSON path first; ReAct path = 4-level fallback chain (json.loads → sanitized json.loads → regex python-dict→JSON → expression extraction → `{"input": raw}`), all ReAct keyword regexes markdown-bold-tolerant (`\*{0,2}` quantifiers, R07.16) |
+| **Tool arg normalization** | 5-strategy matcher in `helpers.py:normalize_args`: alias → direct → case-insensitive → generic alias → prefix/substring (last is dangerously permissive — MAINT-03 open) |
+| **Tool output sanitization** | `sanitize_tool_output()` wraps every tool result in `<tool_output>` tags with 8KB truncation, secret redaction, ANSI stripping (redact-then-truncate since R07.07) |
+| **Parallel tools** | R07.15 FEAT-02: independent tool-call batches run concurrently (4 workers), results commit in call order; mutating/sequential tools excluded; `AGENTKTHX_PARALLEL_TOOLS=0` escape hatch |
+| **Error classification** | `is_error_result` regex on first non-empty line; `is_transient_api_error(e, body=None)` — permanent markers first, auth/404 permanent, 429/5xx transient |
+| **Context defaults** | `num_predict = num_ctx // 32` everywhere (R06.55 empirical cap, matched by `turbo start` and the chat-side ladder); GGUF `context_length` beats hardcoded 8K |
+| **Security** | Defense-in-depth: `validate_path` (allowed-prefix; abspath not realpath — ROB-09), `sanitize_command` (denylist + shell/heredoc block), `is_safe_url` (ipaddress-based, bounded DNS 5s/32-records fail-closed, 5-hop redirect budget), `safe_eval` (AST walker), `sanitize_tool_output`, plugin sha256 pins (opt-in — SEC-13) |
+| **Local backend UX** | R07.16: `turbo start` auto-derives ctx/num-predict from GGUF metadata; tri-state `--flash-attn on|off|auto`; CPU knobs `-tb/-b/-ub/--mlock/--numa`; `--` passthrough for anything else |
+| **Memory** | Sliding window on message count; token tier opt-in (`MemoryConfig.max_tokens`, default `0`); compaction at 85% of num_ctx |
+| **File naming** | `snake_case.py` modules, `PascalCase` classes, `SCREAMING_SNAKE` constants |
+| **Tests** | Co-located in `tests/`, `test_*.py`, pytest fixtures; 2051 tests, all mocked unit tests — no integration tier (TEST-01). Per-release regression files (`test_r07_16_*` style is the convention; R07.16 added variants to existing files instead) |
 
 ---
 
 ## Known Landmines
 
-1. **`Agent.add_tool` is now deprecated but emits NO `DeprecationWarning`** (`agent.py:1131`, R07.05 ROB-04 closure) — split into `register_tool` (safe mid-session, no memory clear), `rebuild_system_prompt` (explicit clear+rebuild), `add_tool` (deprecated, still clears for backward compat). Third-party code has no programmatic signal to migrate. **NEW finding MAINT-16.**
+1. **`_is_process_alive` KILLS the target on Windows** (ROB-33, `plugins/turboquant/turbo.py:159-183`) — `os.kill(pid, 0)` is TerminateProcess on Windows (any sig ≠ CTRL_* kills). R07.16 put this on the chat startup path via `TurboState.load()` in `_get_local_catalog_defaults` — `turbo start` + `chat` on Windows kills its own server; a stale state file with a reused PID can kill an UNRELATED process. POSIX is safe (`/proc` zombie check present).
 
-2. **`api_mode` default inconsistency** — `shared_args.py:171` sets `--api` default to `"openai"`, but `agent_factory.py:121` reads `getattr(args, "api_mode", "openre")`. Actual default is `"openai"` (OpenAI Chat-Completions mode), NOT OpenResponses — surprising given the framework's OpenResponses branding.
+2. **The no-readline chat prompt renders wrong** (ROB-34, `chat.py:291`) — `"\033You:\033 "`: `ESC Y` is a complete 2-byte VT escape (consumed → prompt shows `ou:`), and the trailing `ESC + space` pairs with the next echoed byte. Verified in a terminal emulator. Use plain `"You: "` or a real CSI sequence.
 
-3. **`update_check.py` makes 3 sequential HTTPS requests on every CLI invocation** — INTENTIONAL per owner (ROB-05 WONTFIX in R07.05): VTSTech's refresh script relies on the uncached check. Opt out with `AGENTKTHX_NO_UPDATE_CHECK=1`.
+3. **`--force-react=False` is not a valid CLI invocation** (MAINT-25) — `--force-react` is `store_true` (parser.py:191); passing `=False` is an argparse ERROR. The UNTESTED debug hint suggests exactly that. No opt-out exists for the local-backend default-to-ReAct behavior short of deleting `~/.agentkthx/tool_support.json`.
 
-4. **`Memory.sanitize_history` mutates `_messages` in place** (`memory.py:140-209`) — Called on every `get_messages()` (every generate call). Mutating during iteration causes subtle bugs in nested calls. PERF-01 still open.
+4. **Custom souls can lose ReAct format instructions** (MAINT-24) — R07.16 removed the ReAct block from `_build_tool_section` (dedup). Souls that don't ship their own `Action:`/`Action Input:` block (and lack example placeholders) now produce prompts with ZERO format instructions when ReAct is active — the parser then sees no valid tool calls. The docstring still claims otherwise.
 
-5. **`_generate_stream` swallows JSON parse errors** (`streaming.py:838-843`) — When the model emits malformed tool_call argument JSON across SSE chunks, fallback is `args = {"_raw_arguments": args_str}`. R07.06 ROB-13 closure added debug logging in `_parse_react`, but the streaming-path JSON parse in `_generate_stream` does not have the same debug chain.
+5. **Remote-catalog probe can stall chat startup** — `_probe_remote_catalog` calls `backend.list_models()` synchronously with the backend's own timeouts (llama-server `/v1/models` timeout=10s). A dead Cloudflare tunnel adds up to ~10s before falling back to `config.num_ctx`. Failure is silent (broad `except: pass`).
 
-6. **`ErrorRecoveryTracker.consecutive_all` resets on ANY success** (`error_recovery.py:540-549`) — A single successful `get_time` call between two failing `calculator` calls resets the counter. Agent loops until `max_steps` if it alternates failing/succeeding tools. Still open.
+6. **`_is_local_base_url` excludes 172.16/12** — RFC1918 `172.16-31.x.x` backends take the REMOTE probe path (documented in-code); local TurboState/Ollama-catalog lookups are skipped for them. Empty/unknown URLs are treated as local (conservative).
 
-7. **`plugins/_loader.py:768` sets `sys.modules[pkg_name] = package` BEFORE `spec.loader.exec_module()`** — Standard pattern for circular imports, but means a plugin that raises during `exec_module` leaves a partially-initialized module in `sys.modules`. ROB-11 still open.
+7. **`Agent.add_tool` is deprecated but emits NO `DeprecationWarning`** (MAINT-16) — use `register_tool` mid-session (no memory clear). `add_tool` still clears conversation for backward compat, with no programmatic migration signal.
 
-8. **`cli/parser.py:26` stashes `parser._subparsers_action = subparsers`** — Private argparse attribute. ARCH issue, unchanged.
+8. **`--api` default is `"openai"`, not `"openre"`** — `shared_args.py` sets openai (Chat-Completions); surprising given the OpenResponses branding.
 
-9. **External plugin import has no path restriction** (`plugins/_loader.py:753-769`) — `_import_entrypoint` for `root_kind in ("user", "env")` executes arbitrary Python from `~/.agentkthx/plugins/<name>/__init__.py` or `$AGENTKTHX_PLUGIN_PATH`. R07.05 SEC-06 added optional `sha256` pin verification, but **pins are opt-in** — plugins without `sha256` field still load (NEW finding SEC-13: no enforcement mode).
+9. **`update_check.py` makes 3 sequential HTTPS requests on every CLI invocation** — INTENTIONAL per owner (ROB-05 WONTFIX). Opt out with `AGENTKTHX_NO_UPDATE_CHECK=1`.
 
-10. **`MemoryConfig.max_tokens` default flipped to `0`** (R07.06 ROB-08) — Was `4096` (never enforced). Now real but opt-in. Existing users who relied on (claimed) 4096 enforcement now have NO token-tier pruning. Set `MemoryConfig(max_tokens=100000)` explicitly to enable.
+10. **`Memory.sanitize_history` mutates `_messages` in place** on every `get_messages()` (PERF-01 open) — subtle bugs possible in nested iteration.
 
-11. **`Agent.__init__` `**kwargs` silently swallows typos** (`agent_setup.py:54-87`) — 5 stashed kwargs (`response_format`, `confirm_dangerous`, `persistent`, `session_id`, `memory_db`). ARCH-05 still OPEN — R07.05/06 did NOT address this.
+11. **Streaming-path JSON parse errors fall back to `{"_raw_arguments": ...}`** without the debug chain the ReAct path has — malformed streaming tool-call args are hard to diagnose without a reproducer.
 
-12. **`BUILTIN_REGISTRY = make_builtin_registry()` is a module-level singleton** (`builtins.py:1341`) — Two `Agent` instances in the same process share the same todo store unless `set_todo_session(session_id)` is called.
+12. **`ErrorRecoveryTracker.consecutive_all` resets on ANY success** — alternating fail/succeed tool calls loop until `max_steps`.
 
-13. **3 try/except ImportError blocks in `__init__.py`** — `PersistentMemory`, `ACPPlugin`, Soul types are silently `None` on import failure.
+13. **`MemoryConfig.max_tokens` defaults to `0`** (tier disabled) — token-tier pruning is opt-in; long agentic runs rely on compaction at 85% num_ctx. Single messages larger than the whole budget still defeat the tier (ROB-17).
 
-14. **`is_safe_url` SSRF check resolves DNS bounded** (R07.12 SEC-11/SEC-17/ROB-27 closure) — `_iter_hostname_ips` routes through `_resolve_hostname_bounded`: `getaddrinfo` on a daemon thread with a 5s wall-clock budget, record sets capped at 32, timed-out lookups fail CLOSED via the `__DNS_TIMEOUT__` sentinel (genuine resolution failures stay fail-open). `_SSRFSafeRedirectHandler` enforces `_MAX_HOPS = 5`; the abandoned daemon thread dies with the OS resolver timeout and cannot block interpreter exit.
+14. **`BUILTIN_REGISTRY` todo store is a module-level singleton** — two `Agent` instances in one process share todos unless `set_todo_session()` is called.
 
-15. **`sanitize_command` heredoc regex** (R07.05 SEC-04 closure) — `bash`/`sh`/`zsh`/`ksh`/`fish` added to `BLOCKED_COMMANDS`; heredoc pattern `<<\s*['\"]?[A-Za-z_]\w*` added to injection regexes. **Residual gaps**: brace expansion and ANSI-C quoting documented but not blocked. `bash <script>` form rejected; direct `./script.sh` invocation still works (shebang honored).
+15. **`__init__.py` optional imports are silent `None`** — PersistentMemory/ACPPlugin/Soul import failures surface only as missing features, never as warnings.
 
-16. **`sanitize_tool_output` truncates AFTER redaction** (`helpers.py:1306`) — A secret whose `password=secret` lands just past the 8KB cutoff is NOT redacted — the truncation drops the redacted prefix but the unredacted tail still contains the secret value. **NEW finding SEC-12 (subagent mislabeled as ROB-13).** Fix: redact AFTER truncating.
-
-17. **`CloudBackend.__init__` mutates `os.environ["AGENTKTHX_API_MODE"]`** (`cloud_base.py:173`) — Process-global side effect from a constructor. Two `CloudBackend` instances with different `api_mode` fight over this env var; last-constructed wins. Inherited from the old per-plugin pattern; the consolidation inherits the issue rather than fixing it. **NEW finding SEC-15.**
-
-18. **`tool_parse.py` `\bTrue\b` / `\bFalse\b` / `\bNone\b` regex substitutions mangle string values** (R07.05 SEC-02 closure) — Substitutions run AFTER single→double quote conversion but on the WHOLE string, not respecting string-literal boundaries. `{"prompt": "None of the above is True"}` becomes `{"prompt": "null of the above is true"}`. Verified by reproducer. **NEW finding MAINT-14 — should be re-classified ROB-High (correctness bug, silent data corruption).**
-
-19. **OrcaRouter Retry-After cap** (ROB-16, closed R07.07) — `_parse_retry_after_seconds` caps at `_MAX_RETRY_AFTER_SECONDS = 60.0`; negative values clamp to 0.0. Related R07.12 closure: `list_models` free detection now live-convention-driven (ROB-23 closed).
-
-20. **OrcaRouter `_extract_buy_credits_url` surfaces attacker-controlled URL** (`orcarouter.py:229`) — The URL from the upstream provider's error body is interpolated directly into the user-facing RuntimeError message. An attacker controlling a malicious upstream provider (or MITM if HTTPS isn't enforced) could inject a phishing URL. **NEW finding SEC-16.**
+16. **`normalize_args` strategy 5 matches substrings** (`{"e": ...}` → `expression`) — last-match-wins on dict order (MAINT-03). Prefer exact keys in tool args.
 
 ---
 
@@ -303,65 +264,51 @@ Key coupling points:
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| **ORM/Database** | SQLite via stdlib `sqlite3` (no ORM) | Zero-dep constraint; SQLite universally available; `PersistentMemory` is a thin `Memory` subclass |
-| **HTTP client** | `urllib.request` (stdlib) | Zero-dep. Trade-off: no connection pooling, manual SSE line buffering |
-| **Tool calling** | ReAct prompting for ALL models (no native function-calling) | Single codepath; works with models that don't support native tool calls. Trade-off: 200-500 tokens of prompt overhead per call |
-| **Agent class composition** | 5 mixins over god-class (R07.00) | Testable in isolation; clear separation of concerns. Trade-off: no type-checker can verify the mixin "host contract" |
-| **`is_cloud` backend attribute** | Per-class attribute on `BaseBackend` | Replaces hardcoded `[OPENROUTER, ZAI, GEMINI]` lists in 8 sites |
-| **Plugin manager singleton** | Lazy-loaded global `_plugin_manager` | Backends lazy-resolved on first `get_backend(name)` call |
-| **Soul Spec optional** | Default `soul="nova-helper"`; falls back to `_build_default_prompt()` on any error | Lets framework boot without soul packages. Trade-off: silent failure means Soul misconfigs invisible without `--debug` |
-| **Update check always-live** | Removed cache in R07.00 | "Cache kept hiding freshly-cut releases from the developer." INTENTIONAL per owner — ROB-05 WONTFIX R07.05 |
-| **Zero dependencies** | `dependencies = []` in `pyproject.toml` | Fully reproducible install; `pip install -e .` in ~5s. Trade-off: hand-rolled SSE parsing, JSON streaming, AST walking, SSRF protection |
-| **Backends split across two locations** | Native (ollama, llama_server, bitnet) in `backends/`; cloud (zai, openrouter, gemini, openai, huggingface, orcarouter) in `plugins/` | Cloud backends are optional (loaded if env vars present). ARCH-01 still open |
-| **`CloudBackend` base class** (R07.05 NEW) | New base in `backends/cloud_base.py` consolidating ~5K LOC of duplicated boilerplate. Subclasses override data (`MODELS`) + 5 methods, get ~400 LOC of common code | Closes MAINT-02. Trade-off: hardcodes OpenAI Chat-Completions wire shape (NEW ARCH-06); `__init__` mutates env var (NEW SEC-15) |
-| **`sha256` plugin pins opt-in** (R07.05 NEW) | Optional field on `plugin.json`; verification fail-closed when present, no-op when absent | Closes SEC-06. Trade-off: plugins without pins still load — no enforcement mode (NEW SEC-13) |
-| **Token-tier memory pruning opt-in** (R07.06 NEW) | `MemoryConfig.max_tokens` default `0` (disabled). Real enforcement when set explicitly | Closes ROB-08. Trade-off: default-flip is silent behavior change for anyone relying on (claimed) 4096 enforcement |
-| **`is_transient_api_error` body arg** (R07.06 NEW) | Optional `body: str | None` second arg | Closes ROB-10. Trade-off: no backend currently passes `body` — forward-looking API addition |
-| **`/model` switch state derivation** (R07.06 NEW) | `apply_model_switch(agent, new_model)` re-derives num_ctx/num_predict/family config | Closes ROB-14. `/param num_ctx <v>` at runtime sets `_num_ctx_explicit=True` so the value survives the switch |
+| **Zero dependencies** | `dependencies = []` | Reproducible install, no supply-chain surface; trade-off: hand-rolled SSE, SSRF, AST eval |
+| **Backend rename** (R07.16) | `turboquant` primary; `llama-server`/`llama_server` aliases; `TURBOQUANT_BASE_URL` env primary with `LLAMA_SERVER_BASE_URL` fallback | Match the TurboQuant fork branding; binary stays `llama-server` (llama.cpp upstream name); old names kept so scripts and third-party enum checks keep working |
+| **Local tool calling** (R07.16) | Auto-detect via cached `test_tool_support`; UNTESTED defaults to ReAct for local backends | Small CPU models typically aren't trained for native function calling; safe default, user `--force-react` wins |
+| **Context auto-derivation** (R07.16) | GGUF `context_length` → ctx; `num_predict = ctx // 32` | Kills the hardcoded 8K mismatch (8K window vs 256K server); matches the cloud-backend max_tokens cap empirically found in R06.55 |
+| **Tri-state flags** (R07.16) | `--flash-attn on|off|auto` (was `store_true`) | TurboQuant fork v0.3.0 requires an explicit `-fa <value>`; bare `-fa` crashed the server |
+| **HTTP client** | `urllib.request` (stdlib) | Zero-dep; trade-off: no pooling, manual SSE buffering, GC-dependent close (ROB-06) |
+| **Agent composition** | 5 mixins over god-class (R07.00) | Testable separation; trade-off: unverified mixin host contract |
+| **`is_cloud` attribute** | Per-class on `BaseBackend` | Replaced hardcoded provider lists; cloud catalog defaults + detection gates hang off it |
+| **`CloudBackend` base** (R07.05) | New cloud backends = ~100 LOC | Subclasses override data + 5 methods; retry-loop skeleton NOT yet lifted (ROB-29/MAINT-23 open) |
+| **Update check always-live** | No cache (R07.00) | Owner's refresh script relies on uncached check (ROB-05 WONTFIX) |
+| **Plugin pins opt-in** (R07.05) | sha256 verified fail-closed WHEN present | Closes SEC-06; no enforcement mode yet (SEC-13 open) |
+| **Transactional plugin registration** (R07.15) | `_PluginTransaction` LIFO undo | Closes ROB-11 — partial registrations from failed loads are rolled back |
+| **Parallel tool batches** (R07.15) | Concurrent for independent batches, committed in call order | Latency win with byte-identical transcripts; mutating tools stay sequential |
+| **`/model` switch derivation** (R07.06) | `apply_model_switch` + explicit-flags | Re-derives ctx/predict/family; now also drives insufficient-credits auto-switch callbacks (R07.16 wiring) |
+| ** Souls + skills bundling** | 3 souls, 4 skills in-tree | Persona/format split; soul loading is best-effort with default-prompt fallback |
 
 ---
 
 ## What's Missing / Incomplete
 
-1. **No integration tests** — All 2031 tests are mocked unit tests. TEST-01 still open. Coverage baseline: 42.7% line coverage (R07.01).
-2. **No `black --check` or `ruff check` in CI** — TEST-06 still open.
-3. **No `mypy` / type checking** — `pyproject.toml` has no `[tool.mypy]` section.
-4. **No `CONTRIBUTING.md`** — `docs/CREDITS.md` lists contributors but no guide.
-5. **No `SECURITY.md`** — No documented vulnerability disclosure policy.
-6. **`schemas/v0.2/plugin.schema.json` declared but not validated** — `_parse_manifest` does ad-hoc dict-shape checks; `jsonschema` is never used.
-7. **`agentkthx/examples/` (11 files)** are demo scripts, not doctests.
-8. **`patches/fix_turbo_v_padding.py`** standalone script — not integrated into build, not tested.
-9. **Tool output schema validation absent** — `tool.execute(**args)` returns `Any`; agentic loop treats it as `str(result)`. FEAT-03 still open.
-10. **No conversation export/import** — FEAT-07 still open.
-11. **No streaming `function_call_arguments.delta` events** — FEAT-06 still open.
-12. **`docs/` has no API reference** — Only `ARCH.md`, `PLUGIN_SPEC.md`, `TESTS.md`, per-backend `*_API_TECHNICAL_REFERENCE.md`.
-13. **MAINT-01 still open** — `cmd_chat` is still 1230 LOC single function with 25+ nested closures and no slash-command dispatcher.
-14. **ARCH-05 still open** — `Agent.__init__` `**kwargs` swallowing concern NOT addressed by R07.05/06.
-15. **ARCH-01 still open** — Backends split across `backends/` (native) and `plugins/` (cloud). New `CloudBackend` lives in `backends/` but OrcaRouter plugin that uses it lives in `plugins/`.
-16. **`PersistentMemory.add()` does two lock acquisitions** (`_write_message` + `_touch_session`) — interleaving risk + 2× commit per message. **NEW finding ROB-15.**
-17. **`_write_lock` is `threading.Lock`, not `RLock`** — brittle if future code adds nested locked calls. **NEW finding ROB-18.**
-18. **Pollinations catalog is key-scoped** — keyed `GET /v1/models` silently drops every `paid_only` model (307 anon vs 134 keyed cards, verified 2026-09-28); `POLLINATIONS_ANON_CATALOG=1` fetches the public catalog while keeping generation keyed. Zero-cost models are encoded as currency-only pricing dicts (NOT zero-valued fields). **NEW findings ROB-31, FEAT-08, TEST-10 (R07.11 re-audit).**
-19. **Cloud-backend retry skeleton copy-paste family** — third consecutive backend carries ~80 duplicated LOC (MAINT-11 closed → ROB-29 → **NEW MAINT-23**); provider error prose injection reopened twice (SEC-14 closed → SEC-18 → **NEW SEC-19**). Lifting the retry primitive + a shared `sanitize_provider_message()` to `CloudBackend` closes four findings at once.
+1. **34 OPEN findings** in `audit/audit.md` (full detail + priority matrix there): Security 2 (SEC-09 ACP Basic-Auth-over-HTTP default, SEC-13 no plugin-pin enforcement mode) · Robustness 14 (incl. ROB-33 Windows process-kill, ROB-34 broken fallback prompt, ROB-31 Pollinations entitlement mismatch, ROB-02 orchestrator thread join, ROB-06 Windows conn release, ROB-15/17/18 memory-store gaps, ROB-20/25 API asymmetries, ROB-09 symlink validate_path, ROB-28/29/30 catalog catch-alls + retry dup) · Maintainability 6 (MAINT-01 1,307-line cmd_chat, MAINT-03 fuzzy args, MAINT-22 streaming body bypass, MAINT-23 retry skeleton, MAINT-24 docstring contract, MAINT-25 no opt-out) · New Features 4 (FEAT-03 tool output schema, FEAT-05 plugin sandbox, FEAT-06 streaming arg deltas, FEAT-07 conversation export, FEAT-08 free-TIER mode) · Testing 8 (TEST-01 integration tier, TEST-03/04/05/07/09/10).
+2. **No integration tests** — all 2051 tests are mocked unit tests (TEST-01); coverage baseline 42.7% (R07.01), CLI layer well below.
+3. **No mypy** — no `[tool.mypy]`; mixins' host contracts are unverifiable by tooling.
+4. **No `CONTRIBUTING.md` / `SECURITY.md`**.
+5. **`schemas/v0.2/plugin.schema.json` declared but not validated** — ad-hoc dict checks in `_parse_manifest`.
+6. **No conversation export/import** (FEAT-07); no tool output JSON Schema validation (FEAT-03); no streaming `function_call_arguments.delta` (FEAT-06).
+7. **`agentkthx/examples/`** are demo scripts, not doctests; `patches/` not integrated into the build.
+8. **R07.16 shipped no regression-test file** (suite count unchanged at 2051) — the auto-derivation ladder, tool-support auto-detection, and `_probe_remote_catalog` are tested only indirectly. Per house convention a `tests/test_r07_16_*.py` would pin the ladder precedence + the bold-tolerant parser + the Windows liveness check (which fails on Windows today per ROB-33).
+9. **75 findings archived** in `audit/deltas.md` (68 CLOSED across R07.00–R07.15 + 7 WONTFIX with owner rationale — the closure timeline and per-release test-count deltas live there; `generate_audit_dash.py` merges both files for the full register).
 
 ---
 
 ## Quick Start for Developer
 
-1. **Read the Critical Files Index above** — start with `agent.py`, `core/agentic_loop.py`, `core/helpers.py`. The "Why It Matters" column tells you when to touch each.
-2. **Understand the Request Lifecycle** — every chat / run / agent command flows through `cmd_chat → Agent.run → _run_core → _run_loop_iteration → backend.generate → tool dispatch → sanitize_tool_output → memory`.
+1. **Read the Critical Files Index** — start with `cli/agent_factory.py` (wiring), `plugins/turboquant/turbo.py` (server lifecycle), `core/agent_setup.py` (prompt strategy). The "Why It Matters" column tells you when to touch each.
+2. **Understand the Lifecycle** — `cmd_chat → _build_agent (auto-detection + catalog ladder) → Agent.run → _run_loop_iteration → backend.generate → tool dispatch (sanitize → memory)`.
 3. **Check Known Landmines** before changing:
-   - Don't call `agent.add_tool` mid-session — use `agent.tools.register_tool` directly (R07.05 ROB-04 split)
-   - `--api` defaults to `"openai"`, not `"openre"`
-   - `AGENTKTHX_NO_UPDATE_CHECK=1` skips the 3-HTTPS-request startup cost (intentional per owner)
-   - `ErrorRecoveryTracker` resets on any success — don't rely on it stopping infinite loops
-   - **R07.05+**: tool args go through `sanitize_tool_output` before reaching memory — don't pattern-match on raw tool output
-   - **R07.06+**: `MemoryConfig.max_tokens` default is `0` — set explicitly to enable token-tier pruning
-4. **Follow Patterns & Conventions** — ReAct prompting for all models, 4-level tool-arg parse fallback chain (R07.05 SEC-02: `ast.literal_eval` gone, regex python-dict→JSON instead), defense-in-depth security.
-5. **If changing a critical file**, check the Dependency Graph for blast radius:
-   - Touching `core/helpers.py` affects 18+ modules
-   - Touching `backends/cloud_base.py` affects 6 cloud plugins
-   - Touching `plugins/_loader.py` affects every backend
-6. **Run tests before committing**: `python -m pytest tests/ -q` (~25s, 1461 tests). For coverage: `pytest --cov=agentkthx --cov-report=term-missing`.
-7. **Read prior audits**: `audit/audit.md` tracks findings by ID (SEC-XX, ROB-XX, MAINT-XX, etc.) with closure deltas. **R07.07 delta** (appended) extends the ID sequence with new findings surfaced by re-auditing the R07.06 codebase.
+   - Never probe process liveness with `os.kill(pid, 0)` on Windows paths (ROB-33)
+   - Don't follow the UNTESTED debug hint — `--force-react=False` errors (MAINT-25)
+   - Mid-session tool addition: `register_tool`, NOT `add_tool` (memory clear, no warning)
+   - `AGENTKTHX_NO_UPDATE_CHECK=1` skips the 3-request startup check
+   - `MemoryConfig.max_tokens=0` default — token tier is opt-in
+4. **Follow Patterns** — hybrid native/ReAct tool calling via `_use_native_tools`; `num_predict = ctx // 32`; `sanitize_tool_output` on every tool result; per-release regression-test files.
+5. **Blast radius**: `core/helpers.py` → 18+ modules · `backends/cloud_base.py` → 8 cloud plugins · `cli/agent_factory.py` → every backend launch · `plugins/_loader.py` → every backend load.
+6. **Run tests before committing**: `python -m pytest tests/ -q` (~12s, 2051 tests). Lint is a REQUIRED CI check: `ruff check agentkthx/ tests/ && black --check agentkthx/ tests/`.
+7. **Read the register before adding work**: `audit/audit.md` (34 OPEN, ID-indexed, priority matrix) + `audit/deltas.md` (75 archived with closure prose). Re-audit workflow, split tooling, and the dashboard parser contract are specified in `agentkthx/skills/codebase-audit/SKILL.md`.
 
-Do NOT start by reading every file. Use this brief as your map and read only what you need for your specific task. The 20-module `core/` package is the engine — most changes start there.
+Do NOT start by reading every file. Use this brief as your map and read only what you need for your specific task. The `core/` package is the engine — most changes start there; R07.16-era work concentrates in `cli/agent_factory.py` + `plugins/turboquant/`.
