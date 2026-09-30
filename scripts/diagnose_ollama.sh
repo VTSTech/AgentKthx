@@ -138,10 +138,10 @@ guess_requested_quant() {
 # ---- start server once ------------------------------------------------------
 
 start_server() {
-  pkill -9 ollama 2>/dev/null
-  pkill -9 llama-server 2>/dev/null
-  sleep 3
-  rm -f "$LOG"
+  #pkill -9 ollama 2>/dev/null
+  #pkill -9 llama-server 2>/dev/null
+  #sleep 3
+  #rm -f "$LOG"
 
   OLLAMA_DEBUG=1 \
   OLLAMA_NUM_PARALLEL=1 \
