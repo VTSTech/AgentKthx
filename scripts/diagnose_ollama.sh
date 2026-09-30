@@ -169,14 +169,20 @@ wait_for_port_free() {
   return 1
 }
 
-# Wait for ollama process to actually exit
+# Wait for ollama process to actually exit (or become a defunct zombie)
+# A zombie/defunct process is already dead — it's just waiting for its parent
+# to reap it. That's "dead enough" for our purposes (port is free, memory reclaimed).
 wait_for_ollama_dead() {
   local max_wait="${1:-15}"
   local i=0
   while [ $i -lt $max_wait ]; do
     # Use -x for exact match — avoids killing this script itself!
     # (script name contains "ollama" as substring)
-    if ! pgrep -x ollama >/dev/null 2>&1 && ! pgrep -x llama-server >/dev/null 2>&1; then
+    # Then filter out zombies (state Z / <defunct>) since those are harmless.
+    local live_ollama live_llama
+    live_ollama=$(pgrep -x ollama 2>/dev/null | xargs -I{} ps -o pid,stat,comm -p {} 2>/dev/null | grep -v '<defunct>' | grep -v '^PID' | wc -l)
+    live_llama=$(pgrep -x llama-server 2>/dev/null | xargs -I{} ps -o pid,stat,comm -p {} 2>/dev/null | grep -v '<defunct>' | grep -v '^PID' | wc -l)
+    if [ "$live_ollama" -eq 0 ] && [ "$live_llama" -eq 0 ]; then
       return 0
     fi
     sleep 1
