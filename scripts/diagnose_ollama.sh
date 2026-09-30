@@ -3,15 +3,23 @@
 # diagnose_ollama.sh — Ollama Model Health Checker
 #
 # Usage:
-#   ./diagnose_ollama.sh <model_name>           # Check a single model
-#   ./diagnose_ollama.sh --all                  # Check all installed models
-#   ./diagnose_ollama.sh --all --json           # All models, JSON output
+#   ./diagnose_ollama.sh <model_name>               # Check a single model
+#   ./diagnose_ollama.sh --all                      # Check all installed models
+#   ./diagnose_ollama.sh --all --json               # All models, JSON output
+#   ./diagnose_ollama.sh --all --max-size 4096      # Skip models > 4 GB
+#   ./diagnose_ollama.sh <model> --force             # Bypass memory safety (DANGER)
 #
 # Examples:
 #   ./diagnose_ollama.sh dlasher/granite-4.2-3b-GGUF:IQ4_NL
 #   ./diagnose_ollama.sh qwen2.5:3b-instruct-q4_K_M
 #   ./diagnose_ollama.sh krith/meta-llama-3.2-1b-instruct-uncensored:IQ4_XS
 #   ./diagnose_ollama.sh --all
+#
+# Memory safety:
+#   - Models larger than MAX_FILE_MB (default 8192 = 8 GB) are SKIPPED by default
+#     to prevent OOM-killing the script. Override with --max-size <MB>.
+#   - Pre-load check: if free_mem < file_size * 1.5, model is skipped.
+#   - Use --force to bypass all safety checks (can OOM-kill the whole script).
 #
 # Detects:
 #   1. fp16 fallback (file_size << peak_RSS) — the IQ4_NL silent expansion bug
@@ -33,8 +41,10 @@ set -u
 
 ALL_MODE=false
 JSON_OUTPUT=false
+FORCE_MODE=false
 SINGLE_MODEL=""
 CTX_REQUESTED=4096
+MAX_FILE_MB=8192              # skip models larger than this (8 GB default)
 LOG=/tmp/diag_model.log
 RESULTS_CSV=/tmp/diag_results.csv
 
@@ -57,6 +67,14 @@ while [ $# -gt 0 ]; do
     --json)
       JSON_OUTPUT=true
       shift
+      ;;
+    --force)
+      FORCE_MODE=true
+      shift
+      ;;
+    --max-size)
+      MAX_FILE_MB="$2"
+      shift 2
       ;;
     -h|--help)
       sed -n '3,30p' "$0"
@@ -144,15 +162,12 @@ start_server() {
   rm -f "$LOG"
 
   OLLAMA_DEBUG=1 \
-  OLLAMA_HOST="0.0.0.0:11434" \
-  OLLAMA_API_KEY="ollama-local" \
-  OLLAMA_NUM_THREAD=1 \
   OLLAMA_NUM_PARALLEL=1 \
   OLLAMA_MAX_LOADED_MODELS=1 \
   OLLAMA_KEEP_ALIVE=2m \
-  OLLAMA_FLASH_ATTENTION=1 \
+  OLLAMA_FLASH_ATTENTION=true \
   OLLAMA_CONTEXT_LENGTH=$CTX_REQUESTED \
-  OLLAMA_KV_CACHE_TYPE=q4_0 \
+  OLLAMA_KV_CACHE_TYPE=q8_0 \
   OLLAMA_VULKAN=false \
   ollama serve > "$LOG" 2>&1 < /dev/null &
   SERVER_PID=$!
@@ -221,6 +236,58 @@ diagnose_one() {
     KB|KiB) file_size_mb=$(echo "$size_value" | awk '{print $1 / 1024}') ;;
     *)      file_size_mb="$size_value" ;;
   esac
+
+  # ---- MEMORY SAFETY CHECKS (skip models that would OOM) ----
+  if [ "$FORCE_MODE" = "false" ]; then
+    # Check 1: file size > MAX_FILE_MB → skip
+    if [ -n "$file_size_mb" ] && [ "$file_size_mb" != "?" ]; then
+      if (( $(echo "$file_size_mb > $MAX_FILE_MB" | bc -l 2>/dev/null || echo 0) )); then
+        if [ "$verbose" = "true" ]; then
+          local file_gb
+          file_gb=$(echo "scale=2; $file_size_mb / 1024" | bc)
+          echo "    ⏭  SKIPPED: file size ${file_gb} GB exceeds --max-size ${MAX_FILE_MB} MB"
+          echo "       (use --force or --max-size $((file_size_mb + 1024)) to test this model)"
+        fi
+        DIAG_VERDICT="SKIPPED"
+        DIAG_EXIT_CODE=0
+        DIAG_RATIO="?"
+        DIAG_CTX="?"
+        DIAG_RSS="?"
+        DIAG_FILE_MB="$file_size_mb"
+        DIAG_GEN_TPS="?"
+        DIAG_FILE_TYPE="?"
+        DIAG_MODEL_PARAMS="?"
+        DIAG_FALLBACK_MSG="Skipped: file size ${file_size_mb} MB > max ${MAX_FILE_MB} MB"
+        DIAG_CTX_MSG=""
+        return
+      fi
+    fi
+
+    # Check 2: free memory < file_size * 1.5 → skip (would OOM)
+    local free_mb required_mb
+    free_mb=$(free_mem_mib)
+    required_mb=$(echo "scale=0; $file_size_mb * 1.5 / 1" | bc 2>/dev/null)
+    if [ -n "$free_mb" ] && [ -n "$required_mb" ] && [ "$free_mb" != "0" ]; then
+      if (( $(echo "$free_mb < $required_mb" | bc -l 2>/dev/null || echo 0) )); then
+        if [ "$verbose" = "true" ]; then
+          echo "    ⏭  SKIPPED: would OOM (free: ${free_mb} MiB, need: ${required_mb} MiB for file+KV)"
+          echo "       (use --force to attempt anyway)"
+        fi
+        DIAG_VERDICT="SKIPPED"
+        DIAG_EXIT_CODE=0
+        DIAG_RATIO="?"
+        DIAG_CTX="?"
+        DIAG_RSS="?"
+        DIAG_FILE_MB="$file_size_mb"
+        DIAG_GEN_TPS="?"
+        DIAG_FILE_TYPE="?"
+        DIAG_MODEL_PARAMS="?"
+        DIAG_FALLBACK_MSG="Skipped: free mem ${free_mb} MiB < required ${required_mb} MiB"
+        DIAG_CTX_MSG=""
+        return
+      fi
+    fi
+  fi
 
   if [ "$verbose" = "true" ]; then
     local file_size_display
@@ -499,6 +566,7 @@ echo "╔═══════════════════════�
 echo "║  Ollama Model Health Check — ALL MODE                            ║"
 echo "╚══════════════════════════════════════════════════════════════════╝"
 echo "Requested ctx: $CTX_REQUESTED"
+echo "Max file size: $MAX_FILE_MB MB (use --max-size to change, --force to disable)"
 echo ""
 
 # Discover installed models
@@ -544,11 +612,12 @@ for model in "${MODELS[@]}"; do
   fi
 
   # Print compact result
-  # emoji
+  emoji=""
   case "$DIAG_VERDICT" in
     HEALTHY)  emoji="✅" ;;
     WARNING)  emoji="⚠️"  ;;
     BROKEN)   emoji="❌" ;;
+    SKIPPED)  emoji="⏭️" ;;
     *)        emoji="?" ;;
   esac
   echo "  $emoji $DIAG_VERDICT — ratio: $DIAG_RATIO | ctx: $DIAG_CTX | RSS: ${DIAG_RSS} MiB | gen_tps: $DIAG_GEN_TPS"
@@ -578,16 +647,17 @@ echo "╚═══════════════════════�
 echo ""
 
 # count verdicts
-healthy=0; warning=0; broken=0
+healthy=0; warning=0; broken=0; skipped=0
 for v in "${SUMMARY_VERDICTS[@]}"; do
   case "$v" in
     HEALTHY) healthy=$((healthy + 1)) ;;
     WARNING) warning=$((warning + 1)) ;;
     BROKEN)  broken=$((broken + 1)) ;;
+    SKIPPED) skipped=$((skipped + 1)) ;;
   esac
 done
 
-echo "Total: ${#SUMMARY_MODELS[@]}  |  ✅ Healthy: $healthy  |  ⚠️ Warning: $warning  |  ❌ Broken: $broken"
+echo "Total: ${#SUMMARY_MODELS[@]}  |  ✅ Healthy: $healthy  |  ⚠️ Warning: $warning  |  ❌ Broken: $broken  |  ⏭️ Skipped: $skipped"
 echo ""
 
 # Print table
@@ -614,6 +684,7 @@ for idx in "${!SUMMARY_MODELS[@]}"; do
     HEALTHY)  marker=" " ;;
     WARNING)  marker="!" ;;
     BROKEN)   marker="X" ;;
+    SKIPPED)  marker="~" ;;
     *)        marker="?" ;;
   esac
 
@@ -621,7 +692,7 @@ for idx in "${!SUMMARY_MODELS[@]}"; do
 done
 
 echo ""
-echo "Legend: X = BROKEN, ! = WARNING, (space) = HEALTHY"
+echo "Legend: X = BROKEN, ! = WARNING, ~ = SKIPPED, (space) = HEALTHY"
 echo ""
 echo "Detailed CSV: $RESULTS_CSV"
 echo ""
@@ -633,6 +704,7 @@ if [ "$JSON_OUTPUT" = "true" ]; then
   echo "  \"healthy\": $healthy,"
   echo "  \"warning\": $warning,"
   echo "  \"broken\": $broken,"
+  echo "  \"skipped\": $skipped,"
   echo "  \"models\": ["
   for idx in "${!SUMMARY_MODELS[@]}"; do
     m="${SUMMARY_MODELS[$idx]}"
