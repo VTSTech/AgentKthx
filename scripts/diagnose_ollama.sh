@@ -155,10 +155,97 @@ guess_requested_quant() {
 
 # ---- start server once ------------------------------------------------------
 
+# Wait for a port to become free (port 11434)
+wait_for_port_free() {
+  local port="$1" max_wait="${2:-15}"
+  local i=0
+  while [ $i -lt $max_wait ]; do
+    if ! ss -ltn 2>/dev/null | grep -q ":$port "; then
+      return 0
+    fi
+    sleep 1
+    i=$((i + 1))
+  done
+  return 1
+}
+
+# Wait for ollama process to actually exit
+wait_for_ollama_dead() {
+  local max_wait="${1:-15}"
+  local i=0
+  while [ $i -lt $max_wait ]; do
+    if ! pgrep -x ollama >/dev/null 2>&1 && ! pgrep -x llama-server >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+    i=$((i + 1))
+  done
+  return 1
+}
+
+# Wait for memory to be reclaimed after a kill
+wait_for_memory_reclaim() {
+  local target_free="${1:-8000}"   # MiB we want available
+  local max_wait="${2:-20}"
+  local i=0 free_mb
+  while [ $i -lt $max_wait ]; do
+    free_mb=$(free_mem_mib)
+    if [ "$free_mb" -ge "$target_free" ] 2>/dev/null; then
+      echo "    Memory reclaimed: ${free_mb} MiB free"
+      return 0
+    fi
+    sleep 1
+    i=$((i + 1))
+  done
+  echo "    ! Memory not fully reclaimed after ${max_wait}s (free: ${free_mb} MiB)"
+  return 1
+}
+
+# Wait for ollama to be reachable on its API
+wait_for_ollama_ready() {
+  local max_wait="${1:-20}"
+  local i=0
+  while [ $i -lt $max_wait ]; do
+    if curl -s -o /dev/null -m 2 http://127.0.0.1:11434/api/tags 2>/dev/null; then
+      return 0
+    fi
+    sleep 1
+    i=$((i + 1))
+  done
+  return 1
+}
+
 start_server() {
-  pkill -9 ollama 2>/dev/null
-  pkill -9 llama-server 2>/dev/null
-  sleep 3
+  echo ">>> Starting ollama with controlled env (ctx=$CTX_REQUESTED, kv=q8_0)..."
+
+  # Try graceful shutdown first, then force kill
+  echo "    Stopping any existing ollama..."
+  pkill -TERM ollama 2>/dev/null
+  pkill -TERM llama-server 2>/dev/null
+  sleep 2
+  if pgrep -x ollama >/dev/null 2>&1 || pgrep -x llama-server >/dev/null 2>&1; then
+    echo "    Forcing kill..."
+    pkill -9 ollama 2>/dev/null
+    pkill -9 llama-server 2>/dev/null
+  fi
+
+  # Wait for processes to actually exit
+  if ! wait_for_ollama_dead 15; then
+    echo "    ✗ Existing ollama/llama-server won't die after 15s"
+    ps -eo pid,rss,comm | grep -E 'ollama|llama-server' || true
+    exit 3
+  fi
+
+  # Wait for port 11434 to be free
+  if ! wait_for_port_free 11434 10; then
+    echo "    ✗ Port 11434 still in use after 10s"
+    ss -ltnp 2>/dev/null | grep 11434 || true
+    exit 3
+  fi
+
+  # Wait for memory to actually be reclaimed (target: at least 8GB free)
+  wait_for_memory_reclaim 8000 20 || true
+
   rm -f "$LOG"
 
   OLLAMA_DEBUG=1 \
@@ -171,13 +258,21 @@ start_server() {
   OLLAMA_VULKAN=false \
   ollama serve > "$LOG" 2>&1 < /dev/null &
   SERVER_PID=$!
-  sleep 4
 
-  if ! kill -0 "$SERVER_PID" 2>/dev/null; then
-    echo "    ✗ Server failed to start"
-    tail -30 "$LOG"
+  # Wait for server to be reachable (replaces fixed sleep 4)
+  if ! wait_for_ollama_ready 30; then
+    echo "    ✗ Server didn't become reachable in 30s"
+    if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+      echo "    Server process died. Last log lines:"
+      tail -30 "$LOG"
+    else
+      echo "    Server process is alive but not responding. Last log lines:"
+      tail -30 "$LOG"
+    fi
     exit 3
   fi
+
+  echo "    ✓ Server PID=$SERVER_PID up. Free mem: $(free_mem_mib) MiB"
 }
 
 # ---- the core check function (returns via global vars) ---------------------
@@ -569,7 +664,11 @@ echo "Requested ctx: $CTX_REQUESTED"
 echo "Max file size: $MAX_FILE_MB MB (use --max-size to change, --force to disable)"
 echo ""
 
-# Discover installed models
+# Start server FIRST (before listing models — ollama list requires a server)
+start_server
+echo ""
+
+# Now discover installed models
 echo ">>> Discovering installed models..."
 mapfile -t MODELS < <(ollama list | tail -n +2 | awk '{print $1}')
 echo ">>> Found ${#MODELS[@]} models to test:"
@@ -579,11 +678,6 @@ echo ""
 # Init CSV
 echo "model,verdict,exit_code,file_mb,peak_rss_mib,expansion_ratio,actual_ctx,gen_tps,metadata_quant,model_params" \
   > "$RESULTS_CSV"
-
-# Start server once
-start_server
-echo ">>> Server PID=$SERVER_PID up. Free mem: $(free_mem_mib) MiB"
-echo ""
 
 # Iterate
 i=0
