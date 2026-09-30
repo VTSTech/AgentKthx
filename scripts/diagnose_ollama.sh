@@ -138,16 +138,19 @@ guess_requested_quant() {
 # ---- start server once ------------------------------------------------------
 
 start_server() {
-  #pkill -9 ollama 2>/dev/null
-  #pkill -9 llama-server 2>/dev/null
-  #sleep 3
-  #rm -f "$LOG"
+  pkill -9 ollama 2>/dev/null
+  pkill -9 llama-server 2>/dev/null
+  sleep 3
+  rm -f "$LOG"
 
   OLLAMA_DEBUG=1 \
+  OLLAMA_HOST="0.0.0.0:11434" \
+  OLLAMA_API_KEY="ollama-local" \
+  OLLAMA_NUM_THREAD=1 \
   OLLAMA_NUM_PARALLEL=1 \
   OLLAMA_MAX_LOADED_MODELS=1 \
   OLLAMA_KEEP_ALIVE=2m \
-  OLLAMA_FLASH_ATTENTION=true \
+  OLLAMA_FLASH_ATTENTION=1 \
   OLLAMA_CONTEXT_LENGTH=$CTX_REQUESTED \
   OLLAMA_KV_CACHE_TYPE=q4_0 \
   OLLAMA_VULKAN=false \
@@ -510,7 +513,7 @@ echo "model,verdict,exit_code,file_mb,peak_rss_mib,expansion_ratio,actual_ctx,ge
   > "$RESULTS_CSV"
 
 # Start server once
-#start_server
+start_server
 echo ">>> Server PID=$SERVER_PID up. Free mem: $(free_mem_mib) MiB"
 echo ""
 
