@@ -304,6 +304,9 @@ def _build_agent(args: argparse.Namespace, config) -> Agent:
         temperature=getattr(args, "temperature", None),
         top_p=getattr(args, "top_p", None),
         num_predict=final_num_predict,
+        # R07.17: num_batch forwarded to Ollama as a per-request option.
+        # Silently ignored by backends that don't recognize it.
+        num_batch=getattr(args, "num_batch", None),
         skills_prompt=skills_prompt,
         retry_on_error=not getattr(args, "no_retry", False),
         max_tool_retries=getattr(args, "max_tool_retries", None) or config.max_tool_retries,
@@ -327,6 +330,11 @@ def _build_agent(args: argparse.Namespace, config) -> Agent:
     # values — a value the user chose explicitly survives model switches.
     agent._num_ctx_explicit = getattr(args, "num_ctx", None) is not None
     agent._num_predict_explicit = getattr(args, "num_predict", None) is not None
+    # R07.17: same pin semantics for num_batch — a user-pinned batch size
+    # survives /model switches (num_batch is per-request, not model-derived,
+    # so a switch never re-derives it; the pin flag is for parity with
+    # num_ctx/num_predict so /param reset + /model interact consistently).
+    agent._num_batch_explicit = getattr(args, "num_batch", None) is not None
     # Set compaction threshold from --compaction arg
     agent._compaction_threshold = compaction_threshold
 
@@ -731,5 +739,11 @@ def apply_model_switch(agent, new_model: str) -> dict:
         if new_predict != old_predict:
             agent._num_predict = new_predict
             changes["num_predict"] = (old_predict, new_predict)
+
+    # R07.17: num_batch is intentionally NOT re-derived here. It's a
+    # per-request option (Ollama ``options.num_batch``), not a function of
+    # the model name, so a /model switch never changes it. The user-pinned
+    # value (CLI --num-batch or /param num_batch) survives as-is, and a
+    # None value (backend default) stays None.
 
     return changes

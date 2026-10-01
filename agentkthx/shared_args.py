@@ -10,6 +10,7 @@ All test/example scripts can use these standard arguments:
   --acp-url URL       ACP server URL
   --num-ctx TOKENS    Context window size
   --num-predict TOKENS Max tokens to generate
+  --num-batch N       Prompt-processing batch size (Ollama)
   --fast              Fast mode preset (ctx=2048, predict=256)
 
 Usage in example scripts:
@@ -46,6 +47,7 @@ class SharedConfig:
     acp_url: Optional[str] = None
     num_ctx: Optional[int] = None
     num_predict: Optional[int] = None
+    num_batch: Optional[int] = None
     temperature: Optional[float] = None
     top_p: Optional[float] = None
     fast: bool = False
@@ -115,6 +117,16 @@ def add_shared_args(parser: argparse.ArgumentParser) -> None:
         dest="num_predict",
         metavar="TOKENS",
         help="Maximum tokens to generate",
+    )
+    parser.add_argument(
+        "--num-batch",
+        type=int,
+        default=None,
+        dest="num_batch",
+        metavar="N",
+        help="Prompt-processing batch size (Ollama per-request option; "
+        "llama-server/TurboQuant use 'turbo start --batch-size N' at server "
+        "start). Lower values reduce peak memory during prompt eval.",
     )
     parser.add_argument(
         "--temp",
@@ -255,6 +267,15 @@ def add_agent_args(
         help="Maximum tokens to generate (default: model-specific)",
     )
     parser.add_argument(
+        "--num-batch",
+        type=int,
+        default=None,
+        dest="num_batch",
+        help="Prompt-processing batch size (Ollama per-request option; "
+        "llama-server/TurboQuant use 'turbo start --batch-size N' at server "
+        "start; cloud backends ignore it). Default: backend default.",
+    )
+    parser.add_argument(
         "--temp",
         "--temperature",
         type=float,
@@ -386,6 +407,7 @@ def parse_shared_args(args) -> SharedConfig:
         acp_url=getattr(args, "acp_url", None) or os.environ.get("AGENTKTHX_ACP_URL"),
         num_ctx=getattr(args, "num_ctx", None) or _env_int("AGENTKTHX_NUM_CTX"),
         num_predict=getattr(args, "num_predict", None) or _env_int("AGENTKTHX_NUM_PREDICT"),
+        num_batch=getattr(args, "num_batch", None) or _env_int("AGENTKTHX_NUM_BATCH"),
         temperature=getattr(args, "temperature", None) or _env_float("AGENTKTHX_TEMPERATURE"),
         top_p=getattr(args, "top_p", None) or _env_float("AGENTKTHX_TOP_P"),
         fast=getattr(args, "fast", False) or os.environ.get("AGENTKTHX_FAST", "0") == "1",

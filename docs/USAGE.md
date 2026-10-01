@@ -110,6 +110,7 @@ In chat mode, use these slash commands to manage tools, skills, and models mid-s
 /skills              # List all available skills (✓ = loaded)
 /skill codebase-audit  # Load a skill mid-session (appends to system prompt)
 /param temperature 0.3   # Set generation parameters
+/param num_batch 256     # Ollama: per-request prompt-processing batch size
 /status              # Show model, backend, tools, skills, memory info
 /help                # Show all slash commands
 ```
@@ -694,6 +695,7 @@ agentkthx config --urls  # Show only URLs
 | `--session <name>` | Resume or create a persistent memory session |
 | `--force-react` | Force ReAct text-based tool calling (skip native tool detection) |
 | `--num-predict <tokens>` | Maximum tokens to generate |
+| `--num-batch <n>` | Prompt-processing batch size (Ollama per-request `options.num_batch`; llama-server/TurboQuant use `turbo start --batch-size N` at server start; cloud backends ignore it). Lower values reduce peak RAM during prompt eval at the cost of more iterations. Default: backend default (Ollama: 512). |
 | `--stream` | Stream output in real-time |
 | `-q, --quiet` | Suppress header and summary output |
 | `-v, --verbose` | Verbose output |

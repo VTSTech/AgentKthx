@@ -657,6 +657,23 @@ def cmd_chat(args: argparse.Namespace) -> int:
                         "backends": {"all"},
                         "agent_attr": "num_ctx",
                     },
+                    # ── R07.17: per-request prompt-processing batch size ──
+                    "num_batch": {
+                        "type": "int",
+                        "range": "1-N",
+                        "description": (
+                            "Prompt-processing batch size. Ollama per-request option "
+                            "(options.num_batch); lower = less peak RAM during prompt eval. "
+                            "llama-server/TurboQuant set this at server start "
+                            "('turbo start --batch-size N'); cloud backends ignore it."
+                        ),
+                        # Only Ollama native /api/chat forwards it (via the
+                        # generic kwargs-to-options loop). The OpenAI-compat
+                        # path (/v1/chat/completions) does NOT support per-request
+                        # num_batch — switch to --api openre to use it.
+                        "backends": {"ollama"},
+                        "agent_attr": "_num_batch",
+                    },
                     # ── OpenAI / OpenRouter-specific ────────────────────────
                     "top_k": {
                         "type": "int",
@@ -796,6 +813,11 @@ def cmd_chat(args: argparse.Namespace) -> int:
                             agent._num_ctx_explicit = False
                         elif attr == "_num_predict":
                             agent._num_predict_explicit = False
+                        elif attr == "_num_batch":
+                            # R07.17: num_batch is per-request (not model-derived),
+                            # so /model never re-derives it — but we still clear the
+                            # pin flag for parity with num_ctx / num_predict.
+                            agent._num_batch_explicit = False
                     else:
                         agent._runtime_kwargs.pop(name, None)
                     print(green(f"Reset {name} to model default."))
@@ -926,6 +948,11 @@ def cmd_chat(args: argparse.Namespace) -> int:
                         agent._num_ctx_explicit = True
                     elif attr == "_num_predict":
                         agent._num_predict_explicit = True
+                    elif attr == "_num_batch":
+                        # R07.17: pin num_batch too — though /model never
+                        # re-derives it (per-request, not model-derived), the
+                        # pin flag is consulted by /param reset for parity.
+                        agent._num_batch_explicit = True
                 else:
                     agent._runtime_kwargs[name] = value
 

@@ -165,6 +165,15 @@ def create_parser() -> argparse.ArgumentParser:
         help="Maximum tokens to generate (default: model-specific)",
     )
     test_parser.add_argument(
+        "--num-batch",
+        type=int,
+        default=None,
+        dest="num_batch",
+        help="Prompt-processing batch size (Ollama per-request option; "
+        "llama-server/TurboQuant use 'turbo start --batch-size N' at server "
+        "start; cloud backends ignore it). Default: backend default.",
+    )
+    test_parser.add_argument(
         "--temp",
         "--temperature",
         type=float,

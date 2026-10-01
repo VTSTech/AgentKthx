@@ -784,6 +784,10 @@ class StreamingMixin:
             backend_kwargs["reasoning_effort"] = self._reasoning_effort
         if self.num_ctx is not None:
             backend_kwargs["num_ctx"] = self.num_ctx
+        # R07.17: forward num_batch (Ollama per-request option; ignored by
+        # backends that don't support it — see agent.py:_generate for details).
+        if self._num_batch is not None:
+            backend_kwargs["num_batch"] = self._num_batch
 
         # R06.3: Forward runtime kwargs set via /param slash command.
         # These are params that don't have a dedicated agent attribute
@@ -1015,6 +1019,10 @@ class StreamingMixin:
             backend_kwargs["num_ctx"] = self.num_ctx
         if self._num_predict is not None:
             backend_kwargs["num_predict"] = self._num_predict
+        # R07.17: forward num_batch (Ollama per-request option; silently
+        # dropped by backends that don't recognize it).
+        if self._num_batch is not None:
+            backend_kwargs["num_batch"] = self._num_batch
         if hasattr(self, "_runtime_kwargs") and self._runtime_kwargs:
             for k, v in self._runtime_kwargs.items():
                 backend_kwargs[k] = v

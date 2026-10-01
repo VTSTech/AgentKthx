@@ -44,6 +44,7 @@ def _make_agent():
     a._temperature = None
     a._top_p = None
     a._num_predict = None
+    a._num_batch = None  # R07.17: per-request prompt-processing batch size
     a.num_ctx = None
     a.model_family = None
     a._response_format = None

@@ -970,6 +970,11 @@ class Agent(AgentSetupMixin, CompactionMixin, ToolExecutionMixin, StreamingMixin
             backend_kwargs["num_ctx"] = self.num_ctx
         if self._num_predict is not None:
             backend_kwargs["num_predict"] = self._num_predict
+        # R07.17: forward num_batch to backends that support it as a per-request
+        # option (Ollama ``options.num_batch`` via the generic kwargs-to-options
+        # loop in OllamaBackend.generate). Other backends silently drop it.
+        if self._num_batch is not None:
+            backend_kwargs["num_batch"] = self._num_batch
 
         # Stop tokens: forward model-family stop sequences to backend.
         # Critical for llama-server /completion and Ollama OPENRE where the

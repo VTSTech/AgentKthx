@@ -84,6 +84,12 @@ class AgentSetupMixin:
         temperature: float | None = None,
         top_p: float | None = None,
         num_predict: int | None = None,
+        # R07.17: Prompt-processing batch size. Ollama's ``num_batch`` option
+        # (per-request, in ``options``); llama-server / TurboQuant set this at
+        # server start via ``-b`` / ``--batch-size`` (see ``turbo start``), so
+        # the value is silently ignored on those backends. Cloud backends
+        # ignore it too (no per-request batch knob).
+        num_batch: int | None = None,
         # OpenResponses parameters
         tool_choice: str | ToolChoice = "auto",  # Default per OpenResponses spec
         allowed_tools: list[str] | None = None,
@@ -132,6 +138,12 @@ class AgentSetupMixin:
             temperature: Sampling temperature (default: model-specific)
             top_p: Nucleus sampling probability (default: model-specific)
             num_predict: Maximum tokens to generate (default: model-specific)
+            num_batch: Prompt-processing batch size (Ollama per-request option;
+                ignored by llama-server/TurboQuant — set via ``turbo start
+                --batch-size N`` at server start — and by cloud backends).
+                Lower values reduce peak memory during prompt processing at
+                the cost of more iterations; useful on RAM-constrained hosts.
+                Default None lets the backend use its own default (Ollama: 512).
             tool_choice: Control tool invocation ("auto", "required", "none", or specific tool name)
             allowed_tools: List of tools the model is allowed to invoke (subset of tools)
             force_react: Enforce ReAct-only tool-call parsing (ROB-32, R07.14).
@@ -176,7 +188,7 @@ class AgentSetupMixin:
                 f"Agent.__init__ got unexpected keyword argument(s): {unknown}. "
                 f"Valid kwargs are: model, tools, backend, max_steps, memory_config, "
                 f"debug, system_prompt, soul, soul_level, num_ctx, temperature, top_p, "
-                f"num_predict, tool_choice, allowed_tools, force_react, skills_prompt, retry_on_error, "
+                f"num_predict, num_batch, tool_choice, allowed_tools, force_react, skills_prompt, retry_on_error, "
                 f"max_tool_retries, max_api_retries, truncation, thinking_level, think, "
                 f"reasoning_effort, show_reasoning, response_format, confirm_dangerous, "
                 f"persistent, session_id, memory_db. (ARCH-05: kwargs swallowing closed R07.13)"
@@ -221,6 +233,12 @@ class AgentSetupMixin:
         self._temperature = temperature
         self._top_p = top_p
         self._num_predict = num_predict
+        # R07.17: num_batch is forwarded to backends that support it as a
+        # per-request option (Ollama ``options.num_batch``). Backends that
+        # don't recognize it (cloud, llama-server OPENRE/OPENAI modes) silently
+        # drop the kwarg — no API leak because ``_build_openai_body`` only
+        # forwards a specific allowlist of optional fields.
+        self._num_batch = num_batch
 
         # ── Thinking controls (R05.8) ────────────────────────────────────
         # --thinking off|auto|low|medium|high → (think, reasoning_effort)
