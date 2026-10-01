@@ -5,6 +5,53 @@ All notable changes to AgentKthx will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [R07.18] - 2026-10-01 5:28:40 PM
+
+**llama-server kwargs forwarding fix + `repeat_penalty` / `repeat_last_n` exposure.** Fixes a parity bug where llama-server/TurboQuant/BitNet in OpenRE mode (`/completion` endpoint) silently dropped every sampling param except `temperature` / `n_predict` / `stop` — `/param top_p 0.9` and `--top-p` were no-ops on those backends. Also exposes the two most-requested llama.cpp repetition knobs via CLI + `/param`, and makes BitNet's hardcoded `repeat_penalty=1.3` a default that users can override.
+
+### Fixed — llama-server /completion kwargs forwarding (bug fix)
+
+- **`_generate_completion` + `_stream_completion` now forward kwargs** (`agentkthx/backends/llama_server.py`): before R07.18, both methods built a hardcoded 4-field body (`prompt`, `n_predict`, `temperature`, `stop`) and silently dropped every other sampling param the user set via `/param` or `--top-p`. This was a parity bug vs Ollama's generic kwargs-to-options loop. R07.18 adds the same generic forwarding loop to both completion methods — `top_p`, `top_k`, `seed`, `repeat_penalty`, `repeat_last_n`, `typical_p`, `tfs_z`, `mirostat*`, `penalty_*`, `min_p`, `grammar`, `n_keep`, etc. now all reach the server. Agent-internal kwargs (`think`, `reasoning_effort`, `num_ctx`, `num_predict`, `num_batch`, `tool_choice`, `response_format`, `truncation`) are explicitly excluded so they don't leak as llama-server params.
+- **BitNet `repeat_penalty=1.3` is now a default, not a hardcode** (`agentkthx/backends/llama_server.py`): before R07.18, the value was hardcoded and user-supplied values (via `/param repeat_penalty 1.4`) were silently dropped. Now: 1.3 applies when no kwarg is supplied; an explicit kwarg overrides it. The override works in both `_generate_completion` and `_stream_completion`.
+
+### Added — `repeat_penalty` + `repeat_last_n` exposure
+
+- **`Agent(repeat_penalty=..., repeat_last_n=...)`** (`agentkthx/core/agent_setup.py`): new constructor parameters, stored as `self._repeat_penalty` / `self._repeat_last_n`. Default `None` means "use the backend's own default" (BitNet: 1.3; others: model default). Added to the kwargs error message and the constructor signature.
+- **`--repeat-penalty <P>` + `--repeat-last-n <N>` CLI flags** (`agentkthx/shared_args.py`, `agentkthx/cli/parser.py`): added to `add_agent_args` (chat/run/agent subcommands), `add_shared_args` (example scripts), and the `test` subcommand parser. Honor the `AGENTKTHX_REPEAT_PENALTY` / `AGENTKTHX_REPEAT_LAST_N` env vars via `SharedConfig`.
+- **`/param repeat_penalty <P>` + `/param repeat_last_n <N>`** slash commands (`agentkthx/cli/commands/chat.py`): settable at runtime in chat mode. Listed in the PARAM_MATRIX as supported for `ollama` + `llama_server` + `bitnet` backends. `/param reset` clears the value and the `_explicit` pin flag.
+
+#### Behavior by backend
+
+- **Ollama native `/api/chat`** (default `--api openre`): forwarded into `body["options"]["repeat_penalty"]` / `body["options"]["repeat_last_n"]` via the existing generic kwargs-to-options loop.
+- **Ollama OpenAI-compat `/v1/chat/completions`** (`--api openai`): NOT forwarded (not in the OpenAI Chat-Completions allowlist). Switch to `--api openre` to use them with Ollama.
+- **llama-server / TurboQuant / BitNet** (OpenRE `/completion`): forwarded at the top level of the request body (R07.18 kwargs loop). BitNet's default of 1.3 applies when no value is supplied; an explicit value overrides it.
+- **Cloud backends** (ZAI, OpenRouter, Gemini, OpenAI, Huggingface, Mistral, OrcaRouter, Pollinations): silently dropped. `OpenAICompatibleBackend._build_openai_body` only forwards a specific allowlist of optional fields — `repeat_penalty` / `repeat_last_n` are not in it, so no API leak.
+
+#### Wiring
+
+- **`agentkthx/agent.py:_generate`**: forwards `self._repeat_penalty` / `self._repeat_last_n` into `backend_kwargs` when not None (non-streaming path).
+- **`agentkthx/core/streaming.py:_generate_stream_chunks` + `_prepare_stream_params`**: forwards them when not None (streaming paths).
+- **`agentkthx/cli/agent_factory.py:_build_agent`**: passes `args.repeat_penalty` / `args.repeat_last_n` to the `Agent` constructor and stashes `agent._repeat_penalty_explicit` / `agent._repeat_last_n_explicit` for parity with `_num_batch_explicit`.
+- **`agentkthx/cli/agent_factory.py:apply_model_switch`**: intentionally does NOT re-derive them on `/model` switches — they're per-request options, not functions of the model name. The user-pinned values survive as-is.
+
+### Tests
+
+- **New `tests/test_r07_18_repeat_penalty.py`** (32 tests): covers Agent constructor acceptance + signature, ARCH-05 kwargs fail-fast, non-streaming forwarding via `_generate`, streaming forwarding via `_prepare_stream_params`, CLI flag acceptance on all three arg parsers, `SharedConfig` env-var fallback, `_build_agent` wiring + `_explicit` pin flags, `apply_model_switch` preserving values across model switches, `/param` PARAM_MATRIX inclusion for ollama + llama_server + bitnet, `/param reset` clearing the `_explicit` pin flags, `OllamaBackend.generate` placing them in `body["options"]`, **`LlamaServerBackend._generate_completion` forwarding `top_p`/`top_k`/`seed`/`repeat_penalty` to the /completion body** (the R07.18 bug fix), **`LlamaServerBackend._stream_completion` forwarding `top_p` in stream mode**, **BitNet `repeat_penalty=1.3` default applying when no kwarg supplied**, **BitNet explicit `repeat_penalty` kwarg overriding the 1.3 default**, agent-internal kwargs NOT leaking to /completion, and cloud backends NOT leaking them into the OpenAI body. All tests are pure logic / mocked — no network calls.
+- **Updated `tests/test_streaming.py` + `tests/test_r07_15_maint_batch.py` + `tests/test_num_batch.py`**: the existing `__new__`-based Agent fixtures now set `a._repeat_penalty = None` / `a._repeat_last_n = None` so the streaming code paths that consult `self._repeat_penalty` don't raise `AttributeError`.
+
+### Version bump
+
+- `scripts/bump-version.sh R07.18` applied: bumped 4 sites across 3 files (`pyproject.toml`, `agentkthx/__init__.py` header + `__version__` line, `README.md`).
+- `R07.17 (0.7.17)` → `R07.18 (0.7.18)`.
+
+### Suite status
+
+- `python -m pytest tests/ -q` → **2123 passed / 16 skipped** (was 2091; +32 from `test_r07_18_repeat_penalty.py`).
+- `ruff check agentkthx/ tests/` → all checks passed.
+- `black --check agentkthx/ tests/` → 196 files would be left unchanged.
+
+---
+
 ## [R07.17] - 2026-10-01 4:49:53 PM
 
 **`num_batch` parameter support + footer improvements.** Adds the `num_batch` prompt-processing batch-size parameter throughout the agent stack (primary support for Ollama per-request `options.num_batch`, graceful no-op on every other backend). Also fixes a long-standing temp-icon spacing bug in the CLI footer and adds batch-size + TPS (tokens-per-second) segments.

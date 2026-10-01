@@ -174,6 +174,22 @@ def create_parser() -> argparse.ArgumentParser:
         "start; cloud backends ignore it). Default: backend default.",
     )
     test_parser.add_argument(
+        "--repeat-penalty",
+        type=float,
+        default=None,
+        dest="repeat_penalty",
+        help="Repetition penalty (llama.cpp native, >1.0 discourages repetition). "
+        "Ollama + llama-server/TurboQuant/BitNet only; cloud backends drop it.",
+    )
+    test_parser.add_argument(
+        "--repeat-last-n",
+        type=int,
+        default=None,
+        dest="repeat_last_n",
+        help="Tokens to consider for repetition penalty (llama.cpp native). "
+        "0 = full context, -1 = model default. Ollama + llama-server only.",
+    )
+    test_parser.add_argument(
         "--temp",
         "--temperature",
         type=float,

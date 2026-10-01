@@ -307,6 +307,12 @@ def _build_agent(args: argparse.Namespace, config) -> Agent:
         # R07.17: num_batch forwarded to Ollama as a per-request option.
         # Silently ignored by backends that don't recognize it.
         num_batch=getattr(args, "num_batch", None),
+        # R07.18: llama.cpp repetition sampling — forwarded to Ollama
+        # (options.*) and llama-server (top-level on /completion). Cloud
+        # backends silently drop them (not in OpenAI allowlist). BitNet
+        # has a default of 1.3 — an explicit value here overrides it.
+        repeat_penalty=getattr(args, "repeat_penalty", None),
+        repeat_last_n=getattr(args, "repeat_last_n", None),
         skills_prompt=skills_prompt,
         retry_on_error=not getattr(args, "no_retry", False),
         max_tool_retries=getattr(args, "max_tool_retries", None) or config.max_tool_retries,
@@ -335,6 +341,9 @@ def _build_agent(args: argparse.Namespace, config) -> Agent:
     # so a switch never re-derives it; the pin flag is for parity with
     # num_ctx/num_predict so /param reset + /model interact consistently).
     agent._num_batch_explicit = getattr(args, "num_batch", None) is not None
+    # R07.18: same pin semantics for repeat_penalty / repeat_last_n.
+    agent._repeat_penalty_explicit = getattr(args, "repeat_penalty", None) is not None
+    agent._repeat_last_n_explicit = getattr(args, "repeat_last_n", None) is not None
     # Set compaction threshold from --compaction arg
     agent._compaction_threshold = compaction_threshold
 

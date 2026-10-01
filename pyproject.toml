@@ -4,10 +4,9 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agentkthx"
-version = "0.7.17"
+version = "0.7.18"
 description = "⚛️ AgentKthx - A minimal, hackable agentic framework for local LLM inference"
 readme = "README.md"
-license = {text = "MIT"}
 authors = [
     {name = "VTSTech", email = "veritas@vts-tech.org"}
 ]

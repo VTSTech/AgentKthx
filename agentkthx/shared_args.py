@@ -11,6 +11,8 @@ All test/example scripts can use these standard arguments:
   --num-ctx TOKENS    Context window size
   --num-predict TOKENS Max tokens to generate
   --num-batch N       Prompt-processing batch size (Ollama)
+  --repeat-penalty P  Repetition penalty (llama.cpp native)
+  --repeat-last-n N   Repetition window (llama.cpp native)
   --fast              Fast mode preset (ctx=2048, predict=256)
 
 Usage in example scripts:
@@ -48,6 +50,8 @@ class SharedConfig:
     num_ctx: Optional[int] = None
     num_predict: Optional[int] = None
     num_batch: Optional[int] = None
+    repeat_penalty: Optional[float] = None
+    repeat_last_n: Optional[int] = None
     temperature: Optional[float] = None
     top_p: Optional[float] = None
     fast: bool = False
@@ -127,6 +131,26 @@ def add_shared_args(parser: argparse.ArgumentParser) -> None:
         help="Prompt-processing batch size (Ollama per-request option; "
         "llama-server/TurboQuant use 'turbo start --batch-size N' at server "
         "start). Lower values reduce peak memory during prompt eval.",
+    )
+    parser.add_argument(
+        "--repeat-penalty",
+        type=float,
+        default=None,
+        dest="repeat_penalty",
+        metavar="PENALTY",
+        help="Repetition penalty (llama.cpp native, >1.0 discourages repetition). "
+        "Forwarded to Ollama + llama-server/TurboQuant/BitNet; cloud backends "
+        "silently drop it. BitNet default is 1.3 for small models prone to looping.",
+    )
+    parser.add_argument(
+        "--repeat-last-n",
+        type=int,
+        default=None,
+        dest="repeat_last_n",
+        metavar="N",
+        help="Number of recent tokens to consider for repetition penalty "
+        "(llama.cpp native, in tokens). 0 = full context, -1 = model default. "
+        "Forwarded to Ollama + llama-server/TurboQuant/BitNet.",
     )
     parser.add_argument(
         "--temp",
@@ -276,6 +300,23 @@ def add_agent_args(
         "start; cloud backends ignore it). Default: backend default.",
     )
     parser.add_argument(
+        "--repeat-penalty",
+        type=float,
+        default=None,
+        dest="repeat_penalty",
+        help="Repetition penalty (llama.cpp native, >1.0 discourages repetition). "
+        "Forwarded to Ollama + llama-server/TurboQuant/BitNet; cloud backends "
+        "silently drop it. BitNet default is 1.3.",
+    )
+    parser.add_argument(
+        "--repeat-last-n",
+        type=int,
+        default=None,
+        dest="repeat_last_n",
+        help="Tokens to consider for repetition penalty (llama.cpp native). "
+        "0 = full context, -1 = model default. Ollama + llama-server only.",
+    )
+    parser.add_argument(
         "--temp",
         "--temperature",
         type=float,
@@ -408,6 +449,9 @@ def parse_shared_args(args) -> SharedConfig:
         num_ctx=getattr(args, "num_ctx", None) or _env_int("AGENTKTHX_NUM_CTX"),
         num_predict=getattr(args, "num_predict", None) or _env_int("AGENTKTHX_NUM_PREDICT"),
         num_batch=getattr(args, "num_batch", None) or _env_int("AGENTKTHX_NUM_BATCH"),
+        repeat_penalty=getattr(args, "repeat_penalty", None)
+        or _env_float("AGENTKTHX_REPEAT_PENALTY"),
+        repeat_last_n=getattr(args, "repeat_last_n", None) or _env_int("AGENTKTHX_REPEAT_LAST_N"),
         temperature=getattr(args, "temperature", None) or _env_float("AGENTKTHX_TEMPERATURE"),
         top_p=getattr(args, "top_p", None) or _env_float("AGENTKTHX_TOP_P"),
         fast=getattr(args, "fast", False) or os.environ.get("AGENTKTHX_FAST", "0") == "1",

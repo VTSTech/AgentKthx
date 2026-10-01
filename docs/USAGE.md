@@ -111,6 +111,8 @@ In chat mode, use these slash commands to manage tools, skills, and models mid-s
 /skill codebase-audit  # Load a skill mid-session (appends to system prompt)
 /param temperature 0.3   # Set generation parameters
 /param num_batch 256     # Ollama: per-request prompt-processing batch size
+/param repeat_penalty 1.4  # llama.cpp: discourages repetition (BitNet default 1.3)
+/param repeat_last_n 128   # llama.cpp: repetition window in tokens
 /status              # Show model, backend, tools, skills, memory info
 /help                # Show all slash commands
 ```
@@ -696,6 +698,8 @@ agentkthx config --urls  # Show only URLs
 | `--force-react` | Force ReAct text-based tool calling (skip native tool detection) |
 | `--num-predict <tokens>` | Maximum tokens to generate |
 | `--num-batch <n>` | Prompt-processing batch size (Ollama per-request `options.num_batch`; llama-server/TurboQuant use `turbo start --batch-size N` at server start; cloud backends ignore it). Lower values reduce peak RAM during prompt eval at the cost of more iterations. Default: backend default (Ollama: 512). |
+| `--repeat-penalty <p>` | Repetition penalty (llama.cpp native, >1.0 discourages repetition). Forwarded to Ollama + llama-server/TurboQuant/BitNet; cloud backends silently drop it. BitNet default is 1.3 for small models prone to looping. |
+| `--repeat-last-n <n>` | Tokens to consider for repetition penalty (llama.cpp native). 0 = full context, -1 = model default. Ollama + llama-server only. |
 | `--stream` | Stream output in real-time |
 | `-q, --quiet` | Suppress header and summary output |
 | `-v, --verbose` | Verbose output |

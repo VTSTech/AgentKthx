@@ -90,6 +90,15 @@ class AgentSetupMixin:
         # the value is silently ignored on those backends. Cloud backends
         # ignore it too (no per-request batch knob).
         num_batch: int | None = None,
+        # R07.18: llama.cpp repetition sampling. Forwarded to Ollama
+        # (``options.repeat_penalty`` / ``options.repeat_last_n``) and
+        # llama-server/TurboQuant/BitNet (top-level ``repeat_penalty`` /
+        # ``repeat_last_n`` on /completion). Cloud backends silently drop
+        # them (not in the OpenAI Chat-Completions allowlist). BitNet has
+        # a default of 1.3 baked into the backend — an explicit value here
+        # overrides it.
+        repeat_penalty: float | None = None,
+        repeat_last_n: int | None = None,
         # OpenResponses parameters
         tool_choice: str | ToolChoice = "auto",  # Default per OpenResponses spec
         allowed_tools: list[str] | None = None,
@@ -144,6 +153,14 @@ class AgentSetupMixin:
                 Lower values reduce peak memory during prompt processing at
                 the cost of more iterations; useful on RAM-constrained hosts.
                 Default None lets the backend use its own default (Ollama: 512).
+            repeat_penalty: Repetition penalty (llama.cpp native, distinct
+                from OpenAI's ``frequency_penalty``). Values >1.0 discourage
+                repetition; 1.3 is the BitNet default for small models prone
+                to looping. Forwarded to Ollama + llama-server/TurboQuant/
+                BitNet; cloud backends silently drop it. Default None.
+            repeat_last_n: Number of recent tokens to consider for repetition
+                penalty (llama.cpp native, in tokens). 0 = use full context;
+                -1 = use the model's default (typically 64). Default None.
             tool_choice: Control tool invocation ("auto", "required", "none", or specific tool name)
             allowed_tools: List of tools the model is allowed to invoke (subset of tools)
             force_react: Enforce ReAct-only tool-call parsing (ROB-32, R07.14).
@@ -188,7 +205,8 @@ class AgentSetupMixin:
                 f"Agent.__init__ got unexpected keyword argument(s): {unknown}. "
                 f"Valid kwargs are: model, tools, backend, max_steps, memory_config, "
                 f"debug, system_prompt, soul, soul_level, num_ctx, temperature, top_p, "
-                f"num_predict, num_batch, tool_choice, allowed_tools, force_react, skills_prompt, retry_on_error, "
+                f"num_predict, num_batch, repeat_penalty, repeat_last_n, "
+                f"tool_choice, allowed_tools, force_react, skills_prompt, retry_on_error, "
                 f"max_tool_retries, max_api_retries, truncation, thinking_level, think, "
                 f"reasoning_effort, show_reasoning, response_format, confirm_dangerous, "
                 f"persistent, session_id, memory_db. (ARCH-05: kwargs swallowing closed R07.13)"
@@ -239,6 +257,12 @@ class AgentSetupMixin:
         # drop the kwarg — no API leak because ``_build_openai_body`` only
         # forwards a specific allowlist of optional fields.
         self._num_batch = num_batch
+        # R07.18: llama.cpp repetition sampling. Forwarded to Ollama
+        # (options.repeat_penalty / options.repeat_last_n) and llama-server
+        # (top-level repeat_penalty / repeat_last_n on /completion). Cloud
+        # backends silently drop them (not in the OpenAI allowlist).
+        self._repeat_penalty = repeat_penalty
+        self._repeat_last_n = repeat_last_n
 
         # ── Thinking controls (R05.8) ────────────────────────────────────
         # --thinking off|auto|low|medium|high → (think, reasoning_effort)

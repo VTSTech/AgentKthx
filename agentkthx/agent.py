@@ -1001,6 +1001,12 @@ class Agent(AgentSetupMixin, CompactionMixin, ToolExecutionMixin, StreamingMixin
         # loop in OllamaBackend.generate). Other backends silently drop it.
         if self._num_batch is not None:
             backend_kwargs["num_batch"] = self._num_batch
+        # R07.18: forward llama.cpp repetition sampling to Ollama (options.*)
+        # and llama-server (top-level on /completion). Cloud backends drop.
+        if self._repeat_penalty is not None:
+            backend_kwargs["repeat_penalty"] = self._repeat_penalty
+        if self._repeat_last_n is not None:
+            backend_kwargs["repeat_last_n"] = self._repeat_last_n
 
         # Stop tokens: forward model-family stop sequences to backend.
         # Critical for llama-server /completion and Ollama OPENRE where the

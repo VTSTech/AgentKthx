@@ -302,6 +302,8 @@ def _make_stream_agent():
     a._top_p = None
     a._num_predict = None
     a._num_batch = None  # R07.17: per-request prompt-processing batch size
+    a._repeat_penalty = None  # R07.18: llama.cpp repetition sampling
+    a._repeat_last_n = None  # R07.18: llama.cpp repetition window
     a.num_ctx = None
     a.model_family = None
     a._response_format = None

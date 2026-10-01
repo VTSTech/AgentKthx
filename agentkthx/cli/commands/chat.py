@@ -674,6 +674,30 @@ def cmd_chat(args: argparse.Namespace) -> int:
                         "backends": {"ollama"},
                         "agent_attr": "_num_batch",
                     },
+                    # ── R07.18: llama.cpp repetition sampling ──────────────
+                    "repeat_penalty": {
+                        "type": "float",
+                        "range": "0.0-2.0 (1.0=off)",
+                        "description": (
+                            "Repetition penalty (llama.cpp native, >1.0 discourages "
+                            "repetition). BitNet default is 1.3 for small models prone "
+                            "to looping. Forwarded to Ollama (options.*) + llama-server "
+                            "(top-level on /completion). Cloud backends drop it."
+                        ),
+                        "backends": {"ollama", "llama_server", "bitnet"},
+                        "agent_attr": "_repeat_penalty",
+                    },
+                    "repeat_last_n": {
+                        "type": "int",
+                        "range": "-1 to N (0=full ctx, -1=model default)",
+                        "description": (
+                            "Tokens to consider for repetition penalty (llama.cpp native). "
+                            "0 = full context, -1 = model default (typically 64). "
+                            "Ollama + llama-server/TurboQuant/BitNet only."
+                        ),
+                        "backends": {"ollama", "llama_server", "bitnet"},
+                        "agent_attr": "_repeat_last_n",
+                    },
                     # ── OpenAI / OpenRouter-specific ────────────────────────
                     "top_k": {
                         "type": "int",
@@ -818,6 +842,11 @@ def cmd_chat(args: argparse.Namespace) -> int:
                             # so /model never re-derives it — but we still clear the
                             # pin flag for parity with num_ctx / num_predict.
                             agent._num_batch_explicit = False
+                        elif attr == "_repeat_penalty":
+                            # R07.18: same per-request semantics as num_batch.
+                            agent._repeat_penalty_explicit = False
+                        elif attr == "_repeat_last_n":
+                            agent._repeat_last_n_explicit = False
                     else:
                         agent._runtime_kwargs.pop(name, None)
                     print(green(f"Reset {name} to model default."))
@@ -953,6 +982,11 @@ def cmd_chat(args: argparse.Namespace) -> int:
                         # re-derives it (per-request, not model-derived), the
                         # pin flag is consulted by /param reset for parity.
                         agent._num_batch_explicit = True
+                    elif attr == "_repeat_penalty":
+                        # R07.18: same per-request pin semantics as num_batch.
+                        agent._repeat_penalty_explicit = True
+                    elif attr == "_repeat_last_n":
+                        agent._repeat_last_n_explicit = True
                 else:
                     agent._runtime_kwargs[name] = value
 

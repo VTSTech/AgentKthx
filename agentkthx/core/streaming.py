@@ -788,6 +788,11 @@ class StreamingMixin:
         # backends that don't support it — see agent.py:_generate for details).
         if self._num_batch is not None:
             backend_kwargs["num_batch"] = self._num_batch
+        # R07.18: forward llama.cpp repetition sampling.
+        if self._repeat_penalty is not None:
+            backend_kwargs["repeat_penalty"] = self._repeat_penalty
+        if self._repeat_last_n is not None:
+            backend_kwargs["repeat_last_n"] = self._repeat_last_n
 
         # R06.3: Forward runtime kwargs set via /param slash command.
         # These are params that don't have a dedicated agent attribute
@@ -1023,6 +1028,11 @@ class StreamingMixin:
         # dropped by backends that don't recognize it).
         if self._num_batch is not None:
             backend_kwargs["num_batch"] = self._num_batch
+        # R07.18: forward llama.cpp repetition sampling.
+        if self._repeat_penalty is not None:
+            backend_kwargs["repeat_penalty"] = self._repeat_penalty
+        if self._repeat_last_n is not None:
+            backend_kwargs["repeat_last_n"] = self._repeat_last_n
         if hasattr(self, "_runtime_kwargs") and self._runtime_kwargs:
             for k, v in self._runtime_kwargs.items():
                 backend_kwargs[k] = v

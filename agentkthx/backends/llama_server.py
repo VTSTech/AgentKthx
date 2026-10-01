@@ -418,12 +418,48 @@ class LlamaServerBackend(OllamaBackend):
             "stop": stop_sequences,
         }
 
-        # BitNet: enable repeat penalty to prevent degenerate loops
-        # (e.g., model repeating "Final Answer: 42" indefinitely).
-        # 0.5b models are especially prone to repetition — 1.3 is the
-        # minimum to break the cycle; 1.2 is insufficient.
+        # R07.18: BitNet default — repeat penalty prevents degenerate loops
+        # on 0.5b models (e.g. "Final Answer: 42" infinitely). 1.3 is the
+        # minimum to break the cycle; 1.2 is insufficient. This is a DEFAULT,
+        # not a hardcode — if the caller passes repeat_penalty via kwargs
+        # (e.g. /param repeat_penalty 1.4), the kwargs loop below overrides
+        # this value. Before R07.18, repeat_penalty was hardcoded and
+        # user-supplied values were silently dropped.
+        # NOTE: repeat_penalty is NOT in _already_set below — we WANT the
+        # kwargs loop to forward it so user values override this default.
         if self._bitnet_mode:
             body["repeat_penalty"] = 1.3
+
+        # R07.18: forward llama.cpp sampling params from kwargs (top_p,
+        # top_k, seed, repeat_penalty, repeat_last_n, typical_p, tfs_z,
+        # mirostat*, penalty_*, min_p, grammar, n_keep, etc.). Before
+        # R07.18, only the 4 fields above were sent — every other param
+        # the user set via /param or --top-p was silently dropped, a
+        # parity bug vs Ollama's generic kwargs-to-options loop.
+        # Skip keys that are already in the body or are handled specially.
+        # NOTE: repeat_penalty is intentionally NOT skipped — if the caller
+        # supplied it, it should override the BitNet default set above.
+        _already_set = {"prompt", "n_predict", "temperature", "stop", "stream"}
+        _agent_internal = (
+            "think",
+            "reasoning_effort",
+            "tool_choice",
+            "response_format",
+            "truncation",
+            "num_ctx",
+            "num_predict",
+            "num_batch",
+        )
+        for key, value in kwargs.items():
+            if key in _already_set:
+                continue
+            if key in _agent_internal:
+                continue
+            # Forward everything else verbatim — llama-server accepts 25+
+            # sampling params at the top level of the /completion body.
+            # If key is 'repeat_penalty' and we're in BitNet mode, this
+            # overrides the 1.3 default set above (intentional).
+            body[key] = value
 
         start_time = time.time()
 
@@ -510,9 +546,31 @@ class LlamaServerBackend(OllamaBackend):
             "stop": stop_sequences,
         }
 
-        # BitNet: enable repeat penalty to prevent degenerate loops
+        # R07.18: BitNet default — same logic as _generate_completion above.
+        # Default, not hardcode — kwargs loop below can override.
         if self._bitnet_mode:
             body["repeat_penalty"] = 1.3
+
+        # R07.18: forward llama.cpp sampling params from kwargs (parity with
+        # _generate_completion). Before R07.18, streaming mode dropped all
+        # sampling params except the 4 hardcoded ones.
+        _already_set = {"prompt", "n_predict", "temperature", "stop", "stream"}
+        _agent_internal = (
+            "think",
+            "reasoning_effort",
+            "tool_choice",
+            "response_format",
+            "truncation",
+            "num_ctx",
+            "num_predict",
+            "num_batch",
+        )
+        for key, value in kwargs.items():
+            if key in _already_set:
+                continue
+            if key in _agent_internal:
+                continue
+            body[key] = value
 
         try:
             req = urllib.request.Request(

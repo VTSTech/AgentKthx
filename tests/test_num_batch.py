@@ -145,6 +145,9 @@ def _make_minimal_agent():
     a._temperature = None
     a._top_p = None
     a._num_predict = None
+    a._num_batch = None
+    a._repeat_penalty = None  # R07.18
+    a._repeat_last_n = None  # R07.18
     a.num_ctx = None
     a.model_family = None
     a._response_format = None
@@ -233,6 +236,8 @@ class TestStreamingForwardsNumBatch(unittest.TestCase):
         a.truncation = "auto"
         a.debug = False
         a._num_batch = 512
+        a._repeat_penalty = None  # R07.18
+        a._repeat_last_n = None  # R07.18
 
         # Use native generate_stream path (text-only)
         def _gen(**kwargs):
@@ -278,6 +283,8 @@ class TestStreamingForwardsNumBatch(unittest.TestCase):
         a.truncation = "auto"
         a.debug = False
         a._num_batch = 128
+        a._repeat_penalty = None  # R07.18
+        a._repeat_last_n = None  # R07.18
         a._runtime_kwargs = {}
 
         params = a._prepare_stream_params([])
@@ -314,6 +321,8 @@ class TestStreamingForwardsNumBatch(unittest.TestCase):
         a.truncation = "auto"
         a.debug = False
         a._num_batch = None  # explicit None
+        a._repeat_penalty = None  # R07.18
+        a._repeat_last_n = None  # R07.18
         a._runtime_kwargs = {}
 
         params = a._prepare_stream_params([])
