@@ -5,7 +5,7 @@ All notable changes to AgentKthx will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [R07.17] - 2026-10-02
+## [R07.17] - 2026-10-01 4:49:53 PM
 
 **`num_batch` parameter support + footer improvements.** Adds the `num_batch` prompt-processing batch-size parameter throughout the agent stack (primary support for Ollama per-request `options.num_batch`, graceful no-op on every other backend). Also fixes a long-standing temp-icon spacing bug in the CLI footer and adds batch-size + TPS (tokens-per-second) segments.
 
