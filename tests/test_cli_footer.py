@@ -47,8 +47,15 @@ def _agent(**kw):
     # footer's "only show when set" guard works correctly.
     if "_num_batch" in kw:
         a._num_batch = kw["_num_batch"]
-    if "_run_start_time" in kw:
-        a._run_start_time = kw["_run_start_time"]
+    # Per-response TPS fields (set by _generate_with_retry after each
+    # successful generation call). Tests that want TPS visible set all
+    # three: _gen_start_time, _gen_end_time, _gen_tokens_out.
+    if "_gen_start_time" in kw:
+        a._gen_start_time = kw["_gen_start_time"]
+    if "_gen_end_time" in kw:
+        a._gen_end_time = kw["_gen_end_time"]
+    if "_gen_tokens_out" in kw:
+        a._gen_tokens_out = kw["_gen_tokens_out"]
     return a
 
 
@@ -192,21 +199,32 @@ class TestFooterBatchSize(unittest.TestCase):
 
 
 class TestFooterTPS(unittest.TestCase):
-    """Line 2 shows ⚡ N.N tok/s when _run_start_time is set and output > 0."""
+    """Line 2 shows ⚡ N.N tok/s for the most recent completed generation.
 
-    def test_tps_shown_during_run(self):
-        """When _run_start_time is set and _running_tokens_out > 0, TPS appears."""
+    R07.17: per-RESPONSE TPS (not run-average). Computed from
+    _gen_tokens_out / (_gen_end_time - _gen_start_time), all three set
+    by _generate_with_retry after each successful generate_fn() call.
+    """
+
+    def test_tps_shown_after_generation_completes(self):
+        """When _gen_start/end_time + _gen_tokens_out are set, TPS appears."""
         import time as _time
 
-        a = _agent(_run_start_time=_time.time() - 10.0)  # 10s ago
-        a._running_tokens_in = 100
-        a._running_tokens_out = 200
+        _now = _time.time()
+        a = _agent(
+            _gen_start_time=_now - 5.0,  # generation started 5s ago
+            _gen_end_time=_now,  # generation just completed
+            _gen_tokens_out=100,  # 100 tokens in 5s = 20.0 tok/s
+        )
+        a._running_tokens_in = 200
+        a._running_tokens_out = 100
         line = footer_line2(a)
         self.assertIn("\u26a1", line)  # lightning bolt
         self.assertIn("tok/s", line)
+        self.assertIn("20.0", line)
 
-    def test_tps_omitted_when_no_run_start(self):
-        """When _run_start_time is not set, TPS is omitted."""
+    def test_tps_omitted_when_no_generation_yet(self):
+        """Before the first generation: _gen_start_time is 0 → TPS omitted."""
         a = _agent()
         a._running_tokens_in = 100
         a._running_tokens_out = 200
@@ -214,24 +232,77 @@ class TestFooterTPS(unittest.TestCase):
         self.assertNotIn("tok/s", line)
 
     def test_tps_omitted_when_no_output_tokens(self):
-        """When _running_tokens_out is 0, TPS is omitted (avoid div-by-zero)."""
+        """When _gen_tokens_out is 0, TPS is omitted (avoid div-by-zero)."""
         import time as _time
 
-        a = _agent(_run_start_time=_time.time() - 5.0)
+        _now = _time.time()
+        a = _agent(
+            _gen_start_time=_now - 5.0,
+            _gen_end_time=_now,
+            _gen_tokens_out=0,
+        )
         a._running_tokens_in = 100
         a._running_tokens_out = 0
         line = footer_line2(a)
         self.assertNotIn("tok/s", line)
 
+    def test_tps_omitted_when_generation_in_progress(self):
+        """When _gen_end_time is 0 (generation still running), TPS omitted.
+
+        The footer only shows TPS for COMPLETED responses — live TPS during
+        streaming would require per-chunk token counting which isn't
+        available (usage arrives in the final SSE chunk only).
+        """
+        import time as _time
+
+        a = _agent(
+            _gen_start_time=_time.time() - 3.0,  # started 3s ago
+            # _gen_end_time NOT set → generation in progress
+            _gen_tokens_out=0,
+        )
+        a._running_tokens_in = 100
+        a._running_tokens_out = 50
+        line = footer_line2(a)
+        self.assertNotIn("tok/s", line)
+
+    def test_tps_reflects_single_response_not_run_average(self):
+        """TPS = tokens / gen_elapsed, NOT tokens / run_elapsed.
+
+        This is the key difference from run-average TPS: a 10s run with
+        5s of generation + 5s of tool execution should show TPS based on
+        the 5s generation, not the 10s run. Verified by setting gen
+        timing that differs from what run-average would compute.
+        """
+        import time as _time
+
+        _now = _time.time()
+        # 200 tokens generated in 2s (fast generation) but the run has
+        # been going for 20s (slow tool execution). TPS should show
+        # 100.0 (200/2), NOT 10.0 (200/20).
+        a = _agent(
+            _gen_start_time=_now - 2.0,
+            _gen_end_time=_now,
+            _gen_tokens_out=200,
+        )
+        a._running_tokens_in = 500
+        a._running_tokens_out = 200
+        line = footer_line2(a)
+        self.assertIn("100.0", line)  # 200 tokens / 2s = 100 tok/s
+        self.assertNotIn("10.0", line)  # NOT the run-average
+
     def test_tps_value_is_reasonable(self):
         """200 tokens in 10s → ~20.0 tok/s."""
         import time as _time
 
-        a = _agent(_run_start_time=_time.time() - 10.0)
+        _now = _time.time()
+        a = _agent(
+            _gen_start_time=_now - 10.0,
+            _gen_end_time=_now,
+            _gen_tokens_out=200,
+        )
         a._running_tokens_in = 100
         a._running_tokens_out = 200
         line = footer_line2(a)
-        # The TPS value should be around 20.0 (allow some slack for timing)
         self.assertIn("20.", line)
 
 

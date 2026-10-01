@@ -213,7 +213,27 @@ class Agent(AgentSetupMixin, CompactionMixin, ToolExecutionMixin, StreamingMixin
         _terminated = False
         while True:
             try:
+                # R07.17: mark the start of THIS generation call for
+                # per-response TPS display. Updated on each retry so
+                # the timing reflects the successful attempt, not the
+                # retries + backoff delays.
+                self._gen_start_time = time.time()
                 gen_response = generate_fn()
+                # R07.17: generation succeeded — record end time + output
+                # tokens for per-response TPS. The footer computes:
+                #   TPS = _gen_tokens_out / (_gen_end_time - _gen_start_time)
+                # Falls back to len(content)//4 when usage is missing
+                # (some streaming backends don't emit usage in the final
+                # SSE chunk — the estimate keeps TPS visible).
+                self._gen_end_time = time.time()
+                if gen_response is not None:
+                    _usage = gen_response.get("usage", {}) or {}
+                    _toks = _usage.get("completion_tokens", 0) or 0
+                    if _toks == 0:
+                        # Fallback: estimate from content length
+                        _content = gen_response.get("content", "") or ""
+                        _toks = len(_content) // 4
+                    self._gen_tokens_out = _toks
                 break
             except KeyboardInterrupt:
                 raise
@@ -759,15 +779,9 @@ class Agent(AgentSetupMixin, CompactionMixin, ToolExecutionMixin, StreamingMixin
         """
         # PERF-01: streaming path. Delegates to the streaming wrapper
         # (same AgentRun shape; only the display behavior differs).
-        # R07.17: mark run start for TPS display in the CLI footer.
-        # Set here (before the branch) so both streaming and non-streaming
-        # paths get it. The streaming path also resets token totals at its
-        # own entry point (_run_core_streaming); the non-streaming path
-        # relies on _run_loop_iteration's start_time for its own timing.
-        import time as _time
-
-        self._run_start_time = _time.time()
-
+        # R07.17: per-response TPS timing is now tracked in
+        # _generate_with_retry (the single chokepoint for both paths),
+        # not here — see _gen_start_time / _gen_end_time / _gen_tokens_out.
         if stream:
             return self._run_core_streaming(prompt)
 
@@ -809,9 +823,9 @@ class Agent(AgentSetupMixin, CompactionMixin, ToolExecutionMixin, StreamingMixin
         # Reset running token totals for this run
         self._running_tokens_in = 0
         self._running_tokens_out = 0
-        # R07.17: _run_start_time is set by the caller (_run_core) before
-        # delegating to this method, so both streaming and non-streaming
-        # paths share the same start timestamp.
+        # R07.17: per-response TPS timing (_gen_start_time / _gen_end_time /
+        # _gen_tokens_out) is set in _generate_with_retry, not here —
+        # it resets on each generate_fn() call, not per-run.
 
         def _on_step_start(step_num: int) -> None:
             # ROB-06: Check if memory needs compaction before generating.

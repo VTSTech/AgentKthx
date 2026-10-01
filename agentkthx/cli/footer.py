@@ -16,8 +16,11 @@ Pure formatting — stdlib only, no state, no I/O.
 R07.17 additions:
 - Line 1: optional batch-size segment (🔧 N) shown when ``agent._num_batch``
   is set. Placed after temp.
-- Line 2: optional TPS segment (⚡ N.N tok/s) shown when
-  ``agent._run_start_time`` is set and output tokens > 0.
+- Line 2: optional TPS segment (⚡ N.N tok/s) showing PER-RESPONSE tokens/sec
+  for the most recent completed generation call (not run-average — run-average
+  skews low because it includes tool execution + memory update gaps between
+  generation calls). Computed from ``agent._gen_start_time`` /
+  ``_gen_end_time`` / ``_gen_tokens_out`` (set in ``_generate_with_retry``).
 - Fixed temp icon spacing: removed redundant VS16 from thermometer emoji
   (U+1F321 defaults to emoji presentation; the VS16 was rendering as extra
   blank columns on some terminals, causing the large gap between 🌡️ and
@@ -27,8 +30,6 @@ R07.17 additions:
 """
 
 from __future__ import annotations
-
-import time
 
 from .. import __version__
 from ..colors import cyan, dim, green, red, yellow
@@ -114,9 +115,14 @@ def footer_line2(agent, session_tokens_in: int = 0, session_tokens_out: int = 0)
     (`_running_tokens_in/out`, updated during the streaming loop — the
     session counters alone only advance after `agent.run()` returns).
 
-    R07.17: added optional TPS segment (⚡ N.N tok/s) computed from
-    ``agent._run_start_time`` and ``_running_tokens_out``. Shown only when
-    a run is in progress (start time set) and output tokens > 0.
+    R07.17: TPS segment (⚡ N.N tok/s) shows PER-RESPONSE tokens/sec for the
+    most recent completed generation call. Computed from:
+      ``agent._gen_tokens_out / (_gen_end_time - _gen_start_time)``
+    where ``_gen_start_time`` / ``_gen_end_time`` / ``_gen_tokens_out`` are
+    set in ``_generate_with_retry`` (the single chokepoint for both streaming
+    and non-streaming paths). This avoids the run-average skew where tool
+    execution time, memory updates, and other non-generation gaps drag the
+    average down. Omitted before the first generation completes.
     """
     backend = getattr(agent.backend, "backend_type", None)
     bname = (
@@ -144,15 +150,26 @@ def footer_line2(agent, session_tokens_in: int = 0, session_tokens_out: int = 0)
         f"{dim(_e_be)} {green(bname)}",
         f"{dim(_e_tok)} {yellow(tok_str)}",
     ]
-    # R07.17: TPS (output tokens per second) — only shown when a run is
-    # in progress and we have output tokens to measure. Computed as
-    # _running_tokens_out / elapsed_seconds. Uses the agent's
-    # _run_start_time (set at the start of each run() call).
-    _run_start = getattr(agent, "_run_start_time", 0.0)
-    if _run_start and _tok_out > 0:
-        _elapsed = time.time() - _run_start
-        if _elapsed > 0.1:  # avoid div-by-zero / jitter on very fast steps
-            _tps = _tok_out / _elapsed
+    # R07.17: per-RESPONSE TPS (not run-average). Shows tokens/sec for the
+    # most recent completed generation call only — avoids skew from tool
+    # execution time, memory updates, and inter-step gaps.
+    # Use explicit getattr-with-default to avoid MagicMock auto-attr creation
+    # in test stubs (a MagicMock returns a new MagicMock for any attr access,
+    # which would fail the `> 0` comparison below with TypeError).
+    _gen_start = getattr(agent, "_gen_start_time", 0.0)
+    _gen_end = getattr(agent, "_gen_end_time", 0.0)
+    _gen_tokens = getattr(agent, "_gen_tokens_out", 0)
+    # Coerce to numeric in case a test stub left a non-int (MagicMock)
+    if not isinstance(_gen_start, (int, float)):
+        _gen_start = 0.0
+    if not isinstance(_gen_end, (int, float)):
+        _gen_end = 0.0
+    if not isinstance(_gen_tokens, int):
+        _gen_tokens = 0
+    if _gen_start and _gen_end and _gen_tokens > 0:
+        _elapsed = _gen_end - _gen_start
+        if _elapsed > 0.001:  # avoid div-by-zero on instant returns
+            _tps = _gen_tokens / _elapsed
             parts.append(f"{dim(_e_tps)} {yellow(f'{_tps:.1f}')} {dim('tok/s')}")
     parts.append(f"{dim('ctx')} {_ctx_pct_str}")
     if agent.debug:

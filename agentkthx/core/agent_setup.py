@@ -310,12 +310,21 @@ class AgentSetupMixin:
         # Reset at the start of each run() call.
         self._running_tokens_in = 0
         self._running_tokens_out = 0
-        # R07.17: timestamp when the current run() started, for TPS
-        # (tokens-per-second) display in the CLI footer. Set to 0.0 at
-        # init; set to time.time() at the start of each _run_core /
-        # _run_core_streaming call. The footer reads this via getattr
-        # and computes TPS = _running_tokens_out / (now - _run_start_time).
-        self._run_start_time = 0.0
+        # R07.17: per-RESPONSE TPS timing (not per-run). The footer shows
+        # TPS for the most recent completed generation call, not the
+        # run-average — run-average skews low because it includes tool
+        # execution time, memory updates, and other non-generation gaps.
+        #   _gen_start_time: set at the start of each generate_fn() call
+        #                    (in _generate_with_retry, the single chokepoint
+        #                    for both streaming and non-streaming paths)
+        #   _gen_end_time:   set when generate_fn() returns successfully
+        #   _gen_tokens_out: completion_tokens from the response usage dict
+        #                    (falls back to len(content)//4 if usage missing)
+        # The footer computes TPS = _gen_tokens_out / (_gen_end_time - _gen_start_time).
+        # Before the first generation: all three are 0/0.0 → TPS omitted.
+        self._gen_start_time = 0.0
+        self._gen_end_time = 0.0
+        self._gen_tokens_out = 0
         # Optional callback invoked after each step completes, used by
         # the CLI to refresh the persistent footer during streaming.
         # Signature: callback(step_num, tokens_in, tokens_out)
