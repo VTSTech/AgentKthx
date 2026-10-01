@@ -5,9 +5,9 @@ All notable changes to AgentKthx will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [R07.18] - 2026-10-01 5:28:40 PM
+## [R07.18] - 2026-10-02
 
-**llama-server kwargs forwarding fix + `repeat_penalty` / `repeat_last_n` exposure.** Fixes a parity bug where llama-server/TurboQuant/BitNet in OpenRE mode (`/completion` endpoint) silently dropped every sampling param except `temperature` / `n_predict` / `stop` — `/param top_p 0.9` and `--top-p` were no-ops on those backends. Also exposes the two most-requested llama.cpp repetition knobs via CLI + `/param`, and makes BitNet's hardcoded `repeat_penalty=1.3` a default that users can override.
+**llama-server kwargs forwarding fix + `repeat_penalty` / `repeat_last_n` exposure + footer quantization + human-friendly token sizes.** Fixes a parity bug where llama-server/TurboQuant/BitNet in OpenRE mode silently dropped every sampling param except `temperature` / `n_predict` / `stop`. Exposes the two most-requested llama.cpp repetition knobs via CLI + `/param`. Makes BitNet's hardcoded `repeat_penalty=1.3` overridable. Adds weight-quantization to the footer + models list. Accepts `128k` / `1m` / `2g` forms for `--num-ctx` / `--num-predict`.
 
 ### Fixed — llama-server /completion kwargs forwarding (bug fix)
 
@@ -34,9 +34,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`agentkthx/cli/agent_factory.py:_build_agent`**: passes `args.repeat_penalty` / `args.repeat_last_n` to the `Agent` constructor and stashes `agent._repeat_penalty_explicit` / `agent._repeat_last_n_explicit` for parity with `_num_batch_explicit`.
 - **`agentkthx/cli/agent_factory.py:apply_model_switch`**: intentionally does NOT re-derive them on `/model` switches — they're per-request options, not functions of the model name. The user-pinned values survive as-is.
 
+### Added — Human-friendly token sizes for `--num-ctx` / `--num-predict`
+
+- **`_parse_token_size()` helper** (`agentkthx/shared_args.py`): accepts `128k`, `128K`, `1m`, `2g`, `2.5k` (fractional), plain ints (`131072`), and sentinels (`-1`, `0`). Wired as `type=_parse_token_size` on all 3 subcommand surfaces (chat/run/agent via `add_agent_args`, example scripts via `add_shared_args`, test via `parser.py`). Env-var fallback (`AGENTKTHX_NUM_CTX=128k`) also accepts the forms. The agent still receives plain ints — zero backend changes.
+- **`fmt_token_size()` helper** (`agentkthx/cli/footer.py`): renders context/token sizes consistently as `128K`, `1M`, `2K`, `512`, `0`, `?` (None). Distinct from `fmt_tok` (which is for prompt-size + cumulative counters — those want fractional-k like `1.1k`). Applied to footer line 1 (ctx + max-tokens segments, was conditional before) + models-list Context column (was plain int before).
+
+### Added — Weight quantization in footer + models list
+
+- **Footer `🧊` segment** (`agentkthx/cli/footer.py:footer_line1`): `🧊 Q4_K_M` (ice-cube emoji U+1F9CA) appears after the batch segment when `agent._weight_quant` is detected. Omitted when None (cloud backends that don't report it).
+- **`_detect_weight_quant()` helper** (`agentkthx/cli/agent_factory.py`): best-effort lookup used by `_build_agent` to populate `agent._weight_quant`. Tries `backend.get_model_info()` → `details.quantization_level` first (most authoritative for pulled Ollama models), falls back to `backend.list_models()` → same field (works for not-pulled remote-catalog models). Returns None on any error — footer omits the segment gracefully.
+- **Quant column in `agentkthx models`** (`agentkthx/cli/commands/models.py`): new column between Size and Context showing `details.quantization_level` from Ollama's `/api/tags` response. Renders as `Q4_K_M` / `Q8_0` / `F16` etc. for local backends; omitted entirely for cloud providers (header + row both skip it). Column width: 8 chars (`QUANT_W`).
+
 ### Tests
 
 - **New `tests/test_r07_18_repeat_penalty.py`** (32 tests): covers Agent constructor acceptance + signature, ARCH-05 kwargs fail-fast, non-streaming forwarding via `_generate`, streaming forwarding via `_prepare_stream_params`, CLI flag acceptance on all three arg parsers, `SharedConfig` env-var fallback, `_build_agent` wiring + `_explicit` pin flags, `apply_model_switch` preserving values across model switches, `/param` PARAM_MATRIX inclusion for ollama + llama_server + bitnet, `/param reset` clearing the `_explicit` pin flags, `OllamaBackend.generate` placing them in `body["options"]`, **`LlamaServerBackend._generate_completion` forwarding `top_p`/`top_k`/`seed`/`repeat_penalty` to the /completion body** (the R07.18 bug fix), **`LlamaServerBackend._stream_completion` forwarding `top_p` in stream mode**, **BitNet `repeat_penalty=1.3` default applying when no kwarg supplied**, **BitNet explicit `repeat_penalty` kwarg overriding the 1.3 default**, agent-internal kwargs NOT leaking to /completion, and cloud backends NOT leaking them into the OpenAI body. All tests are pure logic / mocked — no network calls.
+- **New `tests/test_r07_19_quant_and_tokens.py`** (44 tests): covers `_parse_token_size` (plain int, k/K/m/M/g/G suffixes, fractional, negative sentinel, empty/bad/sign-only errors), CLI flag acceptance on all 3 subcommands, `SharedConfig` env-var fallback with human-friendly forms, `fmt_token_size` (0/512/1K/2K/8K/128K/1M/non-power-of-1024/None), footer quant segment (shown when set, omitted when None/empty, appears after batch), footer ctx formatting (128K/1M/? placeholder preserved), models-list Quant column (header + row rendering + cloud exclusion), and `_detect_weight_quant` (get_model_info first, list_models fallback, None on errors, None when backend lacks methods).
 - **Updated `tests/test_streaming.py` + `tests/test_r07_15_maint_batch.py` + `tests/test_num_batch.py`**: the existing `__new__`-based Agent fixtures now set `a._repeat_penalty = None` / `a._repeat_last_n = None` so the streaming code paths that consult `self._repeat_penalty` don't raise `AttributeError`.
 
 ### Version bump
@@ -46,9 +58,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Suite status
 
-- `python -m pytest tests/ -q` → **2123 passed / 16 skipped** (was 2091; +32 from `test_r07_18_repeat_penalty.py`).
+- `python -m pytest tests/ -q` → **2167 passed / 16 skipped** (was 2091; +32 from `test_r07_18_repeat_penalty.py`, +44 from `test_r07_19_quant_and_tokens.py`).
 - `ruff check agentkthx/ tests/` → all checks passed.
-- `black --check agentkthx/ tests/` → 196 files would be left unchanged.
+- `black --check agentkthx/ tests/` → 197 files would be left unchanged.
 
 ---
 

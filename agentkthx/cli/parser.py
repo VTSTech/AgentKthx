@@ -8,7 +8,7 @@ import argparse
 import os
 
 from ..backends import get_backend_choices
-from ..shared_args import add_agent_args
+from ..shared_args import _parse_token_size, add_agent_args
 
 # ============================================================================
 # CLI Commands
@@ -152,17 +152,19 @@ def create_parser() -> argparse.ArgumentParser:
     )
     test_parser.add_argument(
         "--num-ctx",
-        type=int,
+        type=_parse_token_size,
         default=None,
         dest="num_ctx",
-        help="Context window size in tokens (Ollama default is 2048)",
+        help="Context window size in tokens. Accepts plain ints (131072) or "
+        "human-friendly forms like 128k, 1m, 2g. R07.19+.",
     )
     test_parser.add_argument(
         "--num-predict",
-        type=int,
+        type=_parse_token_size,
         default=None,
         dest="num_predict",
-        help="Maximum tokens to generate (default: model-specific)",
+        help="Maximum tokens to generate. Accepts plain ints (2048) or "
+        "human-friendly forms like 2k, 4k. R07.19+.",
     )
     test_parser.add_argument(
         "--num-batch",

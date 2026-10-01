@@ -108,19 +108,21 @@ def add_shared_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--num-ctx",
-        type=int,
+        type=_parse_token_size,
         default=None,
         dest="num_ctx",
         metavar="TOKENS",
-        help="Context window size in tokens",
+        help="Context window size in tokens. Accepts plain ints (131072) or "
+        "human-friendly forms like 128k, 1m, 2g. R07.19+.",
     )
     parser.add_argument(
         "--num-predict",
-        type=int,
+        type=_parse_token_size,
         default=None,
         dest="num_predict",
         metavar="TOKENS",
-        help="Maximum tokens to generate",
+        help="Maximum tokens to generate. Accepts plain ints (2048) or "
+        "human-friendly forms like 2k, 4k. R07.19+.",
     )
     parser.add_argument(
         "--num-batch",
@@ -278,17 +280,19 @@ def add_agent_args(
     )
     parser.add_argument(
         "--num-ctx",
-        type=int,
+        type=_parse_token_size,
         default=None,
         dest="num_ctx",
-        help="Context window size in tokens (Ollama default is 2048)",
+        help="Context window size in tokens. Accepts plain ints (131072) or "
+        "human-friendly forms like 128k, 1m, 2g. R07.19+.",
     )
     parser.add_argument(
         "--num-predict",
-        type=int,
+        type=_parse_token_size,
         default=None,
         dest="num_predict",
-        help="Maximum tokens to generate (default: model-specific)",
+        help="Maximum tokens to generate. Accepts plain ints (2048) or "
+        "human-friendly forms like 2k, 4k. R07.19+.",
     )
     parser.add_argument(
         "--num-batch",
@@ -459,14 +463,84 @@ def parse_shared_args(args) -> SharedConfig:
 
 
 def _env_int(name: str) -> Optional[int]:
-    """Read an integer from an environment variable."""
+    """Read an integer from an environment variable.
+
+    R07.19: also accepts token-size suffixes via ``_parse_token_size`` —
+    ``AGENTKTHX_NUM_CTX=128k`` and ``AGENTKTHX_NUM_CTX=131072`` both work.
+    """
     val = os.environ.get(name)
     if val:
         try:
-            return int(val)
-        except ValueError:
+            return _parse_token_size(val)
+        except (ValueError, TypeError):
             pass
     return None
+
+
+def _parse_token_size(s) -> int:
+    """Parse a token size string with optional k/m/g suffix into an int.
+
+    R07.19: accepts human-friendly forms for ``--num-ctx`` / ``--num-predict``:
+      - ``131072``         → 131072
+      - ``128k`` / ``128K`` → 131072  (1024 * 128)
+      - ``1m`` / ``1M``     → 1048576 (1024 * 1024)
+      - ``2.5k``           → 2560    (1024 * 2.5, fractional k allowed)
+      - ``1.5m``           → 1572864 (1024*1024 * 1.5)
+      - ``0``              → 0
+      - ``-1``             → -1 (sentinel: "unlimited" for some backends)
+
+    Used as ``type=_parse_token_size`` on the argparse ``--num-ctx`` /
+    ``--num-predict`` flags so users can write ``--num-ctx 128k`` instead of
+    ``--num-ctx 131072``. The agent still receives a plain int — no backend
+    changes needed.
+
+    Args:
+        s: string or int (ints pass through unchanged)
+
+    Returns:
+        int token count
+
+    Raises:
+        argparse.ArgumentTypeError: on malformed input (raised as ValueError
+        by argparse, which formats it with the flag name).
+    """
+    if s is None:
+        raise ValueError("token size cannot be None")
+    if isinstance(s, int):
+        return s
+    if isinstance(s, float):
+        return int(s)
+    s = str(s).strip()
+    if not s:
+        raise ValueError("token size cannot be empty")
+    # Allow leading sign for sentinels like -1 (llama-server: "unlimited")
+    sign = 1
+    if s[0] in "+-":
+        if s[0] == "-":
+            sign = -1
+        s = s[1:]
+        if not s:
+            raise ValueError("token size: sign with no digits")
+    # No suffix → plain int
+    if s.isdigit():
+        return sign * int(s)
+    # Suffix form: <number>[kKmMgG]
+    last = s[-1]
+    if last.lower() in "kmg":
+        num_part = s[:-1]
+        try:
+            num = float(num_part)
+        except ValueError:
+            raise ValueError(
+                f"token size: bad numeric part {num_part!r} in {s!r} "
+                f"(expected forms like '128k', '2.5m', '1g')"
+            )
+        mult = {"k": 1024, "m": 1024**2, "g": 1024**3}[last.lower()]
+        return sign * int(num * mult)
+    raise ValueError(
+        f"token size: unrecognized suffix {last!r} in {s!r} "
+        f"(valid suffixes: k, m, g — e.g. '128k', '1m', '2g')"
+    )
 
 
 def _env_float(name: str) -> Optional[float]:
@@ -485,4 +559,5 @@ __all__ = [
     "add_shared_args",
     "add_agent_args",
     "parse_shared_args",
+    "_parse_token_size",
 ]

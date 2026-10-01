@@ -102,6 +102,7 @@ def cmd_models(args: argparse.Namespace) -> int:
     # Column widths
     NAME_W = 36
     SIZE_W = 8
+    QUANT_W = 8  # R07.19: weight quant column (Q4_K_M, Q8_0, F16, etc.)
     CTX_W = 12
     TOOLS_W = 12  # fits "✓ native"
     FAMILY_W = 12
@@ -120,9 +121,23 @@ def cmd_models(args: argparse.Namespace) -> int:
         NAME_W = 50  # accommodates longest OpenRouter model names
         sep_len = 2 + NAME_W + 1 + CTX_W + 2 + TOOLS_W + 2 + TOOLS_W  # 81
     else:
+        # R07.19: added QUANT_W to the local-backend separator length
         sep_len = (
-            2 + NAME_W + 1 + SIZE_W + 1 + CTX_W + 2 + TOOLS_W + 2 + TOOLS_W + 2 + FAMILY_W
-        )  # 106
+            2
+            + NAME_W
+            + 1
+            + SIZE_W
+            + 1
+            + QUANT_W
+            + 1
+            + CTX_W
+            + 2
+            + TOOLS_W
+            + 2
+            + TOOLS_W
+            + 2
+            + FAMILY_W
+        )  # 115
 
     print()
     print(f"{bright_cyan('\u2696 AgentKthx')} - Available Models")
@@ -135,10 +150,14 @@ def cmd_models(args: argparse.Namespace) -> int:
     print(dim("-" * sep_len))
 
     if not is_cloud_provider:
-        # Ollama and other local backends - show family column + size
-        header = f"  {'Name':<{NAME_W}} {'Size':>{SIZE_W}}  {'Context':>{CTX_W}}  {'openre':>{TOOLS_W}}  {'openai':>{TOOLS_W}}  {'Family':<{FAMILY_W}}"
+        # R07.19: added Quant column between Size and Context
+        header = (
+            f"  {'Name':<{NAME_W}} {'Size':>{SIZE_W}} {'Quant':<{QUANT_W}} "
+            f"{'Context':>{CTX_W}}  {'openre':>{TOOLS_W}}  {'openai':>{TOOLS_W}}  "
+            f"{'Family':<{FAMILY_W}}"
+        )
     else:
-        # Cloud providers - skip Size column (always 'unknown') and Family column (encoded in name)
+        # Cloud providers - skip Size/Quant column (always 'unknown') and Family column
         header = f"  {'Name':<{NAME_W}} {'Context':>{CTX_W}}  {'openre':>{TOOLS_W}}  {'openai':>{TOOLS_W}}"
 
     print(header)
@@ -148,18 +167,31 @@ def cmd_models(args: argparse.Namespace) -> int:
         name = m.get("name", "unknown")
         size = m.get("size", 0)
         size_gb = size / (1024**3) if size else 0
-        family = m.get("details", {}).get("family", "unknown")
+        details = m.get("details", {}) or {}
+        family = details.get("family", "unknown")
+        # R07.19: detected weight quant (Q4_K_M, Q8_0, F16, etc.) from the
+        # Ollama /api/tags details block. Empty for backends that don't
+        # report it — rendered as "unknown" in the Quant column.
+        weight_quant = details.get("quantization_level", "") or ""
 
         # Get both runtime and max context
         backend.get_model_runtime_context(name)
         max_ctx = backend.get_model_max_context(name, family=family)
 
-        # Format context size — show max context as plain int
-        ctx_str = str(max_ctx)
+        # R07.19: format context size as 128K / 1M style (was plain int)
+        from ..footer import fmt_token_size
+
+        ctx_str = fmt_token_size(max_ctx)
 
         # Fixed columns
         name_col = pad_colored(cyan(name), NAME_W)
         size_col = f"{size_gb:>6.2f} GB"
+        # R07.19: quant column — pad to QUANT_W, dim if unknown
+        quant_col = pad_colored(
+            dim(weight_quant) if not weight_quant else yellow(weight_quant),
+            QUANT_W,
+            "left",
+        )
         ctx_col = pad_colored(dim(ctx_str), CTX_W, "right")
 
         # Handle Ollama with full tool support testing (not cloud providers)
@@ -205,7 +237,7 @@ def cmd_models(args: argparse.Namespace) -> int:
                 tool_re = pad_colored(_tool_status(results.get("openre")), TOOLS_W, "right")
                 tool_ai = pad_colored(_tool_status(results.get("openai")), TOOLS_W, "right")
                 print(
-                    f"\r  {name_col} {size_col}  {ctx_col}  {tool_re}  {tool_ai}  {dim('(' + family + ')')}"
+                    f"\r  {name_col} {size_col} {quant_col} {ctx_col}  {tool_re}  {tool_ai}  {dim('(' + family + ')')}"
                 )
 
                 # Log per-model test result to ACP
@@ -216,7 +248,8 @@ def cmd_models(args: argparse.Namespace) -> int:
                     acp.log_chat("user", "Testing tool support...")
                     acp.log_chat(
                         "assistant",
-                        f"openre={re_status} openai={ai_status} | {size_gb:.2f} GB | ctx {max_ctx}",
+                        f"openre={re_status} openai={ai_status} | {size_gb:.2f} GB | "
+                        f"quant={weight_quant or '?'} | ctx {max_ctx}",
                     )
             else:
                 # Read from cache for both display modes
@@ -229,7 +262,7 @@ def cmd_models(args: argparse.Namespace) -> int:
                 tool_re = pad_colored(_tool_status(results.get("openre")), TOOLS_W, "right")
                 tool_ai = pad_colored(_tool_status(results.get("openai")), TOOLS_W, "right")
                 print(
-                    f"  {name_col} {size_col}  {ctx_col}  {tool_re}  {tool_ai}  {dim('(' + family + ')')}"
+                    f"  {name_col} {size_col} {quant_col} {ctx_col}  {tool_re}  {tool_ai}  {dim('(' + family + ')')}"
                 )
 
         # Handle cloud providers (ZAI, OpenRouter) with proper metadata and tool support
@@ -337,10 +370,10 @@ def cmd_models(args: argparse.Namespace) -> int:
                 )
                 if not is_cloud_provider:
                     print(
-                        f"  {name_col} {size_col}  {ctx_col}  {tool_re}  {tool_ai}  {dim('(' + family + ')')}"
+                        f"  {name_col} {size_col} {quant_col} {ctx_col}  {tool_re}  {tool_ai}  {dim('(' + family + ')')}"
                     )
                 else:
-                    # Cloud provider: no Size column, no Family column
+                    # Cloud provider: no Size/Quant column, no Family column
                     print(f"  {name_col} {ctx_col}  {tool_re}  {tool_ai}")
 
     print(dim("-" * sep_len))

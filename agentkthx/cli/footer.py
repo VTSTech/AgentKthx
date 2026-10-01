@@ -34,14 +34,47 @@ from __future__ import annotations
 from .. import __version__
 from ..colors import cyan, dim, green, red, yellow
 
-__all__ = ["fmt_tok", "footer_line1", "footer_line2", "footer_text"]
+__all__ = ["fmt_tok", "fmt_token_size", "footer_line1", "footer_line2", "footer_text"]
 
 
 def fmt_tok(n) -> str:
-    """Format a token/char count compactly: 950 -> '950', 12000 -> '12.0k'."""
+    """Format a token/char count compactly: 950 -> '950', 12000 -> '12.0k'.
+
+    Used for prompt-size + cumulative token counters (chr/tok), where
+    fractional-k display is desirable (1.1k chr, 282 tok).
+    """
     n = int(str(n).strip())
     if n >= 1000:
         return f"{n/1000:.1f}k"
+    return str(n)
+
+
+def fmt_token_size(n) -> str:
+    """Format a context-window / max-tokens size as '128K', '1M', '2K', '512'.
+
+    R07.19: used for the ctx + max-tokens segments in the footer line 1 and
+    for the Context column in ``agentkthx models``. Distinct from
+    ``fmt_tok`` (which is for prompt-size + cumulative counters — those want
+    fractional-k like '1.1k'); this one wants clean power-of-1024 forms:
+
+      - 0       → '0'
+      - 512     → '512'
+      - 1024    → '1K'
+      - 2048    → '2K'
+      - 8192    → '8K'
+      - 131072  → '128K'
+      - 1048576 → '1M'
+
+    Always integer K/M (no '2.5K') — matches how Ollama/llama-server report
+    context sizes in their docs and how users specify them via --num-ctx 128k.
+    """
+    if n is None:
+        return "?"
+    n = int(str(n).strip())
+    if n >= 1024 * 1024 and n % (1024 * 1024) == 0:
+        return f"{n // (1024 * 1024)}M"
+    if n >= 1024 and n % 1024 == 0:
+        return f"{n // 1024}K"
     return str(n)
 
 
@@ -57,20 +90,27 @@ def _fmt_temp(temp) -> str:
 
 
 def footer_line1(agent) -> str:
-    """Build the first footer line: version, model, prompt, context, tokens, temp, batch.
+    """Build the first footer line: version, model, prompt, context, tokens, temp, batch, quant.
 
     R07.17: added optional batch-size segment (🔧 N) after temp, shown only
     when ``agent._num_batch`` is not None. Also fixed temp icon spacing by
     removing the redundant VS16 from the thermometer emoji.
+    R07.19: ctx + max-tokens now always render in 128K style via
+    ``fmt_token_size`` (was conditional on >=1024). Added optional
+    quantization segment (🧊 Q4_K_M) after batch, shown when
+    ``agent._weight_quant`` is set.
     """
     ctx = agent.num_ctx
-    ctx_str = f"{ctx // 1024}K" if ctx and ctx >= 1024 else str(ctx) if ctx else "?"
+    # R07.19: falsy ctx (0/None) renders as '?' to match the historical
+    # "missing context" placeholder. fmt_token_size is a pure formatter
+    # (0 → '0'); the falsy check lives here so the helper stays reusable.
+    ctx_str = fmt_token_size(ctx) if ctx else "?"
     max_t = (
         agent._num_predict
         if agent._num_predict is not None
         else agent.model_config.default_max_tokens
     )
-    max_t_str = f"{max_t // 1024}K" if max_t >= 1024 else str(max_t)
+    max_t_str = fmt_token_size(max_t)
     temp = (
         agent._temperature
         if agent._temperature is not None
@@ -92,6 +132,7 @@ def footer_line1(agent) -> str:
     _e_temp = "\U0001f321"  # thermometer — NO VS16 (defaults to emoji)
     _e_prmpt = "\U0001f4dd"  # memo
     _e_batch = "\U0001f527"  # wrench — for batch size (R07.17)
+    _e_quant = "\U0001f9ca"  # ice cube — for weight quant (R07.19)
     parts = [
         f"{dim(_e_brand)} {cyan(__version__)}",
         f"{dim(_e_model)} {cyan(agent.model)}",
@@ -104,6 +145,12 @@ def footer_line1(agent) -> str:
     _num_batch = getattr(agent, "_num_batch", None)
     if _num_batch is not None:
         parts.append(f"{dim(_e_batch)} {yellow(str(_num_batch))}")
+    # R07.19: weight quantization — only shown when detected (Ollama
+    # /api/show details.quantization_level, or GGUF header for local
+    # backends). None for cloud backends that don't report it.
+    _weight_quant = getattr(agent, "_weight_quant", None)
+    if _weight_quant:
+        parts.append(f"{dim(_e_quant)} {yellow(str(_weight_quant))}")
     return " ".join(parts)
 
 

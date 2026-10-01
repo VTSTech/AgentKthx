@@ -49,6 +49,57 @@ def _init_acp(args: argparse.Namespace, config, agent_name: str = "AgentKthx") -
         return None, False
 
 
+def _detect_weight_quant(backend, model: str) -> str | None:
+    """Detect the weight quantization of ``model`` for footer display.
+
+    R07.19: best-effort lookup used by ``_build_agent`` to populate
+    ``agent._weight_quant`` (shown as the 🧊 segment in footer line 1).
+
+    Sources tried in order:
+      1. Ollama ``/api/show`` → ``details.quantization_level`` (e.g.
+         ``"Q4_K_M"``, ``"Q8_0"``, ``"F16"``). Works for any pulled Ollama
+         model on the local server or a remote one.
+      2. ``backend.list_models()`` → ``details.quantization_level`` (same
+         field, but from the ``/api/tags`` listing — populated even for
+         not-pulled remote-catalog models).
+      3. None — footer omits the segment.
+
+    The lookup is wrapped in try/except so a dead/unreachable backend at
+    startup doesn't break agent construction (footer just won't show quant).
+
+    Args:
+        backend: a BaseBackend instance (need ``get_model_info`` or
+            ``list_models`` — both are present on OllamaBackend and its
+            LlamaServerBackend subclass).
+        model: model name as typed by the user.
+
+    Returns:
+        Quantization string (e.g. ``"Q4_K_M"``) or None.
+    """
+    # 1) /api/show — most authoritative for pulled models
+    try:
+        if hasattr(backend, "get_model_info"):
+            info = backend.get_model_info(model)
+            if info:
+                q = (info.get("details") or {}).get("quantization_level", "")
+                if q:
+                    return str(q)
+    except Exception:
+        pass
+    # 2) /api/tags — works for not-pulled remote catalog models too
+    try:
+        if hasattr(backend, "list_models"):
+            for m in backend.list_models():
+                if m.get("name") == model:
+                    q = (m.get("details") or {}).get("quantization_level", "")
+                    if q:
+                        return str(q)
+                    break
+    except Exception:
+        pass
+    return None
+
+
 def _load_skills_prompt(args: argparse.Namespace) -> tuple[str | None, list[str]]:
     """
     Load skills specified via --skills flag.
@@ -344,6 +395,12 @@ def _build_agent(args: argparse.Namespace, config) -> Agent:
     # R07.18: same pin semantics for repeat_penalty / repeat_last_n.
     agent._repeat_penalty_explicit = getattr(args, "repeat_penalty", None) is not None
     agent._repeat_last_n_explicit = getattr(args, "repeat_last_n", None) is not None
+    # R07.19: detect weight quantization for the footer (🧊 Q4_K_M segment).
+    # Best-effort — uses Ollama /api/show details.quantization_level when
+    # available; falls back to None (footer omits the segment). Looked up
+    # once at startup; not re-derived on /model switch (would need a fresh
+    # API call per switch — defer until someone asks for it).
+    agent._weight_quant = _detect_weight_quant(backend, model)
     # Set compaction threshold from --compaction arg
     agent._compaction_threshold = compaction_threshold
 
