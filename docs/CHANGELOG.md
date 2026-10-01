@@ -7,40 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [R07.17] - 2026-10-02
 
-**`num_batch` parameter support.** Adds the `num_batch` prompt-processing batch-size parameter throughout the agent stack, with primary support for Ollama (per-request `options.num_batch`) and graceful no-op behavior on every other backend.
+**`num_batch` parameter support + footer improvements.** Adds the `num_batch` prompt-processing batch-size parameter throughout the agent stack (primary support for Ollama per-request `options.num_batch`, graceful no-op on every other backend). Also fixes a long-standing temp-icon spacing bug in the CLI footer and adds batch-size + TPS (tokens-per-second) segments.
 
-### Added
+### Added — `num_batch` parameter
 
 - **`Agent(num_batch=...)`** (`agentkthx/core/agent_setup.py`): new constructor parameter, stored as `self._num_batch`. Default `None` means "use the backend's own default" (Ollama: 512). Added to the kwargs error message and the constructor signature.
 - **`--num-batch <N>` CLI flag** (`agentkthx/shared_args.py`, `agentkthx/cli/parser.py`): added to `add_agent_args` (chat/run/agent subcommands), `add_shared_args` (example scripts), and the `test` subcommand parser. Honors the `AGENTKTHX_NUM_BATCH` env var via `SharedConfig.num_batch`.
 - **`/param num_batch <N>`** slash command (`agentkthx/cli/commands/chat.py`): settable at runtime in chat mode. Listed in the PARAM_MATRIX as supported for the `ollama` backend only (the only backend that forwards it as a per-request option). `/param reset num_batch` clears the value and the `_num_batch_explicit` pin flag.
 
-### Behavior by backend
+#### Behavior by backend
 
-- **Ollama native `/api/chat`** (default `--api openre`): `num_batch` is forwarded into `body["options"]["num_batch"]` via the existing generic kwargs-to-options loop in `OllamaBackend.generate` / `OllamaBackend.generate_stream`. Lower values reduce peak RAM during prompt eval at the cost of more iterations — useful on RAM-constrained hosts.
+- **Ollama native `/api/chat`** (default `--api openre`): `num_batch` is forwarded into `body["options"]["num_batch"]` via the existing generic kwargs-to-options loop in `OllamaBackend.generate` / `OllamaBackend.generate_stream`. Lower values reduce peak RAM during prompt eval at the cost of more iterations — useful on RAM-constrained hosts. **Verified live**: `--num-batch 64` reduces response time by ~50% on `cryptidbleh/gemma4-claude-opus-4.6:latest` (3.19 GB) vs the default of 512.
 - **Ollama OpenAI-compat `/v1/chat/completions`** (`--api openai`): NOT forwarded (Ollama's OpenAI-compat endpoint doesn't accept per-request `num_batch`). Switch to `--api openre` to use `num_batch` with Ollama.
 - **llama-server / TurboQuant / BitNet**: per-request `num_batch` is silently ignored — batch size is a server-start flag. Use `agentkthx turbo start <model> --batch-size N` (the `-b` flag, added in R07.16) at server start.
 - **Cloud backends** (ZAI, OpenRouter, Gemini, OpenAI, Huggingface, Mistral, OrcaRouter, Pollinations): silently dropped. `OpenAICompatibleBackend._build_openai_body` only forwards a specific allowlist of optional fields (`top_p`, `top_k`, `seed`, `n`, `presence_penalty`, `frequency_penalty`, `stop`, `response_format`, `tool_choice`, `reasoning_effort`) — `num_batch` is not in the allowlist, so no API leak.
 
-### Wiring
+#### Wiring
 
 - **`agentkthx/agent.py:_generate`**: forwards `self._num_batch` into `backend_kwargs` when not None (non-streaming path).
 - **`agentkthx/core/streaming.py:_generate_stream_chunks` + `_prepare_stream_params`**: forwards `self._num_batch` into `backend_kwargs` when not None (streaming paths).
 - **`agentkthx/cli/agent_factory.py:_build_agent`**: passes `args.num_batch` to the `Agent` constructor and stashes `agent._num_batch_explicit = (args.num_batch is not None)` for parity with `_num_ctx_explicit` / `_num_predict_explicit`.
 - **`agentkthx/cli/agent_factory.py:apply_model_switch`**: intentionally does NOT re-derive `num_batch` on `/model` switches — it's a per-request option, not a function of the model name. The user-pinned value survives as-is. Code comment added explaining the rationale.
 
+### Added — CLI footer segments (`agentkthx/cli/footer.py`, `agentkthx/agent.py`, `agentkthx/core/agent_setup.py`)
+
+- **Batch size in footer line 1**: `🔧 N` appears after temp when `agent._num_batch` is set. Omitted when None (no clutter for users who don't use it). Uses the wrench emoji (U+1F527).
+- **TPS (tokens-per-second) in footer line 2**: `⚡ N.N tok/s` appears during runs, computed from `agent._run_start_time` (set at the start of each `_run_core()` call, covering both streaming and non-streaming paths) and `_running_tokens_out`. Omitted before the first run and when no output tokens have been generated yet (avoids div-by-zero). Uses the lightning bolt emoji (U+26A1).
+
+### Fixed — footer temp icon spacing
+
+- **Removed redundant VS16 from the thermometer emoji** (`agentkthx/cli/footer.py`): the `_e_temp` glyph was `\U0001f321\ufe0f` (THERMOMETER + VS16). U+1F321 defaults to emoji presentation, so VS16 is redundant — some terminals render the VS16 as an extra blank column, causing a 6-space gap between 🌡️ and the value. Changed to `\U0001f321` (no VS16). Now renders as `🌡 0.1` (single space, consistent with 📦 💬 etc.).
+- **Temperature value now formatted with `:g`** (`agentkthx/cli/footer.py:_fmt_temp`): strips trailing zeros and avoids float-precision noise (e.g. `0.30000000000000004` → `0.3`, `0.7` stays `0.7` instead of `0.7000000000000001`).
+
 ### Tests
 
 - **New `tests/test_num_batch.py`** (27 tests): covers Agent constructor acceptance + signature, ARCH-05 kwargs fail-fast, non-streaming forwarding via `_generate`, streaming forwarding via both `_generate_stream_chunks` and `_prepare_stream_params`, CLI flag acceptance on all three arg parsers, `SharedConfig` env-var fallback, `_build_agent` wiring + `_num_batch_explicit` stash, `apply_model_switch` preserving `num_batch` across model switches, `/param` PARAM_MATRIX inclusion for ollama, `OllamaBackend.generate` placing `num_batch` in `body["options"]`, `OpenAICompatibleBackend._build_openai_body` NOT leaking `num_batch` into the request body, and `/param reset` clearing the `_num_batch_explicit` pin flag. All tests are pure logic / mocked — no network calls.
 - **Updated `tests/test_streaming.py` + `tests/test_r07_15_maint_batch.py`**: the existing `__new__`-based Agent fixtures now set `a._num_batch = None` so the streaming code paths that consult `self._num_batch` don't raise `AttributeError`.
+- **New footer test classes in `tests/test_cli_footer.py`** (+11 tests): `TestFooterBatchSize` (3 tests: shown when set, omitted when None, appears after temp), `TestFooterTPS` (4 tests: shown during run, omitted when no run start, omitted when no output tokens, value is reasonable), `TestFooterTempFormatting` (4 tests: 0.1, 0.7, float-noise cleaned, no VS16 in source). The `_agent()` fixture helper now accepts `_num_batch` and `_run_start_time` kwargs.
 
 ### Docs
 
 - **`docs/USAGE.md`**: added `--num-batch <n>` to the CLI flags table and `/param num_batch 256` to the slash-commands example.
 
+### Version bump
+
+- `scripts/bump-version.sh R07.17` applied: bumped 4 sites across 3 files (`pyproject.toml`, `agentkthx/__init__.py` header + `__version__` line, `README.md`).
+- `R07.16 (0.7.16)` → `R07.17 (0.7.17)`.
+
 ### Suite status
 
-- `python -m pytest tests/ -q` → **2078 passed / 16 skipped** (was 2051; +27 from `test_num_batch.py`).
+- `python -m pytest tests/ -q` → **2089 passed / 16 skipped** (was 2051; +27 from `test_num_batch.py`, +11 from new footer tests).
 - `ruff check agentkthx/ tests/` → all checks passed.
 - `black --check agentkthx/ tests/` → 195 files would be left unchanged.
 
