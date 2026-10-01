@@ -316,12 +316,14 @@ def _agent(**kw):
 
 
 class TestFooterQuantSegment(unittest.TestCase):
+    """R07.18: 🧊 emoji shown when _weight_quant is set (R07.17 style)."""
+
     def test_quant_shown_when_set(self):
         from agentkthx.cli.footer import footer_line1
 
         a = _agent(_weight_quant="Q4_K_M")
         line = footer_line1(a)
-        self.assertIn("\U0001f9ca", line)  # ice cube
+        self.assertIn("\U0001f9ca", line)  # ice cube emoji
         self.assertIn("Q4_K_M", line)
 
     def test_quant_omitted_when_none(self):

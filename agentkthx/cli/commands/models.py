@@ -145,7 +145,7 @@ def cmd_models(args: argparse.Namespace) -> int:
         )  # 115
 
     print()
-    print(f"{bright_cyan('\u2696\ufe0f AgentKthx')} - Available Models")
+    print(f"{bright_cyan('\u2696 AgentKthx')} - Available Models")
     print(dim(f"  Backend: {backend.base_url}"))
     if args.tool_support:
         mode_label = ", ".join(modes_to_test)

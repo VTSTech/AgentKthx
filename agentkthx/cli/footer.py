@@ -120,45 +120,35 @@ def footer_line1(agent) -> str:
     _prompt_chr = len(_sys_prompt)
     _prompt_tok = _prompt_chr // 4
     prompt_str = f"{fmt_tok(_prompt_chr)} chr {fmt_tok(_prompt_tok)} tok"
-    # R07.18: ALL emoji now carry VS16 (\ufe0f) to force emoji-presentation.
-    # Without VS16, some terminals render emoji in text-presentation mode,
-    # which appears as a half-height / split glyph ("cut in half vertically").
-    # The VS16 is explicit even for emoji that "should" default to emoji
-    # presentation — not all terminals respect the Unicode default, and
-    # consistency prevents mixed rendering.
-    # The spacing gap that R07.17 tried to fix by removing VS16 from the
-    # thermometer is now handled by the consistent "icon + space + value"
-    # pattern (the space after the emoji separates it from the value
-    # regardless of whether VS16 renders as a blank column).
-    _e_brand = "\u269b\ufe0f"  # atom
-    _e_model = "\U0001f9e0\ufe0f"  # brain
-    _e_ctx = "\U0001f4e6\ufe0f"  # package
-    _e_resp = "\U0001f4ac\ufe0f"  # speech bubble
-    _e_temp = "\U0001f321\ufe0f"  # thermometer
-    _e_prmpt = "\U0001f4dd\ufe0f"  # memo
-    _e_batch = "\U0001f527\ufe0f"  # wrench
-    _e_quant = "\U0001f9ca\ufe0f"  # ice cube
-    # R07.18: emoji are NOT wrapped in dim() — some terminals render DIM
-    # emoji at half-height (cut in half vertically). The emoji are
-    # decorative; only the text values after them get color/dim treatment.
+    # R07.18: restored R07.17 emoji display (was working correctly).
+    # Emoji without VS16 (except atom which needs it), wrapped in dim().
+    # The text-label experiment (R07.18 interim) was reverted per user request.
+    _e_brand = "\u269b\ufe0f"  # atom — needs VS16 (defaults to text)
+    _e_model = "\U0001f9e0"  # brain
+    _e_ctx = "\U0001f4e6"  # package
+    _e_resp = "\U0001f4ac"  # speech bubble
+    _e_temp = "\U0001f321"  # thermometer
+    _e_prmpt = "\U0001f4dd"  # memo
+    _e_batch = "\U0001f527"  # wrench
+    _e_quant = "\U0001f9ca"  # ice cube
     parts = [
-        f"{_e_brand} {cyan(__version__)}",
-        f"{_e_model} {cyan(agent.model)}",
-        f"{_e_prmpt} {yellow(prompt_str)}",
-        f"{_e_ctx} {yellow(ctx_str)}",
-        f"{_e_resp} {yellow(max_t_str)}",
-        f"{_e_temp} {yellow(_fmt_temp(temp))}",
+        f"{dim(_e_brand)} {cyan(__version__)}",
+        f"{dim(_e_model)} {cyan(agent.model)}",
+        f"{dim(_e_prmpt)} {yellow(prompt_str)}",
+        f"{dim(_e_ctx)} {yellow(ctx_str)}",
+        f"{dim(_e_resp)} {yellow(max_t_str)}",
+        f"{dim(_e_temp)} {yellow(_fmt_temp(temp))}",
     ]
     # R07.17: batch size — only shown when explicitly set
     _num_batch = getattr(agent, "_num_batch", None)
     if _num_batch is not None:
-        parts.append(f"{_e_batch} {yellow(str(_num_batch))}")
+        parts.append(f"{dim(_e_batch)} {yellow(str(_num_batch))}")
     # R07.18: weight quantization — only shown when detected (Ollama
     # /api/show details.quantization_level, or GGUF header for local
     # backends). None for cloud backends that don't report it.
     _weight_quant = getattr(agent, "_weight_quant", None)
     if _weight_quant:
-        parts.append(f"{_e_quant} {yellow(str(_weight_quant))}")
+        parts.append(f"{dim(_e_quant)} {yellow(str(_weight_quant))}")
     return " ".join(parts)
 
 
@@ -197,14 +187,13 @@ def footer_line2(agent, session_tokens_in: int = 0, session_tokens_out: int = 0)
         _ctx_pct_str = yellow(f"{_ctx_pct}%")
     else:
         _ctx_pct_str = green(f"{_ctx_pct}%")
-    _e_be = "\U0001f50c\ufe0f"  # plug — VS16 for emoji presentation (R07.18)
-    _e_tok = "\U0001f4c8\ufe0f"  # chart
-    _e_dbg = "\U0001f41b\ufe0f"  # bug
-    _e_tps = "\u26a1\ufe0f"  # lightning bolt — VS16 REQUIRED (defaults to text)
-    # R07.18: emoji NOT dimmed (see footer_line1 comment above)
+    _e_be = "\U0001f50c"
+    _e_tok = "\U0001f4c8"
+    _e_dbg = "\U0001f41b"
+    _e_tps = "\u26a1"
     parts = [
-        f"{_e_be} {green(bname)}",
-        f"{_e_tok} {yellow(tok_str)}",
+        f"{dim(_e_be)} {green(bname)}",
+        f"{dim(_e_tok)} {yellow(tok_str)}",
     ]
     # R07.17: per-RESPONSE TPS (not run-average). Shows tokens/sec for the
     # most recent completed generation call only — avoids skew from tool
@@ -226,7 +215,7 @@ def footer_line2(agent, session_tokens_in: int = 0, session_tokens_out: int = 0)
         _elapsed = _gen_end - _gen_start
         if _elapsed > 0.001:  # avoid div-by-zero on instant returns
             _tps = _gen_tokens / _elapsed
-            parts.append(f"{_e_tps} {yellow(f'{_tps:.1f}')} {dim('tok/s')}")
+            parts.append(f"{dim(_e_tps)} {yellow(f'{_tps:.1f}')} {dim('tok/s')}")
     parts.append(f"{dim('ctx')} {_ctx_pct_str}")
     if agent.debug:
         parts.append(f"{red(_e_dbg + ' debug')}")

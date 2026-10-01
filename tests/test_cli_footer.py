@@ -326,31 +326,27 @@ class TestFooterTempFormatting(unittest.TestCase):
         self.assertIn("0.3", line)
         self.assertNotIn("0000000", line)  # no float noise
 
-    def test_temp_icon_has_vs16(self):
-        """R07.18: ALL emoji must carry VS16 to force emoji-presentation.
+    def test_temp_icon_restored_to_r07_17_style(self):
+        """R07.18: restored R07.17 emoji display (thermometer without VS16).
 
-        Without VS16, some terminals render emoji in text-presentation mode,
-        which appears as a half-height / split glyph ("cut in half vertically").
-        R07.17 tried removing VS16 from the thermometer to fix a spacing gap,
-        but R07.18 reverted that — ALL emoji now carry VS16 consistently.
-        The spacing gap is handled by the "icon + space + value" pattern.
+        The text-label experiment was reverted per user request — the R07.17
+        emoji display was working correctly on the user's terminal.
         """
         from pathlib import Path
 
         src = Path(__file__).resolve().parent.parent / "agentkthx" / "cli" / "footer.py"
         text = src.read_text(encoding="utf-8")
-        # The _e_temp line must use \U0001f321 WITH \ufe0f
-        for line in text.split("\n"):
-            if "_e_temp =" in line and "U0001f321" in line:
-                self.assertIn(
-                    "\\ufe0f",
-                    line,
-                    "_e_temp must carry VS16 — without it some terminals "
-                    "render the thermometer in text-presentation (half-height)",
-                )
-                break
-        else:
-            self.fail("Could not find _e_temp definition in footer.py")
+        # The footer must use the thermometer emoji (not 'tmp' text label)
+        self.assertIn(
+            "\\U0001f321",
+            text,
+            "footer must use thermometer emoji (R07.17 style restored)",
+        )
+        self.assertNotIn(
+            "dim('tmp')",
+            text,
+            "footer must not use 'tmp' text label (reverted to emoji)",
+        )
 
 
 class TestFooterDeduplicated(unittest.TestCase):
