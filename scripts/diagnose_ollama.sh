@@ -228,7 +228,7 @@ wait_for_ollama_ready() {
 }
 
 start_server() {
-  echo ">>> Starting ollama with controlled env (ctx=$CTX_REQUESTED, kv=q4_0)..."
+  echo ">>> Starting ollama with controlled env (ctx=$CTX_REQUESTED, kv=q8_0)..."
 
   # Try graceful shutdown first, then force kill
   # CRITICAL: use -x for exact match — without it, `pkill ollama` would
@@ -269,12 +269,12 @@ start_server() {
 
   OLLAMA_DEBUG=1 \
   OLLAMA_NUM_PARALLEL=1 \
-  OLLAMA_NUM_THREADS=4 \
+  OLLAMA_NUM_THREADS=1 \
   OLLAMA_MAX_LOADED_MODELS=1 \
   OLLAMA_KEEP_ALIVE=5m \
   OLLAMA_FLASH_ATTENTION=true \
   OLLAMA_CONTEXT_LENGTH=$CTX_REQUESTED \
-  OLLAMA_KV_CACHE_TYPE=q4_0 \
+  OLLAMA_KV_CACHE_TYPE=q8_0 \
   OLLAMA_VULKAN=false \
   ollama serve > "$LOG" 2>&1 < /dev/null &
   SERVER_PID=$!
@@ -414,7 +414,7 @@ diagnose_one() {
     echo "    ✓ Installed"
     echo "    File size: $file_size_display ($file_size_mb MB)"
     echo ""
-    echo ">>> [2/5] Server already running with controlled env (ctx=$CTX_REQUESTED, kv=q4_0)"
+    echo ">>> [2/5] Server already running with controlled env (ctx=$CTX_REQUESTED, kv=q8_0)"
     echo ""
     echo ">>> [3/5] Running inference test..."
     echo "    Prompt: \"Say hello in one short sentence.\""
