@@ -156,7 +156,7 @@ def create_parser() -> argparse.ArgumentParser:
         default=None,
         dest="num_ctx",
         help="Context window size in tokens. Accepts plain ints (131072) or "
-        "human-friendly forms like 128k, 1m, 2g. R07.19+.",
+        "human-friendly forms like 128k, 1m, 2g. R07.18+.",
     )
     test_parser.add_argument(
         "--num-predict",
@@ -164,7 +164,7 @@ def create_parser() -> argparse.ArgumentParser:
         default=None,
         dest="num_predict",
         help="Maximum tokens to generate. Accepts plain ints (2048) or "
-        "human-friendly forms like 2k, 4k. R07.19+.",
+        "human-friendly forms like 2k, 4k. R07.18+.",
     )
     test_parser.add_argument(
         "--num-batch",

@@ -52,7 +52,7 @@ def _init_acp(args: argparse.Namespace, config, agent_name: str = "AgentKthx") -
 def _detect_weight_quant(backend, model: str) -> str | None:
     """Detect the weight quantization of ``model`` for footer display.
 
-    R07.19: best-effort lookup used by ``_build_agent`` to populate
+    R07.18: best-effort lookup used by ``_build_agent`` to populate
     ``agent._weight_quant`` (shown as the 🧊 segment in footer line 1).
 
     Sources tried in order:
@@ -395,7 +395,7 @@ def _build_agent(args: argparse.Namespace, config) -> Agent:
     # R07.18: same pin semantics for repeat_penalty / repeat_last_n.
     agent._repeat_penalty_explicit = getattr(args, "repeat_penalty", None) is not None
     agent._repeat_last_n_explicit = getattr(args, "repeat_last_n", None) is not None
-    # R07.19: detect weight quantization for the footer (🧊 Q4_K_M segment).
+    # R07.18: detect weight quantization for the footer (🧊 Q4_K_M segment).
     # Best-effort — uses Ollama /api/show details.quantization_level when
     # available; falls back to None (footer omits the segment). Looked up
     # once at startup; not re-derived on /model switch (would need a fresh

@@ -126,7 +126,7 @@ def cmd_models(args: argparse.Namespace) -> int:
         NAME_W = 50  # accommodates longest OpenRouter model names
         sep_len = 2 + NAME_W + 1 + CTX_W + 2 + TOOLS_W + 2 + TOOLS_W  # 81
     else:
-        # R07.19: added QUANT_W to the local-backend separator length
+        # R07.18: added QUANT_W to the local-backend separator length
         sep_len = (
             2
             + NAME_W
@@ -155,7 +155,7 @@ def cmd_models(args: argparse.Namespace) -> int:
     print(dim("-" * sep_len))
 
     if not is_cloud_provider:
-        # R07.19: added Quant column between Size and Context
+        # R07.18: added Quant column between Size and Context
         header = (
             f"  {'Name':<{NAME_W}} {'Size':>{SIZE_W}} {'Quant':<{QUANT_W}} "
             f"{'Context':>{CTX_W}}  {'openre':>{TOOLS_W}}  {'openai':>{TOOLS_W}}  "
@@ -174,7 +174,7 @@ def cmd_models(args: argparse.Namespace) -> int:
         size_gb = size / (1024**3) if size else 0
         details = m.get("details", {}) or {}
         family = details.get("family", "unknown")
-        # R07.19: detected weight quant (Q4_K_M, Q8_0, F16, etc.) from the
+        # R07.18: detected weight quant (Q4_K_M, Q8_0, F16, etc.) from the
         # Ollama /api/tags details block. Empty for backends that don't
         # report it — rendered as "unknown" in the Quant column.
         weight_quant = details.get("quantization_level", "") or ""
@@ -183,7 +183,7 @@ def cmd_models(args: argparse.Namespace) -> int:
         backend.get_model_runtime_context(name)
         max_ctx = backend.get_model_max_context(name, family=family)
 
-        # R07.19: format context size as 128K / 1M style (was plain int)
+        # R07.18: format context size as 128K / 1M style (was plain int)
         from ..footer import fmt_token_size
 
         ctx_str = fmt_token_size(max_ctx)
@@ -198,7 +198,7 @@ def cmd_models(args: argparse.Namespace) -> int:
         # R07.18: pad size_col to SIZE_W=9 for alignment (was raw string,
         # which overflowed by 1 char and cascaded to all columns after it)
         size_col = pad_colored(f"{size_gb:>6.2f} GB", SIZE_W, "right")
-        # R07.19: quant column — pad to QUANT_W, dim if unknown
+        # R07.18: quant column — pad to QUANT_W, dim if unknown
         quant_col = pad_colored(
             dim(weight_quant) if not weight_quant else yellow(weight_quant),
             QUANT_W,

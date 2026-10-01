@@ -113,7 +113,7 @@ def add_shared_args(parser: argparse.ArgumentParser) -> None:
         dest="num_ctx",
         metavar="TOKENS",
         help="Context window size in tokens. Accepts plain ints (131072) or "
-        "human-friendly forms like 128k, 1m, 2g. R07.19+.",
+        "human-friendly forms like 128k, 1m, 2g. R07.18+.",
     )
     parser.add_argument(
         "--num-predict",
@@ -122,7 +122,7 @@ def add_shared_args(parser: argparse.ArgumentParser) -> None:
         dest="num_predict",
         metavar="TOKENS",
         help="Maximum tokens to generate. Accepts plain ints (2048) or "
-        "human-friendly forms like 2k, 4k. R07.19+.",
+        "human-friendly forms like 2k, 4k. R07.18+.",
     )
     parser.add_argument(
         "--num-batch",
@@ -284,7 +284,7 @@ def add_agent_args(
         default=None,
         dest="num_ctx",
         help="Context window size in tokens. Accepts plain ints (131072) or "
-        "human-friendly forms like 128k, 1m, 2g. R07.19+.",
+        "human-friendly forms like 128k, 1m, 2g. R07.18+.",
     )
     parser.add_argument(
         "--num-predict",
@@ -292,7 +292,7 @@ def add_agent_args(
         default=None,
         dest="num_predict",
         help="Maximum tokens to generate. Accepts plain ints (2048) or "
-        "human-friendly forms like 2k, 4k. R07.19+.",
+        "human-friendly forms like 2k, 4k. R07.18+.",
     )
     parser.add_argument(
         "--num-batch",
@@ -465,7 +465,7 @@ def parse_shared_args(args) -> SharedConfig:
 def _env_int(name: str) -> Optional[int]:
     """Read an integer from an environment variable.
 
-    R07.19: also accepts token-size suffixes via ``_parse_token_size`` —
+    R07.18: also accepts token-size suffixes via ``_parse_token_size`` —
     ``AGENTKTHX_NUM_CTX=128k`` and ``AGENTKTHX_NUM_CTX=131072`` both work.
     """
     val = os.environ.get(name)
@@ -480,7 +480,7 @@ def _env_int(name: str) -> Optional[int]:
 def _parse_token_size(s) -> int:
     """Parse a token size string with optional k/m/g suffix into an int.
 
-    R07.19: accepts human-friendly forms for ``--num-ctx`` / ``--num-predict``:
+    R07.18: accepts human-friendly forms for ``--num-ctx`` / ``--num-predict``:
       - ``131072``         → 131072
       - ``128k`` / ``128K`` → 131072  (1024 * 128)
       - ``1m`` / ``1M``     → 1048576 (1024 * 1024)

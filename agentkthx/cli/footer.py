@@ -52,7 +52,7 @@ def fmt_tok(n) -> str:
 def fmt_token_size(n) -> str:
     """Format a context-window / max-tokens size as '128K', '1M', '2K', '512'.
 
-    R07.19: used for the ctx + max-tokens segments in the footer line 1 and
+    R07.18: used for the ctx + max-tokens segments in the footer line 1 and
     for the Context column in ``agentkthx models``. Distinct from
     ``fmt_tok`` (which is for prompt-size + cumulative counters — those want
     fractional-k like '1.1k'); this one wants clean power-of-1024 forms:
@@ -95,13 +95,13 @@ def footer_line1(agent) -> str:
     R07.17: added optional batch-size segment (🔧 N) after temp, shown only
     when ``agent._num_batch`` is not None. Also fixed temp icon spacing by
     removing the redundant VS16 from the thermometer emoji.
-    R07.19: ctx + max-tokens now always render in 128K style via
+    R07.18: ctx + max-tokens now always render in 128K style via
     ``fmt_token_size`` (was conditional on >=1024). Added optional
     quantization segment (🧊 Q4_K_M) after batch, shown when
     ``agent._weight_quant`` is set.
     """
     ctx = agent.num_ctx
-    # R07.19: falsy ctx (0/None) renders as '?' to match the historical
+    # R07.18: falsy ctx (0/None) renders as '?' to match the historical
     # "missing context" placeholder. fmt_token_size is a pure formatter
     # (0 → '0'); the falsy check lives here so the helper stays reusable.
     ctx_str = fmt_token_size(ctx) if ctx else "?"
@@ -132,25 +132,28 @@ def footer_line1(agent) -> str:
     _e_temp = "\U0001f321"  # thermometer — NO VS16 (defaults to emoji)
     _e_prmpt = "\U0001f4dd"  # memo
     _e_batch = "\U0001f527"  # wrench — for batch size (R07.17)
-    _e_quant = "\U0001f9ca"  # ice cube — for weight quant (R07.19)
+    _e_quant = "\U0001f9ca"  # ice cube — for weight quant (R07.18)
+    # R07.18: emoji are NOT wrapped in dim() — some terminals render DIM
+    # emoji at half-height (cut in half vertically). The emoji are
+    # decorative; only the text values after them get color/dim treatment.
     parts = [
-        f"{dim(_e_brand)} {cyan(__version__)}",
-        f"{dim(_e_model)} {cyan(agent.model)}",
-        f"{dim(_e_prmpt)} {yellow(prompt_str)}",
-        f"{dim(_e_ctx)} {yellow(ctx_str)}",
-        f"{dim(_e_resp)} {yellow(max_t_str)}",
-        f"{dim(_e_temp)} {yellow(_fmt_temp(temp))}",
+        f"{_e_brand} {cyan(__version__)}",
+        f"{_e_model} {cyan(agent.model)}",
+        f"{_e_prmpt} {yellow(prompt_str)}",
+        f"{_e_ctx} {yellow(ctx_str)}",
+        f"{_e_resp} {yellow(max_t_str)}",
+        f"{_e_temp} {yellow(_fmt_temp(temp))}",
     ]
     # R07.17: batch size — only shown when explicitly set
     _num_batch = getattr(agent, "_num_batch", None)
     if _num_batch is not None:
-        parts.append(f"{dim(_e_batch)} {yellow(str(_num_batch))}")
-    # R07.19: weight quantization — only shown when detected (Ollama
+        parts.append(f"{_e_batch} {yellow(str(_num_batch))}")
+    # R07.18: weight quantization — only shown when detected (Ollama
     # /api/show details.quantization_level, or GGUF header for local
     # backends). None for cloud backends that don't report it.
     _weight_quant = getattr(agent, "_weight_quant", None)
     if _weight_quant:
-        parts.append(f"{dim(_e_quant)} {yellow(str(_weight_quant))}")
+        parts.append(f"{_e_quant} {yellow(str(_weight_quant))}")
     return " ".join(parts)
 
 
@@ -193,9 +196,10 @@ def footer_line2(agent, session_tokens_in: int = 0, session_tokens_out: int = 0)
     _e_tok = "\U0001f4c8"
     _e_dbg = "\U0001f41b"
     _e_tps = "\u26a1"  # R07.17: lightning bolt for TPS
+    # R07.18: emoji NOT dimmed (see footer_line1 comment above)
     parts = [
-        f"{dim(_e_be)} {green(bname)}",
-        f"{dim(_e_tok)} {yellow(tok_str)}",
+        f"{_e_be} {green(bname)}",
+        f"{_e_tok} {yellow(tok_str)}",
     ]
     # R07.17: per-RESPONSE TPS (not run-average). Shows tokens/sec for the
     # most recent completed generation call only — avoids skew from tool
@@ -217,7 +221,7 @@ def footer_line2(agent, session_tokens_in: int = 0, session_tokens_out: int = 0)
         _elapsed = _gen_end - _gen_start
         if _elapsed > 0.001:  # avoid div-by-zero on instant returns
             _tps = _gen_tokens / _elapsed
-            parts.append(f"{dim(_e_tps)} {yellow(f'{_tps:.1f}')} {dim('tok/s')}")
+            parts.append(f"{_e_tps} {yellow(f'{_tps:.1f}')} {dim('tok/s')}")
     parts.append(f"{dim('ctx')} {_ctx_pct_str}")
     if agent.debug:
         parts.append(f"{red(_e_dbg + ' debug')}")
