@@ -759,6 +759,15 @@ class Agent(AgentSetupMixin, CompactionMixin, ToolExecutionMixin, StreamingMixin
         """
         # PERF-01: streaming path. Delegates to the streaming wrapper
         # (same AgentRun shape; only the display behavior differs).
+        # R07.17: mark run start for TPS display in the CLI footer.
+        # Set here (before the branch) so both streaming and non-streaming
+        # paths get it. The streaming path also resets token totals at its
+        # own entry point (_run_core_streaming); the non-streaming path
+        # relies on _run_loop_iteration's start_time for its own timing.
+        import time as _time
+
+        self._run_start_time = _time.time()
+
         if stream:
             return self._run_core_streaming(prompt)
 
@@ -800,6 +809,9 @@ class Agent(AgentSetupMixin, CompactionMixin, ToolExecutionMixin, StreamingMixin
         # Reset running token totals for this run
         self._running_tokens_in = 0
         self._running_tokens_out = 0
+        # R07.17: _run_start_time is set by the caller (_run_core) before
+        # delegating to this method, so both streaming and non-streaming
+        # paths share the same start timestamp.
 
         def _on_step_start(step_num: int) -> None:
             # ROB-06: Check if memory needs compaction before generating.

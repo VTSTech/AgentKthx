@@ -310,6 +310,12 @@ class AgentSetupMixin:
         # Reset at the start of each run() call.
         self._running_tokens_in = 0
         self._running_tokens_out = 0
+        # R07.17: timestamp when the current run() started, for TPS
+        # (tokens-per-second) display in the CLI footer. Set to 0.0 at
+        # init; set to time.time() at the start of each _run_core /
+        # _run_core_streaming call. The footer reads this via getattr
+        # and computes TPS = _running_tokens_out / (now - _run_start_time).
+        self._run_start_time = 0.0
         # Optional callback invoked after each step completes, used by
         # the CLI to refresh the persistent footer during streaming.
         # Signature: callback(step_num, tokens_in, tokens_out)

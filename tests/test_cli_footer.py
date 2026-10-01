@@ -43,6 +43,12 @@ def _agent(**kw):
     a._custom_system_prompt = kw.get("_custom_system_prompt", "")
     a.backend = kw.get("backend", _Backend(_BackendType("ollama")))
     a.debug = kw.get("debug", False)
+    # R07.17: optional fields read by getattr — default to not-set so the
+    # footer's "only show when set" guard works correctly.
+    if "_num_batch" in kw:
+        a._num_batch = kw["_num_batch"]
+    if "_run_start_time" in kw:
+        a._run_start_time = kw["_run_start_time"]
     return a
 
 
@@ -155,6 +161,122 @@ class TestFooterText(unittest.TestCase):
         text = footer_text(a, 1000, 500)
         self.assertEqual(len(text.splitlines()), 2)
         self.assertEqual(text, f"{footer_line1(a)}\n{footer_line2(a, 1000, 500)}")
+
+
+# ─────────────────────────────────────────────────────────────────────
+# R07.17: batch size + TPS + temp formatting
+# ─────────────────────────────────────────────────────────────────────
+
+
+class TestFooterBatchSize(unittest.TestCase):
+    """Line 1 shows 🔧 N when _num_batch is set; omits the segment when None."""
+
+    def test_batch_shown_when_set(self):
+        a = _agent(_num_batch=64)
+        line = footer_line1(a)
+        self.assertIn("\U0001f527", line)  # wrench emoji
+        self.assertIn("64", line)
+
+    def test_batch_omitted_when_none(self):
+        a = _agent()  # _num_batch not set → getattr returns None
+        line = footer_line1(a)
+        self.assertNotIn("\U0001f527", line)
+
+    def test_batch_shown_after_temp(self):
+        """The batch segment appears after the temp segment."""
+        a = _agent(_temperature=0.1, _num_batch=256)
+        line = footer_line1(a)
+        temp_idx = line.index("0.1")
+        batch_idx = line.index("256")
+        self.assertGreater(batch_idx, temp_idx, "batch must appear after temp")
+
+
+class TestFooterTPS(unittest.TestCase):
+    """Line 2 shows ⚡ N.N tok/s when _run_start_time is set and output > 0."""
+
+    def test_tps_shown_during_run(self):
+        """When _run_start_time is set and _running_tokens_out > 0, TPS appears."""
+        import time as _time
+
+        a = _agent(_run_start_time=_time.time() - 10.0)  # 10s ago
+        a._running_tokens_in = 100
+        a._running_tokens_out = 200
+        line = footer_line2(a)
+        self.assertIn("\u26a1", line)  # lightning bolt
+        self.assertIn("tok/s", line)
+
+    def test_tps_omitted_when_no_run_start(self):
+        """When _run_start_time is not set, TPS is omitted."""
+        a = _agent()
+        a._running_tokens_in = 100
+        a._running_tokens_out = 200
+        line = footer_line2(a)
+        self.assertNotIn("tok/s", line)
+
+    def test_tps_omitted_when_no_output_tokens(self):
+        """When _running_tokens_out is 0, TPS is omitted (avoid div-by-zero)."""
+        import time as _time
+
+        a = _agent(_run_start_time=_time.time() - 5.0)
+        a._running_tokens_in = 100
+        a._running_tokens_out = 0
+        line = footer_line2(a)
+        self.assertNotIn("tok/s", line)
+
+    def test_tps_value_is_reasonable(self):
+        """200 tokens in 10s → ~20.0 tok/s."""
+        import time as _time
+
+        a = _agent(_run_start_time=_time.time() - 10.0)
+        a._running_tokens_in = 100
+        a._running_tokens_out = 200
+        line = footer_line2(a)
+        # The TPS value should be around 20.0 (allow some slack for timing)
+        self.assertIn("20.", line)
+
+
+class TestFooterTempFormatting(unittest.TestCase):
+    """Temperature is formatted cleanly with :g (no float-precision noise)."""
+
+    def test_temp_0_1(self):
+        a = _agent(_temperature=0.1)
+        line = footer_line1(a)
+        self.assertIn("0.1", line)
+
+    def test_temp_0_7(self):
+        a = _agent(_temperature=0.7)
+        line = footer_line1(a)
+        self.assertIn("0.7", line)
+
+    def test_temp_float_noise_cleaned(self):
+        """0.1 + 0.2 = 0.30000000000000004 → should render as '0.3'."""
+        a = _agent(_temperature=0.1 + 0.2)
+        line = footer_line1(a)
+        self.assertIn("0.3", line)
+        self.assertNotIn("0000000", line)  # no float noise
+
+    def test_temp_icon_has_no_vs16(self):
+        """R07.17: the thermometer emoji must NOT carry VS16 (causes spacing gap).
+
+        U+1F321 THERMOMETER defaults to emoji presentation, so the VS16
+        (\ufe0f) is redundant. Some terminals render the VS16 as an extra
+        blank column, causing a 6-space gap between the icon and the value.
+        """
+        from pathlib import Path
+
+        src = Path(__file__).resolve().parent.parent / "agentkthx" / "cli" / "footer.py"
+        text = src.read_text(encoding="utf-8")
+        # The _e_temp line must use \U0001f321 WITHOUT \ufe0f
+        for line in text.split("\n"):
+            if "_e_temp =" in line and "U0001f321" in line:
+                self.assertNotIn(
+                    "\\ufe0f",
+                    line,
+                    "_e_temp must not carry VS16 — it causes a spacing gap on some terminals",
+                )
+                break
+        else:
+            self.fail("Could not find _e_temp definition in footer.py")
 
 
 class TestFooterDeduplicated(unittest.TestCase):
