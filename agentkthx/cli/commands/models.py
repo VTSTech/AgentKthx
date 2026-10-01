@@ -100,9 +100,14 @@ def cmd_models(args: argparse.Namespace) -> int:
     acp, _ = _cli._init_acp(args, config, "AgentKthx-Models")
 
     # Column widths
-    NAME_W = 36
-    SIZE_W = 8
-    QUANT_W = 8  # R07.19: weight quant column (Q4_K_M, Q8_0, F16, etc.)
+    # R07.18: NAME_W widened from 36→48 to fit long Ollama names without
+    # truncation (the user needs the full name to copy into `-m`). The
+    # longest realistic name (cryptidbleh/gemma4-claude-opus-4.6:latest)
+    # is 42 chars; 48 gives headroom for future longer names. Cloud
+    # providers already used 50.
+    NAME_W = 48
+    SIZE_W = 9  # R07.18: was 8, but "xxx.xx GB" (e.g. "  0.75 GB") is 9 chars — the 1-char overflow cascaded to every column after Size
+    QUANT_W = 8  # weight quant column (Q4_K_M, Q8_0, F16, etc.)
     CTX_W = 12
     TOOLS_W = 12  # fits "✓ native"
     FAMILY_W = 12
@@ -184,8 +189,15 @@ def cmd_models(args: argparse.Namespace) -> int:
         ctx_str = fmt_token_size(max_ctx)
 
         # Fixed columns
+        # R07.18: NO truncation — the user needs to see the full model name
+        # to copy it into `-m`. Long names push subsequent columns right
+        # for that row only (pad_colored pads short names but doesn't
+        # truncate long ones). Widened NAME_W from 36→48 to fit the
+        # longest realistic Ollama name (cryptidbleh/gemma4-claude-opus-4.6:latest = 42 chars).
         name_col = pad_colored(cyan(name), NAME_W)
-        size_col = f"{size_gb:>6.2f} GB"
+        # R07.18: pad size_col to SIZE_W=9 for alignment (was raw string,
+        # which overflowed by 1 char and cascaded to all columns after it)
+        size_col = pad_colored(f"{size_gb:>6.2f} GB", SIZE_W, "right")
         # R07.19: quant column — pad to QUANT_W, dim if unknown
         quant_col = pad_colored(
             dim(weight_quant) if not weight_quant else yellow(weight_quant),

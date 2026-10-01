@@ -321,7 +321,9 @@ def pad_colored(text: str, width: int, align: str = "left") -> str:
         align: 'left', 'right', or 'center'
 
     Returns:
-        Text padded with spaces to reach the target visible width
+        Text padded with spaces to reach the target visible width.
+        Does NOT truncate — use ``truncate_visible`` first if the text
+        may exceed ``width``.
     """
     visible = visible_len(text)
     padding = width - visible
@@ -337,6 +339,41 @@ def pad_colored(text: str, width: int, align: str = "left") -> str:
         left = padding // 2
         right = padding - left
         return " " * left + text + " " * right
+
+
+def truncate_visible(text: str, width: int) -> str:
+    """Truncate plain text to a visible width using a middle ellipsis.
+
+    R07.18: used by ``cmd_models`` to keep long model names from pushing
+    subsequent columns out of alignment. Middle-ellipsis preserves both
+    the start (publisher/repo) and end (tag) of the name so the user
+    can still identify the model.
+
+    Examples (width=36):
+      ``'qwen2.5:0.5b'`` (13 chars) → ``'qwen2.5:0.5b'`` (unchanged)
+      ``'cryptidbleh/gemma4-claude-opus-4.6:latest'`` (42 chars)
+        → ``'cryptidbleh/gemma4-c…s-4.6:latest'`` (36 chars)
+
+    Operates on PLAIN text (no ANSI codes). Call before applying color:
+        ``cyan(truncate_visible(name, NAME_W))``
+
+    Args:
+        text: Plain text (no ANSI codes)
+        width: Maximum visible width
+
+    Returns:
+        Truncated text with a middle ``…`` (U+2026) if ``len(text) > width``,
+        otherwise the original text unchanged.
+    """
+    if len(text) <= width:
+        return text
+    if width <= 1:
+        return "…"[:width]
+    ellipsis = "…"
+    keep = width - 1  # 1 char for the ellipsis
+    first = keep // 2 + (keep % 2)  # slightly more at the start
+    last = keep // 2
+    return text[:first] + ellipsis + text[len(text) - last :]
 
 
 __all__ = [
@@ -366,4 +403,5 @@ __all__ = [
     "bright_red",
     "visible_len",
     "pad_colored",
+    "truncate_visible",
 ]
