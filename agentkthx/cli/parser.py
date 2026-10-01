@@ -425,7 +425,7 @@ def _make_confirm_callback(args: argparse.Namespace):
         # Truncate very long values (e.g. file content)
         if len(arg_str) > 200:
             arg_str = arg_str[:200] + "..."
-        print(f"\n{yellow('⚠')}  Dangerous tool: {yellow(tool_name)}")
+        print(f"\n{yellow('\u26a0\ufe0f')}  Dangerous tool: {yellow(tool_name)}")
         print(f"{dim('  ' + arg_str)}")
         try:
             choice = input(f"  {dim('Execute?')} [y/N] ").strip().lower()

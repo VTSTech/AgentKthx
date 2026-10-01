@@ -120,19 +120,24 @@ def footer_line1(agent) -> str:
     _prompt_chr = len(_sys_prompt)
     _prompt_tok = _prompt_chr // 4
     prompt_str = f"{fmt_tok(_prompt_chr)} chr {fmt_tok(_prompt_tok)} tok"
-    # R07.17: removed \ufe0f (VS16) from thermometer — U+1F321 defaults to
-    # emoji presentation, so VS16 is redundant. Some terminals render the
-    # VS16 as an extra blank column, causing a 6-space gap between the icon
-    # and the value. Other emojis below (🧠 📝 📦 💬) are in the Emoji
-    # category and don't need VS16 either.
-    _e_brand = "\u269b\ufe0f"  # atom — needs VS16 (defaults to text)
-    _e_model = "\U0001f9e0"  # brain
-    _e_ctx = "\U0001f4e6"  # package
-    _e_resp = "\U0001f4ac"  # speech bubble
-    _e_temp = "\U0001f321"  # thermometer — NO VS16 (defaults to emoji)
-    _e_prmpt = "\U0001f4dd"  # memo
-    _e_batch = "\U0001f527"  # wrench — for batch size (R07.17)
-    _e_quant = "\U0001f9ca"  # ice cube — for weight quant (R07.18)
+    # R07.18: ALL emoji now carry VS16 (\ufe0f) to force emoji-presentation.
+    # Without VS16, some terminals render emoji in text-presentation mode,
+    # which appears as a half-height / split glyph ("cut in half vertically").
+    # The VS16 is explicit even for emoji that "should" default to emoji
+    # presentation — not all terminals respect the Unicode default, and
+    # consistency prevents mixed rendering.
+    # The spacing gap that R07.17 tried to fix by removing VS16 from the
+    # thermometer is now handled by the consistent "icon + space + value"
+    # pattern (the space after the emoji separates it from the value
+    # regardless of whether VS16 renders as a blank column).
+    _e_brand = "\u269b\ufe0f"  # atom
+    _e_model = "\U0001f9e0\ufe0f"  # brain
+    _e_ctx = "\U0001f4e6\ufe0f"  # package
+    _e_resp = "\U0001f4ac\ufe0f"  # speech bubble
+    _e_temp = "\U0001f321\ufe0f"  # thermometer
+    _e_prmpt = "\U0001f4dd\ufe0f"  # memo
+    _e_batch = "\U0001f527\ufe0f"  # wrench
+    _e_quant = "\U0001f9ca\ufe0f"  # ice cube
     # R07.18: emoji are NOT wrapped in dim() — some terminals render DIM
     # emoji at half-height (cut in half vertically). The emoji are
     # decorative; only the text values after them get color/dim treatment.
@@ -192,10 +197,10 @@ def footer_line2(agent, session_tokens_in: int = 0, session_tokens_out: int = 0)
         _ctx_pct_str = yellow(f"{_ctx_pct}%")
     else:
         _ctx_pct_str = green(f"{_ctx_pct}%")
-    _e_be = "\U0001f50c"
-    _e_tok = "\U0001f4c8"
-    _e_dbg = "\U0001f41b"
-    _e_tps = "\u26a1"  # R07.17: lightning bolt for TPS
+    _e_be = "\U0001f50c\ufe0f"  # plug — VS16 for emoji presentation (R07.18)
+    _e_tok = "\U0001f4c8\ufe0f"  # chart
+    _e_dbg = "\U0001f41b\ufe0f"  # bug
+    _e_tps = "\u26a1\ufe0f"  # lightning bolt — VS16 REQUIRED (defaults to text)
     # R07.18: emoji NOT dimmed (see footer_line1 comment above)
     parts = [
         f"{_e_be} {green(bname)}",

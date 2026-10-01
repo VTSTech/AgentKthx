@@ -326,24 +326,27 @@ class TestFooterTempFormatting(unittest.TestCase):
         self.assertIn("0.3", line)
         self.assertNotIn("0000000", line)  # no float noise
 
-    def test_temp_icon_has_no_vs16(self):
-        """R07.17: the thermometer emoji must NOT carry VS16 (causes spacing gap).
+    def test_temp_icon_has_vs16(self):
+        """R07.18: ALL emoji must carry VS16 to force emoji-presentation.
 
-        U+1F321 THERMOMETER defaults to emoji presentation, so the VS16
-        (\ufe0f) is redundant. Some terminals render the VS16 as an extra
-        blank column, causing a 6-space gap between the icon and the value.
+        Without VS16, some terminals render emoji in text-presentation mode,
+        which appears as a half-height / split glyph ("cut in half vertically").
+        R07.17 tried removing VS16 from the thermometer to fix a spacing gap,
+        but R07.18 reverted that — ALL emoji now carry VS16 consistently.
+        The spacing gap is handled by the "icon + space + value" pattern.
         """
         from pathlib import Path
 
         src = Path(__file__).resolve().parent.parent / "agentkthx" / "cli" / "footer.py"
         text = src.read_text(encoding="utf-8")
-        # The _e_temp line must use \U0001f321 WITHOUT \ufe0f
+        # The _e_temp line must use \U0001f321 WITH \ufe0f
         for line in text.split("\n"):
             if "_e_temp =" in line and "U0001f321" in line:
-                self.assertNotIn(
+                self.assertIn(
                     "\\ufe0f",
                     line,
-                    "_e_temp must not carry VS16 — it causes a spacing gap on some terminals",
+                    "_e_temp must carry VS16 — without it some terminals "
+                    "render the thermometer in text-presentation (half-height)",
                 )
                 break
         else:
