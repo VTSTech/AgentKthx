@@ -113,6 +113,9 @@ In chat mode, use these slash commands to manage tools, skills, and models mid-s
 /tool shell,read_file,write_file   # Load tools mid-session (comma-separated)
 /skills              # List all available skills (✓ = loaded)
 /skill codebase-audit  # Load a skill mid-session (appends to system prompt)
+/souls               # List all available souls (✓ = active)
+/soul                # Show the active soul (display name, version, level, tools)
+/soul kthx-trading   # Switch soul mid-session (prompt rebuilt, history kept)
 /param temperature 0.3   # Set generation parameters
 /param num_batch 256     # Ollama: per-request prompt-processing batch size
 /param repeat_penalty 1.4  # llama.cpp: discourages repetition (BitNet default 1.3)
@@ -141,6 +144,35 @@ The prompt then shows the name on every turn (`VTSTech: _`). Resolution order:
 Names are sanitized before use: control characters and ANSI escapes are
 stripped and length is capped at 32 chars, since the name is rendered into
 the input prompt on every turn.
+
+### Souls — Persona Packages & Mid-Session Switching (R07.19)
+
+Souls are the heavier persona packages (Soul Spec v0.5 — `soul.json` +
+`SOUL.md` + `IDENTITY.md` + …) that replace the default system prompt with a
+full persona. Three ship with the framework: `kthx-helper` (general
+diagnostic assistant), `kthx-skills` (skills-focused), and `kthx-trading`
+(Canadian TSX/TSX-V paper-trading analyst).
+
+```bash
+agentkthx chat --soul kthx-trading   # Select a soul at startup
+```
+
+Inside chat, `/souls` lists every bundled soul (✓ = the active one) and
+`/soul` shows or switches the active persona mid-session:
+
+```bash
+/souls                # Available souls (name, version, description)
+/soul                 # Current soul details (level, allowed tools)
+/soul kthx-trading    # Switch — system prompt rebuilt, conversation preserved
+```
+
+Switching mirrors the startup `--soul` path exactly: the new soul's
+`allowedTools` filter re-applies to the current tool registry (tools can be
+filtered out, never added — load extras with `/tool`), the system prompt is
+rebuilt at the session's `--soul-level`, any `--skills` / `/skill` text and
+the `# Host Environment` section are re-appended, and the system message in
+memory is replaced. Conversation history is untouched — the persona change
+takes effect from the next message on.
 
 ### Host Environment in the System Prompt (R07.19)
 
@@ -721,8 +753,14 @@ AGENTKTHX_MAX_TOOL_RETRIES=2           # Maximum retries per tool call failure
 Check current configuration:
 ```bash
 agentkthx config
-agentkthx config --urls  # Show only URLs
+agentkthx config --urls  # Show only backend URLs
+agentkthx config --full  # Dump every config var incl. plugin sections
 ```
+
+The default view ends with a complete **Environment Variables** reference —
+every env var the framework reads (core, all plugin backends, display/platform
+conventions like `NO_COLOR` / `AGENTKTHX_GLYPHS` / XDG dirs) with a one-line
+description and its default.
 
 ### CLI Options (run, chat, agent)
 

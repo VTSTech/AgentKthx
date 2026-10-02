@@ -8,6 +8,9 @@ Consolidates the Agent construction path into one addressable module:
   registry assembly (incl. plugin tools + allowed_tools filtering),
   thinking-control resolution, memory setup (persistent / BitNet-tuned),
   soul loading, and system-prompt assembly.
+- ``switch_soul()`` — mid-session soul switch (R07.19 ``/soul`` command):
+  re-applies the allowed_tools filter, rebuilds the system prompt
+  (soul + skills + environment) and swaps the memory system message.
 - ``_is_comp_mode`` — property: backend is using Chat-Completions
   (OpenAI) API mode. Used by the constructor and the prompt builder.
 - ``_build_default_prompt()`` — the no-soul fallback system prompt
@@ -515,6 +518,9 @@ class AgentSetupMixin:
 
         # Load Soul Spec package (default: kthx-helper)
         self.soul = None
+        # R07.19: remember the disclosure level so the /soul slash command
+        # can rebuild the prompt at the same depth when switching mid-session.
+        self._soul_level = soul_level
 
         # Determine if tools are available
         has_tools = (
@@ -582,7 +588,14 @@ class AgentSetupMixin:
                 self._custom_system_prompt = f"{self._custom_system_prompt}\n\n{tool_section}"
 
         # Append skills prompt if provided
+        # R07.19: the raw skills text is ALSO kept on the agent so the /soul
+        # slash command can rebuild the system prompt (new soul + skills +
+        # environment) without losing the --skills injection. The mid-session
+        # /skill command appends to this same field, so a soul switch
+        # re-applies every loaded skill.
+        self._skills_prompt: str | None = None
         if skills_prompt:
+            self._skills_prompt = skills_prompt
             self._custom_system_prompt = f"{self._custom_system_prompt}\n{skills_prompt}"
             if debug:
                 print(
@@ -629,6 +642,98 @@ class AgentSetupMixin:
             print(
                 f"[Agent] Retry on error: {self._retry_on_error}, max_tool_retries: {self._max_tool_retries}"
             )
+
+    def switch_soul(self, soul_name: str, level: int | None = None) -> object:
+        """Switch the active Soul Spec package mid-session (R07.19 /soul).
+
+        Mirrors the startup soul path in ``__init__`` — load the new
+        manifest, re-apply the ``allowed_tools`` filter, rebuild the system
+        prompt (soul + skills + host environment) and swap the system
+        message in memory. Conversation history is preserved; only the
+        system message is replaced (``Memory.add("system", ...)`` drops the
+        previous one).
+
+        Tool-filtering contract (same as startup): the CURRENT registry —
+        which may include mid-session ``/tool`` additions — is intersected
+        with the new soul's ``allowed_tools``. Switching souls can therefore
+        remove tools but never adds ones the session didn't already have;
+        use ``/tool`` to load more.
+
+        Args:
+            soul_name: Soul package name (bare name like ``kthx-trading``)
+                or path, anything ``load_soul`` resolves.
+            level: Override the disclosure level for this switch. Default
+                None keeps the level the agent was constructed with
+                (``self._soul_level``).
+
+        Returns:
+            The new SoulManifest (also stored on ``self.soul``).
+
+        Raises:
+            FileNotFoundError / ValueError: from ``load_soul`` when the
+                package doesn't exist or fails validation (strict mode).
+        """
+        from ..soul import build_system_prompt, build_system_prompt_with_tools, load_soul
+
+        new_level = level if level is not None else getattr(self, "_soul_level", 2)
+        if self.debug:
+            print(f"[Soul] Switching to '{soul_name}' (level {new_level})")
+
+        new_soul = load_soul(soul_name, level=new_level)
+
+        # Re-apply the allowed_tools filter — the same "additional
+        # filtering" contract as startup (agent_setup.__init__).
+        if new_soul.allowed_tools and len(new_soul.allowed_tools) > 0:
+            allowed = set(new_soul.allowed_tools)
+            current_tools = set(self.tools.names())
+            filtered = current_tools.intersection(allowed)
+            if filtered != current_tools:
+                if self.debug:
+                    print(f"[Soul] Filtering tools: {current_tools} -> {filtered}")
+                self.tools = self.tools.subset(list(filtered))
+
+        # Rebuild the prompt exactly like startup: tool-aware when tools
+        # are available, bare soul prompt otherwise.
+        has_tools = (
+            self.tools and len(self.tools) > 0 and self.tool_choice.type != ToolChoiceType.NONE
+        )
+        if has_tools:
+            prompt = build_system_prompt_with_tools(
+                new_soul,
+                self.tools.all(),
+                level=new_level,
+                tool_choice=self.tool_choice,
+                native_tools=self._use_native_tools,
+            )
+        else:
+            prompt = build_system_prompt(new_soul, level=new_level)
+
+        self.soul = new_soul
+        self._soul_level = new_level
+
+        # Re-append the accumulated skills text (--skills at startup plus
+        # any mid-session /skill loads, kept current by cmd_chat).
+        skills_text = getattr(self, "_skills_prompt", None)
+        if skills_text:
+            prompt = f"{prompt}\n{skills_text}"
+
+        # Host-environment section — same fail-safe probe as startup.
+        env_section = build_environment_section(is_bitnet=self._is_bitnet, debug=self.debug)
+        if env_section:
+            prompt = f"{prompt}\n\n{env_section}"
+
+        self._custom_system_prompt = prompt
+
+        # Refresh the tool parser (its name list pins what the model may
+        # emit) and swap the system message in memory.
+        self._parser = ToolParser(
+            self.tools.names(), debug=self.debug, force_react=self.force_react
+        )
+        self.memory.add("system", prompt)
+
+        if self.debug:
+            print(f"[Soul] Switched: {new_soul.display_name} v{new_soul.version}")
+        return new_soul
 
     @property
     def _is_comp_mode(self) -> bool:

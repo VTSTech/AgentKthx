@@ -208,6 +208,72 @@ class SoulLoader:
         self._cache[cache_key] = manifest
         return manifest
 
+    def list_souls(self, level: int = 1) -> list[SoulManifest]:
+        """
+        Discover and load every bundled Soul Spec package (R07.19).
+
+        Mirrors ``SkillLoader.list_skills()`` but returns the loaded
+        manifests rather than bare names — the /souls slash command and
+        the ``agentkthx souls`` surface need display metadata (display
+        name, version, description, allowed tools), all of which live in
+        soul.json and are available at Level 1 (quick scan).
+
+        Discovery roots (in order):
+          1. ``importlib.resources.files('agentkthx') / 'souls'`` — the
+             canonical accessor (namespace packages, pip installs)
+          2. ``<agentkthx package dir>/souls`` — filesystem fallback for
+             zipped installs where the traversable has no disk path
+
+        A directory counts as a soul package when it contains
+        ``soul.json``. Entries that fail to load are skipped (best-effort
+        — one broken third-party soul must not hide the rest).
+
+        Args:
+            level: Progressive disclosure level passed to ``load()``.
+                Default 1 (manifest only) keeps discovery cheap — the
+                caller can ``load()`` any soul it actually switches to.
+
+        Returns:
+            List of SoulManifest objects sorted by soul directory name.
+        """
+        souls_root: Optional[Path] = None
+
+        # 1. importlib.resources (canonical accessor for bundled souls)
+        try:
+            import importlib.resources as resources
+
+            if hasattr(resources, "files"):
+                bundled = resources.files("agentkthx") / "souls"
+                if bundled.is_dir():
+                    souls_root = Path(str(bundled))
+        except (ImportError, TypeError, AttributeError):
+            pass  # fall through to filesystem fallback
+
+        # 2. Filesystem fallback: <package_dir>/souls
+        if souls_root is None:
+            try:
+                import agentkthx
+
+                if agentkthx.__file__ is not None:
+                    candidate = Path(agentkthx.__file__).parent / "souls"
+                    if candidate.is_dir():
+                        souls_root = candidate
+            except (ImportError, TypeError):
+                pass
+
+        if souls_root is None:
+            return []
+
+        manifests: list[SoulManifest] = []
+        for entry in sorted(souls_root.iterdir()):
+            if not (entry.is_dir() and (entry / "soul.json").exists()):
+                continue
+            try:
+                manifests.append(self.load(entry, level=level))
+            except Exception:
+                continue  # best-effort discovery — skip unloadable souls
+        return manifests
+
     def _parse_manifest(self, data: dict, soul_dir: Path) -> SoulManifest:
         """Parse soul.json into SoulManifest."""
 

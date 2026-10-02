@@ -411,6 +411,10 @@ def cmd_chat(args: argparse.Namespace) -> int:
                 print(
                     f"  {cyan('/skill')}      Load a skill mid-session (e.g. /skill codebase-audit, crypto-signals)"
                 )
+                print(f"  {cyan('/souls')}      Show available souls (\u2713 = active)")
+                print(
+                    f"  {cyan('/soul')}       Show or switch the active soul (e.g. /soul kthx-trading)"
+                )
                 print(
                     f"  {cyan('/status')}     Show model, backend, tools, skills, and memory info"
                 )
@@ -644,9 +648,15 @@ def cmd_chat(args: argparse.Namespace) -> int:
                         skill_text = skill.instructions.strip()
                         if skill_text:
                             old_prompt = getattr(agent, "_custom_system_prompt", "") or ""
-                            agent._custom_system_prompt = (
-                                f"{old_prompt}\n\n# Skill: {skill.name}\n{skill_text}"
-                            )
+                            skill_block = f"\n\n# Skill: {skill.name}\n{skill_text}"
+                            agent._custom_system_prompt = old_prompt + skill_block
+                            # R07.19: track the accumulated skills text so the
+                            # /soul switch can rebuild the prompt (new soul +
+                            # every loaded skill + environment) without losing
+                            # mid-session skill loads.
+                            agent._skills_prompt = (
+                                getattr(agent, "_skills_prompt", None) or ""
+                            ) + skill_block
                             # memory.add("system", ...) automatically removes any
                             # existing system messages and appends the new one —
                             # no need to manually find/replace in _messages.
@@ -674,6 +684,137 @@ def cmd_chat(args: argparse.Namespace) -> int:
                         print(dim(f"  Available: {', '.join(available)}"))
                 if not newly_loaded and not already_loaded and not not_found:
                     print(yellow("  No skills specified."))
+                continue
+
+            # ── /souls slash command ──────────────────────────────────────
+            # List every bundled Soul Spec package. ✓ = the agent's active
+            # soul. R07.19 companion to /skills — souls are the heavier
+            # persona packages (selected with --soul at startup); /soul
+            # shows/switches them mid-session.
+            if user_input == "/souls":
+                try:
+                    from ...soul import SoulLoader
+
+                    available = SoulLoader().list_souls()
+                except Exception as e:
+                    print(yellow(f"Soul module unavailable: {e}"))
+                    continue
+                if not available:
+                    print(yellow("No souls available."))
+                    print(dim("  Souls live in agentkthx/souls/<name>/soul.json"))
+                    continue
+                current_name = getattr(agent.soul, "name", None)
+                print(f"{bold('Available souls:')}")
+                for m in available:
+                    marker = green("\u2713") if m.name == current_name else dim("\u25cb")
+                    desc = m.description or ""
+                    if len(desc) > 60:
+                        desc = desc[:57] + "..."
+                    print(
+                        f"  {marker} {cyan(m.name.ljust(20))}{dim(('v' + m.version).ljust(10))}{desc}"
+                    )
+                print()
+                if current_name:
+                    print(dim(f"  Active: {current_name}. Switch with {cyan('/soul <name>')}."))
+                else:
+                    print(
+                        dim(
+                            f"  No soul active (default prompt). Load one with {cyan('/soul <name>')}."
+                        )
+                    )
+                continue
+
+            # ── /soul slash command ───────────────────────────────────────
+            # Show or switch the active Soul Spec package.
+            # Usage:
+            #   /soul                — show the active soul
+            #   /soul kthx-trading   — switch mid-session (prompt rebuilt,
+            #                          conversation history preserved)
+            if user_input == "/soul" or user_input.startswith("/soul "):
+                parts = user_input.split(None, 1)
+                if len(parts) < 2 or not parts[1].strip():
+                    # No args — show the active soul
+                    if agent.soul:
+                        s = agent.soul
+                        print(
+                            f"Current soul: {magenta(s.display_name)} ({cyan(s.name)}) v{s.version}"
+                        )
+                        print(
+                            dim(
+                                f"  Level: {getattr(agent, '_soul_level', 2)} (1=quick, 2=full, 3=deep)"
+                            )
+                        )
+                        if s.description:
+                            desc = s.description
+                            if len(desc) > 70:
+                                desc = desc[:67] + "..."
+                            print(f"  {dim(desc)}")
+                        if s.allowed_tools:
+                            print(dim(f"  Allowed tools: {', '.join(s.allowed_tools)}"))
+                        print(dim(f"  Switch with: {cyan('/soul <name>')} (see /souls)"))
+                    else:
+                        print(yellow("No soul active — the default system prompt is in use."))
+                        print(
+                            dim(
+                                f"  Load one now with {cyan('/soul <name>')} (see /souls), "
+                                "or restart with --soul <name>."
+                            )
+                        )
+                    continue
+                name = parts[1].strip()
+                # Validate against the bundled souls (fuzzy suggestion like /skill)
+                try:
+                    from ...soul import SoulLoader
+
+                    available = [m.name for m in SoulLoader().list_souls()]
+                except Exception:
+                    available = []
+                if name not in available:
+                    suggestion = ""
+                    if available:
+                        from ...core.helpers import fuzzy_match
+
+                        fuzzy = fuzzy_match(name, available, threshold=0.6)
+                        if fuzzy:
+                            suggestion = f" (did you mean '{fuzzy}'?)"
+                    print(red(f"Soul not found: {name}{suggestion}"))
+                    if available:
+                        print(dim(f"  Available: {', '.join(available)}"))
+                    continue
+                old_name = agent.soul.name if agent.soul else None
+                old_tools = set(agent.tools.names())
+                try:
+                    new_soul = agent.switch_soul(name)
+                except Exception as e:
+                    print(red(f"Failed to switch soul: {e}"))
+                    continue
+                new_tools = set(agent.tools.names())
+                removed = old_tools - new_tools
+                was = old_name or "(default prompt)"
+                print(green(f"Soul switched: {was} -> {new_soul.name}"))
+                print(
+                    dim(
+                        f"  {new_soul.display_name} v{new_soul.version} — system prompt rebuilt, "
+                        "conversation preserved"
+                    )
+                )
+                if removed:
+                    print(
+                        yellow(f"  Tools filtered out by this soul: {', '.join(sorted(removed))}")
+                    )
+                    print(
+                        dim(
+                            "  They stay filtered while this soul is active — reload with /tool "
+                            "after switching back."
+                        )
+                    )
+                if not new_tools:
+                    print(
+                        dim(
+                            "  Tip: no tools loaded — use /tool <name,name,...> to load some "
+                            "(e.g. /tool calculator,shell)."
+                        )
+                    )
                 continue
 
             # ── /param slash command ────────────────────────────────────────
