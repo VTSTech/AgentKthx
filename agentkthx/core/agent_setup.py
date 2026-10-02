@@ -772,7 +772,7 @@ class AgentSetupMixin:
         the model uses native function calling.
         """
         if not has_tools:
-            return "You are AI AgentKthx. Answer questions directly and accurately."
+            return "You are AGI AgentKthx. Answer questions directly and accurately."
 
         if self._is_bitnet:
             # Ultra-lean ReAct prompt for BitNet's degraded tokenizer.
@@ -780,7 +780,7 @@ class AgentSetupMixin:
             # token positions, crashing the i2_s kernel at ~320 tokens.
             # Keep this under 500 chars to stay safely below the crash threshold.
             return (
-                "You are AI AgentKthx with tools.\n"
+                "You are AGI AgentKthx with tools.\n"
                 "Use the ReAct format shown in the tool section below.\n"
                 "After tool result, give Final Answer: <answer>\n"
                 # SEC-10 / FEAT-01 (R07.05): untrusted tool output
@@ -792,7 +792,7 @@ class AgentSetupMixin:
             # OpenAI Chat-Completions mode + model supports native function calling
             # (or user explicitly opted in via --force-react=False / cloud backend).
             # Tools are in the API body — no ReAct format instructions needed.
-            return """You are AI AgentKthx with access to tools.
+            return """You are AGI AgentKthx with access to tools.
 
 Use the available tools when needed. The tools are provided via the API — call them naturally as function calls.
 

@@ -212,6 +212,7 @@ def build_environment_section(is_bitnet: bool = False, debug: bool = False) -> s
         else:
             lines = ["# Host Environment", _format_os_line(env)]
             lines.append(f"- Shell tool: {_shell_note(env['family'])}")
+            lines.append(f"# The next message you recieve will be your Primary User starting a session. Introduce yourself, Then reply conversationally of follow their instructions if given.")
             section = "\n".join(lines)
         if debug:
             print(f"[Env] Detected: {env['os']} ({env['family']})")
