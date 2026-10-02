@@ -67,6 +67,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ruff check agentkthx/ tests/` → all checks passed.
 - `black --check agentkthx/ tests/` → 200 files would be left unchanged.
 - Register: 112 findings — **35 OPEN / 70 CLOSED / 7 WONTFIX (77 archived, 69%)**.
+- Lint burn-down (follow-up commit #4): black + ruff installed and the CI lint pair run for real — `ruff check agentkthx/ tests/` → all checks passed, `black --check agentkthx/ tests/` → 203 files would be left unchanged. Both failures lived in `tests/test_r07_19_models_table_width.py` (unused `pytest` import + two black line-joins); zero logic change, suite unchanged.
 
 ---
 

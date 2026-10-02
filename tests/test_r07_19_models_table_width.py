@@ -32,8 +32,6 @@ import contextlib
 import io
 import re
 
-import pytest
-
 from agentkthx.backends.ollama import OllamaBackend
 from agentkthx.cli.commands import models as models_mod
 
@@ -125,9 +123,7 @@ def _run_models(monkeypatch, backend, entries) -> str:
         "agentkthx.core.tool_cache.get_cached_tool_support",
         lambda model, api_mode="openre": None,
     )
-    args = argparse.Namespace(
-        backend="stub", tool_support=False, api_mode=None, no_cache=False
-    )
+    args = argparse.Namespace(backend="stub", tool_support=False, api_mode=None, no_cache=False)
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         rc = models_mod.cmd_models(args)
@@ -185,8 +181,7 @@ class TestLocalTableDynamicWidth:
         _, separator, _ = _table_lines(out)
         expected = 76 + len(LONG_NAME)  # 128 for the 52-char name
         assert len(separator) == expected, (
-            f"separator must widen to {expected} (76 + {len(LONG_NAME)}), "
-            f"got {len(separator)}"
+            f"separator must widen to {expected} (76 + {len(LONG_NAME)}), " f"got {len(separator)}"
         )
 
     def test_quant_and_context_columns_align(self, monkeypatch):
