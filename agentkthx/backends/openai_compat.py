@@ -849,7 +849,7 @@ class OpenAICompatibleBackend(BaseBackend):
     _THINKING_NAME_PATTERNS: tuple[str, ...] = (
         r"deepseek-r\d",  # deepseek-r1, r1-distill-llama-8b, deepseek-r1:8b
         r"\bqwq",  # qwq-32b, Qwen/QwQ-32B
-        r"\bo[134](-|$|:|/)",  # o1, o3, o4-mini, o3-preview (word-boundary)
+        r"\bo[134](-|$|:)",  # o1, o3, o4-mini, o3-preview (word-boundary)
         r"glm-[45]\.\d",  # glm-4.5 / glm-4.6 / glm-4.7 hybrid-thinking family
         r"glm-5",  # glm-5 family
         r"qwen3",  # qwen3 hybrid thinking mode
@@ -861,11 +861,23 @@ class OpenAICompatibleBackend(BaseBackend):
 
     @classmethod
     def _name_matches_thinking(cls, model: str) -> bool:
-        """True when the model name carries an explicit reasoning marker."""
+        """True when the model SEGMENT carries an explicit reasoning marker.
+
+        R07.19 (post-release follow-up #13): matching ran against the full
+        slug, so a vendor name carrying a marker word bled into the verdict
+        — ``thinkingmachines/inkling`` hit the "thinking" pattern via the
+        ORG name and flagged a model with no reasoning evidence (caught in
+        the R07.19 big smoke test: 4 inkling rows showed think=yes for the
+        wrong reason). Patterns now match the model segment (after the last
+        ``/``) only: every shipped marker (deepseek-r1, qwq, o1/o3/o4,
+        glm-4.5+, qwen3, thinking, reason, magistral, exaone-deep) is
+        model-level, so the restriction keeps every true positive and kills
+        vendor bleed. Never NO: a miss still yields UNKNOWN.
+        """
         import re
 
-        name = (model or "").lower()
-        return any(re.search(p, name) for p in cls._THINKING_NAME_PATTERNS)
+        segment = (model or "").split("/")[-1].lower()
+        return any(re.search(p, segment) for p in cls._THINKING_NAME_PATTERNS)
 
     def test_thinking_support(
         self, model: str, family: str | None = None, force_test: bool = False

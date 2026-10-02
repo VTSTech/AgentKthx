@@ -494,16 +494,20 @@ class TestCloudThinkingHeuristic:
         [
             "deepseek/deepseek-r1:free",
             "deepseek-r1:8b",
+            "deepseek/deepseek-r1-0528",
             "qwen/qwq-32b:free",
             "openai/o1",
             "openai/o3-mini",
+            "openai/o3:batch",
             "openai/o4-mini",
             "z-ai/glm-4.5-air:free",
             "z-ai/glm-4.6",
+            "~z-ai/glm-5-latest",
             "qwen/qwen3-30b-a3b:free",
             "org/supermodel-thinking",
             "mistralai/magistral-small-2506",
             "microsoft/phi-4-reasoning-plus:free",
+            "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
         ],
     )
     def test_markers_hit(self, name):
@@ -519,6 +523,15 @@ class TestCloudThinkingHeuristic:
             "gemma3:270m",
             "granite4:350m",
             "mistralai/mistral-small-24b-instruct",
+            # R07.19 follow-up #13: vendor-name bleed — the ORG carries the
+            # marker word, the model does not. Was a false YES (smoke test:
+            # 4 thinkingmachines/inkling rows flagged via "thinking").
+            "thinkingmachines/inkling",
+            "thinkingmachines/inkling-small",
+            "thinkingmachines/inkling-small:free",
+            "thinkingmachines/inkling:free",
+            "reasonstack/base-model",
+            "~z-ai/glm-latest",  # routed alias without a version marker
         ],
     )
     def test_non_markers_miss(self, name):
