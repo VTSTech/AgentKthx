@@ -5,7 +5,7 @@ All notable changes to AgentKthx will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [R07.19] - 2026-10-02
+## [R07.19] - 2026-10-02 1:00:13 PM
 
 **Primary User chat prompt + host-environment probe in the system prompt.** The chat REPL now asks who is chatting and renders their name instead of the hardcoded `You:`. At Agent construction, a light stdlib-only probe detects the OS family + version and appends a `# Host Environment` section to the system prompt, so the model knows which argument syntax to pass to the shell tool (cmd.exe on Windows vs `/bin/sh` POSIX on Linux/macOS). Follow-up commits in the same release also make the `agentkthx models` Name column dynamic (ROB-37) so long model names can no longer break the table grid, rename the Primary User prompt examples to `VTSTech:`, render real example arguments in the Tool Reference table instead of `"..."` placeholders, rename the bundled souls `nova-*` → `kthx-*` with an accuracy review of the renamed `kthx-helper`, add `/souls` + `/soul` chat commands with a mid-session soul switch, complete the `agentkthx config` environment-variable reference, sort every `-h` output alphabetically, ship an interactive arrow-key model picker (an in-chat `/models` switcher plus a startup picker when `--model` is omitted), and add the `agentkthx souls` listing subcommand.
 
@@ -95,7 +95,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [R07.18] - 2026-10-02
+## [R07.18] - 2026-10-01 9:01:59 PM
 
 **llama-server kwargs forwarding fix + `repeat_penalty` / `repeat_last_n` exposure + footer quantization + human-friendly token sizes.** Fixes a parity bug where llama-server/TurboQuant/BitNet in OpenRE mode silently dropped every sampling param except `temperature` / `n_predict` / `stop`. Exposes the two most-requested llama.cpp repetition knobs via CLI + `/param`. Makes BitNet's hardcoded `repeat_penalty=1.3` overridable. Adds weight-quantization to the footer + models list. Accepts `128k` / `1m` / `2g` forms for `--num-ctx` / `--num-predict`.
 
