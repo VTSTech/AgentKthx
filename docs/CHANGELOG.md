@@ -35,12 +35,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **ROB-37 CLOSED** (`agentkthx/cli/commands/models.py`): R07.18 fixed the local Name column at 48 chars (cloud: 50) while keeping the no-truncation policy — the user needs the full name to copy into `-m`, and `pad_colored` pads short names but cannot absorb long ones. Real-world trigger (user report on the R07.19 pre-release build): `krith/meta-llama-3.2-1b-instruct-uncensored:IQ4_XS` (50 chars, 2 over the floor) pushed its row's Size/Quant/Context columns right and broke the grid. `NAME_W` is now measured from the longest model name in the already-loaded (and free-filtered) `models` list — `max(48 local / 50 cloud, longest_name)` — computed BEFORE the header/separator render, so header, separator and every data row share one width. Both layout branches grow with the measured width (local separator `76 + NAME_W`, cloud `43 + NAME_W`); the floors are unchanged, so short listings render byte-identical to R07.18. Cloud providers get the same dynamic behavior.
 - Full rationale in `audit/deltas.md` (archived ROB-37 section) and the R07.19 delta notes in `audit/audit.md`.
 
+### Fixed — Tool Reference real example arguments (follow-up commit #2)
+
+- The system prompt's Tool Reference table rendered every string parameter as the generic `"..."` placeholder — the user reported the shell row (`{"command": "...", "timeout": 10}`) reads as if the prompt itself were truncated, and a placeholder gives small local models nothing to copy (they render the Arguments column verbatim — the same mechanism that made the old `0` timeout example dangerous). String params now render real values: curated per param name (`_PARAM_STRING_EXAMPLES` in `agentkthx/soul/loader.py` — shell `command` → `echo Hello, World!`, 16 names covering the builtin registry), else the param's own non-empty string default (todo `priority` → `medium`), else `...`. Enum params show their first always-valid value, booleans render `true`, objects render `{}`.
+- The "When to use" cell cap moved 40 → 60 chars with word-boundary cutting — `Execute shell commands (with security restrictions)` now fits in full instead of `(with security...`.
+
 ### Tests
 
 - **New `tests/test_r07_19_primary_user_env.py`** (42 tests): covers per-family probe output (Win10/Win11 build boundary 22000/21999, other NT majors, Linux PRETTY_NAME + NAME fallback + malformed os-release + PRETTY_NAME truncation, macOS + Darwin kernel, unknown platform), shell-note bodies per family, full-section shape, BitNet compact line (< 200 chars, no markdown), kill-switch env var, probe-crash → empty section, Agent wiring (custom prompt prefix + default prompt + BitNet backend-driven compact line + kill-switch leaves the prompt byte-identical), Primary User sanitization (control chars/ANSI/length cap), default resolution (OS login / `You` fallback / sanitized login), resolution precedence (flag > env > interactive > non-TTY default, EOF fallback), `--user`/`-u` parser acceptance + chat-only pin, and source-level prompt pins (named prompt literals present, no `You:` literal remains, no bare-ESC form).
 - **Updated `tests/test_agent_setup_subsystem.py`**: the exact-equality system-prompt assertion relaxed to a prefix assertion — the custom prompt must survive verbatim as the PREFIX with the env section appended after it.
 - **Updated `tests/test_zai_session_fallback.py::TestChatPromptColor`**: the yellow-prompt source pin now asserts the `{primary_user}` form (same yellow SGR + readline zero-width markers) instead of the hardcoded `You:`.
 - **New `tests/test_r07_19_models_table_width.py`** (8 tests, follow-up commit): drives the real `cmd_models` over stub Ollama/cloud backends (no network) and pins — mixed short/long listings keep every row's Size/Quant/Context at identical offsets (the user-report bug), the separator/header width grows to `76 + longest` (local) and `43 + longest` (cloud), the Quant and Context column offsets hold on long rows, short listings keep the R07.18 widths (124 local / 93 cloud), the full name is never truncated, and the reported 50-char name really exceeds the old fixed 48 (premise pin).
+- **New `tests/test_r07_19_tool_examples.py`** (17 tests, follow-up commit #2): exact shell-row pin (`{"command": "echo Hello, World!", "timeout": 10}`), no-placeholder sweep over the full builtin registry, per-type rendering rules (boolean → `true`, object → `{}`, numeric → `10` pin, enum → first value), fallback precedence (curated > default > `...`), and the 60-char word-boundary description cap.
 
 ### Version bump
 
@@ -49,7 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Suite status
 
-- `python -m pytest tests/ -q` → **2261 passed / 16 skipped** (was 2211; +42 from `test_r07_19_primary_user_env.py`, +8 from `test_r07_19_models_table_width.py`).
+- `python -m pytest tests/ -q` → **2278 passed / 16 skipped** (was 2211; +42 from `test_r07_19_primary_user_env.py`, +8 from `test_r07_19_models_table_width.py`, +17 from `test_r07_19_tool_examples.py`).
 - `ruff check agentkthx/ tests/` → all checks passed.
 - `black --check agentkthx/ tests/` → 200 files would be left unchanged.
 - Register: 112 findings — **35 OPEN / 70 CLOSED / 7 WONTFIX (77 archived, 69%)**.

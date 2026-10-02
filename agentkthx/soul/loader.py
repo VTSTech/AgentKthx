@@ -717,6 +717,33 @@ def _build_tool_choice_context(tool_choice: object) -> str:
     return ""
 
 
+# R07.19 (follow-up commit #2): real example values for common string
+# parameter names, rendered in the Tool Reference "Arguments" column.
+# Small local models copy the example verbatim, so a real value
+# ("echo Hello, World!") teaches the shape of a correct call — the
+# previous generic "..." placeholder read like the prompt itself had
+# been truncated (user report). Resolution per string param: this map →
+# the parameter's own non-empty string default → "..." fallback.
+_PARAM_STRING_EXAMPLES = {
+    "command": "echo Hello, World!",  # shell
+    "expression": "15 * 8",  # calculator
+    "file_path": "/tmp/example.txt",  # read_file / write_file / edit_file / read_file_lines
+    "path": "/tmp",  # list_directory / find_files
+    "pattern": "*.py",  # find_files
+    "content": "Hello, World!",  # write_file / todo add
+    "old_string": "text to replace",  # edit_file
+    "new_string": "replacement text",  # edit_file
+    "url": "https://example.com",  # http_get
+    "query": "latest AI news",  # web_search
+    "code": "print(2 + 2)",  # python_repl
+    "json_string": "[1, 2, 3]",  # parse_json
+    "text": "hello world",  # count_words / count_chars
+    "action": "add",  # todo
+    "task_id": "1",  # todo
+    "timezone": "UTC",  # get_time
+}
+
+
 def _build_tool_section(tools: list, native_tools: bool = False) -> str:
     """Build the dynamic tool section for system prompt.
 
@@ -741,13 +768,30 @@ def _build_tool_section(tools: list, native_tools: bool = False) -> str:
         params = getattr(tool, "params", [])
 
         # Build arguments example
+        # R07.19 (follow-up commit #2): string params render a REAL value —
+        # curated per param name, else the param's own string default, else
+        # the "..." fallback. Small local models copy the Arguments column
+        # verbatim, so the example must look like an actual call. Enum
+        # params show their first (always-valid) value, booleans show
+        # `true`, objects show `{}` — only unmapped exotic types still
+        # render a bare `...`.
         if params:
             param_pairs = []
             for p in params:
                 p_name = getattr(p, "name", str(p))
                 p_type = getattr(p, "type", "string")
-                if p_type == "string":
-                    param_pairs.append(f'"{p_name}": "..."')
+                p_enum = getattr(p, "enum", None)
+                p_default = getattr(p, "default", None)
+                if p_enum:
+                    # First enum value is always a valid choice.
+                    param_pairs.append(f'"{p_name}": "{p_enum[0]}"')
+                elif p_type == "string":
+                    example = _PARAM_STRING_EXAMPLES.get(p_name)
+                    if example is None and isinstance(p_default, str) and p_default:
+                        example = p_default
+                    if example is None:
+                        example = "..."
+                    param_pairs.append(f'"{p_name}": "{example}"')
                 elif p_type in ("number", "integer", "float"):
                     # Use 10 (not 0) for numeric examples. Small local models
                     # copy the example value verbatim — 0 was causing instant
@@ -756,6 +800,10 @@ def _build_tool_section(tools: list, native_tools: bool = False) -> str:
                     # timeout param). 10 seconds is a sensible default that
                     # gives the tool enough time to actually run.
                     param_pairs.append(f'"{p_name}": 10')
+                elif p_type == "boolean":
+                    param_pairs.append(f'"{p_name}": true')
+                elif p_type == "object":
+                    param_pairs.append(f'"{p_name}": {{}}')
                 else:
                     param_pairs.append(f'"{p_name}": ...')
             args_example = "{" + ", ".join(param_pairs) + "}"
@@ -763,9 +811,15 @@ def _build_tool_section(tools: list, native_tools: bool = False) -> str:
             args_example = "{}"
 
         # Build "when to use" from description
+        # R07.19 (follow-up commit #2): cap raised 40 → 60 and the cut moved
+        # to a word boundary — "Execute shell commands (with security..."
+        # read as broken truncation (user report); the full first sentence
+        # of most builtin tool descriptions fits in 60 chars.
         short_desc = desc.split(".")[0] if desc else "No description"
-        if len(short_desc) > 40:
-            short_desc = short_desc[:37] + "..."
+        if len(short_desc) > 60:
+            cut = short_desc[:57]
+            space = cut.rfind(" ")
+            short_desc = (cut[:space] if space > 0 else cut) + "..."
 
         lines.append(f"| `{name}` | {short_desc} | `{args_example}` |")
 
