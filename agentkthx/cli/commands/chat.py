@@ -5,6 +5,8 @@ Extracted verbatim from cli.py in R07.00 Phase 8."""
 from __future__ import annotations
 
 import argparse
+import getpass
+import os
 import shutil
 import sys
 import threading
@@ -15,6 +17,74 @@ from ...config import get_config
 from ...tools import make_builtin_registry
 from ..footer import footer_line1, footer_line2
 from ..utils import _print_agent_steps
+
+# ============================================================================
+# Primary User (R07.19)
+# ============================================================================
+
+# The chat prompt used to be a hardcoded "You:". R07.19 asks who is chatting
+# and renders their name instead ("VTSTech: "). Resolution order:
+#
+#   1. --user flag            (explicit, skips the startup prompt)
+#   2. AGENTKTHX_USER env var (scriptable, skips the startup prompt)
+#   3. Interactive prompt     (TTY only — "Primary User [<os-user>]: ",
+#                              Enter accepts the OS login name as default)
+#   4. OS login name          (non-TTY fallback via getpass.getuser())
+#   5. "You"                  (last resort — getpass unavailable)
+
+_MAX_PRIMARY_USER_LEN = 32  # prompt-width sanity: the name renders on every line
+
+
+def _sanitize_primary_user(name: str) -> str:
+    """Make a Primary User name safe to render inside an input() prompt.
+
+    The name is interpolated into the REPL prompt string on EVERY turn, so
+    it must not carry newlines, ANSI escapes or other control characters
+    (a pasted "bob\nquit" would otherwise inject phantom lines / escape
+    sequences into the terminal). Keeps printable characters only, then
+    caps length at 32.
+    """
+    cleaned = "".join(ch for ch in name.strip() if ch.isprintable())
+    return cleaned[:_MAX_PRIMARY_USER_LEN]
+
+
+def _default_primary_user() -> str:
+    """Default Primary User: the OS login name, or "You" when unavailable."""
+    try:
+        name = getpass.getuser().strip()
+    except Exception:
+        # getpass.getuser() raises when no login name is determinable
+        # (e.g. stripped containers with no passwd entry) — last resort.
+        return "You"
+    return _sanitize_primary_user(name) or "You"
+
+
+def _resolve_primary_user(args: argparse.Namespace) -> str:
+    """Resolve the Primary User for this chat session (see order above).
+
+    The interactive prompt (step 3) only fires when stdin is a TTY — piped
+    input (tests, ACP, scripting) never blocks on it.
+    """
+    # 1. --user flag
+    flag = getattr(args, "user", None)
+    if flag and flag.strip():
+        return _sanitize_primary_user(flag)
+    # 2. AGENTKTHX_USER env var
+    env = os.environ.get("AGENTKTHX_USER", "").strip()
+    if env:
+        return _sanitize_primary_user(env)
+    # 3. Interactive prompt — TTY only
+    default = _default_primary_user()
+    if not sys.stdin.isatty():
+        return default
+    try:
+        raw = input(f"Primary User [{default}]: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        # Ctrl+D / Ctrl+C at the naming prompt — fall through to default
+        # instead of killing the whole session.
+        print()
+        return default
+    return _sanitize_primary_user(raw) if raw else default
 
 
 def cmd_chat(args: argparse.Namespace) -> int:
@@ -34,7 +104,14 @@ def cmd_chat(args: argparse.Namespace) -> int:
     agent = _cli._build_agent(args, config)
 
     _cli._print_session_header(agent, args, config, "Chat Mode")
-    print("Type '/quit' to exit, '/help' for commands\n")
+
+    # R07.19: Primary User — who is chatting? Resolved before the persistent
+    # footer takes over the bottom of the terminal so the naming prompt
+    # renders on a clean line. The name replaces "You:" on every REPL turn.
+    primary_user = _resolve_primary_user(args)
+    print(
+        f"Chatting with {bright_cyan(primary_user)} — type '/quit' to exit, '/help' for commands\n"
+    )
 
     # Update notice under the banner — printed BEFORE the persistent footer
     # takes over the bottom of the terminal (see _update_footer scroll regions).
@@ -278,17 +355,19 @@ def cmd_chat(args: argparse.Namespace) -> int:
                 # Prompt uses \001 ... \002 (readline's RL_PROMPT_START_IGNORE /
                 # RL_PROMPT_END_IGNORE) around ANSI escape codes so readline
                 # counts them as zero-width. Without these markers, readline
-                # treats `\033[33m` + `You:` + `\033[0m` + ` ` as 14 visible
+                # treats `\033[33m` + `{NAME}:` + `\033[0m` + ` ` as 14 visible
                 # chars, miscounting the prompt width and breaking wrap detection.
                 # On Windows without readline, these markers are passed through
                 # to the terminal as raw bytes — Windows Terminal / modern
                 # consoles handle ANSI escapes natively, but the SOH/STX (0x01/
                 # 0x02) control chars can render as little boxes. Use a clean
-                # ANSI-only prompt when readline isn't available.
+                # ANSI-only prompt when readline isn't available (R07.19: the
+                # sequence is a proper CSI form — bare-ESC prompts would be
+                # consumed as 2-byte VT escapes, see ROB-34).
                 if readline is not None:
-                    _prompt = "\001\033[33m\002You:\001\033[0m\002 "
+                    _prompt = f"\001\033[33m\002{primary_user}:\001\033[0m\002 "
                 else:
-                    _prompt = "\033[33mYou:\033[0m "
+                    _prompt = f"\033[33m{primary_user}:\033[0m "
                 user_input = input(_prompt).strip()
 
                 # Track last user_input for in-session recall (replaces file-based history)

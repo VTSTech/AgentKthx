@@ -27,6 +27,10 @@ agentkthx run "What is 15 * 8?" --tools calculator
 # Interactive chat
 agentkthx chat -m qwen2.5:0.5b --tools calculator,shell
 
+# R07.19: skip the "Primary User" naming prompt (the name replaces You:)
+agentkthx chat --user Nigel
+AGENTKTHX_USER=Nigel agentkthx chat   # env var works too
+
 # Autonomous agent mode
 agentkthx agent -m qwen2.5:7b --tools calculator,shell,write_file
 
@@ -116,6 +120,48 @@ In chat mode, use these slash commands to manage tools, skills, and models mid-s
 /status              # Show model, backend, tools, skills, memory info
 /help                # Show all slash commands
 ```
+
+### Primary User — Chat Prompt Naming (R07.19)
+
+At the start of every `agentkthx chat` session the REPL asks who is chatting and
+renders that name in the prompt instead of the hardcoded `You:`:
+
+```bash
+Primary User [nigel]:        # Enter accepts the OS login name as default
+```
+
+The prompt then shows the name on every turn (`Nigel: _`). Resolution order:
+
+1. `--user NAME` / `-u NAME` CLI flag (skips the prompt)
+2. `AGENTKTHX_USER` env var (skips the prompt — useful for scripts)
+3. Interactive naming prompt (TTY only — piped stdin / ACP sessions never block)
+4. OS login name via `getpass.getuser()`
+5. `You` (last resort)
+
+Names are sanitized before use: control characters and ANSI escapes are
+stripped and length is capped at 32 chars, since the name is rendered into
+the input prompt on every turn.
+
+### Host Environment in the System Prompt (R07.19)
+
+At Agent construction, AgentKthx lightly probes the host (stdlib `platform`
+reads only — no subprocesses, no network, microseconds, once per session) and
+appends a `# Host Environment` section to the system prompt. This tells the
+model which argument syntax to pass to the `shell` tool, because the tool
+runs `subprocess.run(shell=True)` — **cmd.exe** on Windows but **/bin/sh** on
+POSIX:
+
+- **Windows**: `Windows 11 (NT 10.0 build 22631, AMD64)` + a note that shell
+  commands run via cmd.exe (use `dir` / `where` / `set` / `type`; PowerShell
+  requires `powershell -Command "..."`).
+- **Linux**: distro `PRETTY_NAME` + kernel (`Ubuntu 24.04.1 LTS, kernel
+  6.8.0-45-generic, x86_64`) + POSIX/GNU-coreutils note.
+- **macOS**: `macOS 15.2, Darwin 24.2.0, arm64` + BSD-userland note (`sed -i ''`).
+
+The section is appended to every system prompt (soul, default, or custom).
+BitNet sessions get a compact single line instead of the markdown section, to
+respect BitNet's lean-prompt token budget. Set `AGENTKTHX_NO_ENV_PROBE=1` to
+disable the probe entirely.
 
 ### JEV API Mode — System-One Decisions
 

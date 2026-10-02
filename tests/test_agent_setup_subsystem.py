@@ -92,7 +92,9 @@ def test_agent_construction_via_mixin_initializes_attributes():
     assert isinstance(agent.session_id, str) and len(agent.session_id) == 12
     assert agent.num_ctx == 8192
     assert agent.tool_choice.type == ToolChoiceType.AUTO
-    assert agent._custom_system_prompt == "You are a test agent."
+    # R07.19: the host-environment section is appended to every system
+    # prompt — the custom prompt must survive verbatim as the PREFIX.
+    assert agent._custom_system_prompt.startswith("You are a test agent.")
     assert "calculator" in agent.tools.names()
     # system prompt landed in memory
     assert agent.memory and "test agent" in agent.memory.get_messages()[0]["content"]

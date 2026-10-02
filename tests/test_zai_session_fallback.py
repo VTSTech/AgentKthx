@@ -341,21 +341,23 @@ class TestRegisterInsufficientCreditsSwitch(unittest.TestCase):
 
 class TestChatPromptColor(unittest.TestCase):
 
-    def test_you_prompt_is_yellow(self):
-        """The chat input prompt must render 'You:' in yellow (\\033[33m),
-        not the old dim grey (\\033[90m). Source-level pin: the prompt is
-        built inside a closure, so grep the module source."""
+    def test_primary_user_prompt_is_yellow(self):
+        """R07.19: the chat input prompt renders '{primary_user}:' in yellow
+        (was the hardcoded 'You:' pre-R07.19). Source-level pin: the prompt
+        is built inside a closure, so grep the module source. The yellow
+        SGR form (\\033[33m) and the readline zero-width markers
+        (\\001 / \\002) must both survive the rename."""
         chat_py = Path(__file__).resolve().parents[1] / "agentkthx" / "cli" / "commands" / "chat.py"
         src = chat_py.read_text(encoding="utf-8")
         self.assertIn(
-            "\\033[33m\\002You:",
+            "\\033[33m\\002{primary_user}:",
             src,
-            "chat 'You:' prompt must use yellow (\\033[33m)",
+            "chat prompt must render the Primary User in yellow (\\033[33m)",
         )
         self.assertNotIn(
-            "\\033[90m\\002You:",
+            "\\002You:",
             src,
-            "chat 'You:' prompt must not revert to dim grey (\\033[90m)",
+            "hardcoded 'You:' prompt must not return (R07.19 renames it)",
         )
 
 

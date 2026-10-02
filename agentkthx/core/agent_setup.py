@@ -29,6 +29,7 @@ from ..backends import BaseBackend, get_default_backend
 from ..config import get_config
 from ..tools import ToolRegistry, make_builtin_registry
 from .api_resilience import max_api_retries_from_env
+from .environment import build_environment_section
 from .error_recovery import (
     DEFAULT_MAX_CONSECUTIVE_FAILURES,
     DEFAULT_MAX_TOOL_RETRIES,
@@ -587,6 +588,18 @@ class AgentSetupMixin:
                 print(
                     f"[Skills] Appended skills prompt to system prompt ({len(skills_prompt)} chars)"
                 )
+
+        # R07.19: host-environment probe — append a compact OS/shell section
+        # so the model knows which argument syntax to pass to the shell tool
+        # (cmd.exe on Windows vs /bin/sh POSIX on Linux/macOS). Applied to ALL
+        # prompt paths (custom / soul / default) so every session carries it.
+        # Best-effort: the probe is fail-safe and returns "" on any error, and
+        # AGENTKTHX_NO_ENV_PROBE=1 opts out entirely.
+        env_section = build_environment_section(is_bitnet=self._is_bitnet, debug=self.debug)
+        if env_section:
+            self._custom_system_prompt = f"{self._custom_system_prompt}\n\n{env_section}"
+            if debug:
+                print(f"[Env] Appended environment section ({len(env_section)} chars)")
 
         # Initialize tool parser
         # ROB-13 (R07.06): thread the agent's debug flag into the parser so

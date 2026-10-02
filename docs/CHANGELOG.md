@@ -5,6 +5,50 @@ All notable changes to AgentKthx will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [R07.19] - 2026-10-02
+
+**Primary User chat prompt + host-environment probe in the system prompt.** The chat REPL now asks who is chatting and renders their name instead of the hardcoded `You:`. At Agent construction, a light stdlib-only probe detects the OS family + version and appends a `# Host Environment` section to the system prompt, so the model knows which argument syntax to pass to the shell tool (cmd.exe on Windows vs `/bin/sh` POSIX on Linux/macOS).
+
+### Added — Primary User in chat
+
+- **Interactive naming prompt at session start** (`agentkthx/cli/commands/chat.py`): before the REPL loop takes over, chat resolves the Primary User via `_resolve_primary_user()` — resolution order: `--user` CLI flag → `AGENTKTHX_USER` env var → interactive prompt (`Primary User [<os-login>]: `, Enter accepts the default, TTY-only so piped stdin / ACP / scripting never block) → `getpass.getuser()` → `"You"`. Ctrl+C/Ctrl+D at the naming prompt falls through to the default instead of killing the session.
+- **Named REPL prompt**: the `You:` prompt is replaced by `<PrimaryUser>:` on every turn, in both branches — readline (`\001\033[33m\002<name>:\001\033[0m\002 ` with zero-width markers) and no-readline fallback (`\033[33m<name>:\033[0m `, proper CSI form — ROB-34 closed, see below).
+- **Input sanitization** (`_sanitize_primary_user`): the name is interpolated into an `input()` prompt on every turn, so control characters / ANSI escapes are stripped and length is capped at 32 chars before it ever reaches the terminal.
+- **`--user` / `-u` CLI flag** (`agentkthx/cli/parser.py`, chat subcommand only): skips the startup naming prompt. `AGENTKTHX_USER` env var does the same for scripted launches. The flag is deliberately NOT on `agent`/`run`/`test` (non-interactive surfaces) — pinned by test.
+
+### Added — Host Environment probe in the system prompt
+
+- **New `agentkthx/core/environment.py`**: light, stdlib-only, zero-subprocess probe — `platform`/`sys` reads plus one `/etc/os-release` parse (`platform.freedesktop_os_release`). Total cost is microseconds, paid ONCE per `Agent()` construction, never per turn.
+- **Per-family detection**: Windows → `Windows 11 (NT 10.0 build 22631)` / `Windows 10 (NT 10.0 build 19045)` (Win11 = build ≥ 22000; other NT majors render as `Windows (NT x.y)`); Linux → distro `PRETTY_NAME` + kernel (`Ubuntu 24.04.1 LTS, kernel 6.8.0-45-generic`, falls back to kernel-only when os-release is missing/malformed, PRETTY_NAME capped at 80 chars); macOS → `macOS 15.2, Darwin 24.2.0`; anything else → `Unknown (<system> <release>)`. Architecture (`platform.machine()`) included in every line.
+- **Shell-syntax guidance** — the point of the section. The `shell` tool runs `subprocess.run(shell=True)`, which means **cmd.exe** on Windows but **/bin/sh** on POSIX. The `# Host Environment` section states this explicitly per family: Windows gets the cmd.exe note + `powershell -Command "..."` escape hatch; Linux gets POSIX/GNU-coreutils; macOS gets the BSD-userland warning (`sed -i ''` suffix, readlink flags). Small local models routinely emit `ls` on Windows or `Get-ChildItem` through cmd.exe — this closes that gap at the prompt level.
+- **Wired into ALL prompt paths** (`agentkthx/core/agent_setup.py`): the section is appended after soul/default/custom-prompt assembly and after `skills_prompt`, so every session carries it regardless of prompt origin. Stored with the system message in memory (persistent sessions included).
+- **Fail-safe by contract**: `build_environment_section()` returns `""` on ANY probe failure — a broken os-release must never break Agent construction (same best-effort contract as the soul loader).
+- **`AGENTKTHX_NO_ENV_PROBE=1` opt-out**: skips the probe entirely (same truthiness convention as `AGENTKTHX_DEBUG`, same pattern as `AGENTKTHX_NO_UPDATE_CHECK`).
+- **BitNet compact mode**: BitNet's lean prompt must stay under ~500 chars (reserved-token-ID crash threshold), so BitNet sessions get a single plain `Environment: Windows 11 (NT 10.0 build 22631), AMD64; shell tool runs cmd.exe syntax.` line instead of the markdown section.
+
+### Fixed — ROB-34 (audit register)
+
+- **ROB-34 CLOSED**: the finding described the no-readline fallback prompt as a bare-ESC string (`"\033You:\033 "` — `ESC Y` consumed as a 2-byte VT escape, prompt rendering as `ou:`). Byte-level verification of the R07.18 tree showed the code already carried the proper CSI form (`"\033[33mYou:\033[0m "`), so the defect was not present as filed; R07.19 then rewrote both prompt branches entirely (named prompt), and source-level pins in the new test file assert the bare-ESC shape can never return. Full rationale in `audit/deltas.md` (archived section) and the R07.19 delta note in `audit/audit.md`.
+
+### Tests
+
+- **New `tests/test_r07_19_primary_user_env.py`** (42 tests): covers per-family probe output (Win10/Win11 build boundary 22000/21999, other NT majors, Linux PRETTY_NAME + NAME fallback + malformed os-release + PRETTY_NAME truncation, macOS + Darwin kernel, unknown platform), shell-note bodies per family, full-section shape, BitNet compact line (< 200 chars, no markdown), kill-switch env var, probe-crash → empty section, Agent wiring (custom prompt prefix + default prompt + BitNet backend-driven compact line + kill-switch leaves the prompt byte-identical), Primary User sanitization (control chars/ANSI/length cap), default resolution (OS login / `You` fallback / sanitized login), resolution precedence (flag > env > interactive > non-TTY default, EOF fallback), `--user`/`-u` parser acceptance + chat-only pin, and source-level prompt pins (named prompt literals present, no `You:` literal remains, no bare-ESC form).
+- **Updated `tests/test_agent_setup_subsystem.py`**: the exact-equality system-prompt assertion relaxed to a prefix assertion — the custom prompt must survive verbatim as the PREFIX with the env section appended after it.
+- **Updated `tests/test_zai_session_fallback.py::TestChatPromptColor`**: the yellow-prompt source pin now asserts the `{primary_user}` form (same yellow SGR + readline zero-width markers) instead of the hardcoded `You:`.
+
+### Version bump
+
+- `scripts/bump-version.sh R07.19` applied: bumped 4 sites across 3 files (`pyproject.toml`, `agentkthx/__init__.py` header + `__version__` line, `README.md`).
+- `R07.18 (0.7.18)` → `R07.19 (0.7.19)`.
+
+### Suite status
+
+- `python -m pytest tests/ -q` → **2253 passed / 16 skipped** (was 2211; +42 from `test_r07_19_primary_user_env.py`).
+- `ruff check agentkthx/ tests/` → all checks passed.
+- `black --check agentkthx/ tests/` → 200 files would be left unchanged.
+
+---
+
 ## [R07.18] - 2026-10-02
 
 **llama-server kwargs forwarding fix + `repeat_penalty` / `repeat_last_n` exposure + footer quantization + human-friendly token sizes.** Fixes a parity bug where llama-server/TurboQuant/BitNet in OpenRE mode silently dropped every sampling param except `temperature` / `n_predict` / `stop`. Exposes the two most-requested llama.cpp repetition knobs via CLI + `/param`. Makes BitNet's hardcoded `repeat_penalty=1.3` overridable. Adds weight-quantization to the footer + models list. Accepts `128k` / `1m` / `2g` forms for `--num-ctx` / `--num-predict`.

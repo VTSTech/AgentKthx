@@ -4,12 +4,14 @@
 **Release:** R07.15
 **Date:** 2026-09-29  
 **Archived:** 2026-09-29 (R07.15 closure batch)
-**Counts:** 68 CLOSED · 7 WONTFIX · 75 total
+**Counts:** 69 CLOSED · 7 WONTFIX · 76 total
 
 > Counts corrected 2026-09-30 during the R07.16 re-audit: the R07.15 second
 > batch (ROB-11, ROB-22, FEAT-02, TEST-06) was archived without updating this
 > header, which still read 64 CLOSED · 7 WONTFIX · 71 total. The 75 detail
-> sections below were always the source of truth.
+> sections below were always the source of truth. Counts updated again at
+R07.19 (ROB-34 closure): 69 CLOSED · 7 WONTFIX · 76 total — the 76 detail
+sections below remain the source of truth.
 
 This file is the archive of CLOSED and WONTFIX findings moved out of
 `audit.md` to keep the active audit focused on OPEN findings.
@@ -25,6 +27,7 @@ This file is the archive of CLOSED and WONTFIX findings moved out of
 | SEC-02 | **High** | Security | ✓ CLOSED R07.04 | ast.literal_eval fallback for Python-dict tool arguments enables type-confusion bypass |
 | MAINT-14 | **High** | Maintainability | ✓ CLOSED R07.07 | The headline fix. The \bTrue\b / \bFalse\b / \bNone\b regex substitutions in core/tool_parse.py:243-256 (R07.05 SEC-02 c |
 | ROB-32 | **High** | Robustness | ✓ CLOSED R07.14 | _build_agent passes force_react which Agent no longer accepts — every agentkthx chat/agent invocation raises TypeError post-ARCH-05 (latent since R03.3) |
+| ROB-34 | Low | Robustness | ✓ CLOSED R07.19 | Windows no-readline fallback prompt renders wrong — bare-ESC form described by the finding was not in the R07.18 tree (already proper CSI); R07.19 rewrote the prompt for the Primary User feature and pinned the CSI contract |
 | SEC-01 | Medium | Security | ✓ CLOSED R07.08 | sandboxed_repl.py SAFE_BUILTINS includes getattr/setattr/super/object — sandbox escape via attribute traversal |
 | SEC-11 | Medium | Security | ✓ CLOSED R07.12 | _iter_hostname_ips does unbounded synchronous getaddrinfo — DoS amplification + no timeout (closed with the SEC-11 cluster: bounded DNS) |
 | SEC-03 | Medium | Security | ✓ CLOSED R07.05 | is_safe_url SSRF check uses substring hostname matching — bypassable via DNS rebinding, decimal/IPv6 IP encoding |
@@ -626,6 +629,20 @@ Recommendation: read `self.debug` directly and let a missing attribute raise.
 **Status:** ✓ CLOSED R07.14
 
 **Detail:** `agent_factory._build_agent` has passed `force_react=args.force_react` since the R07.00 CLI split, but the attribute silently vanished from `Agent.__init__` in R03.3 — from that point the kwarg fell into the `**kwargs` catch-all and did nothing. ARCH-05 (R07.13) closed the swallowing pattern with fail-fast `TypeError`s, converting this dormant drift into a hard crash on EVERY `agentkthx chat` and `agentkthx agent` invocation (the factory passes the flag unconditionally; the value is irrelevant — the kwarg name itself is rejected). The 1882-test suite could not see it: the CLI command tests patch `_build_agent` itself (footer/model-switch tests mock the agent entirely), so the factory→Agent kwarg contract was never exercised end-to-end. Closed by re-promoting the flag honestly rather than dropping it at the call site — it is a real, user-facing control (the README documents `Agent(model=..., force_react=True)`; `shared_args` wires a `--force-react` flag and an `AGENTKTHX_FORCE_REACT=1` env var): `force_react: bool = False` is now parameter #30 on `AgentSetupMixin.__init__` (stored as `self.force_react`, added to the ARCH-05 valid-kwargs message), and it is threaded into `ToolParser` at both construction sites — initial init AND the `register_tool` parser rebuild (same init-order reasoning as ROB-19's debug threading). `ToolParser(force_react=True)` enforces ReAct-only parsing, the documented meaning of the flag ("Force ReAct mode for tool calling"): only explicit `Action:`/`Action Input:` blocks produce tool calls; the native-JSON and XML matchers are skipped because on models that emit ReAct they add no recall (ReAct runs anyway in the default chain) and can only misfire or dupe. Default False keeps the standing native → ReAct → XML chain byte-identical. The systemic gap got its own pin: `tests/test_r07_14_force_react.py` (17 tests) constructs a REAL Agent through `_build_agent` (backend stubbed, nothing patched at the factory boundary) and asserts the full captured-kwarg set against `inspect.signature(Agent.__init__)` — any future factory/Agent signature drift now fails in the suite instead of in a user's terminal.
+
+
+#### ROB-34: Windows no-readline fallback prompt `\033You:\033 ` renders as `ou:` — `ESC Y` is a consumed 2-byte VT escape sequence
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Robustness |
+| **File(s)** | `agentkthx/cli/commands/chat.py:287-292` (as filed) |
+| **Opened** | 2026-09-30 — R07.16 re-audit of the Windows fallback prompt family |
+
+**Status:** ✓ CLOSED R07.19 (pattern absent from the filed-against tree + prompt rewritten for Primary User)
+
+**Detail:** Closure note, in two parts. (1) **The described defect was not present in the tree the finding was re-verified against.** Byte-level inspection of the R07.18 code (`od -c` over chat.py:288-292 at commit 155b9c2) shows the no-readline fallback branch is `_prompt = "\033[33mYou:\033[0m "` — a proper CSI SGR pair, identical in shape to the readline branch minus the `\001`/`\002` zero-width markers. The bare-ESC form (`"\033You:\033 "`, where `ESC Y` is a complete 2-byte VT escape that conforming terminals consume, mangling the prompt to `ou:`) does not occur anywhere in the file. The R07.18 delta note listing ROB-34 among "re-verified" findings is therefore recorded as a false-positive verification; the line-range reference (287-292) pointed at the correct prompt block but the quoted string did not match its contents. (2) **The prompt construction was rewritten anyway.** R07.19's Primary User feature replaced the hardcoded `You:` with the resolved user's name in BOTH branches (readline: `f"\001\033[33m\002{primary_user}:\001\033[0m\002 "`; no-readline: `f"\033[33m{primary_user}:\033[0m "` — still a proper CSI form). `tests/test_r07_19_primary_user_env.py` pins the contract from three directions: the exact new prompt literals are present, no `You:`-form prompt literal remains, and the bare-ESC `\033You` shape is asserted absent so this class of regression cannot land silently. The old yellow-prompt source pin in `test_zai_session_fallback.py` was updated to the renamed-prompt contract (same yellow SGR + markers, `{primary_user}` in place of `You`).
 
 ---
 
@@ -1350,3 +1367,5 @@ All 5 OPEN Architecture findings closed in a single pass. Suite: 1849 → 1882 p
 
 > **R07.16 delta (2026-09-30, re-audit of commit 52d2f56):** No closures this pass — all 30 carried-forward OPEN findings were re-verified in the current code, and the 6 summary-only rows (SEC-13, ROB-15, ROB-17, ROB-18, ROB-20, ROB-25) gained full detail sections. Four new findings from the R07.16 surface: ROB-33 (`os.kill(pid, 0)` in `_is_process_alive` TERMINATES the target process on Windows — and R07.16 moved that call onto the chat startup path via `TurboState.load()`), ROB-34 (the Windows no-readline fallback prompt `"\033You:\033 "` renders as `ou:` — `ESC Y` is a consumed 2-byte VT escape sequence, verified in a terminal emulator), MAINT-24 (`_build_tool_section`'s docstring still promises ReAct format instructions the body no longer includes; custom souls without their own block now get none), and MAINT-25 (local-backend tool-support auto-detection has no opt-out; its debug hint suggests `--force-react=False`, which the `store_true` argparse flag rejects with an error). Register: 109 findings — 34 open / 68 closed / 7 wontfix (69% archived).
 > **Split:** 75 CLOSED/WONTFIX findings archived in `deltas.md` (68 closed across R07.00–R07.15 + 7 wontfix). `generate_audit_dash.py` reads both `audit.md` (open) and `deltas.md` (closed/wontfix) and merges them into the full register. The dashboard shows all 109 findings (34 open + 75 closed/wontfix).
+
+> **R07.19 delta (2026-10-02, feature release — Primary User + host-environment probe):** One closure. **ROB-34 CLOSED** — see the archived section above for the full two-part rationale (byte-level check showed the bare-ESC pattern absent from the R07.18 tree; the R07.19 prompt rewrite for Primary User replaced both branches and pinned the CSI contract by source test). Feature work: `agentkthx/core/environment.py` probes OS family + version (Windows NT/build with Win11 = build >= 22000, Linux PRETTY_NAME + kernel via freedesktop_os_release, macOS + Darwin) + arch once per Agent construction and appends a `# Host Environment` section to every system prompt so the model passes the right argument syntax to the shell tool (cmd.exe vs /bin/sh; BSD-userland note on macOS); fail-safe (returns \"\" on any probe error), `AGENTKTHX_NO_ENV_PROBE=1` opt-out, BitNet sessions get a compact single line to respect the ~500-char lean-prompt crash threshold. Chat gains the Primary User flow: `--user` flag > `AGENTKTHX_USER` env > TTY-only interactive naming prompt (OS login name as default, Enter accepts) > `getpass.getuser()` > \"You\"; names are control-char/ANSI-sanitized and capped at 32 chars before rendering on every REPL turn. **42 new tests in `tests/test_r07_19_primary_user_env.py`**; 2 pre-existing assertions updated to the new contracts. Suite 2211 → **2253 passed, 16 skipped, 0 failures**. Register 111 findings: **35 OPEN / 69 CLOSED / 7 WONTFIX (76 archived, 68%)**.

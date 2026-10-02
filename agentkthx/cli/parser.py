@@ -33,6 +33,16 @@ def create_parser() -> argparse.ArgumentParser:
     # Chat command
     chat_parser = subparsers.add_parser("chat", help="Interactive chat mode")
     add_agent_args(chat_parser, tools_default="")
+    # R07.19: Primary User — the name rendered in the REPL prompt instead of
+    # "You:". Setting it skips the interactive "Primary User [...]" naming
+    # prompt at session start (AGENTKTHX_USER env var does the same).
+    chat_parser.add_argument(
+        "-u",
+        "--user",
+        default=None,
+        help="Primary User name for the chat prompt (skips the startup naming "
+        "prompt; falls back to AGENTKTHX_USER, then the OS login name)",
+    )
 
     # Config command
     config_parser = subparsers.add_parser("config", help="Show current configuration")
