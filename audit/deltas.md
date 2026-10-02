@@ -4,14 +4,14 @@
 **Release:** R07.15
 **Date:** 2026-09-29  
 **Archived:** 2026-09-29 (R07.15 closure batch)
-**Counts:** 69 CLOSED · 7 WONTFIX · 76 total
+**Counts:** 70 CLOSED · 7 WONTFIX · 77 total
 
 > Counts corrected 2026-09-30 during the R07.16 re-audit: the R07.15 second
 > batch (ROB-11, ROB-22, FEAT-02, TEST-06) was archived without updating this
 > header, which still read 64 CLOSED · 7 WONTFIX · 71 total. The 75 detail
 > sections below were always the source of truth. Counts updated again at
-R07.19 (ROB-34 closure): 69 CLOSED · 7 WONTFIX · 76 total — the 76 detail
-sections below remain the source of truth.
+> R07.19 (ROB-34 and ROB-37 closures): 70 CLOSED · 7 WONTFIX ·
+> 77 total — the 77 detail sections below remain the source of truth.
 
 This file is the archive of CLOSED and WONTFIX findings moved out of
 `audit.md` to keep the active audit focused on OPEN findings.
@@ -28,6 +28,7 @@ This file is the archive of CLOSED and WONTFIX findings moved out of
 | MAINT-14 | **High** | Maintainability | ✓ CLOSED R07.07 | The headline fix. The \bTrue\b / \bFalse\b / \bNone\b regex substitutions in core/tool_parse.py:243-256 (R07.05 SEC-02 c |
 | ROB-32 | **High** | Robustness | ✓ CLOSED R07.14 | _build_agent passes force_react which Agent no longer accepts — every agentkthx chat/agent invocation raises TypeError post-ARCH-05 (latent since R03.3) |
 | ROB-34 | Low | Robustness | ✓ CLOSED R07.19 | Windows no-readline fallback prompt renders wrong — bare-ESC form described by the finding was not in the R07.18 tree (already proper CSI); R07.19 rewrote the prompt for the Primary User feature and pinned the CSI contract |
+| ROB-37 | Low | Robustness | ✓ CLOSED R07.19 | models table Name column fixed at 48/50 under a no-truncation policy — names longer than the column (krith/meta-llama-3.2-1b-instruct-uncensored:IQ4_XS, 50 chars) pushed Size/Quant/Context right; R07.19 measures the longest name and widens NAME_W |
 | SEC-01 | Medium | Security | ✓ CLOSED R07.08 | sandboxed_repl.py SAFE_BUILTINS includes getattr/setattr/super/object — sandbox escape via attribute traversal |
 | SEC-11 | Medium | Security | ✓ CLOSED R07.12 | _iter_hostname_ips does unbounded synchronous getaddrinfo — DoS amplification + no timeout (closed with the SEC-11 cluster: bounded DNS) |
 | SEC-03 | Medium | Security | ✓ CLOSED R07.05 | is_safe_url SSRF check uses substring hostname matching — bypassable via DNS rebinding, decimal/IPv6 IP encoding |
@@ -643,6 +644,20 @@ Recommendation: read `self.debug` directly and let a missing attribute raise.
 **Status:** ✓ CLOSED R07.19 (pattern absent from the filed-against tree + prompt rewritten for Primary User)
 
 **Detail:** Closure note, in two parts. (1) **The described defect was not present in the tree the finding was re-verified against.** Byte-level inspection of the R07.18 code (`od -c` over chat.py:288-292 at commit 155b9c2) shows the no-readline fallback branch is `_prompt = "\033[33mYou:\033[0m "` — a proper CSI SGR pair, identical in shape to the readline branch minus the `\001`/`\002` zero-width markers. The bare-ESC form (`"\033You:\033 "`, where `ESC Y` is a complete 2-byte VT escape that conforming terminals consume, mangling the prompt to `ou:`) does not occur anywhere in the file. The R07.18 delta note listing ROB-34 among "re-verified" findings is therefore recorded as a false-positive verification; the line-range reference (287-292) pointed at the correct prompt block but the quoted string did not match its contents. (2) **The prompt construction was rewritten anyway.** R07.19's Primary User feature replaced the hardcoded `You:` with the resolved user's name in BOTH branches (readline: `f"\001\033[33m\002{primary_user}:\001\033[0m\002 "`; no-readline: `f"\033[33m{primary_user}:\033[0m "` — still a proper CSI form). `tests/test_r07_19_primary_user_env.py` pins the contract from three directions: the exact new prompt literals are present, no `You:`-form prompt literal remains, and the bare-ESC `\033You` shape is asserted absent so this class of regression cannot land silently. The old yellow-prompt source pin in `test_zai_session_fallback.py` was updated to the renamed-prompt contract (same yellow SGR + markers, `{primary_user}` in place of `You`).
+
+
+#### ROB-37: models table Name column fixed at 48/50 while the no-truncation policy lets longer names overflow — Size/Quant/Context pushed right for the long row
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Robustness |
+| **File(s)** | `agentkthx/cli/commands/models.py:102-145` |
+| **Opened** | 2026-10-02 — user report on R07.19 (`agentkthx models --tool-support`) |
+
+**Status:** ✓ CLOSED R07.19 (follow-up commit — dynamic NAME_W)
+
+**Detail:** R07.18 widened the local Name column 36→48 (cloud: 50) but kept a deliberate no-truncation policy — the user must be able to copy the full model name into `-m`, and `pad_colored` pads short names but does not truncate long ones. The two decisions collide the moment a real name exceeds the fixed width: the row renders past its slot and every later column (Size/Quant/Context/openre/openai/Family) shifts right for that row, breaking the grid. User-report trigger: `krith/meta-llama-3.2-1b-instruct-uncensored:IQ4_XS` — 50 chars, 2 over the local floor — visible in the user's paste, where the krith row's `0.70 GB IQ1_M` sits 2 characters right of its neighbours. Fixed by measuring instead of guessing: `longest_name = max(len(str(m.get("name", ""))) for m in models)`, `NAME_W = max(48 local / 50 cloud, longest_name)`, computed BEFORE the header/separator render so header, separator and every data row share one width (both layout branches grow: local separator 76 + NAME_W, cloud 43 + NAME_W). The floors stay unchanged, so short listings render byte-identical to R07.18. `tests/test_r07_19_models_table_width.py` (8 tests) drives the real `cmd_models` over stub backends and pins the grid offsets (Size/Quant/Context identical across mixed short/long rows), the widening formulas on both branches, the R07.18 floors on short listings, the no-truncation contract, and the premise (the reported name really exceeds the old fixed 48).
 
 ---
 
@@ -1369,3 +1384,5 @@ All 5 OPEN Architecture findings closed in a single pass. Suite: 1849 → 1882 p
 > **Split:** 75 CLOSED/WONTFIX findings archived in `deltas.md` (68 closed across R07.00–R07.15 + 7 wontfix). `generate_audit_dash.py` reads both `audit.md` (open) and `deltas.md` (closed/wontfix) and merges them into the full register. The dashboard shows all 109 findings (34 open + 75 closed/wontfix).
 
 > **R07.19 delta (2026-10-02, feature release — Primary User + host-environment probe):** One closure. **ROB-34 CLOSED** — see the archived section above for the full two-part rationale (byte-level check showed the bare-ESC pattern absent from the R07.18 tree; the R07.19 prompt rewrite for Primary User replaced both branches and pinned the CSI contract by source test). Feature work: `agentkthx/core/environment.py` probes OS family + version (Windows NT/build with Win11 = build >= 22000, Linux PRETTY_NAME + kernel via freedesktop_os_release, macOS + Darwin) + arch once per Agent construction and appends a `# Host Environment` section to every system prompt so the model passes the right argument syntax to the shell tool (cmd.exe vs /bin/sh; BSD-userland note on macOS); fail-safe (returns \"\" on any probe error), `AGENTKTHX_NO_ENV_PROBE=1` opt-out, BitNet sessions get a compact single line to respect the ~500-char lean-prompt crash threshold. Chat gains the Primary User flow: `--user` flag > `AGENTKTHX_USER` env > TTY-only interactive naming prompt (OS login name as default, Enter accepts) > `getpass.getuser()` > \"You\"; names are control-char/ANSI-sanitized and capped at 32 chars before rendering on every REPL turn. **42 new tests in `tests/test_r07_19_primary_user_env.py`**; 2 pre-existing assertions updated to the new contracts. Suite 2211 → **2253 passed, 16 skipped, 0 failures**. Register 111 findings: **35 OPEN / 69 CLOSED / 7 WONTFIX (76 archived, 68%)**.
+
+> **R07.19 delta #2 (2026-10-02, follow-up commit — dynamic models-table Name column):** One finding opened and closed in the same release (second R07.19 commit, no version bump). **ROB-37** — the `agentkthx models` table fixed its Name column at 48 (local) / 50 (cloud) chars while R07.18's no-truncation policy lets longer names render past the slot, pushing Size/Quant/Context right for that row; the user's live listing contained `krith/meta-llama-3.2-1b-instruct-uncensored:IQ4_XS` (50 chars) and the misalignment is visible in the report. Fix: NAME_W is measured from the longest name in the loaded (and free-filtered) models list — `max(48/50 floor, longest)` — before header/separator render, so the whole table shares one width; floors unchanged for short listings. **8 new tests in `tests/test_r07_19_models_table_width.py`** (real `cmd_models` driven over stub Ollama/cloud backends: cross-row grid alignment, widening formulas 76+W local / 43+W cloud, floor preservation, no truncation). Suite 2253 → **2261 passed, 16 skipped, 0 failures**. Register 112 findings: **35 OPEN / 70 CLOSED / 7 WONTFIX (77 archived, 69%)**.

@@ -28,8 +28,8 @@ agentkthx run "What is 15 * 8?" --tools calculator
 agentkthx chat -m qwen2.5:0.5b --tools calculator,shell
 
 # R07.19: skip the "Primary User" naming prompt (the name replaces You:)
-agentkthx chat --user Nigel
-AGENTKTHX_USER=Nigel agentkthx chat   # env var works too
+agentkthx chat --user VTSTech
+AGENTKTHX_USER=VTSTech agentkthx chat   # env var works too
 
 # Autonomous agent mode
 agentkthx agent -m qwen2.5:7b --tools calculator,shell,write_file
@@ -127,10 +127,10 @@ At the start of every `agentkthx chat` session the REPL asks who is chatting and
 renders that name in the prompt instead of the hardcoded `You:`:
 
 ```bash
-Primary User [nigel]:        # Enter accepts the OS login name as default
+Primary User [vtstech]:      # Enter accepts the OS login name as default
 ```
 
-The prompt then shows the name on every turn (`Nigel: _`). Resolution order:
+The prompt then shows the name on every turn (`VTSTech: _`). Resolution order:
 
 1. `--user NAME` / `-u NAME` CLI flag (skips the prompt)
 2. `AGENTKTHX_USER` env var (skips the prompt — useful for scripts)

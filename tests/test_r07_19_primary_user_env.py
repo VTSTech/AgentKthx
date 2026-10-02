@@ -455,14 +455,14 @@ class TestChatUserFlag(unittest.TestCase):
     def test_parser_accepts_user_flag(self):
         from agentkthx.cli.parser import create_parser
 
-        args = create_parser().parse_args(["chat", "--user", "Nigel"])
-        self.assertEqual(args.user, "Nigel")
+        args = create_parser().parse_args(["chat", "--user", "VTSTech"])
+        self.assertEqual(args.user, "VTSTech")
 
     def test_parser_accepts_short_flag(self):
         from agentkthx.cli.parser import create_parser
 
-        args = create_parser().parse_args(["chat", "-u", "Nigel"])
-        self.assertEqual(args.user, "Nigel")
+        args = create_parser().parse_args(["chat", "-u", "VTSTech"])
+        self.assertEqual(args.user, "VTSTech")
 
     def test_parser_default_is_none(self):
         from agentkthx.cli.parser import create_parser

@@ -101,11 +101,17 @@ def cmd_models(args: argparse.Namespace) -> int:
 
     # Column widths
     # R07.18: NAME_W widened from 36→48 to fit long Ollama names without
-    # truncation (the user needs the full name to copy into `-m`). The
-    # longest realistic name (cryptidbleh/gemma4-claude-opus-4.6:latest)
-    # is 42 chars; 48 gives headroom for future longer names. Cloud
-    # providers already used 50.
-    NAME_W = 48
+    # truncation (the user needs the full name to copy into `-m`).
+    # R07.19 (ROB-37): NAME_W is now DYNAMIC — measured from the longest
+    # model name in the already-loaded (and free-filtered) `models` list,
+    # floored at the R07.18 defaults (48 local / 50 cloud). The fixed 48
+    # was 2 chars short of real-world Ollama names like
+    # krith/meta-llama-3.2-1b-instruct-uncensored:IQ4_XS (50 chars),
+    # which pushed the Size/Quant/Context columns right for that row —
+    # with the R07.18 no-truncation policy pad_colored cannot absorb an
+    # overflow, so the column must grow instead. Measurement happens
+    # BEFORE the header/separator render, so header, separator and every
+    # data row share one width.
     SIZE_W = 9  # R07.18: was 8, but "xxx.xx GB" (e.g. "  0.75 GB") is 9 chars — the 1-char overflow cascaded to every column after Size
     QUANT_W = 8  # weight quant column (Q4_K_M, Q8_0, F16, etc.)
     CTX_W = 12
@@ -118,13 +124,17 @@ def cmd_models(args: argparse.Namespace) -> int:
     # the cloud column layout (wider NAME_W, no Size/Family columns).
     is_cloud_provider = getattr(backend, "is_cloud", False)
 
-    # Cloud providers have longer model names (e.g.
-    # "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free" = 49 chars)
-    # and don't show Size/Family columns. Widen NAME_W so names don't
-    # overflow and push the Context column out of alignment.
+    # R07.19 (ROB-37): dynamic Name width — the longest actual model name
+    # vs the R07.18 floors (48 local / 50 cloud; the floor keeps short
+    # listings byte-identical to R07.18). Cloud names still run longer on
+    # average ("nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free" = 49
+    # chars), hence the higher cloud floor. Cloud providers don't show
+    # Size/Family columns, so a wider Name costs them nothing.
+    longest_name = max((len(str(m.get("name", ""))) for m in models), default=0)
+    NAME_W = max(50 if is_cloud_provider else 48, longest_name)
+
     if is_cloud_provider:
-        NAME_W = 50  # accommodates longest OpenRouter model names
-        sep_len = 2 + NAME_W + 1 + CTX_W + 2 + TOOLS_W + 2 + TOOLS_W  # 81
+        sep_len = 2 + NAME_W + 1 + CTX_W + 2 + TOOLS_W + 2 + TOOLS_W  # grows with NAME_W
     else:
         # R07.18: added QUANT_W to the local-backend separator length
         sep_len = (
