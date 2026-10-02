@@ -70,7 +70,7 @@ agentkthx/plugins/            → 12 plugins: acp, bitnet, gemini, huggingface, 
   └─ zai/ + orcarouter/       → CloudBackend-based; _generate_with_auth (ROB-25 defaults mismatch)
 agentkthx/skills/             → 4 bundled skills (codebase-audit, crypto-signals, skill-creator, test-harness) + loader.py
 agentkthx/soul/               → Soul Spec v0.5 persona packages: loader.py (_build_tool_section — MAINT-24), types.py
-agentkthx/souls/              → 3 bundled souls: nova-helper, nova-skills, nova-trading
+agentkthx/souls/              → 3 bundled souls: kthx-helper, kthx-skills, kthx-trading
 agentkthx/tools/              → builtins.py (shell timeout clamp; _SSRFSafeRedirectHandler 5-hop budget),
                                 registry.py, sandboxed_repl.py (521 LOC)
 agentkthx/update_check.py     → Live PyPI + GitHub check on EVERY CLI invocation (intentional, ROB-05 WONTFIX;

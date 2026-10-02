@@ -1,6 +1,6 @@
 {
   "specVersion": "0.5",
-  "name": "nova-helper",
+  "name": "kthx-helper",
   "displayName": "AgentKthx",
   "version": "1.0.0",
   "description": "LLM diagnostic assistant designed to test reasoning, instruction following, and tool usage.",

@@ -144,19 +144,19 @@ agentkthx/
 │   └── loader.py             # SoulLoader with progressive disclosure + dynamic tools
 │
 ├── souls/
-│   ├── nova-helper/          # Diagnostic assistant soul (skill-less LLM testing)
+│   ├── kthx-helper/          # Diagnostic assistant soul (skill-less LLM testing)
 │   │   ├── soul.json         # Manifest
 │   │   ├── SOUL.md           # Persona definition (concise)
 │   │   ├── IDENTITY.md       # Identity (concise)
 │   │   ├── STYLE.md          # Communication style (concise)
 │   │   └── AGENTS.md         # Agent configuration
-│   ├── nova-skills/          # Skill-guided assistant soul (for use with --skills)
+│   ├── kthx-skills/          # Skill-guided assistant soul (for use with --skills)
 │   │   ├── soul.json         # Manifest
 │   │   ├── SOUL.md           # Persona definition (concise)
 │   │   ├── IDENTITY.md       # Identity (concise)
 │   │   ├── STYLE.md          # Communication style (concise)
 │   │   └── AGENTS.md         # Agent configuration
-│   └── nova-trading/         # Trading-assistant soul (crypto-signals demo)
+│   └── kthx-trading/         # Trading-assistant soul (TSX/TSX-V paper trading)
 │       ├── soul.json         # Manifest
 │       ├── SOUL.md           # Persona definition (concise)
 │       ├── IDENTITY.md       # Identity (concise)
@@ -564,7 +564,7 @@ from agentkthx.soul import load_soul
 
 # Force reload from disk after modifying soul files
 # (R07.00: the zero-caller clear_soul_cache() was removed)
-soul = load_soul("nova-helper", reload=True)
+soul = load_soul("kthx-helper", reload=True)
 ```
 
 ---
@@ -1570,7 +1570,7 @@ Small models (under 1B parameters) require additional guidance to comply with th
 
 ### Soul Prompt Structure
 
-The nova-helper soul includes structured sections that guide small models:
+The kthx-helper soul includes structured sections that guide small models:
 
 1. **Tool Reference Table** - Dynamic injection of available tools with argument examples
 2. **Tool Calling Format** - Explicit Action/Action Input format with examples

@@ -172,12 +172,12 @@ class TestArch04SoulLoaderResolution:
         assert hasattr(loader, "_resolve_soul_path")
 
     def test_default_soul_still_loads(self):
-        """The nova-helper default soul must still resolve (regression test)."""
+        """The kthx-helper default soul must still resolve (regression test)."""
         from agentkthx.soul import loader
 
         ldr = loader.SoulLoader()
-        manifest = ldr.load("nova-helper", level=2)
-        assert manifest.name == "nova-helper"
+        manifest = ldr.load("kthx-helper", level=2)
+        assert manifest.name == "kthx-helper"
 
     def test_absolute_existing_path_resolves(self):
         from agentkthx.soul.loader import SoulLoader
@@ -195,11 +195,11 @@ class TestArch04SoulLoaderResolution:
         assert result is None
 
     def test_bare_soul_name_resolves(self):
-        """A bare soul name like 'nova-helper' must resolve (no path separators)."""
+        """A bare soul name like 'kthx-helper' must resolve (no path separators)."""
         from agentkthx.soul.loader import SoulLoader
 
         loader = SoulLoader()
-        result = loader._resolve_soul_path(Path("nova-helper"))
+        result = loader._resolve_soul_path(Path("kthx-helper"))
         assert result is not None
 
     def test_missing_soul_name_returns_none(self):

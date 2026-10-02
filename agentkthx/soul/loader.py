@@ -831,7 +831,7 @@ def _build_tool_section(tools: list, native_tools: bool = False) -> str:
     # Note: ReAct format instructions (Action:/Action Input:/Final Answer:) are
     # NOT duplicated here. They're already provided by either:
     #   - the no-soul default prompt (agent_setup.py:_build_default_prompt, ReAct branch), OR
-    #   - the soul's SOUL.md content (e.g., nova-helper/SOUL.md ships with a
+    #   - the soul's SOUL.md content (e.g., kthx-helper/SOUL.md ships with a
     #     full "When you need to use a tool, follow this EXACT format:" block).
     # Appending another format block here caused a duplicate that confused
     # models — they'd see two different format blocks and emit mixed/atypical

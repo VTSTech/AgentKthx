@@ -78,7 +78,7 @@ class AgentSetupMixin:
         memory_config: MemoryConfig | None = None,
         debug: bool = False,
         system_prompt: str | None = None,
-        soul: str = "nova-helper",
+        soul: str = "kthx-helper",
         soul_level: int = 3,
         num_ctx: int | None = None,
         # Generation parameters
@@ -142,7 +142,7 @@ class AgentSetupMixin:
             memory_config: Memory configuration
             debug: Enable debug output
             system_prompt: Custom system prompt (overrides soul)
-            soul: Path to Soul Spec package (default: "nova-helper")
+            soul: Path to Soul Spec package (default: "kthx-helper")
             soul_level: Progressive disclosure level for soul (1-3)
             num_ctx: Context window size in tokens (default: 8192)
             temperature: Sampling temperature (default: model-specific)
@@ -513,7 +513,7 @@ class AgentSetupMixin:
 
         self.model_family = detect_family(model)
 
-        # Load Soul Spec package (default: nova-helper)
+        # Load Soul Spec package (default: kthx-helper)
         self.soul = None
 
         # Determine if tools are available

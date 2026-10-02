@@ -14,7 +14,7 @@ Test 01 is designed for rapid iteration and debugging. 5 targeted questions iden
 agentkthx test 01 --model qwen2.5:0.5b
 agentkthx test 01 --model qwen    # Fuzzy match: all qwen models
 agentkthx test 01 --model g       # Fuzzy match: gemma, granite, functiongemma
-agentkthx test 01 -m gemma3:270m --force-react --soul nova-helper  # With soul persona
+agentkthx test 01 -m gemma3:270m --force-react --soul kthx-helper  # With soul persona
 agentkthx test 01 -m granite4:350m --api openai  # Chat Completions API
 agentkthx test 01 -m qwen:0.5b --num-ctx 8192  # Custom context window
 ```
@@ -23,8 +23,8 @@ agentkthx test 01 -m qwen:0.5b --num-ctx 8192  # Custom context window
 
 ### OpenResponses Mode Results (R04.5 - openre API Mode, WITH SOUL)
 
-> Testing with `--api openre --soul nova-helper` uses Ollama's native OpenResponses API (`/api/chat`) with the nova-helper soul persona
-> Test params: `--timeout 9999 --num-ctx 16768 --num-predict 256 --temp 0.1 --soul nova-helper`
+> Testing with `--api openre --soul kthx-helper` uses Ollama's native OpenResponses API (`/api/chat`) with the kthx-helper soul persona
+> Test params: `--timeout 9999 --num-ctx 16768 --num-predict 256 --temp 0.1 --soul kthx-helper`
 > Environment: CPU-only Google Colab, 12GB RAM, Ollama
 > ✅ **Complete** — All 22 models tested
 
@@ -57,8 +57,8 @@ agentkthx test 01 -m qwen:0.5b --num-ctx 8192  # Custom context window
 
 ### Chat Completions Mode Results (R04.5 - openai API Mode, WITH SOUL)
 
-> Testing with `--api openai --soul nova-helper --warmup` uses OpenAI-compatible Chat Completions API (`/v1/chat/completions`) with the nova-helper soul persona
-> Test params: `--timeout 9999 --num-ctx 16768 --num-predict 256 --temp 0.2 --soul nova-helper --api openai --warmup`
+> Testing with `--api openai --soul kthx-helper --warmup` uses OpenAI-compatible Chat Completions API (`/v1/chat/completions`) with the kthx-helper soul persona
+> Test params: `--timeout 9999 --num-ctx 16768 --num-predict 256 --temp 0.2 --soul kthx-helper --api openai --warmup`
 > Environment: CPU-only Google Colab, 12GB RAM, Ollama
 > ✅ **Complete** — All 18 models tested
 
@@ -87,8 +87,8 @@ agentkthx test 01 -m qwen:0.5b --num-ctx 8192  # Custom context window
 
 ### BitNet Backend Results (R04.4 - openre API Mode, WITH SOUL)
 
-> Testing with `--backend bitnet --soul nova-helper` uses the BitNet backend (`http://localhost:8765`) with OpenResponses API and the nova-helper soul persona
-> Test params: `--backend bitnet --soul nova-helper --num-ctx 16384 --num-predict 128 --timeout 999 --temp 0.1`
+> Testing with `--backend bitnet --soul kthx-helper` uses the BitNet backend (`http://localhost:8765`) with OpenResponses API and the kthx-helper soul persona
+> Test params: `--backend bitnet --soul kthx-helper --num-ctx 16384 --num-predict 128 --timeout 999 --temp 0.1`
 > ✅ **Complete** — 1 model tested
 
 | Rank | Model | Score | Time | Q1 | Q2 | Q3 | Q4 | Q5 | Notes |
@@ -99,8 +99,8 @@ agentkthx test 01 -m qwen:0.5b --num-ctx 8192  # Custom context window
 
 ### Chat Completions Mode Results (R04.4 - openai API Mode, WITH SOUL)
 
-> Testing with `--api openai --soul nova-helper` uses OpenAI-compatible Chat Completions API (`/v1/chat/completions`) with the nova-helper soul persona
-> Test params: `--api openai --soul nova-helper --timeout 999`
+> Testing with `--api openai --soul kthx-helper` uses OpenAI-compatible Chat Completions API (`/v1/chat/completions`) with the kthx-helper soul persona
+> Test params: `--api openai --soul kthx-helper --timeout 999`
 > ✅ **Complete** — All 10 models tested
 
 | Rank | Model | Score | Time | Q1 | Q2 | Q3 | Q4 | Q5 | vs R03.9 | Notes |
@@ -120,8 +120,8 @@ agentkthx test 01 -m qwen:0.5b --num-ctx 8192  # Custom context window
 
 ### OpenResponses Mode Results (R04.4 - openre API Mode, WITH SOUL)
 
-> Testing with `--api openre --soul nova-helper` uses Ollama's native OpenResponses API (`/api/chat`) with the nova-helper soul persona
-> Test params: `--api openre --soul nova-helper --timeout 999`
+> Testing with `--api openre --soul kthx-helper` uses Ollama's native OpenResponses API (`/api/chat`) with the kthx-helper soul persona
+> Test params: `--api openre --soul kthx-helper --timeout 999`
 > ✅ **Complete** — All 10 models tested
 
 | Rank | Model | Score | Time | Q1 | Q2 | Q3 | Q4 | Q5 | vs R03.9 | Notes |
@@ -147,7 +147,7 @@ Test 02 comprehensively evaluates tool calling across 6 categories. Phase 1 vali
 
 **Usage:**
 ```bash
-agentkthx test 02 --soul nova-helper --num-ctx 8192 --num-predict 512 --temp 0.1
+agentkthx test 02 --soul kthx-helper --num-ctx 8192 --num-predict 512 --temp 0.1
 agentkthx test 02 --model-only -m granite4   # Phase 2 only, specific model
 agentkthx test 02 --tools-only                 # Phase 1 only, no model needed
 agentkthx test 02 --model-only -m qwen2.5:0.5b --debug
@@ -181,7 +181,7 @@ agentkthx test 02 --model-only -m qwen2.5:0.5b --debug
 
 ### Phase 2 Results
 
-> Test params: `--soul nova-helper --num-ctx 8192 --num-predict 512 --temp 0.1 --model-only --timeout 9999`
+> Test params: `--soul kthx-helper --num-ctx 8192 --num-predict 512 --temp 0.1 --model-only --timeout 9999`
 
 | Rank | Model | Score | Calc | Shell | DateTime | File | Repl | All Tools | Time | Tool Mode | Notes |
 |:----:|-------|------:|:----:|:-----:|:--------:|:----:|:----:|:---------:|:----:|:---------:|-------|
@@ -269,7 +269,7 @@ agentkthx test 03 --model granite4:350m --timeout 9999
 
 > **R03.3:** Soul personas dramatically improve small model performance
 
-| Model | Params | Without Soul | With nova-helper | Improvement |
+| Model | Params | Without Soul | With kthx-helper | Improvement |
 |-------|-------:|--------------|------------------|:-----------:|
 | `qwen2:0.5b` | 500M | ~2/5 (40%) | **5/5 (100%)** | **+60%** |
 | `qwen:0.5b` | 500M | 5/5 (221.7s) | **5/5 (96.0s)** | **2.3x faster** |
@@ -283,15 +283,15 @@ agentkthx test 03 --model granite4:350m --timeout 9999
 
 ## Soul Persona System
 
-The `--soul` flag loads a focused persona that guides model behavior. The included `nova-helper` soul is optimized for diagnostic testing:
+The `--soul` flag loads a focused persona that guides model behavior. The included `kthx-helper` soul is optimized for diagnostic testing:
 
 **Usage:**
 ```bash
-agentkthx test 01 -m gemma3:270m --force-react --soul nova-helper
-agentkthx test 01 -m dolphin --soul nova-helper --soul-level 3
+agentkthx test 01 -m gemma3:270m --force-react --soul kthx-helper
+agentkthx test 01 -m dolphin --soul kthx-helper --soul-level 3
 ```
 
-**nova-helper Soul Features:**
+**kthx-helper Soul Features:**
 - Focused diagnostic role (not generic assistant)
 - Explicit tool usage instructions with examples
 - Concise response format (no filler)
@@ -314,8 +314,8 @@ agentkthx test 04 --timeout 6400
 # Run with debug output
 agentkthx test 08 --debug --num-ctx 4096
 
-# Run with nova-helper SOUL.md, 16k context, ChatCompletions API, Debug Output and 9999 timeout
-agentkthx test 01 --soul nova-helper --num-ctx 16384 --api openai --timeout 9999 --debug
+# Run with kthx-helper SOUL.md, 16k context, ChatCompletions API, Debug Output and 9999 timeout
+agentkthx test 01 --soul kthx-helper --num-ctx 16384 --api openai --timeout 9999 --debug
 ```
 
 ---

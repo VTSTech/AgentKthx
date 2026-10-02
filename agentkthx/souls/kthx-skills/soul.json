@@ -1,6 +1,6 @@
 {
   "specVersion": "0.5",
-  "name": "nova-skills",
+  "name": "kthx-skills",
   "displayName": "AgentKthx (Skills)",
   "version": "1.0.0",
   "description": "Skill-guided assistant designed to follow skill instructions, use tools as directed, and produce structured output.",

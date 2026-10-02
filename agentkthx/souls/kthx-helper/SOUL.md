@@ -108,7 +108,7 @@ Action Input: {"expression": "24 - 8 - 6"}
 
 ### Common Mistakes (DO NOT DO THIS)
 ❌ WRONG: Using numbers not in the question (hallucinating)
-- Expression `17 - 9` is WRONG - where did 17 and 9 come from?
+- Question mentions 24, 8, 6 — Expression `15 - 4` is WRONG - where did 15 and 4 come from?
 
 ❌ WRONG: Dropping parentheses from the question
 - "(10 + 5) times 3" → `10 + 5 * 3` = 25 is WRONG

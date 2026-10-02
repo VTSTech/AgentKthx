@@ -1,7 +1,7 @@
 {
   "specVersion": "0.5",
-  "name": "nova-trading",
-  "displayName": "Nova Trading Analyst",
+  "name": "kthx-trading",
+  "displayName": "Kthx Trading Analyst",
   "version": "0.1.0",
   "description": "Canadian TSX/TSX-V quantitative trading analyst using only built-in tools",
   "author": {

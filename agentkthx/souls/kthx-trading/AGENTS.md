@@ -44,12 +44,12 @@ This allows room for fetched data + indicator calculations + analysis output.
 
 For autonomous periodic scanning, use agent mode:
 ```
-agentnova agent -m qwen2.5:7b --soul nova-trading --session trading
+agentnova agent -m qwen2.5:7b --soul kthx-trading --session trading
 ```
 
 For interactive analysis, use chat mode:
 ```
-agentnova chat -m qwen2.5:7b --soul nova-trading --session trading
+agentnova chat -m qwen2.5:7b --soul kthx-trading --session trading
 ```
 
 ## Sessions
