@@ -25,7 +25,7 @@ from .commands import (
     cmd_update,
     cmd_version,
 )
-from .parser import create_parser
+from .parser import apply_sorted_help, create_parser
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -104,6 +104,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         import sys
 
         print(f"[PluginManager] Warning: plugin CLI discovery failed: {e}", file=sys.stderr)
+
+    # R07.19 (follow-up #6): plugin CLI subparsers were registered after
+    # create_parser()'s sorted-help sweep — re-apply (idempotent) so every
+    # -h, native or plugin, renders options alphabetically.
+    apply_sorted_help(parser)
 
     args = parser.parse_args(argv)
 

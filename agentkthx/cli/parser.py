@@ -11,6 +11,70 @@ from ..backends import get_backend_choices
 from ..shared_args import _parse_token_size, add_agent_args
 
 # ============================================================================
+# Help formatting
+# ============================================================================
+
+
+class SortedHelpFormatter(argparse.HelpFormatter):
+    """``-h`` formatter that lists options alphabetically (R07.19 follow-up #6).
+
+    ``chat -h`` (and every other ``-h``) rendered options in registration
+    order, which made flags hard to find once ``add_agent_args()`` grew
+    past 30 entries. This formatter sorts the "options:" listing AND the
+    ``usage:`` line by each flag's primary long name (``-m, --model``
+    sorts under "model"); short-only flags sort by their own name and the
+    bare ``--`` passthrough sorts first.
+
+    Positional arguments keep registration order everywhere — their order
+    is semantic (``run prompt``, ``soul path``, ``turbo start model``).
+    Subcommand listings are kept alphabetical by the registration order
+    in create_parser().
+    """
+
+    def add_arguments(self, actions):
+        """Render one help section with its optionals sorted A→Z."""
+        super().add_arguments(sorted(actions, key=self._sort_key))
+
+    def add_usage(self, usage, actions, groups, prefix=None):
+        """Render the ``usage:`` line with its optionals sorted A→Z."""
+        super().add_usage(usage, sorted(actions, key=self._sort_key), groups, prefix)
+
+    @staticmethod
+    def _sort_key(action):
+        """(positionals-first, name) key; positionals keep insertion order."""
+        if not action.option_strings:
+            return (0, ())  # positional: stable sort preserves semantic order
+        longs = [s for s in action.option_strings if s.startswith("--")]
+        primary = (longs or action.option_strings)[0]
+        return (1, (primary.lstrip("-").lower(),))
+
+
+def apply_sorted_help(parser: argparse.ArgumentParser) -> None:
+    """Apply SortedHelpFormatter to *parser* and every subparser below it.
+
+    ``formatter_class`` is read at help-render time, so setting it after
+    all add_argument()/add_parser() calls is sufficient. Subcommand
+    registries are re-sorted in place so late-registered (plugin) commands
+    also render alphabetically. Called at the end of create_parser() and
+    again in main() once plugin CLI subparsers are registered (idempotent).
+    """
+    parser.formatter_class = SortedHelpFormatter
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            # Re-sort choices + the pseudo-action listing IN PLACE —
+            # choices IS _name_parser_map (rebinding would desync parse
+            # lookup from the rendered metavar), so plugin commands
+            # appended by main() land in alphabetical position instead
+            # of at the end of the {…} metavar and command list.
+            ordered = sorted(action.choices.items())
+            action.choices.clear()
+            action.choices.update(ordered)
+            action._choices_actions.sort(key=lambda ca: ca.dest)
+            for sub in action.choices.values():
+                apply_sorted_help(sub)
+
+
+# ============================================================================
 # CLI Commands
 # ============================================================================
 
@@ -86,6 +150,15 @@ def create_parser() -> argparse.ArgumentParser:
     modelfile_parser.add_argument(
         "--backend", choices=get_backend_choices(), default=None, help="Backend to use"
     )
+
+    # Plugins command (v0.2 spec §CLI integration) — registered before run
+    # so the root -h subcommand list stays alphabetical (R07.19 follow-up #6)
+    plugins_parser = subparsers.add_parser("plugins", help="List and manage plugins")
+    plugins_parser.add_argument("--verbose", action="store_true", help="Show detailed plugin info")
+    plugins_parser.add_argument("--load", metavar="NAME", help="Load a single plugin by name")
+    plugins_parser.add_argument("--unload", metavar="NAME", help="Unload a loaded plugin")
+    plugins_parser.add_argument("--reload", metavar="NAME", help="Unload then load a plugin")
+    plugins_parser.add_argument("--json", action="store_true", help="Machine-readable listing")
 
     # Run command
     run_parser = subparsers.add_parser("run", help="Run a single prompt")
@@ -253,6 +326,10 @@ def create_parser() -> argparse.ArgumentParser:
         "--quick", action="store_true", help="Quick mode: only run 5 fastest tests per test module"
     )
 
+    # Tools command — registered before turbo so the root -h subcommand
+    # list stays alphabetical (R07.19 follow-up #6)
+    subparsers.add_parser("tools", help="List available tools")
+
     # Turbo command
     turbo_parser = subparsers.add_parser(
         "turbo", help="TurboQuant server management (start/stop/list Ollama models)"
@@ -373,29 +450,21 @@ def create_parser() -> argparse.ArgumentParser:
         "--", dest="extra_args", nargs="*", help="Extra arguments to pass to llama-server"
     )
 
+    # turbo status (registered before stop so turbo -h stays alphabetical)
+    turbo_sub.add_parser("status", help="Show TurboQuant server status")
+
     # turbo stop
     turbo_stop_parser = turbo_sub.add_parser("stop", help="Stop the running TurboQuant server")
     turbo_stop_parser.add_argument("--force", action="store_true", help="Force kill (SIGKILL)")
-
-    # turbo status
-    turbo_sub.add_parser("status", help="Show TurboQuant server status")
-
-    # Tools command
-    subparsers.add_parser("tools", help="List available tools")
-
-    # Plugins command (v0.2 spec §CLI integration)
-    plugins_parser = subparsers.add_parser("plugins", help="List and manage plugins")
-    plugins_parser.add_argument("--verbose", action="store_true", help="Show detailed plugin info")
-    plugins_parser.add_argument("--load", metavar="NAME", help="Load a single plugin by name")
-    plugins_parser.add_argument("--unload", metavar="NAME", help="Unload a loaded plugin")
-    plugins_parser.add_argument("--reload", metavar="NAME", help="Unload then load a plugin")
-    plugins_parser.add_argument("--json", action="store_true", help="Machine-readable listing")
 
     # Update command
     subparsers.add_parser("update", help="Update AgentKthx to the latest version from GitHub")
 
     # Version command
     subparsers.add_parser("version", help="Show version information")
+
+    # R07.19 (follow-up #6): render every -h with options sorted A→Z
+    apply_sorted_help(parser)
 
     return parser
 
