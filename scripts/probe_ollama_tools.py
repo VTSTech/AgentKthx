@@ -4,13 +4,13 @@ Probe Ollama tool support via the server's own `capabilities` field.
 
 Modern Ollama reports a per-model `capabilities` array in GET /api/tags
 (e.g. ["completion", "tools", "insert"]). The server derives it from the
-model's chat template / GGUF metadata ? the exact same source its runner
+model's chat template / GGUF metadata — the exact same source its runner
 uses to decide whether tool calling works. So:
 
     "tools" in capabilities  ->  native tool calling is supported
     otherwise                ->  model cannot call tools
 
-This is authoritative, O(1), and loads no models ? replacing the old
+This is authoritative, O(1), and loads no models — replacing the old
 sample-based probe (one "What's the weather in Tokyo?" request per model,
 max_tokens=100, no system prompt), which produced false negatives for
 capable-but-chatty models.
@@ -30,8 +30,9 @@ Examples:
     python3 probe_ollama_tools.py http://localhost:11434 --json
     python3 probe_ollama_tools.py --no-cache
 
-Written by VTSTech ? https://www.vts-tech.org
+Written by VTSTech — https://www.vts-tech.org
 """
+
 from __future__ import annotations
 
 import argparse
@@ -60,7 +61,7 @@ def http_get_json(url: str, timeout: int) -> dict | None:
 
 
 def fmt_size(size: int) -> str:
-    return f"{size / GB:.2f} GB" if size else "?"
+    return f"{size / GB:.2f} GB" if size else "—"
 
 
 def load_cached_verdicts() -> dict[str, str]:
@@ -107,15 +108,13 @@ def main() -> int:
     args = parser.parse_args()
 
     base_url = (
-        args.base_url
-        or os.environ.get("OLLAMA_BASE_URL")
-        or "http://localhost:11434"
+        args.base_url or os.environ.get("OLLAMA_BASE_URL") or "http://localhost:11434"
     ).rstrip("/")
     tags_url = f"{base_url}/api/tags"
 
     data = http_get_json(tags_url, timeout=args.timeout)
     if data is None:
-        print(f"? Could not reach Ollama at {tags_url}")
+        print(f"❌ Could not reach Ollama at {tags_url}")
         print("   Start with: ollama serve  (or set OLLAMA_BASE_URL)")
         return 1
 
@@ -124,7 +123,7 @@ def main() -> int:
         print(f"No models found at {tags_url}")
         return 0
 
-    # Old servers omit `capabilities` entirely ? detect and warn once.
+    # Old servers omit `capabilities` entirely — detect and warn once.
     caps_available = any("capabilities" in m for m in models)
 
     cached = {} if args.no_cache else load_cached_verdicts()
@@ -142,9 +141,9 @@ def main() -> int:
             {
                 "name": name,
                 "family": details.get("family", "unknown"),
-                "quant": details.get("quantization_level", "") or "?",
+                "quant": details.get("quantization_level", "") or "—",
                 "size": fmt_size(m.get("size", 0)),
-                "parameter_size": details.get("parameter_size", "?"),
+                "parameter_size": details.get("parameter_size", "—"),
                 "capabilities": caps,
                 "verdict": "native" if has_tools else "none",
                 "cached": cached_verdict,
@@ -163,15 +162,17 @@ def main() -> int:
         f"{'Verdict':<9} {'Cached(bare)':<12} Caps"
     )
     print()
-    print(f"? AgentKthx ? Ollama Tool Support (from /api/tags capabilities)")
+    print(f"⚖ AgentKthx — Ollama Tool Support (from /api/tags capabilities)")
     print(f"  Server: {tags_url}")
-    print(f"  Cache:  {'(skipped)' if args.no_cache else '(AgentKthx tool_support.json, openre keys)'}")
+    print(
+        f"  Cache:  {'(skipped)' if args.no_cache else '(AgentKthx tool_support.json, openre keys)'}"
+    )
     print("-" * (len(header) - 2))
     print(header)
     print("-" * (len(header) - 2))
     for r in rows:
-        verdict = "? native" if r["verdict"] == "native" else "? none"
-        cached_col = r["cached"] if r["cached"] else "?"
+        verdict = "✓ native" if r["verdict"] == "native" else "✗ none"
+        cached_col = r["cached"] if r["cached"] else "—"
         if r["delta"]:
             cached_col += " !"
         print(
@@ -180,17 +181,17 @@ def main() -> int:
         )
     print("-" * (len(header) - 2))
     native_n = sum(1 for r in rows if r["verdict"] == "native")
-    print(f"Total: {len(rows)} models ? {native_n} native, {len(rows) - native_n} none")
+    print(f"Total: {len(rows)} models — {native_n} native, {len(rows) - native_n} none")
     if not caps_available:
         print(
-            "? Server did not report capabilities for any model ? Ollama may be too old. "
+            "⚠ Server did not report capabilities for any model — Ollama may be too old. "
             "Upgrade Ollama for this probe to work."
         )
     print()
-    print("Legend: ? native = 'tools' in /api/tags capabilities | ? none = capability absent")
+    print("Legend: ✓ native = 'tools' in /api/tags capabilities | ✗ none = capability absent")
     print("        Cached(bare) = verdict from the old no-prompt sampled probe (local cache)")
     print("        '!' marks models where the cached verdict disagrees with the declared")
-    print("        capability ? those are the false negatives the sampled probe produced.")
+    print("        capability — those are the false negatives the sampled probe produced.")
     return 0
 
 

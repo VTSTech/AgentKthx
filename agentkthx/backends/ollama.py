@@ -74,6 +74,13 @@ class OllamaBackend(OpenAICompatibleBackend):
         # in _get_model_defaults. Mirrors the cloud backends' init.
         self._context_safe_max_tokens: int | None = None
 
+        # R07.19 (follow-up #9): memoized /api/tags capabilities map
+        # (model name -> declared capabilities list). None = not fetched yet;
+        # {} = fetched but the server predates the capabilities field. Filled
+        # by _capabilities_map() and consumed by model_capabilities() /
+        # test_tool_support() — one GET serves every model in the process.
+        self._caps_map: dict[str, list[str]] | None = None
+
     @property
     def backend_type(self) -> BackendType:
         return BackendType.OLLAMA
@@ -1065,7 +1072,62 @@ class OllamaBackend(OpenAICompatibleBackend):
             return []
 
     # No family-based assumptions - tool support depends on the model's template
-    # Each model must be tested individually. Use --tool-support to test.
+    # R07.19 (follow-up #9): the template fact is now DECLARED by the server
+    # itself in /api/tags' `capabilities` field, so test_tool_support() reads
+    # it directly and only falls back to the sampled probe on legacy servers.
+
+    def _capabilities_map(self) -> dict[str, list[str]]:
+        """Model name -> declared capabilities from GET /api/tags.
+
+        R07.19 (follow-up #9): modern Ollama reports a per-model
+        ``capabilities`` array (e.g. ``["completion", "tools", "insert"]``)
+        derived server-side from the model's chat template / GGUF metadata —
+        the exact same source its runner consults at request time. It is
+        therefore an authoritative, O(1) tool-support signal that replaces
+        the old sampled probe (one 100-token "what's the weather" request
+        per model, no system prompt — a shape that misclassified
+        capable-but-chatty models as ``react``).
+
+        Memoized per backend instance: one GET serves every model and both
+        API modes for the lifetime of the process (capabilities cannot
+        change mid-run). Transient fetch failures return ``{}`` WITHOUT
+        memoizing, so a later call can still succeed.
+
+        Returns:
+            Map of model name -> capabilities list. ``{}`` when the server
+            predates the capabilities field or the response is unusable —
+            callers treat ``{}`` as "no capabilities signal available" and
+            fall back to the sampled probe.
+        """
+        if getattr(self, "_caps_map", None) is not None:
+            return self._caps_map
+        import urllib.error
+        import urllib.request
+
+        url = f"{self.base_url}/api/tags"
+        try:
+            req = urllib.request.Request(url, method="GET")
+            with urllib.request.urlopen(req, timeout=10) as response:
+                result = json.loads(response.read().decode("utf-8"))
+            caps_map: dict[str, list[str]] = {}
+            for m in result.get("models", []) or []:
+                if "capabilities" in m:
+                    caps_map[m.get("name", "")] = m.get("capabilities") or []
+            self._caps_map = caps_map
+        except (urllib.error.HTTPError, urllib.error.URLError, OSError, ValueError):
+            # Transient failure — do not memoize; the next call retries.
+            return {}
+        return self._caps_map
+
+    def model_capabilities(self, model: str) -> list[str] | None:
+        """Return the model's declared capabilities, or None if no signal.
+
+        None means the server predates the capabilities field, the response
+        was unreachable, or the model is not listed — in all three cases the
+        caller should fall back to its own detection (for
+        ``test_tool_support`` that is the sampled probe + cache).
+        """
+        return self._capabilities_map().get(model)
 
     def test_tool_support(
         self, model: str, family: str | None = None, force_test: bool = False
@@ -1073,7 +1135,11 @@ class OllamaBackend(OpenAICompatibleBackend):
         """
         Test model's tool support capability.
 
-        Detection logic (from main branch):
+        R07.19 (follow-up #9): when the server reports /api/tags
+        `capabilities` (any modern Ollama), the verdict comes straight from
+        the declaration — "tools" -> NATIVE, absent -> NONE — with no model
+        load and no inference. Only legacy servers reach the sampled probe:
+
         1. HTTP 400 "does not support tools" → none (Ollama's explicit rejection)
         2. Native tool_calls in API response, calling correct function → native
         3. No tool_calls but content has JSON tool call pattern → react (text-based)
@@ -1097,6 +1163,25 @@ class OllamaBackend(OpenAICompatibleBackend):
 
         # Determine API mode for cache namespacing
         api_mode = self._api_mode.value if hasattr(self, "_api_mode") else "openre"
+
+        # R07.19 (follow-up #9): capabilities-first detection. Modern Ollama
+        # declares per-model capabilities in /api/tags (server-derived from
+        # the model's chat template / GGUF — the same source the runner
+        # consults), so the verdict is available without loading the model:
+        #   "tools" in capabilities  -> NATIVE
+        #   otherwise                -> NONE (pure reasoning / completion)
+        # This short-circuits BOTH the cache and the sampled probe — the
+        # signal is live, authoritative and API-mode-independent (the runner
+        # template governs openre and openai alike). The verdict is still
+        # written to the persistent cache so non-capability consumers
+        # (agent_factory reads, other processes) see it without a fetch.
+        # Legacy servers that omit the field fall through to the sampled
+        # probe below, unchanged.
+        declared = self.model_capabilities(model)
+        if declared is not None:
+            result = ToolSupportLevel.NATIVE if "tools" in declared else ToolSupportLevel.NONE
+            cache_tool_support(model, result, family=family or "", api_mode=api_mode)
+            return result
 
         if not force_test:
             # Check cache first, even without force_test
