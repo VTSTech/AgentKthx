@@ -116,8 +116,9 @@ class _PromptHost(AgentSetupMixin):
 def test_build_default_prompt_all_four_variants():
     host = _PromptHost()
     # 1. No tools → direct-answer prompt
+    #    (cca31be: "AI AgentKthx" → "AGI AgentKthx" branding update)
     no_tools = host._build_default_prompt(False)
-    assert no_tools == ("You are AI AgentKthx. " "Answer questions directly and accurately.")
+    assert no_tools == ("You are AGI AgentKthx. " "Answer questions directly and accurately.")
     # 2. BitNet → ultra-lean prompt, < 500 chars, no markdown
     bitnet = _PromptHost(is_bitnet=True)._build_default_prompt(True)
     assert len(bitnet) < 500

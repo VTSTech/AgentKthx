@@ -1111,6 +1111,25 @@ class ZaiBackend(CloudBackend):
         OpenAI tools format. Returns NATIVE for known GLM models.
 
         When force_test=True, makes a live API call to verify.
+
+        R07.19 (follow-up #12) probe hardening — live finding: the free
+        tier rate-limits rapid sequential probes (HTTP 429 "code 1302"),
+        and the old probe cached REACT for ANY HTTPError, so one
+        rate-limited probe poisoned the cache and mislabeled native
+        models (observed with glm-4.7-flash) as react. Fixes:
+          - ``thinking`` disabled in the probe body — this is a
+            capability test, not a chat; the glm-4.7 family thinks by
+            default and would otherwise spend the token budget on
+            reasoning_content first.
+          - ``max_tokens`` 200 → 512 for reasoning headroom.
+          - Transient failures (429 / 5xx / rate-limit text / network
+            errors / degenerate empty-choices replies) retry with
+            backoff; a persisting transient failure returns UNTESTED
+            WITHOUT caching, so the next run re-probes cleanly.
+          - Only a definitive server-side rejection of the tools param
+            caches REACT. Non-rejection HTTP errors (401/403 auth,
+            credits) return UNTESTED uncached — capability unknown is
+            not capability absent.
         """
         from agentkthx.core.tool_cache import cache_tool_support, get_cached_tool_support
 
@@ -1144,102 +1163,149 @@ class ZaiBackend(CloudBackend):
             ],
         )
 
-        try:
-            import urllib.error
-            import urllib.request
+        # Follow-up #12: transient failures retry with this backoff
+        # schedule before giving up as UNTESTED (uncached).
+        attempts = 3
+        backoffs = (2.0, 5.0)
 
-            url = f"{self.base_url}/api/paas/v4/chat/completions"
+        for attempt in range(attempts):
+            try:
+                import urllib.error
+                import urllib.request
 
-            body = {
-                "model": model,
-                "messages": [{"role": "user", "content": "What's the weather like in Tokyo?"}],
-                "tools": [test_tool.to_openai_schema()],
-                "stream": False,
-                "temperature": 0.0,
-                "max_tokens": 200,
-            }
+                url = f"{self.base_url}/api/paas/v4/chat/completions"
 
-            headers = {"Content-Type": "application/json"}
-            if self._api_key:
-                headers["Authorization"] = f"Bearer {self._api_key}"
+                body = {
+                    "model": model,
+                    "messages": [{"role": "user", "content": "What's the weather like in Tokyo?"}],
+                    "tools": [test_tool.to_openai_schema()],
+                    "stream": False,
+                    "temperature": 0.0,
+                    # Follow-up #12: 200 → 512 — headroom so a model that
+                    # still reasons before calling cannot truncate away
+                    # the tool call.
+                    "max_tokens": 512,
+                    # Follow-up #12: capability probe, not a chat — keep
+                    # reasoning out of the way (glm-4.7 family thinks by
+                    # default; reasoning tokens otherwise precede the
+                    # tool call and risk finish_reason=length).
+                    "thinking": {"type": "disabled"},
+                }
 
-            req = urllib.request.Request(
-                url,
-                data=json.dumps(body).encode("utf-8"),
-                headers=headers,
-                method="POST",
-            )
+                headers = {"Content-Type": "application/json"}
+                if self._api_key:
+                    headers["Authorization"] = f"Bearer {self._api_key}"
 
-            with urllib.request.urlopen(req, timeout=30) as response:
-                result = json.loads(response.read().decode("utf-8"))
+                req = urllib.request.Request(
+                    url,
+                    data=json.dumps(body).encode("utf-8"),
+                    headers=headers,
+                    method="POST",
+                )
 
-            choices = result.get("choices", [])
-            if not choices:
-                support = ToolSupportLevel.REACT
-                cache_tool_support(model, support, family=family or "glm")
-                return support
+                with urllib.request.urlopen(req, timeout=30) as response:
+                    result = json.loads(response.read().decode("utf-8"))
 
-            message = choices[0].get("message", {})
-            content = message.get("content", "")
-            tool_calls = message.get("tool_calls", [])
+                choices = result.get("choices", [])
+                if not choices:
+                    # Degenerate 200 reply — treat as transient and retry.
+                    if attempt < attempts - 1:
+                        time.sleep(backoffs[min(attempt, len(backoffs) - 1)])
+                        continue
+                    if os.environ.get("AGENTKTHX_DEBUG"):
+                        print(
+                            "  [ZAI] Tool support: UNTESTED "
+                            "(empty choices persisted — not cached)"
+                        )
+                    return ToolSupportLevel.UNTESTED
 
-            # Native tool calls in response → NATIVE support
-            if tool_calls:
+                message = choices[0].get("message", {})
+                content = message.get("content", "")
+                tool_calls = message.get("tool_calls", [])
+
+                # Native tool calls in response → NATIVE support
+                if tool_calls:
+                    if os.environ.get("AGENTKTHX_DEBUG"):
+                        print(f"  [ZAI] Tool support: NATIVE (tool_calls={len(tool_calls)})")
+                    cache_tool_support(model, ToolSupportLevel.NATIVE, family=family or "glm")
+                    return ToolSupportLevel.NATIVE
+
+                # Check for ReAct-style text patterns
+                if content and any(
+                    kw in content.lower() for kw in ["action:", "action input:", "final answer:"]
+                ):
+                    if os.environ.get("AGENTKTHX_DEBUG"):
+                        print("  [ZAI] Tool support: REACT (text-based tool pattern)")
+                    cache_tool_support(model, ToolSupportLevel.REACT, family=family or "glm")
+                    return ToolSupportLevel.REACT
+
+                # API accepted tools but model didn't use them — REACT-capable
                 if os.environ.get("AGENTKTHX_DEBUG"):
-                    print(f"  [ZAI] Tool support: NATIVE (tool_calls={len(tool_calls)})")
-                cache_tool_support(model, ToolSupportLevel.NATIVE, family=family or "glm")
-                return ToolSupportLevel.NATIVE
-
-            # Check for ReAct-style text patterns
-            if content and any(
-                kw in content.lower() for kw in ["action:", "action input:", "final answer:"]
-            ):
-                if os.environ.get("AGENTKTHX_DEBUG"):
-                    print("  [ZAI] Tool support: REACT (text-based tool pattern)")
+                    print("  [ZAI] Tool support: REACT (tools accepted, no tool calls)")
                 cache_tool_support(model, ToolSupportLevel.REACT, family=family or "glm")
                 return ToolSupportLevel.REACT
 
-            # API accepted tools but model didn't use them — REACT-capable
-            if os.environ.get("AGENTKTHX_DEBUG"):
-                print("  [ZAI] Tool support: REACT (tools accepted, no tool calls)")
-            cache_tool_support(model, ToolSupportLevel.REACT, family=family or "glm")
-            return ToolSupportLevel.REACT
+            except urllib.error.HTTPError as e:
+                error_body = e.read().decode("utf-8") if e.fp else ""
+                error_msg = error_body.lower()
+                status = e.code
 
-        except urllib.error.HTTPError as e:
-            error_body = e.read().decode("utf-8") if e.fp else ""
-            error_msg = error_body.lower()
-
-            if "does not support" in error_msg or "invalid" in error_msg:
-                if os.environ.get("AGENTKTHX_DEBUG"):
-                    print("  [ZAI] Tool support: REACT (server rejected tools param)")
-                cache_tool_support(
-                    model,
-                    ToolSupportLevel.REACT,
-                    family=family or "glm",
-                    error=str(e),
+                # Follow-up #12: free-tier rate limits (429 "code 1302")
+                # and provider 5xx blips are TRANSIENT — retry, and if
+                # they persist return UNTESTED without caching. Caching
+                # REACT here is what mislabeled native models (e.g.
+                # glm-4.7-flash) after a single rate-limited probe.
+                transient = (
+                    status == 429
+                    or status >= 500
+                    or "rate limit" in error_msg
+                    or "1302" in error_body
                 )
-                return ToolSupportLevel.REACT
+                if transient:
+                    if attempt < attempts - 1:
+                        time.sleep(backoffs[min(attempt, len(backoffs) - 1)])
+                        continue
+                    if os.environ.get("AGENTKTHX_DEBUG"):
+                        print(
+                            "  [ZAI] Tool support: UNTESTED "
+                            f"(transient HTTP {status} persisted — not cached)"
+                        )
+                    return ToolSupportLevel.UNTESTED
 
-            if os.environ.get("AGENTKTHX_DEBUG"):
-                print(f"  [ZAI] Tool support: REACT (HTTP {e.code})")
-            cache_tool_support(
-                model,
-                ToolSupportLevel.REACT,
-                family=family or "glm",
-                error=str(e),
-            )
-            return ToolSupportLevel.REACT
+                # Definitive server-side rejection of the tools param —
+                # the API genuinely cannot take native tool calls here.
+                rejected = (
+                    "does not support" in error_msg
+                    or ("tools" in error_msg and "invalid" in error_msg)
+                    or ("tools" in error_msg and "not supported" in error_msg)
+                )
+                if rejected:
+                    if os.environ.get("AGENTKTHX_DEBUG"):
+                        print("  [ZAI] Tool support: REACT (server rejected tools param)")
+                    cache_tool_support(
+                        model,
+                        ToolSupportLevel.REACT,
+                        family=family or "glm",
+                        error=str(e),
+                    )
+                    return ToolSupportLevel.REACT
 
-        except Exception as e:
-            if os.environ.get("AGENTKTHX_DEBUG"):
-                print(f"  [ZAI] Tool support test failed: {e}")
-            cache_tool_support(
-                model,
-                ToolSupportLevel.REACT,
-                family=family or "glm",
-                error=str(e),
-            )
-            return ToolSupportLevel.REACT
+                # Any other HTTP error (401 auth, 403 credits, …) leaves
+                # the capability unknown — do not guess, do not cache.
+                if os.environ.get("AGENTKTHX_DEBUG"):
+                    print(f"  [ZAI] Tool support: UNTESTED (HTTP {status} — not cached)")
+                return ToolSupportLevel.UNTESTED
+
+            except Exception as e:  # timeouts, connection resets, DNS…
+                if attempt < attempts - 1:
+                    time.sleep(backoffs[min(attempt, len(backoffs) - 1)])
+                    continue
+                if os.environ.get("AGENTKTHX_DEBUG"):
+                    print(f"  [ZAI] Tool support test failed: {e} (not cached)")
+                return ToolSupportLevel.UNTESTED
+
+        # Defensive: the loop above always returns; keep types honest.
+        return ToolSupportLevel.UNTESTED
 
     # ─────────────────────────────────────────────────────────────────────
     # Context Size — from static model catalog
