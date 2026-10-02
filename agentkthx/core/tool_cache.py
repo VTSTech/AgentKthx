@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from .types import ToolSupportLevel
+from .types import ThinkingSupport, ToolSupportLevel
 
 
 def get_cache_dir() -> Path:
@@ -172,6 +172,14 @@ def cache_tool_support(
     """
     Cache tool support result for a model.
 
+    R07.19 (follow-up #10): there is now a SINGLE authoritative tool-support
+    check per model (the capabilities verdict is API-mode-independent), so
+    internal callers no longer namespace by api_mode — the default "openre"
+    key is the one canonical entry. The api_mode parameter is retained for
+    backward compatibility with third-party callers and old cache shapes;
+    reads of legacy "model:openai" entries still work via the fallback in
+    get_cached_tool_support().
+
     Args:
         model: Model name
         support: Detected tool support level
@@ -190,4 +198,59 @@ def cache_tool_support(
         cache[key]["api_mode"] = api_mode
     if error:
         cache[key]["error"] = error[:100]
+    save_tool_cache(cache)
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Thinking / reasoning support cache (R07.19 follow-up #11)
+#
+# Stored in the SAME tool_support.json file under a ``thinking:<model>``
+# key prefix, so one file answers both "can this model call tools?" and
+# "does this model think?". A separate prefix (instead of a field inside
+# the tool entry) keeps the two verdicts independent — re-testing tools
+# never clobbers a thinking verdict and vice versa.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def _thinking_key(model: str) -> str:
+    """Cache key for a model's thinking-support verdict."""
+    return f"thinking:{model}"
+
+
+def get_cached_thinking_support(model: str) -> Optional[ThinkingSupport]:
+    """
+    Get cached thinking/reasoning support level for a model.
+
+    Args:
+        model: Model name (e.g., "deepseek-r1:8b")
+
+    Returns:
+        ThinkingSupport if cached, None if not in cache
+    """
+    cache = load_tool_cache()
+    cached = cache.get(_thinking_key(model))
+    if cached:
+        support_str = cached.get("support", "")
+        try:
+            return ThinkingSupport(support_str)
+        except ValueError:
+            pass
+    return None
+
+
+def cache_thinking_support(model: str, support: ThinkingSupport, family: str = "") -> None:
+    """
+    Cache thinking/reasoning support verdict for a model.
+
+    Args:
+        model: Model name
+        support: Detected ThinkingSupport level
+        family: Model family (for reference)
+    """
+    cache = load_tool_cache()
+    cache[_thinking_key(model)] = {
+        "support": support.value,
+        "tested_at": time.time(),
+        "family": family,
+    }
     save_tool_cache(cache)

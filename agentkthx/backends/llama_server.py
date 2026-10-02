@@ -897,12 +897,15 @@ class LlamaServerBackend(OllamaBackend):
 
         from ..core.tool_cache import cache_tool_support, get_cached_tool_support
 
-        api_mode = "openai"  # Always test via OpenAI endpoint
+        # R07.19 (follow-up #10): single cache namespace — one authoritative
+        # check per model, one plain-key cache entry (was api_mode="openai").
+        api_mode = None
 
         if not force_test:
-            cached = get_cached_tool_support(model, api_mode=api_mode)
+            cached = get_cached_tool_support(model, api_mode=api_mode or "openre")
             if cached is not None:
-                return cached
+                # Legacy "none" entries normalize to REACT (follow-up #10)
+                return ToolSupportLevel.effective(cached)
             return ToolSupportLevel.UNTESTED
 
         # Test tool: Weather (simple, commonly supported)
@@ -947,7 +950,7 @@ class LlamaServerBackend(OllamaBackend):
             choices = result.get("choices", [])
             if not choices:
                 support = ToolSupportLevel.REACT
-                cache_tool_support(model, support, family=family or "unknown", api_mode=api_mode)
+                cache_tool_support(model, support, family=family or "unknown")
                 return support
 
             message = choices[0].get("message", {})
@@ -958,9 +961,7 @@ class LlamaServerBackend(OllamaBackend):
             if tool_calls:
                 if os.environ.get("AGENTKTHX_DEBUG"):
                     print(f"  [llama-server] Tool support: NATIVE (tool_calls={len(tool_calls)})")
-                cache_tool_support(
-                    model, ToolSupportLevel.NATIVE, family=family or "unknown", api_mode=api_mode
-                )
+                cache_tool_support(model, ToolSupportLevel.NATIVE, family=family or "unknown")
                 return ToolSupportLevel.NATIVE
 
             # Check if content contains ReAct-style tool call pattern
@@ -969,17 +970,13 @@ class LlamaServerBackend(OllamaBackend):
             ):
                 if os.environ.get("AGENTKTHX_DEBUG"):
                     print("  [llama-server] Tool support: REACT (text-based tool pattern)")
-                cache_tool_support(
-                    model, ToolSupportLevel.REACT, family=family or "unknown", api_mode=api_mode
-                )
+                cache_tool_support(model, ToolSupportLevel.REACT, family=family or "unknown")
                 return ToolSupportLevel.REACT
 
             # API accepted tools but model didn't use them — still REACT-capable
             if os.environ.get("AGENTKTHX_DEBUG"):
                 print("  [llama-server] Tool support: REACT (tools accepted, no tool calls)")
-            cache_tool_support(
-                model, ToolSupportLevel.REACT, family=family or "unknown", api_mode=api_mode
-            )
+            cache_tool_support(model, ToolSupportLevel.REACT, family=family or "unknown")
             return ToolSupportLevel.REACT
 
         except urllib.error.HTTPError as e:
@@ -995,7 +992,6 @@ class LlamaServerBackend(OllamaBackend):
                     ToolSupportLevel.REACT,
                     family=family or "unknown",
                     error=str(e),
-                    api_mode=api_mode,
                 )
                 return ToolSupportLevel.REACT
 
@@ -1007,7 +1003,6 @@ class LlamaServerBackend(OllamaBackend):
                 ToolSupportLevel.REACT,
                 family=family or "unknown",
                 error=str(e),
-                api_mode=api_mode,
             )
             return ToolSupportLevel.REACT
 
@@ -1019,7 +1014,6 @@ class LlamaServerBackend(OllamaBackend):
                 ToolSupportLevel.REACT,
                 family=family or "unknown",
                 error=str(e),
-                api_mode=api_mode,
             )
             return ToolSupportLevel.REACT
 

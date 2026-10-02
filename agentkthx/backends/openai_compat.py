@@ -56,7 +56,7 @@ import time
 from typing import Generator, Iterable
 
 from ..core.models import Tool
-from ..core.types import ApiMode
+from ..core.types import ApiMode, ThinkingSupport
 from .base import BaseBackend
 
 
@@ -833,6 +833,76 @@ class OpenAICompatibleBackend(BaseBackend):
     def _get_model_defaults(self, model: str) -> dict:
         """Return per-model defaults: ``{"temperature": float, "max_tokens": int}``."""
         raise NotImplementedError(f"{self.__class__.__name__} must implement _get_model_defaults()")
+
+    # ─────────────────────────────────────────────────────────────────────
+    # Thinking / reasoning support detection (R07.19 follow-up #11)
+    # ─────────────────────────────────────────────────────────────────────
+    # Cloud / OpenAI-compatible providers have no per-model capabilities
+    # endpoint like Ollama's /api/tags, so the signal is the model NAME
+    # itself. The patterns below are deliberately conservative — a hit
+    # requires an explicit reasoning marker in the ID, never a loose
+    # substring ("gpt-4o" must NOT match the o-series patterns). A miss is
+    # UNKNOWN, not NO: we never claim a model can't think without evidence.
+
+    #: Model-name patterns that indicate thinking / reasoning output.
+    #: Order is irrelevant; anchored regexes, matched case-insensitively.
+    _THINKING_NAME_PATTERNS: tuple[str, ...] = (
+        r"deepseek-r\d",  # deepseek-r1, r1-distill-llama-8b, deepseek-r1:8b
+        r"\bqwq",  # qwq-32b, Qwen/QwQ-32B
+        r"\bo[134](-|$|:|/)",  # o1, o3, o4-mini, o3-preview (word-boundary)
+        r"glm-[45]\.\d",  # glm-4.5 / glm-4.6 / glm-4.7 hybrid-thinking family
+        r"glm-5",  # glm-5 family
+        r"qwen3",  # qwen3 hybrid thinking mode
+        r"thinking",  # explicit marker: ...-thinking, thinking-...
+        r"reason",  # reasoning, reasoning-mini, phi-4-reasoning
+        r"magistral",  # Mistral's reasoning family
+        r"exaone-deep",  # LG's reasoning family
+    )
+
+    @classmethod
+    def _name_matches_thinking(cls, model: str) -> bool:
+        """True when the model name carries an explicit reasoning marker."""
+        import re
+
+        name = (model or "").lower()
+        return any(re.search(p, name) for p in cls._THINKING_NAME_PATTERNS)
+
+    def test_thinking_support(
+        self, model: str, family: str | None = None, force_test: bool = False
+    ) -> ThinkingSupport:
+        """Thinking support via conservative model-name heuristics.
+
+        R07.19 (follow-up #11): cloud catalogs don't declare capabilities,
+        so the model ID is the signal — an explicit reasoning marker
+        (deepseek-r1, qwq, o1/o3/o4, glm-4.5+, qwen3, *thinking*,
+        *reasoning*, magistral, ...) → YES, everything else → UNKNOWN.
+        Never NO: absence of a marker is not evidence of absence (a
+        provider can ship a reasoning model under any name). Verdicts are
+        cached under the ``thinking:<model>`` key.
+
+        OllamaBackend overrides this with the authoritative /api/tags
+        capabilities verdict (``thinking`` in capabilities), so the
+        heuristic only governs true cloud backends.
+
+        Args:
+            model: Model name
+            family: Optional family hint (stored with the cache entry)
+            force_test: Unused (the heuristic is name-local and free)
+
+        Returns:
+            ThinkingSupport.YES on a marker hit, UNKNOWN otherwise
+        """
+        from ..core.tool_cache import cache_thinking_support, get_cached_thinking_support
+
+        cached = get_cached_thinking_support(model)
+        if cached is not None:
+            return cached
+
+        if self._name_matches_thinking(model):
+            result = ThinkingSupport.YES
+            cache_thinking_support(model, result, family=family or "")
+            return result
+        return ThinkingSupport.UNKNOWN
 
     # ─────────────────────────────────────────────────────────────────────
     # ARCH-03 (R06.57): Shared context-length 400 recovery helpers

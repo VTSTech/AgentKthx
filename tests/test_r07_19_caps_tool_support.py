@@ -8,6 +8,11 @@ system prompt), which misclassified capable-but-chatty models as REACT.
 
 Only servers that predate the capabilities field (or models absent from the
 listing) fall through to the sampled probe / cache path, unchanged.
+
+R07.19 follow-up #10 update: NONE is retired as a produced verdict —
+"None is essentially untested". Capabilities-without-tools now falls back
+to REACT (the assertions below pin REACT where they previously pinned
+NONE), and legacy "none" cache entries normalize to REACT on read.
 """
 
 from __future__ import annotations
@@ -112,19 +117,23 @@ class TestCapsVerdicts:
             ToolSupportLevel.NATIVE
         )
 
-    def test_no_tools_capability_is_none(self, monkeypatch, isolated_cache):
+    def test_no_tools_capability_falls_back_to_react(self, monkeypatch, isolated_cache):
+        # R07.19 follow-up #10: was NONE — "None is essentially untested",
+        # so a declaration without "tools" falls back to REACT. No model is
+        # ever classified None anymore.
         rec = _UrlopenRecorder(TAGS)
         backend = _make_backend(monkeypatch, rec)
         assert backend.test_tool_support("plainmodel:1b", force_test=True) is (
-            ToolSupportLevel.NONE
+            ToolSupportLevel.REACT
         )
 
     def test_insert_alone_is_not_tools(self, monkeypatch, isolated_cache):
         # "insert" (fill-in-middle) must not be confused with tool calling.
+        # R07.19 follow-up #10: falls back to REACT (was NONE).
         rec = _UrlopenRecorder(TAGS)
         backend = _make_backend(monkeypatch, rec)
         assert backend.test_tool_support("insertmodel:1b", force_test=True) is (
-            ToolSupportLevel.NONE
+            ToolSupportLevel.REACT
         )
 
     def test_no_model_load_no_inference(self, monkeypatch, isolated_cache):
@@ -168,7 +177,9 @@ class TestCapsVerdicts:
     def test_missing_caps_field_falls_back_to_sampled(self, monkeypatch, isolated_cache):
         # A server that reports capabilities for OTHER models but omits the
         # field for this one: no declaration exists -> NO signal -> sampled
-        # fallback (we never fabricate NONE without a declaration).
+        # fallback (we never fabricate a verdict without a declaration).
+        # (Comment updated for follow-up #10: the fabricated value used to
+        # be spelled NONE; detection now produces REACT instead.)
         rec = _UrlopenRecorder(TAGS)
         backend = _make_backend(monkeypatch, rec)
         assert backend.model_capabilities("nocapsfield:1b") is None
@@ -298,11 +309,12 @@ class TestCapsMapSurface:
         assert backend.model_capabilities("toolmodel:1b") == ["completion", "tools"]
         assert backend.model_capabilities("ghost:latest") is None
 
-    def test_empty_capabilities_array_is_none_verdict(self, monkeypatch, isolated_cache):
+    def test_empty_capabilities_array_is_react_fallback(self, monkeypatch, isolated_cache):
+        # R07.19 follow-up #10: empty capabilities → REACT fallback (was NONE).
         tags = {"models": [{"name": "weird:1b", "capabilities": []}]}
         rec = _UrlopenRecorder(tags)
         backend = _make_backend(monkeypatch, rec)
-        assert backend.test_tool_support("weird:1b", force_test=True) is (ToolSupportLevel.NONE)
+        assert backend.test_tool_support("weird:1b", force_test=True) is (ToolSupportLevel.REACT)
 
     def test_stub_subclass_without_init_is_safe(self, monkeypatch, isolated_cache):
         # Subclasses that skip __init__ (the cmd_models test stubs) must not

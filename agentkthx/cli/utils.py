@@ -192,6 +192,21 @@ def _tool_status(status: str) -> str:
     return dim("? untested")
 
 
+def _thinking_status(status: str) -> str:
+    """Format a thinking/reasoning support status with color (R07.19 follow-up #11).
+
+    "no" is deliberately dim, not red — a non-thinking model is a neutral
+    fact, not a failure. Only "error" is red.
+    """
+    if status == "yes":
+        return bright_green("✓ yes")
+    if status == "no":
+        return dim("✗ no")
+    if status == "error":
+        return red("✗ error")
+    return dim("? unknown")
+
+
 def _is_externally_managed_error(stderr: str) -> bool:
     """Return True if pip stderr indicates a PEP 668 externally-managed env.
 

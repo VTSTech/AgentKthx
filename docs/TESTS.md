@@ -333,28 +333,29 @@ Example output (R04.5 — 12 models):
 ```
 ⚛ AgentKthx - Available Models
   Backend: http://localhost:11434
-----------------------------------------------------------------------------------------------------------
-  Name                                     Size       Context        openre        openai  Family
-----------------------------------------------------------------------------------------------------------
-  qwen:1.8b                              1.04 GB         32768       ○ react       ○ react  (qwen2)
-  qwen2.5:1.5b                           0.92 GB         32768      ✓ native       ○ react  (qwen2)
-  gemma3:270m                            0.27 GB         32768       ○ react       ○ react  (gemma3)
-  functiongemma:270m                     0.28 GB         32768      ✓ native      ✓ native  (gemma3)
-  granite4:350m                          0.66 GB         32768      ✓ native      ✓ native  (granite)
-  qwen3.5:0.8b                           0.96 GB        262144       ○ react      ✓ native  (qwen35)
-  qwen3:0.6b                             0.49 GB         40960      ✓ native       ○ react  (qwen3)
-  qwen2.5:0.5b                           0.37 GB         32768      ✓ native      ✓ native  (qwen2)
-  qwen2:0.5b                             0.33 GB         32768       ○ react       ○ react  (qwen2)
-  qwen:0.5b                              0.37 GB         32768       ○ react       ○ react  (qwen2)
-  nchapman/dolphin3.0-qwen2.5:0.5b       0.37 GB         32768       ○ react       ○ react  (qwen2)
-  qwen2.5-coder:0.5b-instruct-q4_k_m     0.37 GB         32768       ○ react       ○ react  (qwen2)
-----------------------------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------------------------------
+  Name                                        Size       Context         tools       think  Family
+------------------------------------------------------------------------------------------------------------
+  qwen:1.8b                                 1.04 GB         32768       ○ react       ✗ no  (qwen2)
+  qwen2.5:1.5b                              0.92 GB         32768      ✓ native       ✗ no  (qwen2)
+  gemma3:270m                               0.27 GB         32768       ○ react       ✗ no  (gemma3)
+  functiongemma:270m                        0.28 GB         32768      ✓ native       ✗ no  (gemma3)
+  granite4:350m                             0.66 GB         32768      ✓ native       ✗ no  (granite)
+  qwen3.5:0.8b                              0.96 GB        262144       ○ react      ✓ yes  (qwen35)
+  qwen3:0.6b                                0.49 GB         40960      ✓ native      ✓ yes  (qwen3)
+  qwen2.5:0.5b                              0.37 GB         32768      ✓ native       ✗ no  (qwen2)
+  qwen2:0.5b                                0.33 GB         32768       ○ react       ✗ no  (qwen2)
+  qwen:0.5b                                 0.37 GB         32768       ○ react       ✗ no  (qwen2)
+  nchapman/dolphin3.0-qwen2.5:0.5b          0.37 GB         32768       ○ react       ✗ no  (qwen2)
+  qwen2.5-coder:0.5b-instruct-q4_k_m        0.37 GB         32768       ○ react       ✗ no  (qwen2)
+------------------------------------------------------------------------------------------------------------
 Total: 12 models
 
-Legend: ✓ native (API tools) | ○ react (text parsing) | ✗ none (no tools) | ? untested
+Legend: ✓ native (API tools) | ○ react (text parsing) | ? untested
+Think: ✓ yes (reasoning model) | ✗ no | ? unknown
 Context: Max context window from model API
-Tool support columns show openre (OpenResponses) and openai (Chat-Completions) results.
-Use --tool-support to test both API modes. --tool-support --api openai to test only Chat-Completions.
+Single capability check per model (API-mode-independent); none falls back to react.
+Use --tool-support to force re-testing. --no-cache to ignore cached verdicts.
 ```
 
 ---

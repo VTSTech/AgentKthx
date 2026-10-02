@@ -1159,9 +1159,9 @@ class TestExpandedCatalog(unittest.TestCase):
 
 
 class TestTestToolSupportNonChatClassification(unittest.TestCase):
-    """test_tool_support() should classify non-chat models as NONE
-    (not NATIVE) so users don't accidentally try to chat with an
-    embedding model."""
+    """test_tool_support() should classify non-chat models as REACT
+    (R07.19 follow-up #10: was NONE — NONE is retired, no models should
+    have None; non-chat models fall into the same ReAct fallback bucket)."""
 
     def setUp(self):
         os.environ["OPENAI_API_KEY"] = "sk-proj-fake_test_token_for_scaffold"
@@ -1169,21 +1169,21 @@ class TestTestToolSupportNonChatClassification(unittest.TestCase):
     def tearDown(self):
         del os.environ["OPENAI_API_KEY"]
 
-    def test_embedding_model_classified_as_none(self):
+    def test_embedding_model_classified_as_react(self):
         b = OpenAIBackend()
-        assert b.test_tool_support("text-embedding-3-large") is ToolSupportLevel.NONE
+        assert b.test_tool_support("text-embedding-3-large") is ToolSupportLevel.REACT
 
-    def test_tts_model_classified_as_none(self):
+    def test_tts_model_classified_as_react(self):
         b = OpenAIBackend()
-        assert b.test_tool_support("tts-1") is ToolSupportLevel.NONE
+        assert b.test_tool_support("tts-1") is ToolSupportLevel.REACT
 
-    def test_image_model_classified_as_none(self):
+    def test_image_model_classified_as_react(self):
         b = OpenAIBackend()
-        assert b.test_tool_support("gpt-image-2") is ToolSupportLevel.NONE
+        assert b.test_tool_support("gpt-image-2") is ToolSupportLevel.REACT
 
-    def test_moderation_model_classified_as_none(self):
+    def test_moderation_model_classified_as_react(self):
         b = OpenAIBackend()
-        assert b.test_tool_support("omni-moderation-latest") is ToolSupportLevel.NONE
+        assert b.test_tool_support("omni-moderation-latest") is ToolSupportLevel.REACT
 
     def test_chat_model_classified_as_native(self):
         b = OpenAIBackend()

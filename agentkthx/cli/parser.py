@@ -127,12 +127,12 @@ def create_parser() -> argparse.ArgumentParser:
         choices=["openre", "openai", "jev"],
         default=None,
         dest="api_mode",
-        help="API mode for tool support testing (default: test both openre/openai; 'jev' uses System-One decision mode)",
+        help="API mode hint for the backend (R07.19 follow-up #10: tool support is a single API-mode-independent capability check, so this no longer splits the table)",
     )
     models_parser.add_argument(
         "--tool-support",
         action="store_true",
-        help="Test tool calling support (skips already-cached models)",
+        help="Re-test tool calling + thinking support (skips already-cached models)",
     )
     models_parser.add_argument(
         "--no-cache", action="store_true", help="Ignore cached results and re-test all models"

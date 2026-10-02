@@ -1,15 +1,28 @@
 """`agentkthx models` subcommand.
 
-Extracted verbatim from cli.py in R07.00 Phase 8."""
+Extracted verbatim from cli.py in R07.00 Phase 8.
+
+R07.19 (follow-up #10): the openre/openai dual tool-support columns are
+GONE — one authoritative capability check per model feeds ONE `tools`
+column (the capabilities verdict is API-mode-independent, so the two old
+columns could only ever agree). Detected NONE is retired: any verdict that
+would be none falls back to react ("None is essentially untested" — no
+models should show none).
+
+R07.19 (follow-up #11): new `think` column — thinking/reasoning support
+per model, detected for free (Ollama capabilities declaration, cloud
+name-heuristics) and cached under `thinking:<model>` keys.
+"""
 
 from __future__ import annotations
 
 import argparse
 
 from ...backends import OllamaBackend, get_backend
-from ...colors import bright_cyan, bright_green, cyan, dim, green, pad_colored, red, yellow
+from ...colors import bright_cyan, bright_green, cyan, dim, green, pad_colored, yellow
 from ...config import get_config
-from ..utils import _tool_status
+from ...core.types import ApiMode, ToolSupportLevel
+from ..utils import _thinking_status, _tool_status
 
 
 def cmd_models(args: argparse.Namespace) -> int:
@@ -19,17 +32,14 @@ def cmd_models(args: argparse.Namespace) -> int:
     # monkeypatch.setattr(agentkthx.cli, '<name>', ...) keeps working.
     from agentkthx import cli as _cli
 
-    from ...core.tool_cache import cache_tool_support, get_cached_tool_support
-    from ...core.types import ApiMode, ToolSupportLevel
+    from ...core.tool_cache import (
+        cache_tool_support,
+        get_cached_thinking_support,
+        get_cached_tool_support,
+    )
 
     config = get_config()
     backend_name = args.backend or config.backend
-    api_mode_arg = getattr(args, "api_mode", None)  # None = both modes
-
-    # Which modes to test?  --api openai → only openai; otherwise both
-    modes_to_test = [api_mode_arg] if api_mode_arg else ["openre", "openai"]
-    # Always display both columns
-    modes_display = ["openre", "openai"]
 
     # Use appropriate API mode for the backend
     # R06.57 (MAINT-05): replaced hardcoded ("openrouter", "gemini") allowlist
@@ -116,6 +126,7 @@ def cmd_models(args: argparse.Namespace) -> int:
     QUANT_W = 8  # weight quant column (Q4_K_M, Q8_0, F16, etc.)
     CTX_W = 12
     TOOLS_W = 12  # fits "✓ native"
+    THINK_W = 9  # fits "? unknown" / "✓ yes" (follow-up #11)
     FAMILY_W = 12
 
     # Detect backend type early — cloud providers need different column layout
@@ -134,9 +145,12 @@ def cmd_models(args: argparse.Namespace) -> int:
     NAME_W = max(50 if is_cloud_provider else 48, longest_name)
 
     if is_cloud_provider:
-        sep_len = 2 + NAME_W + 1 + CTX_W + 2 + TOOLS_W + 2 + TOOLS_W  # grows with NAME_W
+        # R07.19 (follow-up #10/#11): 2+W+1+CTX+2+TOOLS+2+THINK = 40 + NAME_W
+        sep_len = 2 + NAME_W + 1 + CTX_W + 2 + TOOLS_W + 2 + THINK_W
     else:
-        # R07.18: added QUANT_W to the local-backend separator length
+        # R07.19 (follow-up #10/#11): the two tool columns collapsed into
+        # one `tools` column and a new `think` column added:
+        # 2+W+1+SIZE+1+QUANT+1+CTX+2+TOOLS+2+THINK+2+FAMILY = 73 + NAME_W
         sep_len = (
             2
             + NAME_W
@@ -149,34 +163,78 @@ def cmd_models(args: argparse.Namespace) -> int:
             + 2
             + TOOLS_W
             + 2
-            + TOOLS_W
+            + THINK_W
             + 2
             + FAMILY_W
-        )  # 115
+        )
 
     print()
-    print(f"{bright_cyan('\u2696 AgentKthx')} - Available Models")
+    print(f"{bright_cyan('⚖ AgentKthx')} - Available Models")
     print(dim(f"  Backend: {backend.base_url}"))
     if args.tool_support:
-        mode_label = ", ".join(modes_to_test)
-        print(dim(f"  Testing: {mode_label}"))
+        print(dim("  Testing: tools + thinking (single capability check)"))
     if acp:
-        print(f"  {dim('ACP:')} {green('\u2713 Connected')} ({acp.base_url})")
+        print(f"  {dim('ACP:')} {green('✓ Connected')} ({acp.base_url})")
     print(dim("-" * sep_len))
 
     if not is_cloud_provider:
         # R07.18: added Quant column between Size and Context
+        # R07.19 (follow-up #10/#11): single `tools` column + new `think` column
         header = (
             f"  {'Name':<{NAME_W}} {'Size':>{SIZE_W}} {'Quant':<{QUANT_W}} "
-            f"{'Context':>{CTX_W}}  {'openre':>{TOOLS_W}}  {'openai':>{TOOLS_W}}  "
+            f"{'Context':>{CTX_W}}  {'tools':>{TOOLS_W}}  {'think':>{THINK_W}}  "
             f"{'Family':<{FAMILY_W}}"
         )
     else:
         # Cloud providers - skip Size/Quant column (always 'unknown') and Family column
-        header = f"  {'Name':<{NAME_W}} {'Context':>{CTX_W}}  {'openre':>{TOOLS_W}}  {'openai':>{TOOLS_W}}"
+        header = (
+            f"  {'Name':<{NAME_W}} {'Context':>{CTX_W}}  {'tools':>{TOOLS_W}}  {'think':>{THINK_W}}"
+        )
 
     print(header)
     print(dim("-" * sep_len))
+
+    def _get_tools_status(name: str, family: str) -> str:
+        """ONE authoritative tool-support verdict for a model.
+
+        R07.19 (follow-up #10): the openre/openai per-mode loop is gone.
+        Single check → single cache entry → single column. Legacy "none"
+        verdicts (old cache entries) normalize to react; no model is ever
+        displayed as none.
+        """
+        if not args.no_cache:
+            cached = get_cached_tool_support(name)
+            if cached is not None:
+                return ToolSupportLevel.effective(cached).value
+
+        try:
+            support = backend.test_tool_support(name, family=family, force_test=True)
+            return ToolSupportLevel.effective(support).value
+        except Exception:
+            # Defensive: backends own their caching; on a propagated error
+            # fall back to the ReAct default rather than none (follow-up #10).
+            cache_tool_support(name, ToolSupportLevel.REACT, family=family, error="models scan")
+            return "error"
+
+    def _get_think_status(name: str, family: str) -> str:
+        """Thinking/reasoning verdict for a model (R07.19 follow-up #11).
+
+        Free where a signal exists (Ollama capabilities declaration /
+        cloud name-heuristics — both cached); unknown when the backend
+        offers no signal at all (stubs, exotic third-party plugins).
+        """
+        if not args.no_cache:
+            cached = get_cached_thinking_support(name)
+            if cached is not None:
+                return cached.value
+
+        think_fn = getattr(backend, "test_thinking_support", None)
+        if think_fn is None:
+            return "unknown"
+        try:
+            return think_fn(name, family=family).value
+        except Exception:
+            return "unknown"
 
     for m in models:
         name = m.get("name", "unknown")
@@ -216,207 +274,58 @@ def cmd_models(args: argparse.Namespace) -> int:
         )
         ctx_col = pad_colored(dim(ctx_str), CTX_W, "right")
 
-        # Handle Ollama with full tool support testing (not cloud providers)
+        # Resolve both capability columns once per model (single check each)
+        tools_val = _get_tools_status(name, family)
+        think_val = _get_think_status(name, family)
+        tool_col = pad_colored(_tool_status(tools_val), TOOLS_W, "right")
+        think_col = pad_colored(_thinking_status(think_val), THINK_W, "right")
+
         if isinstance(backend, OllamaBackend) and not is_cloud_provider:
-            results = {}  # mode -> status string
+            print(
+                f"  {name_col} {size_col} {quant_col} {ctx_col}  {tool_col}  {think_col}  {dim('(' + family + ')')}"
+            )
+        else:
+            # Cloud provider: no Size/Quant column, no Family column
+            print(f"  {name_col} {ctx_col}  {tool_col}  {think_col}")
 
-            if args.tool_support:
-                # Test each requested mode, skipping cached results
-                modes_label = " + ".join(modes_to_test)
-                print(
-                    f"  {dim('Testing:')} {cyan(name)} [{dim(modes_label)}]...", end="", flush=True
-                )
-                for mode in modes_to_test:
-                    # Skip models that are already cached (unless --no-cache)
-                    if not args.no_cache:
-                        cached = get_cached_tool_support(name, api_mode=mode)
-                        if cached is not None:
-                            results[mode] = cached.value
-                            continue
-                    backend.api_mode = ApiMode(mode)
-                    try:
-                        support = backend.test_tool_support(name, family=family, force_test=True)
-                        cache_tool_support(name, support, family=family, api_mode=mode)
-                        results[mode] = support.value
-                    except Exception as e:
-                        cache_tool_support(
-                            name,
-                            ToolSupportLevel.NONE,
-                            family=family,
-                            error=str(e)[:100],
-                            api_mode=mode,
-                        )
-                        results[mode] = "error"
-
-                # Fill untested display modes from cache
-                for mode in modes_display:
-                    if mode not in results and not args.no_cache:
-                        cached = get_cached_tool_support(name, api_mode=mode)
-                        if cached is not None:
-                            results[mode] = cached.value
-
-                # Overwrite the "Testing..." line with the final row
-                tool_re = pad_colored(_tool_status(results.get("openre")), TOOLS_W, "right")
-                tool_ai = pad_colored(_tool_status(results.get("openai")), TOOLS_W, "right")
-                print(
-                    f"\r  {name_col} {size_col} {quant_col} {ctx_col}  {tool_re}  {tool_ai}  {dim('(' + family + ')')}"
-                )
-
-                # Log per-model test result to ACP
-                if acp:
-                    acp.model_name = name
-                    re_status = results.get("openre", "?")
-                    ai_status = results.get("openai", "?")
-                    acp.log_chat("user", "Testing tool support...")
-                    acp.log_chat(
-                        "assistant",
-                        f"openre={re_status} openai={ai_status} | {size_gb:.2f} GB | "
-                        f"quant={weight_quant or '?'} | ctx {max_ctx}",
-                    )
-            else:
-                # Read from cache for both display modes
-                for mode in modes_display:
-                    if not args.no_cache:
-                        cached = get_cached_tool_support(name, api_mode=mode)
-                        if cached is not None:
-                            results[mode] = cached.value
-                # Format missing modes as untested
-                tool_re = pad_colored(_tool_status(results.get("openre")), TOOLS_W, "right")
-                tool_ai = pad_colored(_tool_status(results.get("openai")), TOOLS_W, "right")
-                print(
-                    f"  {name_col} {size_col} {quant_col} {ctx_col}  {tool_re}  {tool_ai}  {dim('(' + family + ')')}"
-                )
-
-        # Handle cloud providers (ZAI, OpenRouter) with proper metadata and tool support
-        elif is_cloud_provider:
-            # Initialize results for cloud providers
-            results = {}
-
-            # Cloud providers don't provide reliable size info
-            size_col = dim("unknown")
-
-            # Format context size with units for better readability
-            if max_ctx >= 1000:
-                ctx_display = f"{max_ctx // 1024}K"
-            else:
-                ctx_display = str(max_ctx)
-            ctx_col = pad_colored(dim(ctx_display), CTX_W, "right")
-
-            # Format context size with units for better readability
-            if max_ctx >= 1000:
-                ctx_display = f"{max_ctx // 1024}K"
-            else:
-                ctx_display = str(max_ctx)
-            ctx_col = pad_colored(dim(ctx_display), CTX_W, "right")
-
-            # Get tool support for cloud providers
-            if args.tool_support:
-                modes_label = ", ".join(modes_to_test)
-                print(
-                    f"  {dim('Testing:')} {cyan(name)} [{dim(modes_label)}]...", end="", flush=True
-                )
-
-                for mode in modes_to_test:
-                    # Skip models that are already cached (unless --no-cache)
-                    if not args.no_cache:
-                        cached = get_cached_tool_support(name, api_mode=mode)
-                        if cached is not None:
-                            results[mode] = cached.value
-                            continue
-
-                    try:
-                        support = backend.test_tool_support(name, family=family, force_test=True)
-                        cache_tool_support(name, support, family=family, api_mode=mode)
-                        results[mode] = support.value
-                    except Exception as e:
-                        cache_tool_support(
-                            name,
-                            ToolSupportLevel.NONE,
-                            family=family,
-                            error=str(e)[:100],
-                            api_mode=mode,
-                        )
-                        results[mode] = "error"
-
-                # Fill untested display modes from cache
-                for mode in modes_display:
-                    if mode not in results and not args.no_cache:
-                        cached = get_cached_tool_support(name, api_mode=mode)
-                        if cached is not None:
-                            results[mode] = cached.value
-
-                # Overwrite the "Testing..." line with the final row
-                tool_re = pad_colored(
-                    _tool_status(results.get("openre", "untested")), TOOLS_W, "right"
-                )
-                tool_ai = pad_colored(
-                    _tool_status(results.get("openai", "untested")), TOOLS_W, "right"
-                )
-                print(f"\r  {name_col} {ctx_col}  {tool_re}  {tool_ai}")
-
-                # Log per-model test result to ACP
-                if acp:
-                    acp.model_name = name
-                    re_status = results.get("openre", "?")
-                    ai_status = results.get("openai", "?")
-                    acp.log_chat("user", "Testing tool support...")
-                    acp.log_chat(
-                        "assistant", f"openre={re_status} openai={ai_status} | ctx {max_ctx}"
-                    )
-            else:
-                # Read from cache or show default tool support for cloud providers
-                results = {}
-
-                # Only read from cache if not forcing fresh tests
-                if not args.no_cache:
-                    for mode in modes_display:
-                        cached = get_cached_tool_support(name, api_mode=mode)
-                        if cached is not None:
-                            results[mode] = cached.value
-
-                # For cloud providers, provide intelligent default tool support status
-                if is_cloud_provider:
-                    # Cloud providers have already validated tool support - always default to native
-                    # Override any cached results since cloud providers have confirmed tool support
-                    results = {"openre": "native", "openai": "native"}
-                else:
-                    # For non-cloud providers, use cached results or mark as untested
-                    if not results:
-                        results = {"openre": "untested", "openai": "untested"}
-
-                tool_re = pad_colored(
-                    _tool_status(results.get("openre", "untested")), TOOLS_W, "right"
-                )
-                tool_ai = pad_colored(
-                    _tool_status(results.get("openai", "untested")), TOOLS_W, "right"
-                )
-                if not is_cloud_provider:
-                    print(
-                        f"  {name_col} {size_col} {quant_col} {ctx_col}  {tool_re}  {tool_ai}  {dim('(' + family + ')')}"
-                    )
-                else:
-                    # Cloud provider: no Size/Quant column, no Family column
-                    print(f"  {name_col} {ctx_col}  {tool_re}  {tool_ai}")
+        # Log per-model capability scan to ACP
+        if acp:
+            acp.model_name = name
+            acp.log_chat("user", "Scanning model capabilities...")
+            acp.log_chat(
+                "assistant",
+                f"tools={tools_val} think={think_val} | "
+                + (
+                    f"{size_gb:.2f} GB | quant={weight_quant or '?'} | " f"ctx {max_ctx}"
+                    if not is_cloud_provider
+                    else f"ctx {max_ctx}"
+                ),
+            )
 
     print(dim("-" * sep_len))
     print(f"Total: {bright_green(str(len(models)))} models")
 
     # Show legend
+    # R07.19 (follow-up #10): no "✗ none" anymore — NONE is retired, every
+    # model resolves to native/react. (follow-up #11): think legend added.
     print(
-        f"\n{dim('Legend:')} {bright_green('✓ native')} (API tools) | {yellow('○ react')} (text parsing) | {red('✗ none')} (no tools) | {dim('? untested')}"
+        f"\n{dim('Legend:')} {bright_green('✓ native')} (API tools) | {yellow('○ react')} (text parsing) | {dim('? untested')}"
+    )
+    print(
+        f"{dim('Think:')} {bright_green('✓ yes')} (reasoning model) | {dim('✗ no')} | {dim('? unknown')}"
     )
     print(f"{dim('Context:')} Max context window from model API")
     print(
-        f"{dim('Tool support columns show openre (OpenResponses) and openai (Chat-Completions) results.')}"
+        f"{dim('Single capability check per model (API-mode-independent); none falls back to react.')}"
     )
     print(
-        f"{dim('Use')} {cyan('--tool-support')} {dim('to test both API modes.')} {cyan('--tool-support --api openai')} {dim('to test only Chat-Completions.')}"
+        f"{dim('Use')} {cyan('--tool-support')} {dim('to force re-testing.')} {cyan('--no-cache')} {dim('to ignore cached verdicts.')}"
     )
 
     # Log summary to ACP and clean up
     if acp:
         if args.tool_support:
-            acp.log_chat("assistant", f"Tool-support scan complete: {len(models)} models tested")
+            acp.log_chat("assistant", f"Capability scan complete: {len(models)} models tested")
         acp.a2a_unregister()
 
     return 0

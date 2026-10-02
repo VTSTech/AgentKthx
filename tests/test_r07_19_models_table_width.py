@@ -15,14 +15,20 @@ the already-loaded (and free-filtered) ``models`` list, floored at the
 R07.18 defaults. Header, separator and every data row share the measured
 width because the measurement happens before any of them renders.
 
+R07.19 follow-ups #10/#11 layout update: the openre/openai dual tool columns
+collapsed into ONE ``tools`` column and a new ``think`` column (9 wide) was
+added, so the width formulas shift by −3: local ``73 + longest`` (was 76),
+cloud ``40 + longest`` (was 43). Floors move accordingly (121 local / 90
+cloud).
+
 These tests drive the REAL ``cmd_models`` over stub backends (no network)
 and pin:
 
 1. Alignment — with mixed short/long names, every row's Size/Quant/Context
    columns start at the same character offset (the user-report bug).
 2. Widening — the separator/header width grows to fit the longest name.
-3. Floor — short listings keep the R07.18 widths byte-for-byte (48 local /
-   50 cloud), so the common case renders identically.
+3. Floor — short listings keep the floored widths byte-for-byte (121 local
+   / 90 cloud post-#10/#11), so the common case renders identically.
 4. Cloud layout — same dynamic behavior for the cloud branch.
 5. No truncation — the longest name appears in full in the output.
 """
@@ -123,6 +129,13 @@ def _run_models(monkeypatch, backend, entries) -> str:
         "agentkthx.core.tool_cache.get_cached_tool_support",
         lambda model, api_mode="openre": None,
     )
+    # Follow-up #11: the think column reads the thinking cache — pin it to
+    # empty so tests are deterministic regardless of the developer's real
+    # ~/.cache/agentkthx/tool_support.json.
+    monkeypatch.setattr(
+        "agentkthx.core.tool_cache.get_cached_thinking_support",
+        lambda model: None,
+    )
     args = argparse.Namespace(backend="stub", tool_support=False, api_mode=None, no_cache=False)
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
@@ -173,15 +186,15 @@ class TestLocalTableDynamicWidth:
         assert len(separator) == len(header)
 
     def test_name_column_widens_to_longest_name(self, monkeypatch):
-        """Separator/header grow to 76 + longest_name (the local-layout
-        formula 2+W+1+9+1+8+1+12+2+12+2+12+2+12), proving the column is
-        measured, not fixed."""
+        """Separator/header grow to 73 + longest_name (the local-layout
+        formula 2+W+1+9+1+8+1+12+2+12+2+9+2+12 post-follow-up #10/#11),
+        proving the column is measured, not fixed."""
         entries = [_entry(LONG_NAME), _entry("gemma3:270m")]
         out = _run_models(monkeypatch, StubOllamaBackend(entries), entries)
         _, separator, _ = _table_lines(out)
-        expected = 76 + len(LONG_NAME)  # 128 for the 52-char name
+        expected = 73 + len(LONG_NAME)  # 125 for the 52-char name
         assert len(separator) == expected, (
-            f"separator must widen to {expected} (76 + {len(LONG_NAME)}), " f"got {len(separator)}"
+            f"separator must widen to {expected} (73 + {len(LONG_NAME)}), " f"got {len(separator)}"
         )
 
     def test_quant_and_context_columns_align(self, monkeypatch):
@@ -200,9 +213,9 @@ class TestLocalTableDynamicWidth:
             # Context: right-aligned 12-wide column ending at name_w+34.
             assert row[name_w + 31 : name_w + 34] == "32K"
 
-    def test_short_listings_keep_r0718_floor(self, monkeypatch):
-        """The floor keeps short listings byte-identical to R07.18:
-        48-char Name column → separator = 76 + 48 = 124."""
+    def test_short_listings_keep_floor(self, monkeypatch):
+        """The floor keeps short listings byte-identical across runs:
+        48-char Name column → separator = 73 + 48 = 121 (post #10/#11)."""
         entries = [
             _entry("gemma3:270m"),
             _entry("qwen2.5:0.5b"),
@@ -210,7 +223,7 @@ class TestLocalTableDynamicWidth:
         ]
         out = _run_models(monkeypatch, StubOllamaBackend(entries), entries)
         header, separator, rows = _table_lines(out)
-        assert len(separator) == 124
+        assert len(separator) == 121
         assert len(separator) == len(header)
         assert all(row.find(" GB") == 48 + 9 for row in rows if " GB" in row)
 
@@ -227,7 +240,7 @@ class TestCloudTableDynamicWidth:
 
     def test_cloud_table_widens_past_50_floor(self, monkeypatch):
         """Cloud floor is 50; a longer name still widens the table.
-        Cloud separator formula: 2+W+1+12+2+12+2+12 = 43 + NAME_W."""
+        Cloud separator formula post #10/#11: 2+W+1+12+2+12+2+9 = 40 + NAME_W."""
         assert len(CLOUD_LONG) > 50
         entries = [
             {"name": CLOUD_LONG, "size": 0, "details": {"family": "llama"}},
@@ -236,21 +249,21 @@ class TestCloudTableDynamicWidth:
         out = _run_models(monkeypatch, StubCloudBackend(entries), entries)
         header, separator, rows = _table_lines(out)
         name_w = len(CLOUD_LONG)
-        assert len(separator) == 43 + name_w
+        assert len(separator) == 40 + name_w
         assert len(separator) == len(header)
         # Context column (right-aligned, 12) ends at name_w+15 on every row.
         for row in rows:
             assert row[name_w + 12 : name_w + 15] == "32K"
 
     def test_cloud_short_list_keeps_floor(self, monkeypatch):
-        """Short cloud listings stay at the R07.18 width: 43 + 50 = 93."""
+        """Short cloud listings stay at the floored width: 40 + 50 = 90."""
         entries = [
             {"name": "glm-4.5-flash", "size": 0, "details": {"family": "glm"}},
             {"name": "glm-4.7-flash", "size": 0, "details": {"family": "glm"}},
         ]
         out = _run_models(monkeypatch, StubCloudBackend(entries), entries)
         _, separator, _ = _table_lines(out)
-        assert len(separator) == 93
+        assert len(separator) == 90
 
 
 class TestRegressionPremise:

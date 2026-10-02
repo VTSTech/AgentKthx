@@ -390,13 +390,13 @@ class TestChatCapabilityClassification(unittest.TestCase):
                 f"{name} should be NATIVE (chat model)",
             )
 
-    # Non-chat models → NONE
+    # Non-chat models → REACT (R07.19 follow-up #10: NONE is retired)
     def test_embedding_models_are_none(self):
         for name in ("gemini-embedding-001", "gemini-embedding-2-preview"):
             self.assertEqual(
                 self.backend.test_tool_support(name),
-                ToolSupportLevel.NONE,
-                f"{name} should be NONE (embedding, not chat)",
+                ToolSupportLevel.REACT,
+                f"{name} should be REACT (embedding, not chat)",
             )
 
     def test_video_gen_models_are_none(self):
@@ -408,8 +408,8 @@ class TestChatCapabilityClassification(unittest.TestCase):
         ):
             self.assertEqual(
                 self.backend.test_tool_support(name),
-                ToolSupportLevel.NONE,
-                f"{name} should be NONE (video gen, not chat)",
+                ToolSupportLevel.REACT,
+                f"{name} should be REACT (video gen, not chat)",
             )
 
     def test_music_gen_models_are_none(self):
@@ -421,8 +421,8 @@ class TestChatCapabilityClassification(unittest.TestCase):
         ):
             self.assertEqual(
                 self.backend.test_tool_support(name),
-                ToolSupportLevel.NONE,
-                f"{name} should be NONE (music gen, not chat)",
+                ToolSupportLevel.REACT,
+                f"{name} should be REACT (music gen, not chat)",
             )
 
     def test_tts_models_are_none(self):
@@ -433,8 +433,8 @@ class TestChatCapabilityClassification(unittest.TestCase):
         ):
             self.assertEqual(
                 self.backend.test_tool_support(name),
-                ToolSupportLevel.NONE,
-                f"{name} should be NONE (TTS, not chat)",
+                ToolSupportLevel.REACT,
+                f"{name} should be REACT (TTS, not chat)",
             )
 
     def test_live_api_models_are_none(self):
@@ -448,8 +448,8 @@ class TestChatCapabilityClassification(unittest.TestCase):
         ):
             self.assertEqual(
                 self.backend.test_tool_support(name),
-                ToolSupportLevel.NONE,
-                f"{name} should be NONE (Live API, not chat)",
+                ToolSupportLevel.REACT,
+                f"{name} should be REACT (Live API, not chat)",
             )
 
     def test_image_gen_models_are_none(self):
@@ -461,8 +461,8 @@ class TestChatCapabilityClassification(unittest.TestCase):
         ):
             self.assertEqual(
                 self.backend.test_tool_support(name),
-                ToolSupportLevel.NONE,
-                f"{name} should be NONE (image gen, not chat)",
+                ToolSupportLevel.REACT,
+                f"{name} should be REACT (image gen, not chat)",
             )
 
     def test_robotics_models_are_none(self):
@@ -473,16 +473,16 @@ class TestChatCapabilityClassification(unittest.TestCase):
         ):
             self.assertEqual(
                 self.backend.test_tool_support(name),
-                ToolSupportLevel.NONE,
-                f"{name} should be NONE (robotics, not chat)",
+                ToolSupportLevel.REACT,
+                f"{name} should be REACT (robotics, not chat)",
             )
 
     def test_transcribe_models_are_none(self):
         for name in ("gemini-3.5-transcribe", "gemini-3.5-transcribe-live"):
             self.assertEqual(
                 self.backend.test_tool_support(name),
-                ToolSupportLevel.NONE,
-                f"{name} should be NONE (transcribe, not chat)",
+                ToolSupportLevel.REACT,
+                f"{name} should be REACT (transcribe, not chat)",
             )
 
     def test_misc_non_chat_models_are_none(self):
@@ -495,8 +495,8 @@ class TestChatCapabilityClassification(unittest.TestCase):
         ):
             self.assertEqual(
                 self.backend.test_tool_support(name),
-                ToolSupportLevel.NONE,
-                f"{name} should be NONE (not a chat model)",
+                ToolSupportLevel.REACT,
+                f"{name} should be REACT (not a chat model)",
             )
 
     def test_gemma_models_are_chat_capable(self):
@@ -516,8 +516,8 @@ class TestChatCapabilityClassification(unittest.TestCase):
         still works correctly."""
         self.assertEqual(
             self.backend.test_tool_support("models/gemini-embedding-001"),
-            ToolSupportLevel.NONE,
-            "Prefixed 'models/gemini-embedding-001' should still be NONE",
+            ToolSupportLevel.REACT,
+            "Prefixed 'models/gemini-embedding-001' should still be REACT",
         )
         self.assertEqual(
             self.backend.test_tool_support("models/gemini-3.8-flash"),

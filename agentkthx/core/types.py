@@ -28,12 +28,31 @@ class ToolSupportLevel(Enum):
 
     Use backend.test_tool_support() for runtime detection, or check the cache
     via tool_cache.get_cached_tool_support().
+
+    R07.19 (follow-up #10): NONE is no longer a produced verdict — it is a
+    LEGACY-ONLY value kept so caches written before this release still load.
+    "None is essentially untested": any detection path that would have
+    returned NONE now returns REACT instead (the ReAct fallback — a model
+    that cannot call tools natively still gets the text-based ReAct prompt,
+    which is strictly more useful than passing tools it can never emit).
+    Consumers must therefore never persist or display NONE; normalize it
+    with :meth:`effective` when reading legacy cache entries.
     """
 
     NATIVE = "native"  # Native function calling support (API tool_calls)
     REACT = "react"  # Text-based tool use via ReAct prompting
-    NONE = "none"  # No tool support (pure reasoning)
+    NONE = "none"  # LEGACY ONLY — never returned/detected anymore (falls back to REACT)
     UNTESTED = "untested"  # Not yet tested - each model must be tested individually
+
+    @classmethod
+    def effective(cls, level: "ToolSupportLevel") -> "ToolSupportLevel":
+        """Map a legacy NONE verdict to its REACT fallback (R07.19 follow-up #10).
+
+        Old tool_support.json caches may still carry "none" entries; every
+        reader funnels through this normalizer so no model ever displays or
+        behaves as None. NATIVE / REACT / UNTESTED pass through unchanged.
+        """
+        return cls.REACT if level == cls.NONE else level
 
     @classmethod
     def detect(cls, model_name: str, backend=None, use_cache: bool = True) -> "ToolSupportLevel":
@@ -43,20 +62,23 @@ class ToolSupportLevel(Enum):
         This method checks the cache first. If not cached, returns UNTESTED.
         For actual runtime testing, use backend.test_tool_support(force_test=True).
 
+        Legacy "none" cache entries are normalized to REACT (follow-up #10),
+        so detect() can never surface NONE.
+
         Args:
             model_name: Name of the model
             backend: Optional backend for runtime testing (not used by default)
             use_cache: If True, check cache first (default: True)
 
         Returns:
-            ToolSupportLevel (UNTESTED if not in cache)
+            ToolSupportLevel (UNTESTED if not in cache; legacy NONE → REACT)
         """
         if use_cache:
             from .tool_cache import get_cached_tool_support
 
             cached = get_cached_tool_support(model_name)
             if cached is not None:
-                return cached
+                return cls.effective(cached)
 
         # If backend provided and we want to test, do so
         if backend is not None and hasattr(backend, "test_tool_support"):
@@ -64,6 +86,29 @@ class ToolSupportLevel(Enum):
 
         # Cannot determine without testing
         return cls.UNTESTED
+
+
+class ThinkingSupport(Enum):
+    """Thinking / reasoning support level of a model (R07.19 follow-up #11).
+
+    Answers one question: does this model emit reasoning_content (chain of
+    thought) — i.e. is it a "thinking" model the --thinking / --think flags
+    apply to? Detection sources, in priority order:
+
+    1. Ollama: the server's own /api/tags `capabilities` declaration
+       ("thinking" in capabilities) — authoritative, no model load.
+    2. Cloud / OpenAI-compatible backends: conservative model-name
+       heuristics (deepseek-r1, qwq, o1/o3/o4, glm-4.5+, qwen3, *thinking*,
+       *reasoning*, magistral, ...) — documented and intentionally narrow.
+    3. No signal at all (legacy Ollama server, unrecognized name): UNKNOWN.
+
+    Results are cached alongside tool support in tool_support.json under a
+    ``thinking:`` key prefix (see core/tool_cache.py).
+    """
+
+    YES = "yes"  # Emits reasoning_content (thinking model)
+    NO = "no"  # Declared / matched as non-thinking
+    UNKNOWN = "unknown"  # No signal available (legacy server / unknown name)
 
 
 class BackendType(Enum):

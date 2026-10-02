@@ -618,16 +618,24 @@ result = orchestrator.run("Calculate 15 * 8 and save to file")
 
 ## Tool Support Levels
 
-AgentKthx supports three levels of tool use:
+AgentKthx supports two effective levels of tool use (R07.19 follow-up #10 retired NONE — "None is essentially untested"):
 
 1. **Native** — Models with built-in function calling (qwen2.5, llama3.1+, mistral, granite, functiongemma)
-2. **ReAct** — Text-based tool use via reasoning prompts (qwen2.5-coder, qwen3)
-3. **None** — Pure reasoning without tools
+2. **ReAct** — Text-based tool use via reasoning prompts (qwen2.5-coder, qwen3). This is also the **fallback**: any model that would previously have been classified none (no tools capability declared, explicit tools rejection) now defaults to ReAct — no models show none.
 
-Tool support is auto-detected by running `agentkthx models --tool-support`. Results are cached in `~/.cache/agentkthx/tool_support.json`.
+Legacy caches may still contain `none` entries; they are normalized to ReAct everywhere (table, chat-time auto-detection).
+
+### Thinking / reasoning support (R07.19 follow-up #11)
+
+`agentkthx models` also shows a **Think** column. Detection is free where a signal exists:
+
+- **Ollama**: the server's own `/api/tags` `thinking` capability declaration (deepseek-r1, qwen3, ...) — authoritative, no model load
+- **Cloud backends**: conservative model-name heuristics (deepseek-r1, qwq, o1/o3/o4, glm-4.5+, qwen3, `*thinking*`, `*reasoning*`, magistral, ...) — a miss shows `? unknown`, never `✗ no`
+
+Tool support is auto-detected by running `agentkthx models --tool-support`. Results are cached in `~/.cache/agentkthx/tool_support.json` — one plain-key entry per model (thinking verdicts under `thinking:<model>` keys).
 
 ```bash
-# Test and cache tool support for all models
+# Test and cache tool + thinking support for all models
 agentkthx models --tool-support
 
 # Re-test (ignore cache)

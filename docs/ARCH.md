@@ -495,43 +495,52 @@ deepseek-r1:1.5b         → ReAct only ○ (reasoning model, no native tools)
 from agentkthx.core.tool_cache import (
     get_cached_tool_support,    # Get cached level or None
     cache_tool_support,          # Save detection result
+    get_cached_thinking_support, # Get cached thinking verdict or None (R07.19 #11)
+    cache_thinking_support,      # Save thinking verdict (R07.19 #11)
     load_tool_cache,             # Load full cache dict
     save_tool_cache,             # Save full cache dict
 )
-from agentkthx.core.types import ToolSupportLevel
+from agentkthx.core.types import ToolSupportLevel, ThinkingSupport
 
 # Check if model has cached support level
 support = get_cached_tool_support("qwen2.5-coder:0.5b")
 # Returns: ToolSupportLevel.REACT or None if not cached
 
-# Cache a detection result
+# Cache a detection result (single plain-key entry — R07.19 follow-up #10
+# removed the per-API-mode namespaces)
 cache_tool_support(
     model="qwen2.5-coder:0.5b",
     support=ToolSupportLevel.REACT,
     family="qwen2"
 )
-
 ```
 
 **CLI Usage**:
 ```bash
-# List models with cached tool support (or "? untested")
+# List models with cached tool/thinking support (or "? untested" / "? unknown")
 agentkthx models
 
-# Test and cache tool support for all models
+# Re-test and cache tool + thinking support for all models
 agentkthx models --tool-support
 
 # Ignore cache
 agentkthx models --tool-support --no-cache
 ```
 
-**ToolSupportLevel Values**:
+**ToolSupportLevel Values** (post follow-up #10 — NONE is retired):
 | Level | Meaning | Display |
 |-------|---------|---------|
 | `NATIVE` | API returns `tool_calls` structure | native |
-| `REACT` | Model outputs JSON as text, parsed by AgentKthx | react |
-| `NONE` | Model explicitly rejects tools (HTTP 400) | none |
+| `REACT` | Model outputs JSON as text, parsed by AgentKthx — also the fallback for every would-be NONE | react |
+| `NONE` | LEGACY ONLY — never produced anymore; normalizes to REACT on read | (never shown) |
 | `UNTESTED` | Not yet tested | untested |
+
+**ThinkingSupport Values** (R07.19 follow-up #11):
+| Level | Meaning | Display |
+|-------|---------|---------|
+| `YES` | Emits reasoning_content (thinking model) | yes |
+| `NO` | Declared non-thinking (Ollama capabilities) | no |
+| `UNKNOWN` | No signal (legacy server / unrecognized cloud name) — never cached | unknown |
 
 ### Soul System (`soul/`)
 

@@ -69,7 +69,8 @@ def load_cached_verdicts() -> dict[str, str]:
 
     The cache is written by `agentkthx models --tool-support` and keyed by
     bare model name for the openre (native /api/chat) mode. Returns a map
-    of model name -> verdict string ("native" / "react" / "none" / ...).
+    of model name -> verdict string ("native" / "react" / ...; none is
+    retired — a declaration without tools falls back to react).
     """
     base = os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache"))
     cache_file = Path(base) / "agentkthx" / "tool_support.json"
@@ -145,7 +146,10 @@ def main() -> int:
                 "size": fmt_size(m.get("size", 0)),
                 "parameter_size": details.get("parameter_size", "—"),
                 "capabilities": caps,
-                "verdict": "native" if has_tools else "none",
+                # R07.19 follow-up #10: NONE is retired — a declaration
+                # without "tools" falls back to react, matching the
+                # backend's test_tool_support and the models table.
+                "verdict": "native" if has_tools else "react",
                 "cached": cached_verdict,
                 "delta": delta,
             }
@@ -162,7 +166,7 @@ def main() -> int:
         f"{'Verdict':<9} {'Cached(bare)':<12} Caps"
     )
     print()
-    print(f"⚖ AgentKthx — Ollama Tool Support (from /api/tags capabilities)")
+    print("⚖ AgentKthx — Ollama Tool Support (from /api/tags capabilities)")
     print(f"  Server: {tags_url}")
     print(
         f"  Cache:  {'(skipped)' if args.no_cache else '(AgentKthx tool_support.json, openre keys)'}"
@@ -171,7 +175,7 @@ def main() -> int:
     print(header)
     print("-" * (len(header) - 2))
     for r in rows:
-        verdict = "✓ native" if r["verdict"] == "native" else "✗ none"
+        verdict = "✓ native" if r["verdict"] == "native" else "○ react"
         cached_col = r["cached"] if r["cached"] else "—"
         if r["delta"]:
             cached_col += " !"
@@ -181,14 +185,16 @@ def main() -> int:
         )
     print("-" * (len(header) - 2))
     native_n = sum(1 for r in rows if r["verdict"] == "native")
-    print(f"Total: {len(rows)} models — {native_n} native, {len(rows) - native_n} none")
+    print(f"Total: {len(rows)} models — {native_n} native, {len(rows) - native_n} react (fallback)")
     if not caps_available:
         print(
             "⚠ Server did not report capabilities for any model — Ollama may be too old. "
             "Upgrade Ollama for this probe to work."
         )
     print()
-    print("Legend: ✓ native = 'tools' in /api/tags capabilities | ✗ none = capability absent")
+    print(
+        "Legend: ✓ native = 'tools' in /api/tags capabilities | ○ react = capability absent (ReAct fallback — R07.19 follow-up #10 retired none)"
+    )
     print("        Cached(bare) = verdict from the old no-prompt sampled probe (local cache)")
     print("        '!' marks models where the cached verdict disagrees with the declared")
     print("        capability — those are the false negatives the sampled probe produced.")

@@ -53,7 +53,7 @@ Inspired by the architecture of OpenClaw, rebuilt from scratch for local-first o
 - **Dual API support** — OpenResponses (`--api openre`) and OpenAI Chat-Completions (`--api openai`)
 - **JEV decision mode** — System-One decisions via any free LLM (`--api jev`) — Jev-compatible shape, no TypeSafe API key required
 - **Thinking controls** — `--thinking off|auto|low|medium|high` to control model reasoning effort, `--think` flag to display reasoning_content (chain-of-thought) in CLI output
-- **Three-tier tool support** — Native, ReAct, or none (auto-detected)
+- **Tool support: one capability check, two tiers** — Native or ReAct (auto-detected from the server's own capabilities; a would-be `none` falls back to ReAct — no models classified none) plus a `think` column for thinking/reasoning support
 - **Small model optimized** — Fuzzy matching, argument normalization, string-literal-aware Python-literal substitution (R07.07 MAINT-14 — `True`/`False`/`None` inside string values no longer mangled)
 - **Built-in security** — Path validation, command blocklist (incl. shells + heredocs since R07.05), SSRF protection (DNS-resolving since R07.05), plugin sha256 pinning (R07.05), tool-output sanitization (R07.05), persistent-memory perms `0o700`/`0o600` (R07.05). Toggleable via `--security max|off`.
 - **Multi-agent orchestration** — Router, pipeline, and parallel modes

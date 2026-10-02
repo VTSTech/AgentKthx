@@ -284,6 +284,14 @@ def _build_agent(args: argparse.Namespace, config) -> Agent:
     # (Action:/Action Input:/Final Answer:) instead of assuming the model
     # supports OpenAI native function calling.
     #
+    # R07.19 (follow-up #10): NONE is retired — "None is essentially
+    # untested". Legacy cache entries that say none now fall back to ReAct
+    # exactly like UNTESTED (and detection itself no longer produces NONE:
+    # capabilities-without-tools and explicit tools rejections return REACT
+    # at the source). A model that can't emit native tool_calls still gets
+    # the text-based ReAct prompt, which is strictly more useful than
+    # passing tools it can never call.
+    #
     # Cloud backends are unaffected — they almost universally support
     # native function calling, so the existing comp_mode → native-tools
     # behavior is preserved.
@@ -314,25 +322,22 @@ def _build_agent(args: argparse.Namespace, config) -> Agent:
                         f"(use --force-react=False to suppress, or clear "
                         f"~/.agentkthx/tool_support.json to re-test)"
                     )
-            elif support == ToolSupportLevel.NONE:
-                # Model can't call tools at all — keep force_react=False so
-                # the agent still passes tools but the model just won't use
-                # them. (Setting force_react=True here wouldn't help — the
-                # model can't emit ReAct format either.)
-                if args.debug:
-                    print(
-                        f"[AgentKthx] Tool support for '{model}': NONE (cached) "
-                        f"→ tools will be passed but the model can't call them"
-                    )
-            else:  # UNTESTED — no cache entry yet
-                # For local backends, default to ReAct (safer for small
-                # CPU models that typically aren't trained on native
-                # function calling). For cloud backends we'd default to
-                # native, but this branch only fires when is_cloud=False.
+            else:  # UNTESTED (or legacy NONE) — no usable verdict yet
+                # R07.19 (follow-up #10): NONE now lands here too — it IS
+                # untested as far as capabilities go, so default to ReAct
+                # (safer for small CPU models that typically aren't trained
+                # on native function calling). For cloud backends we'd
+                # default to native, but this branch only fires when
+                # is_cloud=False.
                 effective_force_react = True
                 if args.debug:
+                    label = (
+                        "NONE (legacy cache → untested)"
+                        if support == ToolSupportLevel.NONE
+                        else "UNTESTED (no cache)"
+                    )
                     print(
-                        f"[AgentKthx] Tool support for '{model}': UNTESTED (no cache) "
+                        f"[AgentKthx] Tool support for '{model}': {label} "
                         f"→ defaulting to ReAct for local backend "
                         f"(run `agentkthx models` to populate the cache)"
                     )

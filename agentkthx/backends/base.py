@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Generator
 
 from ..core.models import Tool
-from ..core.types import BackendType, ToolSupportLevel
+from ..core.types import BackendType, ThinkingSupport, ToolSupportLevel
 
 
 @dataclass
@@ -158,6 +158,34 @@ class BaseBackend(ABC):
             Detected ToolSupportLevel
         """
         pass
+
+    def test_thinking_support(
+        self, model: str, family: str | None = None, force_test: bool = False
+    ) -> "ThinkingSupport":
+        """Detect a model's thinking / reasoning support (R07.19 follow-up #11).
+
+        Base default: UNKNOWN (no signal). Concrete backends override with
+        real signals — OllamaBackend reads the server's /api/tags
+        ``thinking`` capability declaration; OpenAICompatibleBackend applies
+        conservative model-name heuristics (deepseek-r1, qwq, o1/o3/o4,
+        glm-4.5+, qwen3, *thinking*, *reasoning*, ...). Verdicts are cached
+        via core/tool_cache (``thinking:<model>`` keys, same JSON file).
+
+        NOT abstract: adding a new required method would break every
+        third-party plugin backend (test-plugin stubs, custom subclasses),
+        so subclasses that don't care simply inherit UNKNOWN.
+
+        Args:
+            model: Model name
+            family: Optional family hint (stored with the cache entry)
+            force_test: Kept for API symmetry with test_tool_support
+
+        Returns:
+            ThinkingSupport (YES / NO when a signal exists, else UNKNOWN)
+        """
+        from ..core.tool_cache import get_cached_thinking_support
+
+        return get_cached_thinking_support(model) or ThinkingSupport.UNKNOWN
 
     # ─────────────────────────────────────────────────────────────────────
     # System-One Decision Mode (ApiMode.JEV)

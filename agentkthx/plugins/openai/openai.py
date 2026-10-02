@@ -1390,13 +1390,18 @@ class OpenAIBackend(OpenAICompatibleBackend):
         chat-capable model without probing — no live API call is made.
 
         Non-chat models (embeddings, TTS, image gen, etc. — detected
-        via ``_NON_CHAT_PATTERNS``) return ``NONE`` so users don't
-        accidentally try to chat with an embedding model.
+        via ``_NON_CHAT_PATTERNS``) return ``REACT`` (R07.19 follow-up
+        #10: NONE is retired — no models should have None. A non-chat
+        model is not tool-capable, so it falls into the same ReAct
+        fallback bucket as every other no-native-tools model; trying to
+        use it as a chat backend fails on its own, independent of this
+        label).
         """
         # Non-chat models (embeddings, TTS, image gen, moderation, etc.)
-        # don't support /chat/completions — classify as NONE.
+        # don't support /chat/completions — classify via the ReAct
+        # fallback (R07.19 follow-up #10: was NONE, which is retired).
         if not _is_chat_model(model):
-            return ToolSupportLevel.NONE
+            return ToolSupportLevel.REACT
         return ToolSupportLevel.NATIVE
 
     # ─────────────────────────────────────────────────────────────────────

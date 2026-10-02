@@ -1107,16 +1107,20 @@ class GeminiBackend(OpenAICompatibleBackend):
         Non-chat models (embeddings, Veo video gen, Lyria music gen,
         robotics, transcribe, TTS, Live API, image gen, computer-use,
         deep-research, antigravity, omni video, Gemma open-source)
-        can't accept chat-completions requests at all → return ``NONE``.
-        Showing them as "✓ native" in the models table was misleading —
-        users would try to chat with them and get a 400.
+        can't accept chat-completions requests at all → return ``REACT``
+        (R07.19 follow-up #10: was NONE — NONE is retired, "None is
+        essentially untested", and no models should have None. A
+        non-chat model is simply not tool-capable, so it lands in the
+        same ReAct fallback bucket as every other no-native-tools model;
+        trying to chat with it still fails on its own with a 400,
+        independent of this label).
 
         The classifier is pattern-based and lives in
         ``_is_chat_capable_model()`` above. It strips a ``models/`` prefix
         if present (defensive — ``_parse_gemini_model`` already does this).
         """
         if not _is_chat_capable_model(model):
-            return ToolSupportLevel.NONE
+            return ToolSupportLevel.REACT
         return ToolSupportLevel.NATIVE
 
     # ─────────────────────────────────────────────────────────────────────

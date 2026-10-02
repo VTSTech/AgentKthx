@@ -14,7 +14,7 @@ from typing import Generator
 
 from ..config import OLLAMA_BASE_URL
 from ..core.models import Tool, ToolParam
-from ..core.types import ApiMode, BackendType, ToolSupportLevel
+from ..core.types import ApiMode, BackendType, ThinkingSupport, ToolSupportLevel
 from .base import BackendConfig
 from .openai_compat import OpenAICompatibleBackend
 
@@ -1135,18 +1135,29 @@ class OllamaBackend(OpenAICompatibleBackend):
         """
         Test model's tool support capability.
 
+        R07.19 (follow-up #10): ONE check per model, ONE cache entry — the
+        openre/openai dual probe is gone. The capabilities verdict is
+        API-mode-independent (the runner template governs both endpoints),
+        so a single authoritative check feeds the single `tools` column.
+
         R07.19 (follow-up #9): when the server reports /api/tags
         `capabilities` (any modern Ollama), the verdict comes straight from
-        the declaration — "tools" -> NATIVE, absent -> NONE — with no model
-        load and no inference. Only legacy servers reach the sampled probe:
+        the declaration — "tools" → NATIVE, absent → REACT fallback — with
+        no model load and no inference. Only legacy servers reach the
+        sampled probe.
 
-        1. HTTP 400 "does not support tools" → none (Ollama's explicit rejection)
-        2. Native tool_calls in API response, calling correct function → native
-        3. No tool_calls but content has JSON tool call pattern → react (text-based)
-        4. No tool_calls, no tool-like JSON, but API accepted tools → react
+        R07.19 (follow-up #10): NONE is retired as a produced verdict —
+        "None is essentially untested". A model whose declaration lacks
+        "tools" (or that explicitly rejects the tools param) falls back to
+        REACT: it still gets the text-based ReAct prompt, which is strictly
+        more useful than passing tools it can never emit. No model is ever
+        classified None.
 
-        Key insight: "native" requires ACTUAL native tool_calls structure in API response.
-        Models that output JSON as text are "react", not "native".
+        Legacy-sampled-probe rules (unchanged):
+        1. Native tool_calls in API response, calling correct function → native
+        2. No tool_calls but content has JSON tool call pattern → react (text-based)
+        3. No tool_calls, no tool-like JSON, but API accepted tools → react
+        4. Explicit "does not support tools" rejection → react (was none)
 
         Results are automatically cached after each live test. If force_test is False,
         the cache is checked first before returning UNTESTED.
@@ -1157,37 +1168,40 @@ class OllamaBackend(OpenAICompatibleBackend):
             force_test: If True, make a test API call to determine support
 
         Returns:
-            ToolSupportLevel (NATIVE, REACT, NONE, or UNTESTED if force_test=False)
+            ToolSupportLevel (NATIVE, REACT, or UNTESTED if force_test=False;
+            NONE is never returned — legacy cache entries normalize to REACT)
         """
         from ..core.tool_cache import cache_tool_support, get_cached_tool_support
 
-        # Determine API mode for cache namespacing
-        api_mode = self._api_mode.value if hasattr(self, "_api_mode") else "openre"
+        # R07.19 (follow-up #10): single cache namespace. The capabilities
+        # verdict is API-mode-independent, so every write lands on the one
+        # canonical plain-key entry instead of per-mode "model:openai" keys.
+        api_mode = None
 
         # R07.19 (follow-up #9): capabilities-first detection. Modern Ollama
         # declares per-model capabilities in /api/tags (server-derived from
         # the model's chat template / GGUF — the same source the runner
         # consults), so the verdict is available without loading the model:
         #   "tools" in capabilities  -> NATIVE
-        #   otherwise                -> NONE (pure reasoning / completion)
+        #   otherwise                -> REACT (fallback; was NONE, follow-up #10)
         # This short-circuits BOTH the cache and the sampled probe — the
-        # signal is live, authoritative and API-mode-independent (the runner
-        # template governs openre and openai alike). The verdict is still
-        # written to the persistent cache so non-capability consumers
-        # (agent_factory reads, other processes) see it without a fetch.
-        # Legacy servers that omit the field fall through to the sampled
-        # probe below, unchanged.
+        # signal is live, authoritative and API-mode-independent. The verdict
+        # is still written to the persistent cache so non-capability
+        # consumers (agent_factory reads, other processes) see it without a
+        # fetch. Legacy servers that omit the field fall through to the
+        # sampled probe below, unchanged.
         declared = self.model_capabilities(model)
         if declared is not None:
-            result = ToolSupportLevel.NATIVE if "tools" in declared else ToolSupportLevel.NONE
-            cache_tool_support(model, result, family=family or "", api_mode=api_mode)
+            result = ToolSupportLevel.NATIVE if "tools" in declared else ToolSupportLevel.REACT
+            cache_tool_support(model, result, family=family or "")
             return result
 
         if not force_test:
             # Check cache first, even without force_test
-            cached = get_cached_tool_support(model, api_mode=api_mode)
+            # (legacy "none" entries normalize to REACT — follow-up #10)
+            cached = get_cached_tool_support(model, api_mode=api_mode or "openre")
             if cached is not None:
-                return cached
+                return ToolSupportLevel.effective(cached)
             return ToolSupportLevel.UNTESTED
 
         # Test tool: Weather (simple, commonly supported)
@@ -1246,23 +1260,19 @@ class OllamaBackend(OpenAICompatibleBackend):
                 result = None  # No native tool calls
 
             if result is not None:
-                cache_tool_support(model, result, family=family or "", api_mode=api_mode)
+                cache_tool_support(model, result, family=family or "")
                 return result
 
             # 3. Check for text-based tool calls in content
             # Models that output JSON like {"name": "get_weather", ...} as TEXT
             if self._contains_text_tool_call(content):
-                cache_tool_support(
-                    model, ToolSupportLevel.REACT, family=family or "", api_mode=api_mode
-                )
+                cache_tool_support(model, ToolSupportLevel.REACT, family=family or "")
                 return ToolSupportLevel.REACT
 
             # 4. API succeeded, no explicit rejection, no native tool_calls
             # Model accepted tools parameter but didn't use native calling
             # This is the "react" case - can still parse text-based tool calls
-            cache_tool_support(
-                model, ToolSupportLevel.REACT, family=family or "", api_mode=api_mode
-            )
+            cache_tool_support(model, ToolSupportLevel.REACT, family=family or "")
             return ToolSupportLevel.REACT
 
         except Exception as e:
@@ -1271,16 +1281,18 @@ class OllamaBackend(OpenAICompatibleBackend):
             # 1. Check for explicit "does not support tools" rejection
             # R06.57: also match "unsupported param: tools" (llama-server 500,
             # used by BitNet's llama.cpp fork to reject the tools param).
+            # R07.19 (follow-up #10): was NONE — the explicit rejection now
+            # falls back to REACT like every other no-native-tools outcome
+            # ("None is essentially untested"; no models should have None).
             error_lower = error_str.lower()
             if "does not support tools" in error_lower or "unsupported param: tools" in error_lower:
                 cache_tool_support(
                     model,
-                    ToolSupportLevel.NONE,
+                    ToolSupportLevel.REACT,
                     family=family or "",
                     error=error_str[:100],
-                    api_mode=api_mode,
                 )
-                return ToolSupportLevel.NONE
+                return ToolSupportLevel.REACT
 
             # Other HTTP errors or connection issues
             cache_tool_support(
@@ -1288,7 +1300,6 @@ class OllamaBackend(OpenAICompatibleBackend):
                 ToolSupportLevel.REACT,
                 family=family or "",
                 error=error_str[:100],
-                api_mode=api_mode,
             )
             return ToolSupportLevel.REACT
 
@@ -1298,6 +1309,51 @@ class OllamaBackend(OpenAICompatibleBackend):
                 self.unload_model(model)
             except Exception:
                 pass  # Ignore errors during cleanup
+
+    def test_thinking_support(
+        self, model: str, family: str | None = None, force_test: bool = False
+    ) -> "ThinkingSupport":
+        """Detect whether a model supports thinking / reasoning output.
+
+        R07.19 (follow-up #11): capabilities-first, mirroring
+        test_tool_support. Modern Ollama declares a ``thinking`` capability
+        in /api/tags for reasoning models (deepseek-r1, qwen3, ...), derived
+        from the same template/GGUF source its runner consults:
+
+            "thinking" in capabilities -> YES
+            capabilities without it    -> NO
+            no declaration (legacy server / unlisted model) -> UNKNOWN
+
+        Verdicts are cached under the ``thinking:<model>`` key (same
+        tool_support.json file). UNKNOWN is never cached — a legacy server
+        may be upgraded or the model listed later, so absence of signal
+        stays re-evaluable.
+
+        Args:
+            model: Model name
+            family: Optional family hint (stored with the cache entry)
+            force_test: Unused (kept for API symmetry with test_tool_support);
+                the capabilities read is always effectively free.
+
+        Returns:
+            ThinkingSupport (YES / NO from the declaration, UNKNOWN without one)
+        """
+        from ..core.tool_cache import cache_thinking_support, get_cached_thinking_support
+
+        cached = get_cached_thinking_support(model)
+        if cached is not None:
+            return cached
+
+        declared = self.model_capabilities(model)
+        if declared is None:
+            # No signal (legacy server, fetch failure, or model not listed).
+            # Do not cache — the situation is recoverable, NONE of this is
+            # a verdict about the model itself.
+            return ThinkingSupport.UNKNOWN
+
+        result = ThinkingSupport.YES if "thinking" in declared else ThinkingSupport.NO
+        cache_thinking_support(model, result, family=family or "")
+        return result
 
     def _contains_text_tool_call(self, content: str) -> bool:
         """

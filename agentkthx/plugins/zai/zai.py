@@ -1114,12 +1114,15 @@ class ZaiBackend(CloudBackend):
         """
         from agentkthx.core.tool_cache import cache_tool_support, get_cached_tool_support
 
-        api_mode = "openai"
+        # R07.19 (follow-up #10): single cache namespace — one authoritative
+        # check per model, one plain-key cache entry (was api_mode="openai").
+        api_mode = None
 
         if not force_test:
-            cached = get_cached_tool_support(model, api_mode=api_mode)
+            cached = get_cached_tool_support(model, api_mode=api_mode or "openre")
             if cached is not None:
-                return cached
+                # Legacy "none" entries normalize to REACT (follow-up #10)
+                return ToolSupportLevel.effective(cached)
             return ToolSupportLevel.UNTESTED
 
         # Check API key before making a test call
@@ -1173,7 +1176,7 @@ class ZaiBackend(CloudBackend):
             choices = result.get("choices", [])
             if not choices:
                 support = ToolSupportLevel.REACT
-                cache_tool_support(model, support, family=family or "glm", api_mode=api_mode)
+                cache_tool_support(model, support, family=family or "glm")
                 return support
 
             message = choices[0].get("message", {})
@@ -1184,9 +1187,7 @@ class ZaiBackend(CloudBackend):
             if tool_calls:
                 if os.environ.get("AGENTKTHX_DEBUG"):
                     print(f"  [ZAI] Tool support: NATIVE (tool_calls={len(tool_calls)})")
-                cache_tool_support(
-                    model, ToolSupportLevel.NATIVE, family=family or "glm", api_mode=api_mode
-                )
+                cache_tool_support(model, ToolSupportLevel.NATIVE, family=family or "glm")
                 return ToolSupportLevel.NATIVE
 
             # Check for ReAct-style text patterns
@@ -1195,17 +1196,13 @@ class ZaiBackend(CloudBackend):
             ):
                 if os.environ.get("AGENTKTHX_DEBUG"):
                     print("  [ZAI] Tool support: REACT (text-based tool pattern)")
-                cache_tool_support(
-                    model, ToolSupportLevel.REACT, family=family or "glm", api_mode=api_mode
-                )
+                cache_tool_support(model, ToolSupportLevel.REACT, family=family or "glm")
                 return ToolSupportLevel.REACT
 
             # API accepted tools but model didn't use them — REACT-capable
             if os.environ.get("AGENTKTHX_DEBUG"):
                 print("  [ZAI] Tool support: REACT (tools accepted, no tool calls)")
-            cache_tool_support(
-                model, ToolSupportLevel.REACT, family=family or "glm", api_mode=api_mode
-            )
+            cache_tool_support(model, ToolSupportLevel.REACT, family=family or "glm")
             return ToolSupportLevel.REACT
 
         except urllib.error.HTTPError as e:
@@ -1220,7 +1217,6 @@ class ZaiBackend(CloudBackend):
                     ToolSupportLevel.REACT,
                     family=family or "glm",
                     error=str(e),
-                    api_mode=api_mode,
                 )
                 return ToolSupportLevel.REACT
 
@@ -1231,7 +1227,6 @@ class ZaiBackend(CloudBackend):
                 ToolSupportLevel.REACT,
                 family=family or "glm",
                 error=str(e),
-                api_mode=api_mode,
             )
             return ToolSupportLevel.REACT
 
@@ -1243,7 +1238,6 @@ class ZaiBackend(CloudBackend):
                 ToolSupportLevel.REACT,
                 family=family or "glm",
                 error=str(e),
-                api_mode=api_mode,
             )
             return ToolSupportLevel.REACT
 

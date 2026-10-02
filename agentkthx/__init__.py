@@ -5,7 +5,8 @@ A minimal, hackable agentic framework engineered for local inference.
 Features:
   • Zero dependencies — uses Python stdlib only
   • Ollama + OpenRouter + BitNet backends — switch with --backend flag
-  • Three-tier tool support — native, ReAct, or none (auto-detected)
+  • Tool support: one capability check — native or ReAct (none falls back
+    to ReAct), plus thinking/reasoning support detection per model
   • Small model optimized — fuzzy matching, argument normalization
   • Built-in security — path validation, command blocklist, SSRF protection
   • Soul Spec v0.5 — persona packages (disabled by default, use --soul)
