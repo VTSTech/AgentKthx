@@ -195,6 +195,17 @@ def create_parser() -> argparse.ArgumentParser:
     soul_parser.add_argument("--validate", action="store_true", help="Run validation checks")
     soul_parser.add_argument("--prompt", action="store_true", help="Show generated system prompt")
 
+    # Souls command (R07.19 follow-up #7) — listing surface for the bundled
+    # Soul Spec packages; registered after soul so the root -h subcommand
+    # list stays alphabetical (soul < souls < test).
+    souls_parser = subparsers.add_parser("souls", help="List available souls")
+    souls_parser.add_argument(
+        "name",
+        nargs="?",
+        default=None,
+        help="Show details for one bundled soul by name (e.g. kthx-trading)",
+    )
+
     # Test command
     test_parser = subparsers.add_parser("test", help="Run diagnostic tests")
     test_parser.add_argument(

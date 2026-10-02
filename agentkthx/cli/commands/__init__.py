@@ -16,6 +16,7 @@ from .run import cmd_run
 from .sessions import cmd_sessions
 from .skills import cmd_skills
 from .soul import cmd_soul
+from .souls import cmd_souls
 from .test import cmd_test
 from .tools import cmd_tools
 from .turbo import cmd_turbo
@@ -35,6 +36,7 @@ __all__ = [
     "cmd_modelfile",
     "cmd_skills",
     "cmd_soul",
+    "cmd_souls",
     "cmd_sessions",
     "cmd_plugins",
 ]

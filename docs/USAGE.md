@@ -24,8 +24,9 @@ for architecture, tests, plugins, and provider API references see the
 # Run a single prompt
 agentkthx run "What is 15 * 8?" --tools calculator
 
-# Interactive chat
+# Interactive chat (-m is optional — omit it to pick from an arrow-key menu)
 agentkthx chat -m qwen2.5:0.5b --tools calculator,shell
+agentkthx chat                      # startup model picker (arrow keys, TTY only)
 
 # R07.19: skip the "Primary User" naming prompt (the name replaces You:)
 agentkthx chat --user VTSTech
@@ -39,6 +40,10 @@ agentkthx chat -m qwen2.5:0.5b --api openai
 
 # List available models
 agentkthx models
+
+# List available souls (or detail one by name)
+agentkthx souls
+agentkthx souls kthx-trading
 
 # List available tools
 agentkthx tools
@@ -106,9 +111,9 @@ agentkthx plugins                    # List discovered plugins
 In chat mode, use these slash commands to manage tools, skills, and models mid-session:
 
 ```bash
-/models              # List all available models (✓ = current, free/paid, chat/non-chat)
-/models free chat    # Filter: free-tier + chat-capable models only
-/model gemini-3.8-flash   # Switch to a different model
+/models              # Interactive model switcher (↑/↓ move · Enter switches; plain list when piped)
+/models free chat    # Pre-filter the picker: free-tier + chat-capable models only
+/model gemini-3.8-flash   # Switch directly by name (same re-derive path as the picker)
 /tools               # List all available tools (✓ = loaded, ○ = available)
 /tool shell,read_file,write_file   # Load tools mid-session (comma-separated)
 /skills              # List all available skills (✓ = loaded)
@@ -123,6 +128,24 @@ In chat mode, use these slash commands to manage tools, skills, and models mid-s
 /status              # Show model, backend, tools, skills, memory info
 /help                # Show all slash commands
 ```
+
+### Interactive Model Picker (R07.19 follow-up #7)
+
+Two surfaces share one arrow-key menu component (`agentkthx/cli/picker.py`, pure
+stdlib — termios on POSIX, msvcrt on Windows, numbered prompt when stdin is
+piped):
+
+- **In chat** — `/models` opens the menu over the current backend's models
+  (`✓` marks the active model, `↑/↓` or `j/k` to move, `Enter` switches,
+  `q`/`Esc` cancels). Switching re-derives `num_ctx` / `num_predict` / family
+  config through the same code path as `/model <name>`, so context windows
+  always follow the chosen model.
+- **At chat startup** — `-m/--model` is optional on `agentkthx chat`: omit it
+  and the picker runs before the session begins, with the config default
+  pre-marked. The picker only fires when stdin is a real terminal, no ACP
+  session is attached and `AGENTKTHX_MODEL` is unset; otherwise (and on
+  cancel / backend failure) the classic default-model resolution applies.
+  Scripted `agentkthx run` / `agentkthx agent` invocations are untouched.
 
 ### Primary User — Chat Prompt Naming (R07.19)
 
@@ -155,6 +178,8 @@ diagnostic assistant), `kthx-skills` (skills-focused), and `kthx-trading`
 
 ```bash
 agentkthx chat --soul kthx-trading   # Select a soul at startup
+agentkthx souls                      # List bundled souls (✓ = the default one)
+agentkthx souls kthx-trading         # Detail view: author, tags, allowed tools, skills
 ```
 
 Inside chat, `/souls` lists every bundled soul (✓ = the active one) and

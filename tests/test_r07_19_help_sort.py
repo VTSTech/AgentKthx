@@ -152,6 +152,7 @@ class TestSubcommandListingSorted:
             "sessions",
             "skills",
             "soul",
+            "souls",
             "test",
             "tools",
             "turbo",

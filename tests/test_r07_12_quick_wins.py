@@ -215,13 +215,25 @@ class TestMaint21MistralErrorEnvelope:
 
 class TestMaint18VerifiedConsumer:
     def test_cmd_chat_consumes_apply_model_switch_return(self):
+        """MAINT-18: apply_model_switch's delta dict must reach the printer.
+
+        R07.19 follow-up #7 moved the outcome reporting into the shared
+        ``_report_model_switch`` helper (both ``/model <name>`` and the
+        ``/models`` arrow-key switcher feed it), so the consumption
+        evidence moved with it: the /model handler passes the dict
+        straight through, the switcher captures it into ``changes`` and
+        the helper itself reads the delta keys for printing.
+        """
         src = (_CMDS_DIR / "chat.py").read_text(encoding="utf-8")
         assert (
-            "changes = _cli.apply_model_switch(agent, new_model)" in src
-        ), "cmd_chat no longer captures apply_model_switch's return dict"
+            "_report_model_switch(_cli.apply_model_switch(agent, new_model), new_model)" in src
+        ), "cmd_chat's /model handler no longer forwards the switch-delta dict"
+        assert (
+            "changes = _cli.apply_model_switch(agent, chosen)" in src
+        ), "the /models arrow-key switcher no longer captures the return dict"
         assert (
             'changes.get("model"' in src
-        ), "cmd_chat no longer consumes the switch-delta dict for printing"
+        ), "chat.py no longer consumes the switch-delta dict for printing"
 
 
 if __name__ == "__main__":

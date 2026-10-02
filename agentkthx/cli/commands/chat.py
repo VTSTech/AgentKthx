@@ -87,6 +87,122 @@ def _resolve_primary_user(args: argparse.Namespace) -> str:
     return _sanitize_primary_user(raw) if raw else default
 
 
+# ============================================================================
+# Interactive model switcher (R07.19 follow-up #7)
+# ============================================================================
+
+
+def _model_menu_labels(
+    models: list[dict], current_model: str | None
+) -> tuple[list[str], int | None]:
+    """Build ArrowMenu labels + the current-model index from list_models() rows.
+
+    Labels carry the context hint where the backend provides one (128K
+    style, same formatting the /models list renders); they stay plain
+    text — the menu itself colors the cursor and the current-model ✓.
+    """
+    labels: list[str] = []
+    current_index: int | None = None
+    for i, m in enumerate(models):
+        name = m.get("name", "unknown")
+        details = m.get("details", {}) or {}
+        ctx = details.get("context_length", 0) or details.get("n_ctx", 0) or 0
+        if ctx >= 1000:
+            labels.append(f"{name}  ({ctx // 1024}K)")
+        elif ctx:
+            labels.append(f"{name}  ({ctx})")
+        else:
+            labels.append(name)
+        if current_model is not None and name == current_model:
+            current_index = i
+    return labels, current_index
+
+
+def _report_model_switch(changes: dict, new_model: str) -> None:
+    """Print the outcome of a model switch (shared by /model and the picker)."""
+    old_model, _ = changes.get("model", (new_model, new_model))
+    print(green(f"Model changed: {old_model} -> {new_model}"))
+
+    def _fmt_pred(v):
+        return "(model default)" if v is None else str(v)
+
+    if "num_ctx" in changes:
+        old_ctx, new_ctx = changes["num_ctx"]
+        print(dim(f"  num_ctx: {old_ctx} -> {new_ctx}"))
+    if "num_predict" in changes:
+        old_pred, new_pred = changes["num_predict"]
+        print(dim(f"  num_predict: {_fmt_pred(old_pred)} -> {_fmt_pred(new_pred)}"))
+
+
+def _interactive_model_switch(agent, models: list[dict], title: str) -> None:
+    """Run the arrow-key picker over `models` and apply the choice to `agent`.
+
+    The switch re-derives num_ctx/num_predict/family config through the
+    SAME `apply_model_switch` path `/model <name>` uses (ROB-14), so
+    picking from the menu is byte-equivalent to typing the name.
+    """
+    # R07.00 convention: resolve collaborators through the cli facade so
+    # monkeypatch.setattr(agentkthx.cli, 'apply_model_switch', ...) works.
+    from agentkthx import cli as _cli
+
+    from ..picker import ArrowMenu
+
+    current_model = agent.model
+    labels, current_index = _model_menu_labels(models, current_model)
+    menu = ArrowMenu(labels, title=title, current_index=current_index)
+    idx = menu.run()
+    if idx is None:
+        print(dim("Cancelled — model unchanged."))
+        return
+    chosen = models[idx].get("name", "unknown")
+    if chosen == current_model:
+        print(f"Already on {cyan(chosen)} — model unchanged.")
+        return
+    changes = _cli.apply_model_switch(agent, chosen)
+    _report_model_switch(changes, chosen)
+
+
+def _startup_model_pick(args: argparse.Namespace, config) -> str | None:
+    """Interactive model selection at chat startup (no ``-m/--model`` given).
+
+    Lists models from the resolved backend (cloud → OPENAI mode probe,
+    local → OPENRE — the same probe layout ``agentkthx models`` uses)
+    and runs the arrow-key picker. Returns the chosen model name, or
+    ``None`` to fall back to the classic resolution inside
+    ``_build_agent`` (bitnet discovery, then ``config.default_model``):
+    listing failures, empty backends and cancellations all degrade to
+    ``None`` instead of blocking the session.
+    """
+    from ...backends import get_backend
+    from ...core.types import ApiMode
+
+    backend_name = getattr(args, "backend", None) or config.backend
+    try:
+        # Probe backend type first (some backends raise on OPENRE, so the
+        # probe passes OPENAI — mirrors cmd_models).
+        probe = get_backend(backend_name, api_mode=ApiMode.OPENAI)
+        api_mode = ApiMode.OPENAI if getattr(probe, "is_cloud", False) else ApiMode.OPENRE
+        backend = get_backend(backend_name, api_mode=api_mode)
+        models = backend.list_models()
+    except Exception as e:
+        print(yellow(f"Could not list models ({e}) — using the default model."))
+        return None
+
+    if not models:
+        print(yellow("No models found on this backend — using the default model."))
+        return None
+
+    from ..picker import ArrowMenu
+
+    labels, current_index = _model_menu_labels(models, config.default_model)
+    menu = ArrowMenu(labels, title=f"Select a model ({backend_name})", current_index=current_index)
+    idx = menu.run()
+    if idx is None:
+        print(dim("Model picker cancelled — using the default model."))
+        return None
+    return models[idx].get("name") or None
+
+
 def cmd_chat(args: argparse.Namespace) -> int:
     """Execute the chat command."""
 
@@ -100,6 +216,23 @@ def cmd_chat(args: argparse.Namespace) -> int:
     acp, should_stop = _cli._init_acp(args, config, "AgentKthx-Chat")
     if should_stop:
         return 1
+
+    # R07.19 (follow-up #7): -m/--model is now OPTIONAL on chat. When it is
+    # omitted, no AGENTKTHX_MODEL override is set, no ACP session is driving
+    # us and stdin is a real terminal, the arrow-key model picker (the same
+    # component /models uses) runs BEFORE the agent is built so the session
+    # starts on the model you picked. Every other case keeps the classic
+    # resolution inside _build_agent: bitnet server discovery, then
+    # config.default_model (which itself honors AGENTKTHX_MODEL).
+    if (
+        getattr(args, "model", None) is None
+        and acp is None
+        and sys.stdin.isatty()
+        and not os.environ.get("AGENTKTHX_MODEL")
+    ):
+        picked = _startup_model_pick(args, config)
+        if picked:
+            args.model = picked
 
     agent = _cli._build_agent(args, config)
 
@@ -401,7 +534,7 @@ def cmd_chat(args: argparse.Namespace) -> int:
                     f"  {cyan('/model')}      Show or change the model (e.g. /model gemini-3.8-flash)"
                 )
                 print(
-                    f"  {cyan('/models')}     List all available models from the current backend (✓ = current)"
+                    f"  {cyan('/models')}     Interactive model switcher (↑/↓ + Enter; plain list when piped)"
                 )
                 print(
                     f"  {cyan('/param')}      Show or set generation parameters (temp, top_p, top_k, etc.)"
@@ -1250,6 +1383,28 @@ def cmd_chat(args: argparse.Namespace) -> int:
                     print(yellow("No models match the filter."))
                     continue
 
+                # R07.19 (follow-up #7): on a real terminal /models is now an
+                # INTERACTIVE switcher — the same (filtered) list, arrow-
+                # navigable, and Enter switches via the same
+                # apply_model_switch path as /model <name>. Piped stdin
+                # (scripts, tests, ACP) keeps the plain listing below.
+                if sys.stdin.isatty():
+                    backend_name = getattr(agent.backend, "backend_type", None)
+                    backend_str = (
+                        backend_name.value if hasattr(backend_name, "value") else str(backend_name)
+                    )
+                    filter_desc = ""
+                    if filter_free and filter_chat:
+                        filter_desc = " — free + chat only"
+                    elif filter_free:
+                        filter_desc = " — free tier only"
+                    elif filter_chat:
+                        filter_desc = " — chat-capable only"
+                    _interactive_model_switch(
+                        agent, models, title=f"Switch model ({backend_str}{filter_desc})"
+                    )
+                    continue
+
                 current_model = agent.model
                 backend_name = getattr(agent.backend, "backend_type", None)
                 backend_str = (
@@ -1315,19 +1470,9 @@ def cmd_chat(args: argparse.Namespace) -> int:
                     # window). Explicitly pinned values (--num-ctx/--num-predict,
                     # /param) survive; everything else follows the new model's
                     # catalog entry, mirroring startup precedence.
-                    changes = _cli.apply_model_switch(agent, new_model)
-                    old_model, _ = changes.get("model", (new_model, new_model))
-                    print(green(f"Model changed: {old_model} -> {new_model}"))
-
-                    def _fmt_pred(v):
-                        return "(model default)" if v is None else str(v)
-
-                    if "num_ctx" in changes:
-                        old_ctx, new_ctx = changes["num_ctx"]
-                        print(dim(f"  num_ctx: {old_ctx} -> {new_ctx}"))
-                    if "num_predict" in changes:
-                        old_pred, new_pred = changes["num_predict"]
-                        print(dim(f"  num_predict: {_fmt_pred(old_pred)} -> {_fmt_pred(new_pred)}"))
+                    # R07.19 (follow-up #7): the outcome reporting is shared
+                    # with the /models arrow-key switcher (_report_model_switch).
+                    _report_model_switch(_cli.apply_model_switch(agent, new_model), new_model)
                 continue
 
             if user_input == "/debug":
