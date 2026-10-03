@@ -559,7 +559,9 @@ def cmd_chat(args: argparse.Namespace) -> int:
                 print(
                     f"  {cyan('/sh')}         Run a local shell command (display + add to context; -n to display only)"
                 )
-                print(f"  {cyan('/skill')}      Load a skill mid-session (e.g. /skill codebase-audit, crypto-signals)")
+                print(
+                    f"  {cyan('/skill')}      Load a skill mid-session (e.g. /skill codebase-audit, crypto-signals)"
+                )
                 print(f"  {cyan('/souls')}      Show available souls (\u2713 = active)")
                 print(
                     f"  {cyan('/soul')}       Show or switch the active soul (e.g. /soul kthx-trading)"
@@ -1558,7 +1560,9 @@ def cmd_chat(args: argparse.Namespace) -> int:
                     print(yellow("Usage: /sh [-n] <command...>"))
                     print(dim("  Run a local shell command and display the output."))
                     print(dim("  By default, the output is also added to the agent's context."))
-                    print(dim("  Pass -n before the command to display only (no context injection)."))
+                    print(
+                        dim("  Pass -n before the command to display only (no context injection).")
+                    )
                     print(dim("  Examples:"))
                     print(dim("    /sh ls -la"))
                     print(dim("    /sh -n pwd"))
@@ -1596,9 +1600,7 @@ def cmd_chat(args: argparse.Namespace) -> int:
                 # parse it cleanly: a tagged block with the command + result.
                 if not _sh_no_inject:
                     _sh_context_msg = (
-                        f"<shell_output command={_sh_arg!r}>\n"
-                        f"{_sh_output}\n"
-                        f"</shell_output>"
+                        f"<shell_output command={_sh_arg!r}>\n" f"{_sh_output}\n" f"</shell_output>"
                     )
                     agent.memory.add("user", _sh_context_msg)
                     print(

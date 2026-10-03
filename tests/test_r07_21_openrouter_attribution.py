@@ -85,12 +85,15 @@ class TestBuildAttributionHeaders(unittest.TestCase):
         alias), X-OpenRouter-Categories.
         """
         h = _build_openrouter_attribution_headers()
-        self.assertEqual(set(h.keys()), {
-            "HTTP-Referer",
-            "X-OpenRouter-Title",
-            "X-Title",
-            "X-OpenRouter-Categories",
-        })
+        self.assertEqual(
+            set(h.keys()),
+            {
+                "HTTP-Referer",
+                "X-OpenRouter-Title",
+                "X-Title",
+                "X-OpenRouter-Categories",
+            },
+        )
 
     def test_referer_is_canonical_github_url(self):
         """HTTP-Referer must be the canonical GitHub repo URL — this is the
@@ -128,6 +131,7 @@ class TestBuildAttributionHeaders(unittest.TestCase):
         # We assert this by reading the source and grepping for the env-var
         # pattern that was removed in R07.21.
         import os
+
         plugin_path = os.path.normpath(
             os.path.join(
                 os.path.dirname(__file__),
@@ -186,6 +190,7 @@ class TestBackendHeaderSitesUseHelper(unittest.TestCase):
         ``__init__``'s header-setup line directly via a thin stub.
         """
         from agentkthx.plugins.openrouter.openrouter import OpenRouterBackend
+
         b = OpenRouterBackend.__new__(OpenRouterBackend)
         b._base_url = "https://openrouter.ai/api/v1"
         b.api_key = "test-key"
@@ -219,6 +224,7 @@ class TestBackendHeaderSitesUseHelper(unittest.TestCase):
         headers in addition to Authorization + Content-Type.
         """
         from agentkthx.plugins.openrouter.openrouter import OpenRouterBackend
+
         b = OpenRouterBackend.__new__(OpenRouterBackend)
         b._base_url = "https://openrouter.ai/api/v1"
         b.api_key = "test-key"
@@ -235,15 +241,21 @@ class TestBackendHeaderSitesUseHelper(unittest.TestCase):
         what env vars are set. The category describes what AgentKthx *is*,
         not what the user wants to claim today.
         """
-        from agentkthx.plugins.openrouter.openrouter import OpenRouterBackend
         import os
+
+        from agentkthx.plugins.openrouter.openrouter import OpenRouterBackend
+
         # Set a bunch of plausible env-var names that a future buggy change
         # might read — none of them must affect the headers.
-        with unittest_mock.patch.dict(os.environ, {
-            "AGENTKTHX_OPENROUTER_CATEGORIES": "creative-writing",
-            "OPENROUTER_CATEGORIES": "roleplay",
-            "OPENROUTER_APP_CATEGORIES": "image-gen",
-        }, clear=False):
+        with unittest_mock.patch.dict(
+            os.environ,
+            {
+                "AGENTKTHX_OPENROUTER_CATEGORIES": "creative-writing",
+                "OPENROUTER_CATEGORIES": "roleplay",
+                "OPENROUTER_APP_CATEGORIES": "image-gen",
+            },
+            clear=False,
+        ):
             b = OpenRouterBackend.__new__(OpenRouterBackend)
             b._base_url = "https://openrouter.ai/api/v1"
             b.api_key = "test-key"
@@ -263,6 +275,7 @@ class TestBackendHeaderSitesUseHelper(unittest.TestCase):
         reintroducing the drift.
         """
         import os
+
         plugin_path = os.path.normpath(
             os.path.join(
                 os.path.dirname(__file__),
@@ -282,16 +295,22 @@ class TestBackendHeaderSitesUseHelper(unittest.TestCase):
         referer_literal_count = src.count('"HTTP-Referer": "https://github.com/VTSTech/AgentKthx"')
         # 0 — the literal must not appear inline anywhere.
         # The canonical constant ``_APP_REFERER_URL`` carries the value.
-        self.assertEqual(referer_literal_count, 0,
+        self.assertEqual(
+            referer_literal_count,
+            0,
             "Inline literal HTTP-Referer string found — header construction "
             "sites must delegate to _build_openrouter_attribution_headers(). "
-            f"Found {referer_literal_count} occurrence(s) in {plugin_path}.")
+            f"Found {referer_literal_count} occurrence(s) in {plugin_path}.",
+        )
 
         title_literal_count = src.count('"X-Title": "AgentKthx"')
-        self.assertEqual(title_literal_count, 0,
+        self.assertEqual(
+            title_literal_count,
+            0,
             "Inline literal X-Title string found — header construction "
             "sites must delegate to _build_openrouter_attribution_headers(). "
-            f"Found {title_literal_count} occurrence(s) in {plugin_path}.")
+            f"Found {title_literal_count} occurrence(s) in {plugin_path}.",
+        )
 
 
 if __name__ == "__main__":

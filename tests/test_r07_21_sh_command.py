@@ -21,9 +21,7 @@ the context-injection behavior.
 Written by VTSTech — https://www.vts-tech.org
 """
 
-import io
 import unittest
-from contextlib import redirect_stdout
 from unittest.mock import MagicMock, patch
 
 
@@ -43,9 +41,11 @@ class _FakeAgent:
         # len(agent.memory) is called in the /sh handler — make it return
         # the current message count.
         self.memory.__len__ = lambda self_: len(self._messages)
+
         # agent.memory.add(role, content) appends to the list
         def _add(role, content, **kwargs):
             self.memory._messages.append({"role": role, "content": content})
+
         self.memory.add.side_effect = _add
 
 
@@ -129,11 +129,7 @@ class TestShCommandBehavior(unittest.TestCase):
 
         # Inject into context unless -n was passed
         if not no_inject:
-            context_msg = (
-                f"<shell_output command={arg!r}>\n"
-                f"{output}\n"
-                f"</shell_output>"
-            )
+            context_msg = f"<shell_output command={arg!r}>\n" f"{output}\n" f"</shell_output>"
             agent.memory.add("user", context_msg)
 
     def test_sh_injects_output_into_context(self):
@@ -145,11 +141,7 @@ class TestShCommandBehavior(unittest.TestCase):
         command = "ls -la"
 
         # Simulate what the /sh handler does after calling shell()
-        context_msg = (
-            f"<shell_output command={command!r}>\n"
-            f"{output}\n"
-            f"</shell_output>"
-        )
+        context_msg = f"<shell_output command={command!r}>\n" f"{output}\n" f"</shell_output>"
         agent.memory.add("user", context_msg)
 
         # Verify the message was added
@@ -177,6 +169,7 @@ class TestShCommandBehavior(unittest.TestCase):
     def test_sh_with_simple_command(self):
         """/sh pwd parses to command='pwd', no_inject=False."""
         from tests.test_r07_21_sh_command import TestShCommandParseFlags
+
         (command, no_inject), err = TestShCommandParseFlags()._parse("/sh pwd")
         self.assertIsNone(err)
         self.assertEqual(command, "pwd")
@@ -185,6 +178,7 @@ class TestShCommandBehavior(unittest.TestCase):
     def test_sh_with_n_flag(self):
         """/sh -n pwd parses to command='pwd', no_inject=True."""
         from tests.test_r07_21_sh_command import TestShCommandParseFlags
+
         (command, no_inject), err = TestShCommandParseFlags()._parse("/sh -n pwd")
         self.assertIsNone(err)
         self.assertEqual(command, "pwd")
@@ -193,6 +187,7 @@ class TestShCommandBehavior(unittest.TestCase):
     def test_sh_with_complex_command(self):
         """/sh ls -la /tmp parses to command='ls -la /tmp' (not split further)."""
         from tests.test_r07_21_sh_command import TestShCommandParseFlags
+
         (command, no_inject), err = TestShCommandParseFlags()._parse("/sh ls -la /tmp")
         self.assertIsNone(err)
         self.assertEqual(command, "ls -la /tmp")
@@ -201,6 +196,7 @@ class TestShCommandBehavior(unittest.TestCase):
     def test_sh_n_with_complex_command(self):
         """/sh -n git log --oneline -5 parses correctly."""
         from tests.test_r07_21_sh_command import TestShCommandParseFlags
+
         (command, no_inject), err = TestShCommandParseFlags()._parse("/sh -n git log --oneline -5")
         self.assertIsNone(err)
         self.assertEqual(command, "git log --oneline -5")
@@ -209,6 +205,7 @@ class TestShCommandBehavior(unittest.TestCase):
     def test_sh_bare_returns_usage(self):
         """/sh alone returns a usage error (no command)."""
         from tests.test_r07_21_sh_command import TestShCommandParseFlags
+
         (command, no_inject), err = TestShCommandParseFlags()._parse("/sh")
         self.assertEqual(err, "usage")
         self.assertIsNone(command)
@@ -216,6 +213,7 @@ class TestShCommandBehavior(unittest.TestCase):
     def test_sh_n_bare_returns_usage(self):
         """/sh -n alone returns a usage error (no command)."""
         from tests.test_r07_21_sh_command import TestShCommandParseFlags
+
         (command, no_inject), err = TestShCommandParseFlags()._parse("/sh -n")
         self.assertEqual(err, "usage")
         self.assertIsNone(command)
@@ -223,6 +221,7 @@ class TestShCommandBehavior(unittest.TestCase):
     def test_sh_with_pipes_and_redirects(self):
         """/sh cat foo | grep bar parses the whole thing as one command."""
         from tests.test_r07_21_sh_command import TestShCommandParseFlags
+
         (command, no_inject), err = TestShCommandParseFlags()._parse("/sh cat foo | grep bar")
         self.assertIsNone(err)
         self.assertEqual(command, "cat foo | grep bar")
@@ -231,6 +230,7 @@ class TestShCommandBehavior(unittest.TestCase):
     def test_sh_with_quotes(self):
         """/sh echo "hello world" preserves the quotes in the command."""
         from tests.test_r07_21_sh_command import TestShCommandParseFlags
+
         (command, no_inject), err = TestShCommandParseFlags()._parse('/sh echo "hello world"')
         self.assertIsNone(err)
         self.assertEqual(command, 'echo "hello world"')
@@ -246,12 +246,14 @@ class TestShCommandIntegrationWithRealShell(unittest.TestCase):
     def test_sh_echo_command_produces_output(self):
         """Running `echo hello` via the shell builtin produces 'hello'."""
         from agentkthx.tools.builtins import shell
+
         output = shell("echo hello")
         self.assertEqual(output, "hello")
 
     def test_sh_failing_command_includes_exit_code(self):
         """Running `false` (exit 1) produces output with the exit-code marker."""
         from agentkthx.tools.builtins import shell
+
         output = shell("false")
         # The builtin formats non-zero exits as "[Exit code: N]" on the
         # first line — /sh displays this verbatim.
@@ -260,6 +262,7 @@ class TestShCommandIntegrationWithRealShell(unittest.TestCase):
     def test_sh_with_stderr_includes_error_line(self):
         """Running a command that writes to stderr includes 'Error:'."""
         from agentkthx.tools.builtins import shell
+
         # `ls /nonexistent` writes to stderr — shell builtin captures it.
         output = shell("ls /nonexistent_path_12345")
         # Should mention either the exit code OR an error message
