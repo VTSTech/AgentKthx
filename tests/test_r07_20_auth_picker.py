@@ -775,27 +775,3 @@ class TestConfigBackendRows:
         with redirect_stdout(out):
             cmd_config(argparse.Namespace(full=False, urls=False))
         assert "AGENTKTHX_ENV_FILE" in self._strip(out.getvalue())
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# 11. Version pin — R07.20 is the release in progress
-# ═══════════════════════════════════════════════════════════════════════
-
-
-class TestVersionPin:
-    def test_version_is_r0720(self):
-        """The DECLARED version (runtime __version__ carries a git suffix)."""
-        init_src = (Path(__file__).resolve().parent.parent / "agentkthx" / "__init__.py").read_text(
-            encoding="utf-8"
-        )
-        import re
-
-        match = re.search(r'^__version__ = "([^"]+)"', init_src, re.M)
-        assert match, "__version__ assignment not found"
-        assert match.group(1) == "0.7.20"
-
-    def test_pyproject_is_r0720(self):
-        pyproject = (Path(__file__).resolve().parent.parent / "pyproject.toml").read_text(
-            encoding="utf-8"
-        )
-        assert 'version = "0.7.20"' in pyproject
