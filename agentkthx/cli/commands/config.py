@@ -6,8 +6,21 @@ from __future__ import annotations
 
 import argparse
 
-from ...colors import bright_cyan, bright_green, cyan, dim, green, yellow
+from ...colors import bright_cyan, bright_green, cyan, dim, green, pad_colored, yellow
 from ...config import get_config
+
+# slug (AGENTKTHX_BACKEND value) -> row label in the Cloud Backends listing
+_BACKEND_SLUG_TO_LABEL = {
+    "zai": "ZAI",
+    "openrouter": "OpenRouter",
+    "orcarouter": "OrcaRouter",
+    "gemini": "Gemini",
+    "hf": "HuggingFace",
+    "huggingface": "HuggingFace",
+    "openai": "OpenAI",
+    "mistral": "Mistral",
+    "pollinations": "Pollinations",
+}
 
 
 def cmd_config(args: argparse.Namespace) -> int:
@@ -244,12 +257,6 @@ def cmd_config(args: argparse.Namespace) -> int:
             "Pollinations": POLLINATIONS_BASE_URL,
             "ACP": ACP_BASE_URL,
         },
-        openrouter_key=_mask_key(OPENROUTER_API_KEY),
-        openrouter_default=OPENROUTER_DEFAULT_MODEL,
-        openrouter_free_only=OPENROUTER_FREE_ONLY,
-        zai_key=ZAI_API_KEY,
-        zai_free_only=ZAI_FREE_ONLY,
-        zai_fallback=ZAI_FREE_FALLBACK_MODEL,
         acp_user=ACP_USER,
         acp_pass=ACP_PASS,
         turboquant={
@@ -259,6 +266,7 @@ def cmd_config(args: argparse.Namespace) -> int:
         },
         retry_on_error=RETRY_ON_ERROR,
         max_tool_retries=MAX_TOOL_RETRIES,
+        backend_rows=_backend_auth_rows(AGENTKTHX_BACKEND),
     )
     return 0
 
@@ -272,6 +280,65 @@ def _mask_key(key: str) -> str:
     return f"{key[:4]}{'*' * (len(key) - 8)}{key[-4:]}"
 
 
+def _backend_auth_rows(active_backend: str) -> list[tuple[str, str, str, str, str]]:
+    """One row per cloud backend — ``(marker, label, key, FREE_ONLY, fallback)``.
+
+    Pure so tests can pin the listing without a terminal. ``marker`` is
+    ``' *'`` for the row matching ``active_backend`` (mirrors the Backend
+    URLs section), ``'  '`` otherwise. Keys show ``Set (***last4)`` /
+    ``Not Set`` (never more than the last 4 characters); backends without
+    a free-fallback env var show ``—``.
+    """
+    from ...config import (
+        GEMINI_API_KEY,
+        GEMINI_FREE_ONLY,
+        HF_FREE_FALLBACK_MODEL,
+        HF_FREE_ONLY,
+        HF_TOKEN,
+        MISTRAL_API_KEY,
+        MISTRAL_FREE_FALLBACK_MODEL,
+        MISTRAL_FREE_ONLY,
+        OPENAI_API_KEY,
+        OPENAI_FREE_FALLBACK_MODEL,
+        OPENAI_FREE_ONLY,
+        OPENROUTER_API_KEY,
+        OPENROUTER_FREE_ONLY,
+        ORCAROUTER_API_KEY,
+        ORCAROUTER_FREE_FALLBACK_MODEL,
+        ORCAROUTER_FREE_ONLY,
+        POLLINATIONS_API_KEY,
+        POLLINATIONS_FALLBACK_MODEL,
+        POLLINATIONS_FREE_ONLY,
+        ZAI_API_KEY,
+        ZAI_FREE_FALLBACK_MODEL,
+        ZAI_FREE_ONLY,
+    )
+    from ..auth import mask_key
+
+    active_label = _BACKEND_SLUG_TO_LABEL.get((active_backend or "").lower().strip(), None)
+    specs = [
+        ("ZAI", ZAI_API_KEY, ZAI_FREE_ONLY, ZAI_FREE_FALLBACK_MODEL),
+        ("OpenRouter", OPENROUTER_API_KEY, OPENROUTER_FREE_ONLY, ""),
+        ("OrcaRouter", ORCAROUTER_API_KEY, ORCAROUTER_FREE_ONLY, ORCAROUTER_FREE_FALLBACK_MODEL),
+        ("Gemini", GEMINI_API_KEY, GEMINI_FREE_ONLY, ""),
+        ("HuggingFace", HF_TOKEN, HF_FREE_ONLY, HF_FREE_FALLBACK_MODEL),
+        ("OpenAI", OPENAI_API_KEY, OPENAI_FREE_ONLY, OPENAI_FREE_FALLBACK_MODEL),
+        ("Mistral", MISTRAL_API_KEY, MISTRAL_FREE_ONLY, MISTRAL_FREE_FALLBACK_MODEL),
+        ("Pollinations", POLLINATIONS_API_KEY, POLLINATIONS_FREE_ONLY, POLLINATIONS_FALLBACK_MODEL),
+    ]
+    rows: list[tuple[str, str, str, str, str]] = []
+    for label, key_val, free_only, fallback in specs:
+        marker = " *" if label == active_label else "  "
+        key_display = "Not Set"
+        if key_val:
+            raw = mask_key(key_val)
+            key_display = raw[0].upper() + raw[1:]  # not set→Not Set, set (***x)→Set (***x)
+        free_display = green("ON") if free_only else dim("off")
+        fallback_display = cyan(fallback) if fallback else dim("—")
+        rows.append((marker, label, key_display, free_display, fallback_display))
+    return rows
+
+
 def _print_config_summary(
     backend: str,
     model: str,
@@ -280,12 +347,7 @@ def _print_config_summary(
     debug: bool,
     verbose: bool,
     urls: dict[str, str],
-    zai_key: str,
-    zai_free_only: bool,
-    zai_fallback: str,
-    openrouter_key: str,
-    openrouter_default: str,
-    openrouter_free_only: bool,
+    backend_rows: list[tuple[str, str, str, str, str]],
     acp_user: str,
     acp_pass: str,
     turboquant: dict[str, str],
@@ -325,25 +387,21 @@ def _print_config_summary(
         )
         print(f"   {marker} {dim(name)}{pad}: {cyan(url)}")
 
-    # ── ZAI settings ──────────────────────────────────────────────────────
-    print(f"\n  {yellow('ZAI API')}")
-    key_status = _mask_key(zai_key)
-    free_badge = green("ON") if zai_free_only else dim("OFF")
-    print(f"    {dim('API Key:')}       {key_status}")
-    print(f"    {dim('Free Only:')}     {free_badge}")
-    print(f"    {dim('Fallback Model:')} {cyan(zai_fallback)}")
+    # ── Cloud backends — one line each: API key · FREE_ONLY · fallback ───
+    # R07.20: was two verbose sections (ZAI + OpenRouter only); now every
+    # cloud backend gets one compact row so the whole auth picture fits
+    # in a single glance (mirrors the /auth picker's registry).
+    print(f"\n  {yellow('Cloud Backends')} {dim('(api key / FREE_ONLY / free fallback)')}")
+    for marker, label, key_display, free_display, fallback_display in backend_rows:
+        print(
+            f"   {marker} {pad_colored(dim(label), 14)} {pad_colored(key_display, 17)} "
+            f"FREE_ONLY {pad_colored(free_display, 8)} fallback {fallback_display}"
+        )
 
     # ── ACP credentials ───────────────────────────────────────────────────
     print(f"\n  {yellow('ACP (Agent Control Panel)')}")
     print(f"    {dim('User:')}          {cyan(acp_user)}")
     print(f"    {dim('Password:')}      {_mask_key(acp_pass)}")
-
-    # ── OpenRouter API ────────────────────────────────────────────────────
-    print(f"\n  {yellow('OpenRouter API')}")
-    print(f"    {dim('API Key:')}       {openrouter_key}")
-    print(f"    {dim('Default Model:')} {cyan(openrouter_default)}")
-    free_badge = green("ON") if openrouter_free_only else dim("OFF")
-    print(f"    {dim('Free Only:')}     {free_badge}")
 
     # ── TurboQuant ────────────────────────────────────────────────────────
     print(f"\n  {yellow('TurboQuant')}")
@@ -398,6 +456,10 @@ def _print_config_summary(
         (
             "AGENTKTHX_MODEL_SEED",
             "Override path of the packaged static-catalog seed JSON (testing/offline)",
+        ),
+        (
+            "AGENTKTHX_ENV_FILE",
+            "Persisted env file written by /auth (default ~/.agentkthx/.env; loaded at startup, shell exports win)",
         ),
         (
             "AGENTKTHX_USER_AGENT",

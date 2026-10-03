@@ -17,6 +17,15 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 
+# R07.20: load the persisted env file (~/.agentkthx/.env, AGENTKTHX_ENV_FILE
+# overrides) BEFORE any constant below reads the environment. This is what
+# makes /auth's saved API keys and FREE_ONLY flags apply to every future
+# CLI invocation — shell exports keep precedence (the loader never
+# clobbers an already-set variable).
+from agentkthx.env_file import load_env_file as _load_env_file
+
+_load_env_file()
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # OLLAMA CONFIGURATION (native backend)
 # ═══════════════════════════════════════════════════════════════════════════════

@@ -1,4 +1,4 @@
-"""Interactive ``/auth`` picker — API keys + FREE_ONLY flags (R07.21).
+"""Interactive ``/auth`` picker — API keys + FREE_ONLY flags (R07.20).
 
 Backs the in-chat ``/auth`` slash command: an arrow-key menu over every
 cloud backend's ``*_API_KEY`` and ``*_FREE_ONLY`` environment variable.
@@ -7,11 +7,20 @@ value (hidden input on a TTY). ``q``/Esc closes the menu.
 
 Design notes:
 
-- **Session-local by definition.** Values are applied to ``os.environ``
-  and rebound everywhere AgentKthx has already imported them, so changes
-  take effect immediately in the running session. Nothing is written to
-  disk — the user's shell profile / environment remains the source of
-  truth for persistence (the closing hint says exactly that).
+- **Applied three ways so it always sticks.** A change is written to
+  (1) the persisted env file (``~/.agentkthx/.env``, override with
+  ``AGENTKTHX_ENV_FILE``) so future CLI invocations pick it up via the
+  config-module loader, (2) ``os.environ`` so the running process sees
+  it immediately, and (3) every ``agentkthx`` module global that
+  already imported the constant, so live code paths react without a
+  restart. When the session's current backend matches an edited key,
+  its instance attributes are patched too.
+
+- **Shell exports keep precedence.** The env-file loader never clobbers
+  a variable that is already set in the environment, so profile exports
+  remain the authoritative source; ``/auth`` edits only fill the file
+  (a saved value behind an export is shadowed until the export is
+  removed — the picker says so via the closing hint).
 
 - **Live rebinding is the whole point.** Plugins import their config
   constants at module import time (``from agentkthx.config import
@@ -142,12 +151,16 @@ def flag_state(name: str) -> str:
 
 
 def mask_key(value: str) -> str:
-    """Mask an API key for display — never print more than the last 4 chars."""
+    """Mask an API key for display — never print more than the last 4 chars.
+
+    Asterisk style (``set (***b3x4)``), matching the ``agentkthx config``
+    per-backend listing.
+    """
     if not value:
         return "not set"
     if len(value) <= 8:
-        return "set"
-    return f"set (\u2026{value[-4:]})"
+        return "set (***)"
+    return f"set (***{value[-4:]})"
 
 
 def _menu_labels(entries: list[AuthVar]) -> list[str]:
@@ -204,20 +217,43 @@ def _apply_env(name: str, env_value: str, typed_value) -> list[str]:
 
 
 def set_flag(entry: AuthVar, enabled: bool) -> str:
-    """Set a FREE_ONLY flag to an explicit state (env ``"1"`` / ``"0"``).
+    """Set a FREE_ONLY flag to an explicit state (env ``"1"`` / unset).
 
     Rebinds the boolean into ``agentkthx.config`` and every plugin module
     that imported the constant, so R07.20's return-time filters react on
-    the very next ``list_models()`` / ``generate()`` call.
+    the very next ``list_models()`` / ``generate()`` call. ON is also
+    persisted to the env file; OFF removes the line (absent env = off).
     """
     _apply_env(entry.name, "1" if enabled else "0", bool(enabled))
+    saved = _persist(entry.name, "1" if enabled else None)
     state = "ON" if enabled else "OFF"
-    return f"{entry.name} -> {state}"
+    return f"{entry.name} -> {state}{saved}"
 
 
 def toggle_flag(entry: AuthVar) -> str:
     """Flip a FREE_ONLY flag (the Enter action on a flag row)."""
     return set_flag(entry, not _env_truthy(entry.name))
+
+
+def _persist(name: str, value: str | None) -> str:
+    """Write/clear one env-file line; returns the outcome suffix.
+
+    ``value=None`` removes the line (flag OFF, key clear). Permission or
+    filesystem failures degrade to a warning suffix — the in-session
+    change already applied, only persistence is lost.
+    """
+    from ..colors import dim
+
+    try:
+        from .. import env_file
+
+        if value is None:
+            env_file.remove_env_var(name)
+        else:
+            env_file.save_env_var(name, value)
+        return f"  {dim('[saved to ' + str(env_file.env_file_path()) + ']')}"
+    except OSError as exc:
+        return f"  {dim(f'[env file not written: {exc}]')}"
 
 
 def _patch_live_backend(agent, entry: AuthVar, typed_value) -> bool:
@@ -247,12 +283,13 @@ def _patch_live_backend(agent, entry: AuthVar, typed_value) -> bool:
 
 
 def set_key(entry: AuthVar, value: str, agent=None) -> str:
-    """Set (or clear with ``""``) an API key and propagate it live.
+    """Set (or clear with ``""``) an API key and propagate it everywhere.
 
-    The environment receives the raw value (``os.environ.pop`` on clear),
-    while ``agentkthx.config`` and the plugin module globals are rebound
-    to the string (empty string on clear). If ``agent`` is attached to a
-    matching backend, the instance's key attributes are patched too.
+    Applied to the env file (upsert, or line removal on clear),
+    ``os.environ`` (pop on clear), and rebound as the raw string into
+    ``agentkthx.config`` + the plugin module globals. If ``agent`` is
+    attached to a matching backend, the instance's key attributes are
+    patched too.
     """
     if value:
         _apply_env(entry.name, value, value)
@@ -260,6 +297,7 @@ def set_key(entry: AuthVar, value: str, agent=None) -> str:
     else:
         _apply_env(entry.name, "", "")
         outcome = f"{entry.name} cleared"
+    outcome += _persist(entry.name, value or None)
 
     if value and len(value) < 20:
         outcome += "  (looks short — the provider may reject it)"
@@ -347,6 +385,12 @@ def run_auth_picker(agent=None, *, stdin=None, stdout=None) -> None:
         print(green(set_key(entry, "" if new_value == "-" else new_value, agent)))
 
     print(dim("Auth menu closed."))
+    from ..env_file import env_file_path as _env_file_path
+
     print(
-        yellow("Reminder: /auth changes are session-local — export them in your shell to persist.")
+        yellow(
+            f"Saved to {_env_file_path()} — loaded on every startup; "
+            f"shell exports still take precedence."
+        )
     )
+    print(dim(f"Session already updated — {cyan('/status')} or a new CLI run reflects the change."))

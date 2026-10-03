@@ -527,12 +527,12 @@ def cmd_chat(args: argparse.Namespace) -> int:
                 break
 
             if user_input == "/auth":
-                # R07.21: interactive auth picker — arrow-key menu over every
+                # R07.20: interactive auth picker — arrow-key menu over every
                 # cloud backend's API_KEY and FREE_ONLY env vars. Enter on a
                 # flag flips it; Enter on a key prompts for a value (hidden
-                # input on a TTY). Changes rebind os.environ + the config
-                # module + every imported plugin global, and patch the live
-                # session backend when it matches — session-local only.
+                # input on a TTY). Changes persist to the env file and rebind
+                # os.environ + the config module + every imported plugin
+                # global, and patch the live session backend when it matches.
                 from ..auth import run_auth_picker
 
                 run_auth_picker(agent)
