@@ -157,10 +157,11 @@ except Exception as e:
   # Strategy: strip ANSI codes, find lines that are only-dashes after
   # stripping whitespace, count them, and after the 2nd separator, print
   # the first field of the next non-empty line. SKIP non-chat models
-  # (TTS, audio, image, transcription, embeddings) — they can't run
-  # the shell tool and will 400 with "response modalities not supported".
+  # (TTS, audio, image, transcription, embeddings, Gemma) — they can't
+  # run the shell tool reliably. Gemma models on Gemini's API don't
+  # support thinking_config (hangs) and have poor tool-calling support.
   # Non-chat patterns: -tts, -transcribe, -image, -preview-tts, embed,
-  # dall-e, flux, lyria, whisper, veo, sora, etc.
+  # dall-e, flux, lyria, whisper, veo, sora, gemma-, etc.
   eval "$cmd 2>/dev/null" \
     | sed 's/\x1b\[[0-9;]*m//g' \
     | awk '
@@ -168,8 +169,8 @@ except Exception as e:
         /^[-─]+$/ { sep++; next }
         sep == 2 && NF > 0 {
           name = $1
-          # Skip non-chat models — they 400 on text requests
-          if (name ~ /-tts$|-tts-|-transcribe|-image$|-preview-tts|^embed|dall-e|flux|lyria|whisper|^tts-|-speech/) next
+          # Skip non-chat models — they 400 on text requests or hang
+          if (name ~ /-tts$|-tts-|-transcribe|-image$|-preview-tts|^embed|dall-e|flux|lyria|whisper|^tts-|-speech|^gemma-/) next
           print name; exit
         }
       '
@@ -197,9 +198,9 @@ test_backend() {
   step "agentkthx models --backend $backend ($fo_var=1)"
   local models_output
   if [[ -n "$fo_var" ]]; then
-    models_output=$(env "$fo_var=1" agentkthx models --backend "$backend" 2>&1)
+    models_output=$(env "$fo_var=1" ${DEBUG:+AGENTKTHX_DEBUG=1} agentkthx models --backend "$backend" 2>&1)
   else
-    models_output=$(agentkthx models --backend "$backend" 2>&1)
+    models_output=$(env ${DEBUG:+AGENTKTHX_DEBUG=1} agentkthx models --backend "$backend" 2>&1)
   fi
   local model_count
   # Count actual data rows: lines after the 2nd separator that have content.
@@ -215,13 +216,13 @@ test_backend() {
       ')
   # OpenAI is known to return 0 free models — not a failure
   if [[ "$backend" == "openai" && "$model_count" -eq 0 ]]; then
-    echo "$models_output" | head -8 | sed 's/^/    /'
+    echo "$models_output" | show_output | sed 's/^/    /'
     skip "openai — 0 free models (known: OpenAI has no free tier)"
   elif [[ "$model_count" -gt 0 ]]; then
-    echo "$models_output" | head -8 | sed 's/^/    /'
+    echo "$models_output" | show_output | sed 's/^/    /'
     ok "models listing — $model_count free models"
   else
-    echo "$models_output" | head -8 | sed 's/^/    /'
+    echo "$models_output" | show_output | sed 's/^/    /'
     fail "models listing — no free models returned"
     return
   fi
@@ -241,29 +242,57 @@ test_backend() {
   # response that returns when complete.
   # timeout 120: kill the process if it takes longer than 2 minutes
   # (thinking models can be slow, but 2 min is plenty for "count to 5").
-  step "agentkthx run --backend $backend --model $model --think --no-stream \"count to 5\""
-  local think_output
-  think_output=$(timeout 120 agentkthx run --backend "$backend" --model "$model" \
-    --think --no-stream "Count from 1 to 5. Brief." 2>&1)
-  local think_exit=$?
-  if [[ $think_exit -eq 124 ]]; then
-    fail "run --think timed out after 120s"
-  elif [[ $think_exit -ne 0 ]]; then
-    fail "run --think exited $think_exit"
-    echo "$think_output" | tail -10 | sed 's/^/    /'
-  elif echo "$think_output" | grep -qiE 'reasoning:|thinking:|thought'; then
-    ok "thinking output detected (reasoning panel surfaced)"
-  elif echo "$think_output" | grep -qE '[1-5]'; then
-    ok "run --think produced output (model may not emit reasoning_content — content OK)"
+  #
+  # Skip --think for Gemma models (Gemini backend): Gemma models on Gemini's
+  # API don't support thinking_config — the request hangs instead of
+  # returning an error. Skip the test rather than hang the script.
+  local skip_think=0
+  if [[ "$backend" == "gemini" && "$model" == gemma-* ]]; then
+    skip_think=1
+  fi
+
+  if [[ $skip_think -eq 1 ]]; then
+    step "agentkthx run --backend $backend --model $model --no-stream (think SKIPPED — Gemma doesn't support thinking_config)"
+    local think_output
+    think_output=$(timeout 120 env ${DEBUG:+AGENTKTHX_DEBUG=1} agentkthx run --backend "$backend" --model "$model" \
+      --no-stream "Count from 1 to 5. Brief." 2>&1)
+    local think_exit=$?
+    if [[ $think_exit -eq 124 ]]; then
+      fail "run (no-think) timed out after 120s"
+    elif [[ $think_exit -ne 0 ]]; then
+      fail "run (no-think) exited $think_exit"
+      echo "$think_output" | show_output | sed 's/^/    /'
+    elif echo "$think_output" | grep -qE '[1-5]'; then
+      ok "run (no-think) produced output (Gemma doesn't support thinking — content OK)"
+    else
+      fail "run (no-think) produced no recognizable output"
+      echo "$think_output" | show_output | sed 's/^/    /'
+    fi
   else
-    fail "run --think produced no recognizable output"
-    echo "$think_output" | tail -10 | sed 's/^/    /'
+    step "agentkthx run --backend $backend --model $model --think --no-stream \"count to 5\""
+    local think_output
+    think_output=$(timeout 120 env ${DEBUG:+AGENTKTHX_DEBUG=1} agentkthx run --backend "$backend" --model "$model" \
+      --think --no-stream "Count from 1 to 5. Brief." 2>&1)
+    local think_exit=$?
+    if [[ $think_exit -eq 124 ]]; then
+      fail "run --think timed out after 120s"
+    elif [[ $think_exit -ne 0 ]]; then
+      fail "run --think exited $think_exit"
+      echo "$think_output" | show_output | sed 's/^/    /'
+    elif echo "$think_output" | grep -qiE 'reasoning:|thinking:|thought'; then
+      ok "thinking output detected (reasoning panel surfaced)"
+    elif echo "$think_output" | grep -qE '[1-5]'; then
+      ok "run --think produced output (model may not emit reasoning_content — content OK)"
+    else
+      fail "run --think produced no recognizable output"
+      echo "$think_output" | show_output | sed 's/^/    /'
+    fi
   fi
 
   # ─── step 3: shell tool call ──────────────────────────────────────────
   step "agentkthx run --backend $backend --model $model --tools shell --no-stream"
   local tool_output
-  tool_output=$(timeout 120 agentkthx run --backend "$backend" --model "$model" \
+  tool_output=$(timeout 120 env ${DEBUG:+AGENTKTHX_DEBUG=1} agentkthx run --backend "$backend" --model "$model" \
     --tools shell --security off --no-stream \
     "Use the shell tool to run: echo $SMOKE_MARKER" 2>&1)
   local tool_exit=$?
@@ -271,38 +300,45 @@ test_backend() {
     fail "run --tools shell timed out after 120s"
   elif [[ $tool_exit -ne 0 ]]; then
     fail "run --tools shell exited $tool_exit"
-    echo "$tool_output" | tail -15 | sed 's/^/    /'
+    echo "$tool_output" | show_output | sed 's/^/    /'
   elif echo "$tool_output" | grep -q "$SMOKE_MARKER"; then
     ok "shell tool executed — marker '$SMOKE_MARKER' found in output"
   elif echo "$tool_output" | grep -qiE 'tool shell|tool_calls'; then
     ok "shell tool was invoked (tool-call line present)"
-    echo "$tool_output" | tail -15 | sed 's/^/    /'
+    echo "$tool_output" | show_output | sed 's/^/    /'
   else
     fail "shell tool did not execute (marker not found)"
-    echo "$tool_output" | tail -15 | sed 's/^/    /'
+    echo "$tool_output" | show_output | sed 's/^/    /'
   fi
 }
 
 # ─── parse args ─────────────────────────────────────────────────────────
 # --backend X  test only one backend (overrides SKIP + DEFAULT_BACKENDS)
+# --debug       show ALL output (no head/tail truncation, full agentkthx stderr)
 # --help / -h   usage
 ONLY_BACKEND=""
+DEBUG=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --backend|-b)
       ONLY_BACKEND="$2"
       shift 2
       ;;
+    --debug)
+      DEBUG=1
+      shift
+      ;;
     --help|-h)
-      echo "Usage: $0 [--backend <name>] [SKIP=backends_to_skip]"
+      echo "Usage: $0 [--backend <name>] [--debug] [SKIP=backends_to_skip]"
       echo ""
       echo "Options:"
       echo "  --backend <name>  Test only one backend (zai, openrouter, gemini, etc.)"
+      echo "  --debug           Show ALL output (no head/tail truncation, full agentkthx stderr)"
       echo "  --help            This help message"
       echo ""
       echo "Environment:"
       echo "  SKIP=backends_to_skip  Space-separated list of backends to skip"
-      echo "  AGENTKTHX_DEBUG=1      Verbose mode"
+      echo "  AGENTKTHX_DEBUG=1      Verbose mode (same as --debug)"
       echo ""
       echo "Without --backend, tests all cloud backends found in env."
       exit 0
@@ -318,6 +354,16 @@ if [[ -n "$ONLY_BACKEND" ]]; then
   BACKENDS="$ONLY_BACKEND"
   SKIP=""
 fi
+[[ "${AGENTKTHX_DEBUG:-0}" == "1" ]] && DEBUG=1
+
+# Helper: show output (head/tail when not --debug, full when --debug)
+show_output() {
+  if [[ $DEBUG -eq 1 ]]; then
+    cat
+  else
+    head -15
+  fi
+}
 
 # ─── main ───────────────────────────────────────────────────────────────
 echo "${C_CYAN}⚖ AgentKthx R07.21 Smoke Test${C_RESET}"
