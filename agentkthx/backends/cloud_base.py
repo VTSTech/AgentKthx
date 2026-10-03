@@ -342,6 +342,21 @@ class CloudBackend(OpenAICompatibleBackend):
         """Return the API key."""
         return self._api_key
 
+    @api_key.setter
+    def api_key(self, value: str) -> None:
+        """Set the API key (writes through to ``_api_key``).
+
+        R07.21: the ``/auth`` picker's ``_patch_live_backend`` calls
+        ``setattr(backend, "api_key", new_value)`` to patch a key onto the
+        running session's backend. Pre-R07.21 this raised
+        ``AttributeError: property 'api_key' of 'ZaiBackend' object has no
+        setter`` because the property was read-only. The setter writes
+        through to ``_api_key`` so every consumer (header builders, the
+        ``test_tool_support`` probe, etc.) sees the new value on the next
+        call. Same pattern as ``OpenAICompatibleBackend.base_url``.
+        """
+        self._api_key = value
+
     @property
     def base_url(self) -> str:
         """Return the cloud API base URL."""
