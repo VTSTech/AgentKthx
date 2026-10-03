@@ -1,4 +1,4 @@
-# ⚛️ AgentKthx R07.21
+# ⚛️ AgentKthx R07.22
 
 **Status: Alpha**
 
@@ -41,6 +41,7 @@ Inspired by the architecture of OpenClaw, rebuilt from scratch for local-first o
 | [CREDITS.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/CREDITS.md) | Acknowledges every project, inspiration, API, model creator, and specification that makes AgentKthx possible |
 | [docs/api/](https://github.com/VTSTech/AgentKthx/blob/main/docs/api/) | **API Technical References** — one deep-dive per provider, all in one folder: ZAI, OpenRouter, Gemini, Hugging Face Router, OpenAI, Mistral, Pollinations, OrcaRouter (auth & endpoints, request/response schemas, model catalogs, function calling, streaming, error codes & recovery, rate limits, free-tier behavior, AgentKthx `Backend` + `plugin.json` blueprints, troubleshooting matrices) |
 | [JEV_API_MODE.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/JEV_API_MODE.md) | JEV API mode — System-One decisions via any free LLM (Jev-compatible shape) |
+| [mcp/ROADMAP.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/mcp/ROADMAP.md) | **MCP support** — Phase 1 (client mode, stdio) status + Phase 2 (`kthx-audit` MCP server) + Phase 3 (generic `mcp serve`) plan |
 | [PLUGIN_SPEC_v0.2.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/PLUGIN_SPEC_v0.2.md) | Plugin spec v0.2 — lifecycle hooks, plugin tools API, external plugin roots, dual-form manifests, migration guide from v0.1 |
 | [USAGE.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/USAGE.md) | **Usage guide** — CLI commands, backend configurations (OpenRouter/Gemini/HuggingFace/ZAI/TurboQuant), Python API, persistent memory, security modes, environment variables, full CLI options table |
 | [TESTS.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/TESTS.md) | Benchmark results, model recommendations, and testing guide |
@@ -67,6 +68,7 @@ Inspired by the architecture of OpenClaw, rebuilt from scratch for local-first o
 - **Persistent memory** — SQLite-backed conversation persistence with session management (`--session`); writes are thread-safe (R07.05 ROB-03)
 - **`/model` switch re-derives per-model state** (R07.06 ROB-14) — `num_ctx`, `num_predict`, `model_config`, `model_family` all follow the new model; values pinned via `--num-ctx`/`--num-predict`/`/param` survive the switch
 - **17 built-in tools** — Calculator, shell, file ops (read/write/edit/list/find), HTTP, web search, JSON parse, Python REPL, todo list, datetime, word/char count. Load mid-session via `/tool shell,read_file`
+- **MCP client support** (R07.22) — Connect to external [Model Context Protocol](https://modelcontextprotocol.io) servers via stdio JSON-RPC; their tools are bridged into the agent's registry with `<server>__<tool>` namespacing. `agentkthx mcp init` writes a ready-to-use config (home-dir substituted, `~/projects/` created), `agentkthx mcp probe <name>` verifies a server end-to-end, `agentkthx chat --mcp [server...]` enables MCP tools in a session. All MCP tool output flows through the same `sanitize_tool_output` security boundary as built-in tools. See [docs/mcp/ROADMAP.md](docs/mcp/ROADMAP.md) for the full plan.
 - **Dangerous tool confirmation** — `--confirm` flag for interactive approval of destructive operations
 - **Audit logging** — Automatic JSON-lines logging of shell, write, and edit operations
 - **Argument normalization** — ~100+ tool argument aliases for small model compatibility
@@ -112,6 +114,40 @@ agentkthx agent "Research the latest AgentKthx release"
 
 For backend configs, security modes, environment variables, and the
 complete CLI options table, see [docs/USAGE.md](docs/USAGE.md).
+
+### MCP (Model Context Protocol)
+
+R07.22 adds stdio MCP client support — connect to external MCP servers
+and their tools are bridged into the agent's registry with `<server>__<tool>`
+namespacing. Zero runtime dependencies (stdlib `subprocess` + `json` only),
+all MCP tool output flows through the same `sanitize_tool_output` security
+boundary as built-in tools.
+
+```bash
+# 1. Write a ready-to-use config (uses your actual home dir, creates ~/projects/)
+agentkthx mcp init
+
+# 2. Probe a server end-to-end (initialize → tools/list → optional tool call)
+agentkthx mcp probe filesystem
+agentkthx mcp probe filesystem --call read_text_file '{"path": "/tmp/test.txt"}'
+
+# 3. List configured servers
+agentkthx mcp list
+
+# 4. Enable MCP in a chat session (bare --mcp = all enabled servers)
+agentkthx chat --mcp
+# Or enable a subset:
+agentkthx chat --mcp filesystem sequential-thinking
+
+# 5. Use MCP tools from any agent command (run/agent also supported)
+agentkthx run "list the files in ~/projects" --mcp filesystem
+```
+
+The example config ships with `filesystem` and `sequential-thinking`
+enabled by default (both verified on npm 2026-10-04). The deprecated
+`@modelcontextprotocol/server-git` is included but disabled. See
+[docs/mcp/ROADMAP.md](docs/mcp/ROADMAP.md) for the full MCP plan
+(Phase 2: `kthx-audit` MCP server; Phase 3: generic `agentkthx mcp serve`).
 
 ## LocalClaw Redirect
 

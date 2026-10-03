@@ -5,6 +5,100 @@ All notable changes to AgentKthx will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [R07.22] - 2026-10-04
+
+**MCP (Model Context Protocol) client support — Phase 1 complete.** R07.22 lands stdio MCP client mode, the largest new feature surface since the R07.19 capabilities-first tool-support chain. Agents can now consume tools from external MCP servers (filesystem, sequential-thinking, sqlite, memory, git, serena, brave-search, ...) via stdio JSON-RPC 2.0, with their tools bridged into the existing `ToolRegistry` alongside built-ins. Zero runtime dependencies added — the implementation uses stdlib `subprocess` + `json` only, in keeping with the project's `dependencies = []` invariant.
+
+The release ships a new `agentkthx mcp` subcommand (`init` / `list` / `probe`), `--mcp [SERVER...]` and `--mcp-config PATH` flags on `chat`/`run`/`agent`, and a new `agentkthx/mcp/` package (`config.py` + `transport.py` + `client.py` + `manager.py`). `agentkthx mcp init` writes a ready-to-use config with the user's actual home directory substituted in (no `REPLACE_ME` placeholder) and creates `~/projects/` + `~/repo/` so the filesystem MCP server starts cleanly without manual setup. All MCP tool output flows through the same `sanitize_tool_output` security boundary (8 KB truncation + secret redaction + ANSI strip) as built-in tools — the defense-in-depth posture does not weaken because a tool came from a subprocess.
+
+End-to-end verified against the official `@modelcontextprotocol/server-filesystem` (14 tools, `secure-filesystem-server v0.2.0`) and `@modelcontextprotocol/server-sequential-thinking` (1 tool, `v2026.8.31`). A `chat --mcp filesystem` session with `glm-4.5-flash` correctly picks `filesystem__list_allowed_directories` then `filesystem__list_directory` without any prompt engineering — the system prompt's Tool Reference section enumerates the namespaced MCP tools and the model selects them naturally.
+
+### Added — MCP client package (`agentkthx/mcp/`)
+
+New stdlib-only package implementing MCP client mode over stdio JSON-RPC 2.0:
+
+- **`config.py`** — `MCPServerConfig` dataclass + `load_mcp_config()` + `write_example_config()`. Config file at `~/.agentkthx/mcp.json` (override with `--mcp-config PATH`). Validates: alphanumeric/-/_ server names (used as tool-name prefixes), `command` must be absolute path or `shutil.which`-resolvable (no shell, no `~`), `shell=False` + `close_fds=True` on subprocess spawn. Permission check warns on group/world-writable config files. `write_example_config()` substitutes the user's actual home directory into all path arguments (no `REPLACE_ME` placeholder) and creates `~/projects/` + `~/repo/` if they don't exist — `mcp init` followed by `mcp probe filesystem` works without manual editing.
+- **`transport.py`** — `StdioTransport` wraps one subprocess; newline-delimited JSON-RPC 2.0 over stdin/stdout; stderr captured to a 64-line ring buffer for diagnostics (surfaced on failure). Lazy spawn (subprocess starts on first request, not at transport construction). `close()` sends MCP `shutdown` + `exit` notifications, then `terminate` + `kill` if the process hasn't exited within 2s. Per-transport `threading.Lock` serializes concurrent calls to the same server (JSON-RPC over a single stdio pair is inherently serial); parallel tool calls across servers use multiple transports.
+- **`client.py`** — `MCPClient` wraps a `StdioTransport` and speaks the MCP protocol: `initialize` (sends `protocolVersion: 2025-06-18` + `clientInfo: agentkthx/<version>`), `notifications/initialized`, `tools/list`, `tools/call`. Server-reported `serverInfo` + `capabilities` exposed via read-only properties. Tool *execution* errors (e.g. file-not-found from the filesystem server) are returned as `{"isError": true, ...}` for the model to react to — only protocol/transport errors raise.
+- **`manager.py`** — `MCPManager` orchestrates multiple `MCPClient` instances and bridges their tools into a target `ToolRegistry`. Tool name namespacing: `<server>__<tool>` (the `__` separator cannot appear in either MCP field, eliminating collision risk). Each MCP tool becomes a shim `Tool` whose handler forwards the call to the right `MCPClient`, then pipes the result through `sanitize_tool_output` exactly like built-in tools. `_extract_params()` converts the MCP `inputSchema` (JSON Schema) into the project's flat `ToolParam` list (handles `type: object` + `properties` + `required`, nullable unions `["string", "null"]`, common types). `_flatten_call_result()` converts the MCP `CallToolResult` (list of content items) into a flat string for sanitization; image content is replaced with a placeholder, resource references surface the URI. `describe()` returns a per-server diagnostic dict for `agentkthx mcp list`.
+
+### Added — `agentkthx mcp` subcommand
+
+Three sub-actions, all using only stdlib + the existing `agentkthx.mcp` package:
+
+- **`agentkthx mcp init`** — writes `~/.agentkthx/mcp.json` with home-dir substitution + creates `~/projects/` + `~/repo/`. Refuses to overwrite without `--force`. The embedded example ships `filesystem` + `sequential-thinking` enabled by default (both verified on npm 2026-10-04), `git` disabled (`@modelcontextprotocol/server-git` was removed from npm — 404), `audit` disabled (Phase 2 placeholder). `chmod 0o600` on the written file.
+- **`agentkthx mcp list`** — shows configured servers with enabled/disabled markers, command preview, and timeout. Hints at `agentkthx mcp init` if no config exists.
+- **`agentkthx mcp probe <name>`** — connects to one server, runs `initialize` + `tools/list`, prints the tool surface with descriptions. Optional `--call TOOL JSON_ARGS` round-trips a real `tools/call` and prints the flattened result. Optional `--config PATH` overrides the config file. Exit codes: 0 success, 1 unknown server, 2 connect failed, 3 tools/list failed, 4 bad JSON args, 5 tools/call failed. Surfaces stderr tail on failure for diagnostics.
+
+### Added — `--mcp` / `--mcp-config` CLI flags
+
+Wired into `shared_args.py:add_agent_args` so `chat`, `run`, and `agent` all accept them:
+
+- **`--mcp [SERVER ...]`** — `nargs="*"`, so bare `--mcp` enables all configured servers and `--mcp fs git` enables only the named subset. `default=None` (not passed) is the opt-in sentinel — MCP is off by default.
+- **`--mcp-config PATH`** — overrides the default `~/.agentkthx/mcp.json` path. Useful for maintaining multiple server sets (work vs personal).
+- **Note on `run` ordering**: because `--mcp` uses `nargs="*"`, it greedily consumes everything after the flag. For `agentkthx run`, put the prompt BEFORE `--mcp` (e.g. `agentkthx run hello --mcp fs`). Documented in the flag's help text.
+
+### Added — `_wire_mcp()` in `agent_factory.py`
+
+MCP wiring runs BEFORE `Agent(...)` construction (critical): the system prompt is built during `Agent.__init__`, and it only includes the Tool Reference section when `has_tools=True`. If MCP wired after construction, the prompt would have no tool section and the model would hallucinate `shell` (which isn't even in the registry) instead of picking an MCP tool.
+
+When `--mcp` is passed without `--tools`, `_wire_mcp` creates an empty `ToolRegistry` so MCP tools have somewhere to land — the "MCP-only session" case. The populated registry is stashed as `manager._bridged_registry` so `_build_agent` can pass it to `Agent(tools=...)`. The manager is stashed on `agent._mcp_manager` for cleanup on session exit.
+
+Failure semantics: a server that fails to connect or list tools is SKIPPED with a stderr warning (`MCPManager.connect_all(skip_failures=True)`). The agent still works without that server's tools — a misconfigured MCP server shouldn't kill the chat session. The `chat.py` `finally` block calls `manager.close_all(timeout=1.0)` on every exit path (REPL exit, Ctrl+C, exception).
+
+### Added — `agentkthx mcp` excluded from update check
+
+`agentkthx mcp probe` is a diagnostic against a local subprocess — hitting `pypi.org` on every probe would be pure latency. Added `"mcp"` to the no-update-check list in `cli/main.py` alongside `"version"` and `"update"`.
+
+### Added — SECURITY.md + CONTRIBUTING.md
+
+Two long-missing trust artifacts:
+
+- **`SECURITY.md`** — vulnerability reporting policy (GitHub Security Advisories preferred, `veritas@vts-tech.org` fallback), 72h acknowledgement / 7-day assessment / 30-day fix timeline, scope (in-scope vs out-of-scope), built-in defenses documented (`validate_path`, `sanitize_command`, `is_safe_url`, `safe_eval`, `sanitize_tool_output`, plugin sha256 pins), known security-relevant findings table (SEC-09, SEC-13, ROB-09, ROB-33, ROB-05), update-check transparency (3 HTTPS requests per CLI invocation, no telemetry), hardening recommendations for operators.
+- **`CONTRIBUTING.md`** — project ethos (zero-deps is the feature, hackable over clever, defense-in-depth not sandbox, audit register is canonical), getting started (Python 3.12+, `pip install -e .` + `pytest`/`black`/`ruff`), architecture map, critical files index (7 files with outsize blast radius), 22 landmines, common contribution types (new backend / CLI flag / tool / plugin / test / soul / skill), audit workflow, commit message format, PR checklist, issue triage, release process.
+
+### Added — Audit findings MCP-01..05
+
+New MCP category in `audit/audit.md` with 5 findings:
+
+- **MCP-01** (Medium, near-term) — `StdioTransport._read_response` uses blocking `readline()`; per-call timeouts don't actually interrupt. Same shape as ROB-06/ROB-02. Fix: thread+queue pattern.
+- **MCP-02** (Medium, near-term) — MCP server configs have no sha256 pin equivalent (SEC-13 analogue). An attacker who can write `mcp.json` can substitute any binary for a declared server name. Fix: optional `sha256` field + `AGENTKTHX_REQUIRE_MCP_PINS=1` enforcement mode.
+- **MCP-03** (Low, short-term) — `_extract_params` flattens `oneOf`/`anyOf`/`$ref` JSON Schema constructs to default `string`. Tools with sophisticated schemas appear deceptively simple. Fix: `arguments_json` fallback.
+- **MCP-04** (Low, short-term) — Eager server startup adds ~1–3s to every `--mcp` session even when no MCP tools are called. Fix: lazy mode (spawn on first tool call).
+- **MCP-05** (Low, medium-term) — No `notifications/tools/list_changed` handler. Runtime tool surface changes invisible to the registry until next session. Fix: per-server callback + `ToolRegistry.unregister_tool`.
+
+Priority matrix updated: MCP-01 + MCP-02 in near-term (R07.22–R07.23), MCP-03 + MCP-04 in short-term (R07.23–R07.25), MCP-05 in medium-term (R08.00+).
+
+### Added — `docs/mcp/ROADMAP.md`
+
+Full MCP integration plan: Phase 1 (client mode, stdio, CLI integration — ✅ done), Phase 2 (`kthx-audit` MCP server — planned, ~400 LOC, exposes `agentkthx/skills/codebase-audit/` as a standalone MCP server so any MCP-compatible client can call it), Phase 3 (generic `agentkthx mcp serve` mode), Phase 4 (HTTP/SSE transport — deferred), Phase 5 (MCP-aware souls — speculative). Includes curated free-tier MCP server list with verification dates, decision log, and the 5 audit findings with proposed fixes.
+
+### Tests — 2858 passed (+56 from R07.21)
+
+- `tests/test_mcp_scaffold.py` (23 tests) — config validation, namespacing round-trip, `inputSchema`→`ToolParam` conversion, `CallToolResult` flattening (text/error/image-skip/resource/bare-string), manager describe/require-connect, `write_example_config` home-dir substitution regression guard.
+- `tests/test_mcp_cli.py` (27 tests) — `--mcp`/`--mcp-config` flag wiring on chat/run/agent, `mcp` subcommand registration, `mcp list` happy/empty/missing paths, `mcp init` write/refuse-overwrite/`--force`, `mcp probe` unknown-server error, `_wire_mcp` no-op-when-disabled regression guard, MCP-only-session-creates-empty-registry regression guard for the prompt-engineering fix.
+- `tests/test_r07_19_help_sort.py` — updated root subcommand listing to include `mcp` (alphabetical between `config` and `modelfile`).
+
+### Process — R07.22 release hygiene
+
+- `scripts/bump-version.sh R07.22` applied: bumped 4 sites across 3 files (`pyproject.toml`, `agentkthx/__init__.py` header + `__version__` line, `README.md` header). `agentkthx/mcp/client.py:_CLIENT_VERSION` also bumped to `0.7.22` (sent in MCP `initialize` handshake).
+- `R07.21 (0.7.21)` → `R07.22 (0.7.22)`.
+- Suite: 2802 → 2858 passed (+56 from MCP scaffold + CLI integration tests). Zero regressions; ruff + black clean across all 229 files.
+- End-to-end verified against real `@modelcontextprotocol/server-filesystem` (14 tools) and `@modelcontextprotocol/server-sequential-thinking` (1 tool) MCP servers — initialize → tools/list → tools/call → clean shutdown round-trip works in production, not just in mocked tests.
+- `agentkthx mcp init` → `agentkthx mcp probe filesystem` → `agentkthx chat --mcp filesystem` verified on Ubuntu 26.04.1 LTS with `glm-4.5-flash` backend — the agent correctly picks `filesystem__list_allowed_directories` then `filesystem__list_directory` without any prompt engineering.
+
+### What's NOT in R07.22 (deferred)
+
+- **MCP server mode** (`agentkthx mcp serve`) — Phase 3. Lets AgentKthx expose its own tools as an MCP server so other MCP clients (Claude Desktop, Cline, Continue, mcphost) can consume them.
+- **`kthx-audit` MCP server** — Phase 2. Exposes `agentkthx/skills/codebase-audit/` as a standalone MCP server. ~400 LOC estimate. The dogfood payoff: `agentkthx chat --mcp filesystem git audit` becomes the demo that drives inbound discovery from MCP directories.
+- **HTTP/SSE transport** — Phase 4. stdio covers >90% of use cases; HTTP/SSE adds auth + rate-limiting complexity that isn't justified without demand.
+- **Lazy server startup** — MCP-04. Eager mode (every configured server spawns at agent construction) is simpler and surfaces config errors immediately. Lazy is a Phase 1.x optimization.
+- **`notifications/tools/list_changed`** — MCP-05. Most current MCP servers have a static tool surface, so this is rarely hit in practice.
+- **Plugin pin enforcement for MCP** — MCP-02. Optional `sha256` field on `MCPServerConfig` + `AGENTKTHX_REQUIRE_MCP_PINS=1` env var. SEC-13 analogue.
+- **`docs/mcp/USAGE.md`** — worked-examples doc (filesystem-only coding session, multi-server research setup, audit workflow). Deferred until Phase 2 lands so the doc can include the audit workflow as a working example rather than a forward reference.
+
+---
+
 ## [R07.21] - 2026-10-03 3:05:35 PM
 
 **OpenRouter App Attribution, `/sh` chat command, 14 audit closures, Gemini thought_signature fix, Mistral agent-internal-field stripping, ZAI default-to-NATIVE fix, and a full-backend smoke test harness.** R07.21 is the largest single-release closure batch since R07.00 — 14 OPEN findings closed across three batches, the smoke test verified all 8 cloud backends end-to-end (29 PASS / 0 FAIL / 2 SKIP), and the register moved from 37 OPEN / 68% closure to 26 OPEN / 78% closure.
