@@ -208,11 +208,19 @@ test_backend() {
   step "using model: $model"
 
   # ─── step 2: thinking output ─────────────────────────────────────────
-  step "agentkthx run --backend $backend --think \"count to 5\""
+  # --no-stream: cloud backends default to streaming, which doesn't
+  # terminate cleanly when captured in $(). --no-stream forces a single
+  # response that returns when complete.
+  # timeout 120: kill the process if it takes longer than 2 minutes
+  # (thinking models can be slow, but 2 min is plenty for "count to 5").
+  step "agentkthx run --backend $backend --model $model --think --no-stream \"count to 5\""
   local think_output
-  think_output=$(agentkthx run --backend "$backend" --model "$model" --think "Count from 1 to 5. Brief." 2>&1)
+  think_output=$(timeout 120 agentkthx run --backend "$backend" --model "$model" \
+    --think --no-stream "Count from 1 to 5. Brief." 2>&1)
   local think_exit=$?
-  if [[ $think_exit -ne 0 ]]; then
+  if [[ $think_exit -eq 124 ]]; then
+    fail "run --think timed out after 120s"
+  elif [[ $think_exit -ne 0 ]]; then
     fail "run --think exited $think_exit"
     echo "$think_output" | tail -10 | sed 's/^/    /'
   elif echo "$think_output" | grep -qiE 'reasoning:|thinking:|thought'; then
@@ -225,13 +233,15 @@ test_backend() {
   fi
 
   # ─── step 3: shell tool call ──────────────────────────────────────────
-  step "agentkthx run --backend $backend --tools shell --security off"
+  step "agentkthx run --backend $backend --model $model --tools shell --no-stream"
   local tool_output
-  tool_output=$(agentkthx run --backend "$backend" --model "$model" \
-    --tools shell --security off \
+  tool_output=$(timeout 120 agentkthx run --backend "$backend" --model "$model" \
+    --tools shell --security off --no-stream \
     "Use the shell tool to run: echo $SMOKE_MARKER" 2>&1)
   local tool_exit=$?
-  if [[ $tool_exit -ne 0 ]]; then
+  if [[ $tool_exit -eq 124 ]]; then
+    fail "run --tools shell timed out after 120s"
+  elif [[ $tool_exit -ne 0 ]]; then
     fail "run --tools shell exited $tool_exit"
     echo "$tool_output" | tail -15 | sed 's/^/    /'
   elif echo "$tool_output" | grep -q "$SMOKE_MARKER"; then
