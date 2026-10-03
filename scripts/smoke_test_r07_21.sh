@@ -131,6 +131,25 @@ first_free_model() {
   local backend="$1"
   local fo_var
   fo_var=$(free_only_var "$backend")
+  # R07.21: clear the persistent JSON cache for this backend before listing
+  # so a stale entry (e.g. a model Google deprecated since the cache was
+  # populated) doesn't surface. The cache lives at
+  # ~/.cache/agentkthx/model_catalog.json and is keyed by backend name.
+  # Clearing forces a re-seed from the (corrected) seed JSON.
+  local cache_file="${XDG_CACHE_HOME:-$HOME/.cache}/agentkthx/model_catalog.json"
+  if [[ -f "$cache_file" ]]; then
+    python3 -c "
+import json, pathlib, sys
+p = pathlib.Path('$cache_file')
+try:
+    d = json.loads(p.read_text())
+    if '$backend' in d:
+        del d['$backend']
+        p.write_text(json.dumps(d, indent=2))
+except Exception as e:
+    pass  # corrupt cache — the next agentkthx run will rebuild it
+" 2>/dev/null
+  fi
   local cmd="agentkthx models --backend $backend"
   if [[ -n "$fo_var" ]]; then
     cmd="env $fo_var=1 $cmd"
@@ -143,7 +162,7 @@ first_free_model() {
     | awk '
         { gsub(/^[[:space:]]+|[[:space:]]+$/, "") }
         /^[-─]+$/ { sep++; next }
-        sep >= 2 && NF > 0 { print $1; exit }
+        sep == 2 && NF > 0 { print $1; exit }
       '
 }
 
@@ -182,7 +201,7 @@ test_backend() {
     | awk '
         { gsub(/^[[:space:]]+|[[:space:]]+$/, "") }
         /^[-─]+$/ { sep++; next }
-        sep >= 2 && NF > 0 && $0 !~ /^Total:/ { count++ }
+        sep == 2 && NF > 0 { count++ }
         END { print count+0 }
       ')
   # OpenAI is known to return 0 free models — not a failure
@@ -254,6 +273,42 @@ test_backend() {
     echo "$tool_output" | tail -15 | sed 's/^/    /'
   fi
 }
+
+# ─── parse args ─────────────────────────────────────────────────────────
+# --backend X  test only one backend (overrides SKIP + DEFAULT_BACKENDS)
+# --help / -h   usage
+ONLY_BACKEND=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --backend|-b)
+      ONLY_BACKEND="$2"
+      shift 2
+      ;;
+    --help|-h)
+      echo "Usage: $0 [--backend <name>] [SKIP=backends_to_skip]"
+      echo ""
+      echo "Options:"
+      echo "  --backend <name>  Test only one backend (zai, openrouter, gemini, etc.)"
+      echo "  --help            This help message"
+      echo ""
+      echo "Environment:"
+      echo "  SKIP=backends_to_skip  Space-separated list of backends to skip"
+      echo "  AGENTKTHX_DEBUG=1      Verbose mode"
+      echo ""
+      echo "Without --backend, tests all cloud backends found in env."
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1 (use --help)" >&2
+      exit 1
+      ;;
+  esac
+done
+
+if [[ -n "$ONLY_BACKEND" ]]; then
+  BACKENDS="$ONLY_BACKEND"
+  SKIP=""
+fi
 
 # ─── main ───────────────────────────────────────────────────────────────
 echo "${C_CYAN}⚖ AgentKthx R07.21 Smoke Test${C_RESET}"
