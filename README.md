@@ -23,10 +23,12 @@ Inspired by the architecture of OpenClaw, rebuilt from scratch for local-first o
 <img width="1291" height="940" alt="image" src="https://github.com/user-attachments/assets/d0e48efd-a738-442a-9e8e-ead7bddb6c03" />
 <img width="1498" height="721" alt="image" src="https://github.com/user-attachments/assets/f1f1e13b-c489-4fc3-b05c-9f6084818e7b" />
 <img width="1117" height="882" alt="image" src="https://github.com/user-attachments/assets/d3e1a716-f3df-4383-ade2-c34882dbddb8" />
-<img width="729" height="436" alt="image" src="https://github.com/user-attachments/assets/f5306ec6-77b1-4dee-8a20-d675e63814b2" />
+<img width="1247" height="622" alt="image" src="https://github.com/user-attachments/assets/f71e2221-57ac-4c15-850b-206039a95063" />
 <img width="848" height="316" alt="image" src="https://github.com/user-attachments/assets/86724683-b217-4788-9277-1e16b65d74c2" />
-<img width="626" height="620" alt="image" src="https://github.com/user-attachments/assets/df0d91ec-8be5-47f1-a5fb-e89e57cdd38f" />
-<img width="1219" height="662" alt="image" src="https://github.com/user-attachments/assets/063d6ece-ad1d-4ac6-901e-5634cc3222a9" />
+<img width="1067" height="342" alt="image" src="https://github.com/user-attachments/assets/8b7870ca-5393-46b4-8d7a-0ea165cb2d41" />
+<img width="791" height="587" alt="image" src="https://github.com/user-attachments/assets/49b94726-e0d6-4d90-ad9d-a52ab2bac601" />
+<img width="672" height="617" alt="image" src="https://github.com/user-attachments/assets/59b4a074-fd8a-4970-8289-5ec671324a94" />
+
 
 
 ## 📚 Documentation
