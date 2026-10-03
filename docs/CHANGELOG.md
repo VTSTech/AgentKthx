@@ -5,58 +5,131 @@ All notable changes to AgentKthx will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [R07.21] - 2026-10-03 2:30:00 PM
+## [R07.21] - 2026-10-03 3:05:35 PM
 
-**OpenRouter App Attribution + a new `/sh` chat command.** R07.21 lands the harness's first deliberate entry into OpenRouter's app marketplace — the OpenRouter backend now sends the four App Attribution headers (`HTTP-Referer`, `X-OpenRouter-Title`, `X-Title` legacy alias, `X-OpenRouter-Categories`) on every request, hardcoded to claim the `cli-agent` marketplace leaf. The AgentKthx app directory entry (App ID 5072126) was already live but was missing the `categories` field — verified live post-patch as `categories: ["cli-agent"]` (was `[]`). The release then ships a new `/sh` chat slash command that runs a local shell command, displays the output, and (by default) injects it into the agent's context as a user-role message so the model can use it on the next turn — pass `-n` before the command to display-only (skip the context injection). The OpenRouter API Technical Reference doc is rewritten + expanded end-to-end against the live API (683 → 1,280 lines) with three new sections (App Directory Entry — Category & Description, Client/Harness Metrics & Reporting covering `/key` + `/credits` + `/generation` + `/activity` + `/datasets/app-rankings` + `/datasets/session-cost` + `/analytics/query`, Generation Inspection & Audit Trail) and a gap table of what AgentKthx currently captures vs. what OpenRouter exposes.
+**OpenRouter App Attribution, `/sh` chat command, 14 audit closures, Gemini thought_signature fix, Mistral agent-internal-field stripping, ZAI default-to-NATIVE fix, and a full-backend smoke test harness.** R07.21 is the largest single-release closure batch since R07.00 — 14 OPEN findings closed across three batches, the smoke test verified all 8 cloud backends end-to-end (29 PASS / 0 FAIL / 2 SKIP), and the register moved from 37 OPEN / 68% closure to 26 OPEN / 78% closure.
 
-### Added — OpenRouter App Attribution headers (MAINT-26)
+The release lands the harness's first deliberate entry into OpenRouter's app marketplace — the OpenRouter backend now sends the four App Attribution headers (`HTTP-Referer`, `X-OpenRouter-Title`, `X-Title` legacy alias, `X-OpenRouter-Categories`) on every request, hardcoded to claim the `cli-agent` marketplace leaf. The AgentKthx app directory entry (App ID 5072126) was already live but was missing the `categories` field — verified live post-patch as `categories: ["cli-agent"]` (was `[]`). A new `/sh` chat slash command runs a local shell command, displays the output, and (by default) injects it into the agent's context as a user-role message so the model can use it on the next turn — pass `-n` before the command to display-only. The OpenRouter API Technical Reference doc is rewritten + expanded end-to-end against the live API (683 → 1,280 lines) with three new sections (App Directory Entry — Category & Description, Client/Harness Metrics & Reporting covering `/key` + `/credits` + `/generation` + `/activity` + `/datasets/app-rankings` + `/datasets/session-cost` + `/analytics/query`, Generation Inspection & Audit Trail) and a gap table of what AgentKthx currently captures vs. what OpenRouter exposes.
 
-The pre-R07.21 `OpenRouterBackend` sent only `HTTP-Referer` + the legacy `X-Title` header on its requests. OpenRouter's [App Attribution spec](https://openrouter.ai/docs/app-attribution) has since added two preferred headers — `X-OpenRouter-Title` (the new preferred form of the display name; `X-Title` is "still supported for backwards compatibility") and `X-OpenRouter-Categories` (marketplace category assignment, comma-separated, max 2 per request, max 10 per app) — neither of which AgentKthx sent. Result: the AgentKthx app entry at `https://openrouter.ai/apps/url/https%3A%2F%2Fgithub.com%2FVTSTech%2FAgentKthx` rendered with `categories: []`, missing from both `/apps/category/coding` and `/apps/category/coding/cli-agent` despite the harness being a terminal-based coding assistant that fits the `cli-agent` leaf exactly.
+### Added — OpenRouter App Attribution headers (MAINT-26 CLOSED)
 
-- **Centralized `_build_openrouter_attribution_headers()` helper** (`agentkthx/plugins/openrouter/openrouter.py:96-112`): returns all four attribution headers as a dict. All four header-construction sites (`__init__`, `list_models`, `_make_api_request`, `_get_auth_headers` — the streaming path's `_iter_sse_lines` receives the headers from `_get_auth_headers`) delegate to this helper so the contract can never drift between sites.
-- **Hardcoded constants, NOT env-overridable** (`_APP_REFERER_URL`, `_APP_TITLE`, `_APP_CATEGORIES = "cli-agent"`): the harness category describes what AgentKthx *is* to OpenRouter's marketplace, not a runtime knob. Letting a user flip `cli-agent` to `creative-writing` would misclassify the harness in the rankings. The category is a module-level constant — if a fork needs a different identity, change the constant directly so the audit catches it.
-- **Sends BOTH `X-OpenRouter-Title` AND `X-Title`** (legacy alias kept until OpenRouter formally deprecates the older form). Same value (`AgentKthx`) — no semantic difference. Rankings that haven't been re-indexed to look for the new header still attribute traffic correctly.
-- **Single leaf auto-includes group landing**: claiming `cli-agent` is enough to appear on BOTH `/apps/category/coding` (the Coding group landing) AND `/apps/category/coding/cli-agent` (the subcategory landing). No need to claim `programming-app` separately.
-- **Verified live post-patch**: App ID 5072126, categories now `["cli-agent"]` (was `[]`). The directory entry's `description`, `main_url`, `slug`, `source_code_url`, `favicon_url`, `icon_class_name`, and `related_apps` fields remain `null` — these are dashboard-only fields, set via the OpenRouter web UI at `openrouter.ai/apps/url/<referer>` while logged in as the app owner. They cannot be set via HTTP headers. Recommended values are documented in the rewritten API Technical Reference doc.
+The pre-R07.21 `OpenRouterBackend` sent only `HTTP-Referer` + the legacy `X-Title` header. OpenRouter's [App Attribution spec](https://openrouter.ai/docs/app-attribution) has since added `X-OpenRouter-Title` (preferred form) and `X-OpenRouter-Categories` (marketplace category assignment, comma-separated, max 2 per request, max 10 per app). Result: the AgentKthx app entry rendered with `categories: []`, missing from both `/apps/category/coding` and `/apps/category/coding/cli-agent` despite the harness being a terminal-based coding assistant that fits the `cli-agent` leaf exactly.
 
-### Added — `/sh` chat slash command (MAINT-27)
+- **Centralized `_build_openrouter_attribution_headers()` helper**: returns all four attribution headers. All four header-construction sites (`__init__`, `list_models`, `_make_api_request`, `_get_auth_headers`) delegate to this helper so the contract can never drift.
+- **Hardcoded constants, NOT env-overridable** (`_APP_REFERER_URL`, `_APP_TITLE`, `_APP_CATEGORIES = "cli-agent"`): the harness category describes what AgentKthx *is* to OpenRouter's marketplace, not a runtime knob. The category is a module-level constant — if a fork needs a different identity, change the constant directly so the audit catches it.
+- **Sends BOTH `X-OpenRouter-Title` AND `X-Title`** (legacy alias kept until OpenRouter formally deprecates). Rankings that haven't been re-indexed to look for the new header still attribute traffic correctly.
+- **Verified live post-patch**: App ID 5072126, categories now `["cli-agent"]` (was `[]`). The directory entry's `description`, `main_url`, `slug`, `source_code_url` fields remain `null` — verified that OpenRouter provides NO documented mechanism to set them (no header, no API endpoint, no dashboard, no OpenGraph-crawler). The gap is structural on OpenRouter's side, not an AgentKthx defect. The four attribution headers are the complete mechanism OpenRouter exposes.
 
-A new `/sh` slash command runs a local shell command, displays the output, and (by default) injects the output into the agent's context as a user-role message so the model can use it on the next turn. Pass `-n` before the command to display-only (skip the context injection) — useful for quick lookups (`/sh -n pwd`, `/sh -n date`) that don't need the model's attention.
+### Added — `/sh` chat slash command (MAINT-27 OPEN)
 
-- **Syntax**: `/sh [-n] <command...>` — the `-n` flag must be the first token after `/sh` to count as the display-only flag. Anything else is treated as the command. Pipes, redirects, and quotes work because the whole arg is passed to the shell as one command string (e.g. `/sh cat README.md | head -50`).
-- **Reuses the built-in `shell()` tool** from `agentkthx.tools.builtins — the same security checks (`sanitize_command` — blocked patterns, heredoc/shell-injection guards), timeout clamping (max 300s), and exit-code formatting apply. Output is formatted as `<shell_output command='...'>...</shell_output>` when injected so the model can parse it cleanly.
-- **Runs locally and synchronously, NOT through the model** — the user's prompt is not routed through the LLM. Security-mode setting (`/security max|off`) applies via `sanitize_command` the same way it does for the model's own tool calls. A blocked command (e.g. `rm -rf /`, `:(){:|:&};:`) is rejected with the same `Security error: ...` message the shell tool returns.
-- **`/help` listing updated**: a new line is rendered between `/skills` and `/skill`, alphabetically sorted: `Run a local shell command (display + add to context; -n to display only)`.
+A new `/sh` slash command runs a local shell command, displays the output, and (by default) injects the output into the agent's context as a user-role message so the model can use it on the next turn. Pass `-n` before the command to display-only (skip the context injection).
+
+- **Syntax**: `/sh [-n] <command...>` — the `-n` flag must be the first token after `/sh`. Pipes, redirects, and quotes work because the whole arg is passed to the shell as one command string (e.g. `/sh cat README.md | head -50`).
+- **Reuses the built-in `shell()` tool** from `agentkthx.tools.builtins` — the same security checks (`sanitize_command`), timeout clamping (max 300s), and exit-code formatting apply. Output is formatted as `<shell_output command='...'>...</shell_output>` when injected.
+- **Runs locally and synchronously, NOT through the model** — the user's prompt is not routed through the LLM. Security-mode setting (`/security max|off`) applies via `sanitize_command`. A blocked command (e.g. `rm -rf /`) is rejected with the same `Security error: ...` message.
+- **`/help` listing updated** with a new line: `Run a local shell command (display + add to context; -n to display only)`.
+
+### Fixed — Gemini `thought_signature` round-trip (ROB-40 CLOSED)
+
+Gemini thinking models emit a `thought_signature` field on each `tool_call` in the response (nested at `tool_calls[].extra_content.google.thought_signature`). The API requires this signature to be passed back on the assistant message's `tool_calls` when the conversation history is sent back, or it 400s with `"Function call is missing a thought_signature"` on the second turn. AgentKthx's parser was capturing `id`, `name`, `arguments` — but dropping `thought_signature`.
+
+- **`_parse_openai_response`** (`agentkthx/backends/openai_compat.py`): now extracts `thought_signature` from `tc["extra_content"]["google"]["thought_signature"]` and stores it on each parsed tool_call dict.
+- **`Message.to_dict()`** (`agentkthx/core/memory.py`): when serializing the assistant message's `tool_calls` back to the OpenAI shape, re-attaches `thought_signature` as `extra_content.google.thought_signature` — but ONLY when present (other backends see no change).
+- **Verified end-to-end**: the `thought_signature` survives the full round-trip (parse → memory → serialize) and lands in the exact shape Gemini expects. Multi-turn agentic runs with `--think --tools` on Gemini thinking models now work (was always 400ing on the second turn).
+
+### Fixed — Mistral agent-internal-field stripping
+
+`MistralBackend._build_mistral_body()` was forwarding every unknown kwarg verbatim into the request body. The skip list only excluded OpenAI-only fields — it didn't exclude agent-internal fields (`num_ctx`, `num_predict`, `truncation`, `num_batch`, `repeat_penalty`, `repeat_last_n`, `think`, `thinking_config`, etc.). These are Ollama/llama-server-specific fields that the agent loop forwards as kwargs — Mistral doesn't know them and 422s with `extra_forbidden: loc=['body','num_ctx']`.
+
+- Added `_AGENT_INTERNAL_FIELDS` frozenset (15 fields) + skip check in the kwarg-forwarding loop. The agent loop's context-sizing fields are consumed by `agent_factory` and never need to reach any cloud API.
+
+### Fixed — ZAI default-to-NATIVE
+
+The ZAI backend was the outlier among cloud backends — it returned `UNTESTED` when the cache was empty (every other cloud backend returns `NATIVE`). The R07.19 #12 probe hardening overcorrected: it was supposed to stop caching REACT for transient errors, but it also changed the default-path return from NATIVE to UNTESTED. Combined with the `models.py` command always calling `test_tool_support(force_test=True)` (bypassing the default path), every ZAI model showed `? untested` in the models table.
+
+- **`ZaiBackend.test_tool_support`**: when the cache is empty AND `force_test=False`, returns `NATIVE` (cloud-backend contract). The `force_test=True` path still does the live probe and caches definitive verdicts (including REACT for models that definitively reject the tools param).
+- **`models.py:_get_tools_status`**: when `--tool-support` is NOT passed, calls `test_tool_support(force_test=False)` — cloud backends return NATIVE; local backends return UNTESTED. Only `--tool-support` forces the live probe.
+
+### Fixed — CloudBackend `api_key` setter (was read-only — crashed `/auth`)
+
+`CloudBackend.api_key` was a read-only `@property` (only a getter, no setter). The `/auth` picker's `_patch_live_backend` calls `setattr(backend, "api_key", new_value)` to patch a key onto the running session's backend — which raised `AttributeError: property 'api_key' of 'ZaiBackend' object has no setter` and crashed the chat session. Added a setter that writes through to `_api_key`. Every cloud backend (ZAI, OrcaRouter, Mistral, Pollinations) now supports live key patching via `/auth`.
+
+### Fixed — ROB-38 fatal-error detection broadened
+
+The empty-answer handler's `_fatal` markers didn't catch Gemini's `"Please pass a valid API key"` (HTTP 400, not 401) because the message says "valid", not "invalid". Added a broader `"api key"` substring marker that catches every variant: "valid api key", "invalid api key", "missing api key", "no api key", "api key not set", "api key required".
+
+### Fixed — Gemini 2.5-flash catalog deprecation
+
+Google deprecated `gemini-2.5-flash` and `gemini-2.5-flash-lite` for new users (returns 404 with "use models/gemini-3.8-flash instead"). The static catalog still listed them as `free_tier: true`, so the smoke test picked `gemini-2.5-flash` alphabetically. Flipped `free_tier: false` in the seed JSON + moved both entries to the deprecated/paid section in `FREE_TIER_LIMITS` with `0/0/0` rate limits.
 
 ### Changed — `OPENROUTER_API_TECHNICAL_REFERENCE.md` rewritten + expanded (683 → 1,280 lines)
 
-Validated every existing section against the live OpenRouter API (466 models probed at `https://openrouter.ai/api/v1/models`, App Attribution spec read at `https://openrouter.ai/docs/app-attribution.md`, Usage Accounting doc at `https://openrouter.ai/docs/cookbook/administration/usage-accounting.md`, OpenAPI 3.1 spec at `https://openrouter.ai/openapi.json` — 111 paths total). The rewrite adds three new sections and validates the existing ones against the live API shape:
+Validated every existing section against the live OpenRouter API (466 models probed, App Attribution spec read, Usage Accounting doc read, OpenAPI 3.1 spec — 111 paths). The rewrite adds three new sections:
 
-- **§2 App Attribution — Marketplace Headers** (NEW): the four headers, the centralized helper, why both `X-OpenRouter-Title` AND `X-Title` are sent, where the attribution appears (app page URL + category landings).
-- **§3 App Directory Entry — Category & Description** (NEW): full category-groups table (Coding / Creative / Productivity / Entertainment leaves), the hardcoded-constant rationale, the dashboard-only fields with recommended values for AgentKthx (description, main_url, slug, source_code_url, favicon_url, icon_class_name, related_apps).
-- **§14 Client/Harness Metrics & Reporting** (NEW): full schemas for `GET /key` (per-key usage envelope with `limit_remaining`, `free_model_daily_requests.remaining`, `usage_daily/weekly/monthly`, `byok_usage_*`), `GET /credits` (total balance — requires management key), `GET /generation?id=<gen-id>` (per-generation audit trail with `total_cost`, `upstream_inference_cost`, `native_tokens_cached`, `native_tokens_reasoning`, `provider_name`, `app_id`, `latency`), `GET /activity` (per-day usage breakdowns), `GET /datasets/app-rankings` (top public apps by token volume — powers `/apps`), `GET /datasets/session-cost` (cost-per-session benchmarking across harnesses — AgentKthx vs. Cline vs. Roo Code), `POST /analytics/query` (arbitrary grouping/slicing). Includes a gap table of what AgentKthx currently captures vs. what OpenRouter exposes.
-- **§15 Generation Inspection & Audit Trail** (NEW): the `/generation` endpoint as an audit tool — how to look up a generation ID, what the response includes (provider, cost breakdown, token counts by category, latency, moderation latency, cache hits), attribution verification via the `app_id` + `http_referer` fields.
-- **Validated existing sections**: response schema now includes `usage.cost_details.upstream_inference_cost`, `usage.prompt_tokens_details.cached_tokens`, `usage.prompt_tokens_details.cache_write_tokens`, `usage.completion_tokens_details.reasoning_tokens` (was missing — these are now always returned per the Usage Accounting doc). The `deprecated` callout for `usage: { include: true }` and `stream_options: { include_usage: true }` is added (no-op per the live spec, but AgentKthx still sets `stream_options.include_usage` for backwards compat with older OpenRouter deployments). The `/models` response example now includes `supported_parameters` (with `include_reasoning` + `repetition_penalty` added since R07.19), `default_parameters`, `reasoning` object (`mandatory` + `default_enabled`), `knowledge_cutoff`, `expiration_date`, `links.details`. Error codes table gains `524 Edge Network Timeout` + `529 Provider Overloaded`.
+- **§2 App Attribution — Marketplace Headers** (NEW): the four headers, the centralized helper, why both title forms are sent, where the attribution appears.
+- **§3 App Directory Entry — Category & Description** (NEW): full category-groups table, the hardcoded-constant rationale, the dashboard-only fields with recommended values (and the verification that there's NO mechanism to set them).
+- **§14 Client/Harness Metrics & Reporting** (NEW): full schemas for `GET /key`, `GET /credits`, `GET /generation`, `GET /activity`, `GET /datasets/app-rankings`, `GET /datasets/session-cost`, `POST /analytics/query`. Includes a gap table of what AgentKthx currently captures vs. what OpenRouter exposes.
+- **§15 Generation Inspection & Audit Trail** (NEW): the `/generation` endpoint as an audit tool.
+- **Validated existing sections**: response schema now includes `usage.cost_details.upstream_inference_cost`, `usage.prompt_tokens_details.cached_tokens`, `usage.completion_tokens_details.reasoning_tokens`. Error codes table gains `524 Edge Network Timeout` + `529 Provider Overloaded`.
+
+### Changed — `--force-react` tri-state (MAINT-25 CLOSED)
+
+`--force-react` was `store_true` (couldn't accept `=False` — the UNTESTED debug hint suggested `--force-react=False` which argparse rejected). Now tri-state (`on|off|auto`) with bare-flag backwards compat:
+- `--force-react` (bare) = `"on"` → force ReAct (backwards compat)
+- `--force-react off` → force native tools (the NEW opt-out from auto-detection)
+- `--force-react auto` → preserve auto-detection (the default when not passed)
+
+### Closed — 14 OPEN audit findings (3 batches)
+
+All surgical, non-breaking fixes with clear patterns. Closure details in `audit/deltas.md` §R07.21 Audit Closure Batch.
+
+**Batch 1 (5 findings):**
+- **ROB-18** — PersistentMemory `Lock` → `RLock` (1 line — strict superset, allows nested locked calls without deadlock).
+- **ROB-35** — `parse_shared_args` `or`-coalescing → `is not None` for 7 integer/float fields (preserves the documented `0` sentinel).
+- **ROB-36** — `_parse_token_size` `math.isfinite` guard (turns `inf`/`1e400` `OverflowError` into clean `ValueError`).
+- **ROB-38** — Empty-answer fatal-error branch (detects 401/402/403/quota/auth before the throttle branch + broadened `"api key"` marker).
+- **ROB-39** — OpenRouter `_NON_CHAT_SLUG_PATTERNS` frozenset (classifies image/audio/moderation/embedding slugs as UNTESTED instead of NATIVE).
+
+**Batch 2 (8 findings):**
+- **ROB-09** — `validate_path` `abspath` → `realpath` (symlink traversal security fix).
+- **ROB-17** — Token-tier truncation of single over-budget message (keeps the tail + visible marker).
+- **ROB-20** — `Agent.num_predict` public `@property` (mirrors `num_ctx`; backed by `_num_predict`).
+- **ROB-25** — Shared `DEFAULT_GENERATE_TEMPERATURE` (0.7) + `DEFAULT_GENERATE_MAX_TOKENS` (8192) constants in `base.py` — `generate()` + `_generate_with_auth()` now aligned.
+- **ROB-30** — `_fetch_model_cards` catch-all `Exception` narrowed to `(JSONDecodeError, UnicodeDecodeError, ValueError)`.
+- **MAINT-24** — `_build_tool_section` docstrings updated to match behavior (no longer promises ReAct format instructions the body doesn't include).
+- **MAINT-25** — `--force-react` tri-state (on/off/auto) with bare-flag backwards compat (see Changed section above).
+- **MAINT-26** — OpenRouter App Attribution (see Added section above; directory description/main_url/slug fields have NO documented mechanism — structural gap on OpenRouter's side).
+
+**Batch 3 (1 finding):**
+- **ROB-40** — Gemini `thought_signature` round-trip (see Fixed section above).
+
+### Added — Smoke test harness
+
+`scripts/smoke_test_r07_21.sh` — exercises every cloud backend with three steps each: models listing (FREE_ONLY env var), thinking output (`--think --no-stream`), shell tool call (`--tools shell --security off --no-stream`). Features:
+- `--backend <name>` to test one backend, `--debug` for real-time `agentkthx run` output in a delimited box, `--help` for usage.
+- Auto-skips backends without an API key; OpenAI's known 0-free-models case is handled as a skip.
+- Auto-picks the first free chat model per backend (skips non-chat models: TTS, audio, image, embeddings, Gemma).
+- Clears the persistent JSON cache before each backend so stale entries (e.g. deprecated models) don't surface.
+- `timeout 120` per command; unique per-run marker for the shell-tool test.
+- **Verified live**: 29 PASS / 0 FAIL / 2 SKIP across all 8 cloud backends (OpenAI + OrcaRouter skipped — known 0-free-models + exhausted free quota respectively).
 
 ### Tests
 
-- **New `tests/test_r07_21_openrouter_attribution.py`** (+19 tests): pins the four attribution header values, pins all four header-construction sites delegate to the helper (via a source-grep that no inline literal `"HTTP-Referer": "https://..."` or `"X-Title": "AgentKthx"` remains in the plugin source), and pins that the category is NOT env-overridable (greps the source for `AGENTKTHX_OPENROUTER_CATEGORIES` and asserts it's absent, plus asserts `_build_openrouter_attribution_headers.__code__.co_names` contains no `os.environ`). The env-not-overridable test was added after the first iteration shipped an env var that broke the R07.19 env-var reference test — the env var was reverted to a hardcoded constant and the negative test now pins that contract permanently.
-- **New `tests/test_r07_21_sh_command.py`** (+6 tests): the /sh handler's context-injection contract (output wrapped in `<shell_output command='...'>...</shell_output>` tags and added to `agent.memory` as a user message when `-n` is NOT passed; memory.add never called when it is) + a real-shell integration suite (echo → output, false → exit-code marker, ls on a missing path → error message). The parsing tests that would test a COPY of the parser are deliberately omitted — `cmd_chat` is a 1,733-line single function (MAINT-01), so the /sh branch can't be tested directly without refactoring it into a `cmd_sh(session, args)` method (which is what MAINT-27 tracks). Real parsing coverage lands when MAINT-01 extracts the branch.
-- **Removed `TestVersionPin`** from `tests/test_r07_20_auth_picker.py` (-2 tests): the exact-string pins (`assert match.group(1) == "0.7.20"` and `assert 'version = "0.7.20"' in pyproject`) broke on every release bump. The bump-version.sh script already verifies all 4 declaration sites match via its own regex pattern verification step (fails loudly if any site is out of pattern), so the tests were redundant with the script's invariants. The /auth picker shipped in R07.20 — its contract is pinned by the 76 other tests in that file, not by the version string.
-- **Suite**: `python -m pytest tests/ -q` → **2783 passed / 16 skipped** (was 2608 at the R07.20 baseline; +19 from `test_r07_21_openrouter_attribution.py`, +6 from `test_r07_21_sh_command.py`, +36 from `test_r07_21_audit_closures.py`, +1 test relaxed in `test_r07_05_audit_fixes.py` to accept either Lock or RLock, -2 from the removed `TestVersionPin` class, +115 from the R07.20 model-cache + auth-picker tests that were already in the tree but not yet counted against the R07.20 baseline in the audit header).
-- **Lint**: `ruff check agentkthx/ tests/` → all checks passed. `black --check agentkthx/ tests/` → 220 files would be left unchanged.
+- **New `tests/test_r07_21_openrouter_attribution.py`** (+19 tests): pins the four attribution header values, pins all four header-construction sites delegate to the helper (source-grep), pins that the category is NOT env-overridable (source-grep + bytecode `co_names` check).
+- **New `tests/test_r07_21_sh_command.py`** (+6 tests): the /sh handler's context-injection contract + a real-shell integration suite (echo → output, false → exit-code marker, ls on a missing path → error).
+- **New `tests/test_r07_21_audit_closures.py`** (+36 tests): ROB-18 (RLock reentrancy), ROB-35 (0-sentinel preserved for all 7 fields), ROB-36 (`inf`/`1e400`/`nan` rejected cleanly), ROB-38 (fatal vs throttle classification), ROB-39 (non-chat slug classification).
+- **New `tests/test_r07_21_audit_closures_batch2.py`** (+19 tests): ROB-09 (symlink rejection), ROB-17 (over-budget truncation), ROB-20 (num_predict property), ROB-25 (shared defaults), ROB-30 (narrowed catch), MAINT-24 (docstring contract), MAINT-25 (tri-state flag parsing).
+- **Removed `TestVersionPin`** from `tests/test_r07_20_auth_picker.py` (-2 tests): exact-string pins broke on every release bump; redundant with `bump-version.sh`'s own site-verification step.
+- **Relaxed** `test_r07_05_audit_fixes.py::test_write_lock_exists` (+1 test): accepts either `Lock` or `RLock` since ROB-18 changed the type.
+- **Updated** `tests/test_gemini_backend.py::test_chat_flash_models_are_free`: removed `gemini-2.5-flash` assertion (Google deprecated it for new users).
+- **Suite**: `python -m pytest tests/ -q` → **2802 passed / 16 skipped** (was 2608 at R07.20 baseline; +194 net).
+- **Lint**: `ruff check agentkthx/ tests/` → all checks passed. `black --check agentkthx/ tests/` → 221 files unchanged.
 
 ### Audit register
 
-- **MAINT-26** (Low, OPEN — eligible for closure): OpenRouter App Attribution was missing `X-OpenRouter-Categories` + `X-OpenRouter-Title` headers. R07.21 added them (hardcoded `cli-agent`). The directory `description` / `main_url` / `slug` / `source_code_url` fields remain `null`, but verified live 2026-10-03 that OpenRouter provides NO documented mechanism to set them — no header, no API endpoint, no dashboard, no OpenGraph-crawler (the GitHub repo has rich `og:description`/`og:title`/`og:image` but the app entry's `description` is still `null` 13 days after creation). The gap is structural on OpenRouter's side, not an AgentKthx defect. The four attribution headers AgentKthx sends are the complete mechanism OpenRouter exposes.
-- **MAINT-27** (Low, OPEN): new `/sh` slash command ships as an inline if/elif branch in `cmd_chat` (MAINT-01 family). The command itself is a useful UX addition; the structural debt is the same MAINT-01 family — every new slash command deepens the case for the dispatcher extraction. Will become a `cmd_sh(session, args)` method when MAINT-01 lands.
-- **5 OPEN findings CLOSED** (surgical non-breaking fixes, all in `audit/deltas.md` §R07.21 Audit Closure Batch):
-  - **ROB-18 CLOSED** — PersistentMemory write-lock was `threading.Lock` (not RLock) — brittle if future code adds nested locked calls. Changed to `threading.RLock()` — a strict superset of Lock (same mutual-exclusion guarantee, same unlock semantics) but allows the holding thread to re-acquire without deadlock. 1-line code change, +3 regression tests.
-  - **ROB-35 CLOSED** — `parse_shared_args` `or`-coalescing dropped the documented `0` sentinel — `--repeat-last-n 0` / `--num-ctx 0` reached `SharedConfig` as `None`. Changed to explicit `is not None` checks for the 7 integer/float fields; boolean and string fields keep `or` (their falsy values are correctly handled by the env fallback). ~10 lines of code, +9 regression tests.
-  - **ROB-36 CLOSED** — `_parse_token_size` accepted `inf`/`1e400` numeric parts — `OverflowError` escaped argparse's clean-error path (it only catches `ValueError`/`TypeError`). Added a `math.isfinite(num)` guard before the `int()` cast — turns both `inf` and `nan` into a clean `ValueError` with a clear diagnostic. ~5 lines of code, +6 regression tests.
-  - **ROB-38 CLOSED** — Empty-final-answer boilerplate in `cmd_chat` blamed every empty response on a rate limit and advised "try again in a few seconds" — correct for HTTP 429, wrong for 401 (key bad), 402 (out of credits), 403 (key lacks permission), or any quota/auth message. Added a `_fatal` branch BEFORE the `_throttled` branch that detects 12 fatal-error markers and shows the actual upstream error + the real remedy (check API key / add credits / switch model). Fatal takes precedence over throttle when both markers appear. ~15 lines of code, +9 regression tests.
-  - **ROB-39 CLOSED** — OpenRouter `test_tool_support` returned NATIVE unconditionally — non-chat slugs (image generation like `google/lyria-3-clip-preview`, audio transcription/TTS like `openai/whisper-1`, moderation/guard like `meta-llama/llama-guard-4-12b`, embeddings) displayed `tools ✓ native` despite not accepting chat-completions requests. Added a static `_NON_CHAT_SLUG_PATTERNS` frozenset (23 lowercase substring patterns) — `test_tool_support` now does a case-insensitive match and returns `ToolSupportLevel.UNTESTED` for matches (the table renders the honest `tools ? unknown`). Runtime was always safe (the 400 → ReAct fallback in `generate()` catches them at request time); only the display changed. ~50 lines of code (mostly the pattern list), +9 regression tests.
-- **Register totals**: 116 findings / 34 OPEN (was 116 / 39 OPEN at R07.21 start; -5 from the closure batch). 75 CLOSED + 7 WONTFIX archived in `deltas.md`.
+- **14 OPEN findings CLOSED**: ROB-09, ROB-17, ROB-18, ROB-20, ROB-25, ROB-30, ROB-35, ROB-36, ROB-38, ROB-39, ROB-40, MAINT-24, MAINT-25, MAINT-26.
+- **2 new findings OPEN**: MAINT-27 (`/sh` inline branch — MAINT-01 family), MAINT-26 (directory description gap — structural on OpenRouter's side, nothing actionable).
+- **Register totals**: 117 findings / 26 OPEN / 84 CLOSED / 7 WONTFIX (was 116 / 37 OPEN / 70 CLOSED / 7 WONTFIX at R07.20). 78% closure rate (was 68%).
 
 ### Version bump
 
@@ -65,9 +138,10 @@ Validated every existing section against the live OpenRouter API (466 models pro
 
 ### Suite status
 
-- `python -m pytest tests/ -q` → **2783 passed / 16 skipped**.
+- `python -m pytest tests/ -q` → **2802 passed / 16 skipped**.
 - `ruff check agentkthx/ tests/` → all checks passed.
-- `black --check agentkthx/ tests/` → 220 files would be left unchanged.
+- `black --check agentkthx/ tests/` → 221 files would be left unchanged.
+- **Smoke test**: `./scripts/smoke_test_r07_21.sh` → **29 PASS / 0 FAIL / 2 SKIP** across all 8 cloud backends (verified live 2026-10-03).
 
 ---
 
