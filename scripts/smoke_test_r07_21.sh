@@ -92,16 +92,59 @@ has_key() {
   return 1
 }
 
+# Return the FREE_ONLY env var name for a backend (or "" if none).
+free_only_var() {
+  local backend="$1"
+  case "$backend" in
+    zai)         echo "ZAI_FREE_ONLY" ;;
+    openrouter)  echo "OPENROUTER_FREE_ONLY" ;;
+    orcarouter)  echo "ORCAROUTER_FREE_ONLY" ;;
+    gemini)      echo "GEMINI_FREE_ONLY" ;;
+    huggingface) echo "HF_FREE_ONLY" ;;
+    openai)      echo "OPENAI_FREE_ONLY" ;;
+    mistral)     echo "MISTRAL_FREE_ONLY" ;;
+    pollinations) echo "POLLINATIONS_FREE_ONLY" ;;
+    *)           echo "" ;;
+  esac
+}
+
 # Pick a default free model per backend — the first free model the listing
-# returns. We grab it dynamically so this doesn't go stale.
+# returns. We grab it dynamically so this doesn't go stale. Sets the
+# per-backend FREE_ONLY env var inline so the listing is free-filtered.
+#
+# The models table format (with ANSI dim codes on separators) is:
+#     ⚖ AgentKthx - Available Models
+#       Backend: https://api.z.ai
+#     --------separator--------
+#       Name           Context    tools    think
+#     --------separator--------
+#       glm-4.5-flash  132000     ○ react  ✓ yes
+#     --------separator--------
+#     Total: N models
+#     Legend: ...
+#
+# We skip past the SECOND separator (the one after the column header), then
+# grab the first non-empty line's first field. The separator lines are
+# indented + ANSI-dim, so we match on "line containing only dashes after
+# stripping whitespace + ANSI codes".
 first_free_model() {
   local backend="$1"
-  # `agentkthx models --backend X --free` prints a table; the first model
-  # name is on the line after the separator, in the first column. We strip
-  # leading whitespace and take the first token.
-  agentkthx models --backend "$backend" --free 2>/dev/null \
-    | awk '/^[-─]/ {getline; print $1; exit}' \
-    | head -1
+  local fo_var
+  fo_var=$(free_only_var "$backend")
+  local cmd="agentkthx models --backend $backend"
+  if [[ -n "$fo_var" ]]; then
+    cmd="env $fo_var=1 $cmd"
+  fi
+  # Strategy: strip ANSI codes, find lines that are only-dashes after
+  # stripping whitespace, count them, and after the 2nd separator, print
+  # the first field of the next non-empty line.
+  eval "$cmd 2>/dev/null" \
+    | sed 's/\x1b\[[0-9;]*m//g' \
+    | awk '
+        { gsub(/^[[:space:]]+|[[:space:]]+$/, "") }
+        /^[-─]+$/ { sep++; next }
+        sep >= 2 && NF > 0 { print $1; exit }
+      '
 }
 
 # ─── per-backend test ───────────────────────────────────────────────────
@@ -117,12 +160,31 @@ test_backend() {
   fi
   ok "API key present"
 
-  # ─── step 1: model listing (free only) ────────────────────────────────
-  step "agentkthx models --backend $backend --free"
+  # ─── step 1: model listing (free only via per-backend FREE_ONLY env var) ──
+  # FREE_ONLY is controlled by per-backend env vars (ZAI_FREE_ONLY,
+  # OPENROUTER_FREE_ONLY, etc.) — there is no --free CLI flag. We set the
+  # env var inline for the duration of the command.
+  local fo_var
+  fo_var=$(free_only_var "$backend")
+  step "agentkthx models --backend $backend ($fo_var=1)"
   local models_output
-  models_output=$(agentkthx models --backend "$backend" --free 2>&1)
+  if [[ -n "$fo_var" ]]; then
+    models_output=$(env "$fo_var=1" agentkthx models --backend "$backend" 2>&1)
+  else
+    models_output=$(agentkthx models --backend "$backend" 2>&1)
+  fi
   local model_count
-  model_count=$(echo "$models_output" | grep -cE '^\s+\S' || true)
+  # Count actual data rows: lines after the 2nd separator that have content.
+  # The old grep counted every indented line (incl. "Backend:", "Name Context...")
+  # which inflated the count. Strip ANSI + count rows after the 2nd separator.
+  model_count=$(echo "$models_output" \
+    | sed 's/\x1b\[[0-9;]*m//g' \
+    | awk '
+        { gsub(/^[[:space:]]+|[[:space:]]+$/, "") }
+        /^[-─]+$/ { sep++; next }
+        sep >= 2 && NF > 0 && $0 !~ /^Total:/ { count++ }
+        END { print count+0 }
+      ')
   # OpenAI is known to return 0 free models — not a failure
   if [[ "$backend" == "openai" && "$model_count" -eq 0 ]]; then
     echo "$models_output" | head -8 | sed 's/^/    /'
