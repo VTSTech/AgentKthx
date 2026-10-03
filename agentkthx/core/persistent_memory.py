@@ -70,17 +70,30 @@ def _get_db_path(db_path: str | None = None) -> str:
 # The guard lock makes get-or-create atomic; between the lookup and the
 # caller's ``self._write_lock = ...`` assignment the lock object cannot be
 # collected (strong local reference).
-_write_locks: "weakref.WeakValueDictionary[str, threading.Lock]" = weakref.WeakValueDictionary()
+_write_locks: "weakref.WeakValueDictionary[str, threading.RLock]" = weakref.WeakValueDictionary()
 _write_locks_guard = threading.Lock()
 
 
-def _get_write_lock(db_path: str) -> threading.Lock:
-    """Return the process-wide write lock for this database path (MAINT-15)."""
+def _get_write_lock(db_path: str) -> "threading.RLock":
+    """Return the process-wide write lock for this database path (MAINT-15).
+
+    ROB-18 (R07.21 CLOSED): the lock type is RLock, not Lock. A plain Lock
+    deadlocks the moment a future code path adds a nested locked call (e.g.
+    ``add()`` calling ``_write_message()`` which acquires the same lock).
+    RLock is a strict superset of Lock for every external caller — same
+    mutual-exclusion guarantee, same unlock semantics — but allows the
+    holding thread to re-acquire without deadlock. The MAINT-15 per-DB-path
+    registry keeps its semantics unchanged.
+    """
     key = os.path.realpath(db_path)
     with _write_locks_guard:
         lock = _write_locks.get(key)
         if lock is None:
-            lock = threading.Lock()
+            # ROB-18 (R07.21 CLOSED): RLock, not Lock — allows nested
+            # locked calls (e.g. a future ``add()`` that calls
+            # ``_write_message()`` which acquires the same lock) without
+            # deadlock. External callers see no behavior change.
+            lock = threading.RLock()
             _write_locks[key] = lock
         return lock
 

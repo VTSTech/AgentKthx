@@ -862,6 +862,57 @@ class OpenRouterBackend(OpenAICompatibleBackend):
             except Exception:
                 pass
 
+    # ROB-39 (R07.21 CLOSED): non-chat OpenRouter slugs that the /models
+    # endpoint lists but that don't actually accept chat-completions
+    # requests. The unconditional ``return ToolSupportLevel.NATIVE`` below
+    # made the models-table display ``tools ✓ native`` for them, which
+    # overstated the capability — runtime was safe (the 400 → ReAct
+    # fallback in generate() catches them), but the table lied. This
+    # frozenset carries name-PATTERNS (lowercase substring match against
+    # the model id) that mark a slug as non-chat; ``test_tool_support``
+    # returns UNKNOWN for matching slugs so the table renders
+    # ``tools ? unknown`` instead. The patterns are conservative — only
+    # slugs that are unambiguously non-chat (image generation, audio
+    # transcription/TTS, moderation/guard models) are listed. New non-chat
+    # slugs can be added here without touching the rest of the method.
+    _NON_CHAT_SLUG_PATTERNS: frozenset[str] = frozenset(
+        {
+            # Audio transcription / TTS
+            "whisper",
+            "tts",
+            "speech",
+            "audio-transcri",
+            "transcribe",
+            # Image generation
+            "stable-audio",
+            "lyria",
+            "imagen",
+            "flux",
+            "stable-diffusion",
+            "stablediffusion",
+            "sdxl",
+            "dall-e",
+            # Moderation / guard models
+            "llama-guard",
+            "guard",
+            "moderation",
+            # Embedding models (some leak into /models)
+            "embed",
+            # Vision-only encoders
+            "clip",
+            # Audio-only encoders
+            "audio-clip",
+            # Text-to-video
+            "veo",
+            "sora",
+            "kling",
+            "pika",
+            # Code-completion-only (not chat) — note we DON'T include
+            # ``codestral`` here because Mistral's chat-capable Codestral
+            # is hosted on OpenRouter as a chat model.
+        }
+    )
+
     def test_tool_support(
         self,
         model: str,
@@ -872,8 +923,21 @@ class OpenRouterBackend(OpenAICompatibleBackend):
 
         OpenRouter is a cloud aggregator that only exposes models which
         already support native function calling on their underlying
-        provider. We therefore assume NATIVE for every model without
-        probing — no live API call is made.
+        provider. We therefore assume NATIVE for every CHAT-capable model
+        without probing — no live API call is made.
+
+        ROB-39 (R07.21 CLOSED): non-chat slugs (image generation, audio
+        transcription/TTS, moderation/guard models, embeddings) are now
+        classified as UNKNOWN instead of NATIVE. The /models endpoint
+        lists them, but they don't actually accept chat-completions
+        requests — the old unconditional NATIVE made the models-table
+        display ``tools ✓ native`` for them, overstating the capability.
+        Runtime was always safe (the 400 → ReAct fallback in generate()
+        catches them), but the table now renders the honest
+        ``tools ? unknown``. The non-chat patterns live in
+        ``_NON_CHAT_SLUG_PATTERNS`` (lowercase substring match against the
+        model id); new patterns can be added there without touching the
+        rest of this method.
 
         The actual generate() path keeps a defensive ReAct fallback for
         the rare case where a specific free / fine-tuned model rejects
@@ -886,8 +950,16 @@ class OpenRouterBackend(OpenAICompatibleBackend):
             force_test: Ignored — kept for API compatibility with other backends
 
         Returns:
-            ToolSupportLevel.NATIVE for every model.
+            ToolSupportLevel.NATIVE for chat-capable models;
+            ToolSupportLevel.UNTESTED for non-chat slugs (ROB-39).
         """
+        # ROB-39 (R07.21 CLOSED): classify non-chat slugs as UNKNOWN.
+        # Substring match against the lowercase model id — patterns are
+        # conservative (only unambiguous non-chat slugs).
+        _model_lower = model.lower()
+        for pattern in self._NON_CHAT_SLUG_PATTERNS:
+            if pattern in _model_lower:
+                return ToolSupportLevel.UNTESTED
         return ToolSupportLevel.NATIVE
 
     # _build_openai_body() is inherited from OpenAICompatibleBackend (ARCH-01)

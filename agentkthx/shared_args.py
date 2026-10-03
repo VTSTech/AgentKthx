@@ -32,6 +32,7 @@ Written by VTSTech — https://www.vts-tech.org
 from __future__ import annotations
 
 import argparse
+import math
 import os
 from dataclasses import dataclass, field
 from typing import Optional
@@ -435,12 +436,49 @@ def add_agent_args(
 def parse_shared_args(args) -> SharedConfig:
     """Parse shared args into a SharedConfig, falling back to env vars.
 
+    ROB-35 (R07.21 CLOSED): the ``or``-coalescing used here dropped the
+    documented ``0`` sentinel — ``--repeat-last-n 0`` ("0 = full context"
+    per its own help text) reached ``SharedConfig`` as ``None`` (or the
+    env-var value), because ``0 or _env_int(...)`` short-circuits to the
+    env fallback when the arg is ``0``. The integer fields now use
+    explicit ``is not None`` checks so ``0`` is preserved. The boolean
+    fields (``force_react``, ``debug``, ``acp``, ``fast``,
+    ``use_modelfile_system``) keep the ``or`` pattern because ``False``
+    falling through to the env var is the correct behavior for them. The
+    string fields (``model``, ``acp_url``) keep ``or`` because empty
+    string is not a meaningful value.
+
     Args:
         args: Parsed argparse Namespace object.
 
     Returns:
         SharedConfig with values from args or env vars.
     """
+    # ROB-35 (R07.21 CLOSED): explicit ``is not None`` for integer/float
+    # fields so the documented ``0`` sentinel survives the coalescing
+    # (was ``or _env_int(...)`` which short-circuits to env on ``0``).
+    _num_ctx = getattr(args, "num_ctx", None)
+    if _num_ctx is None:
+        _num_ctx = _env_int("AGENTKTHX_NUM_CTX")
+    _num_predict = getattr(args, "num_predict", None)
+    if _num_predict is None:
+        _num_predict = _env_int("AGENTKTHX_NUM_PREDICT")
+    _num_batch = getattr(args, "num_batch", None)
+    if _num_batch is None:
+        _num_batch = _env_int("AGENTKTHX_NUM_BATCH")
+    _repeat_penalty = getattr(args, "repeat_penalty", None)
+    if _repeat_penalty is None:
+        _repeat_penalty = _env_float("AGENTKTHX_REPEAT_PENALTY")
+    _repeat_last_n = getattr(args, "repeat_last_n", None)
+    if _repeat_last_n is None:
+        _repeat_last_n = _env_int("AGENTKTHX_REPEAT_LAST_N")
+    _temperature = getattr(args, "temperature", None)
+    if _temperature is None:
+        _temperature = _env_float("AGENTKTHX_TEMPERATURE")
+    _top_p = getattr(args, "top_p", None)
+    if _top_p is None:
+        _top_p = _env_float("AGENTKTHX_TOP_P")
+
     return SharedConfig(
         force_react=getattr(args, "force_react", False)
         or os.environ.get("AGENTKTHX_FORCE_REACT", "0") == "1",
@@ -450,14 +488,13 @@ def parse_shared_args(args) -> SharedConfig:
         debug=getattr(args, "debug", False) or os.environ.get("AGENTKTHX_DEBUG", "0") == "1",
         acp=getattr(args, "acp", False) or os.environ.get("AGENTKTHX_ACP", "0") == "1",
         acp_url=getattr(args, "acp_url", None) or os.environ.get("AGENTKTHX_ACP_URL"),
-        num_ctx=getattr(args, "num_ctx", None) or _env_int("AGENTKTHX_NUM_CTX"),
-        num_predict=getattr(args, "num_predict", None) or _env_int("AGENTKTHX_NUM_PREDICT"),
-        num_batch=getattr(args, "num_batch", None) or _env_int("AGENTKTHX_NUM_BATCH"),
-        repeat_penalty=getattr(args, "repeat_penalty", None)
-        or _env_float("AGENTKTHX_REPEAT_PENALTY"),
-        repeat_last_n=getattr(args, "repeat_last_n", None) or _env_int("AGENTKTHX_REPEAT_LAST_N"),
-        temperature=getattr(args, "temperature", None) or _env_float("AGENTKTHX_TEMPERATURE"),
-        top_p=getattr(args, "top_p", None) or _env_float("AGENTKTHX_TOP_P"),
+        num_ctx=_num_ctx,
+        num_predict=_num_predict,
+        num_batch=_num_batch,
+        repeat_penalty=_repeat_penalty,
+        repeat_last_n=_repeat_last_n,
+        temperature=_temperature,
+        top_p=_top_p,
         fast=getattr(args, "fast", False) or os.environ.get("AGENTKTHX_FAST", "0") == "1",
     )
 
@@ -534,6 +571,21 @@ def _parse_token_size(s) -> int:
             raise ValueError(
                 f"token size: bad numeric part {num_part!r} in {s!r} "
                 f"(expected forms like '128k', '2.5m', '1g')"
+            )
+        # ROB-36 (R07.21 CLOSED): reject inf/nan before the int() cast.
+        # ``float("inf")`` and ``float("1e400")`` succeed without raising,
+        # but ``int(inf * 1024)`` raises ``OverflowError`` — which argparse
+        # does NOT convert to a clean usage error (it only catches
+        # ValueError/TypeError), so the user saw a raw traceback. The
+        # ``math.isfinite`` guard turns both into a clean ``ValueError``
+        # that argparse formats with the flag name. Same treatment for
+        # ``nan`` (``float("nan")`` succeeds, ``int(nan)`` raises
+        # ``ValueError``, but the error message is opaque — fail with a
+        # clear diagnostic instead).
+        if not math.isfinite(num):
+            raise ValueError(
+                f"token size: numeric part {num_part!r} in {s!r} is not finite "
+                f"(inf/nan are not valid token sizes)"
             )
         mult = {"k": 1024, "m": 1024**2, "g": 1024**3}[last.lower()]
         return sign * int(num * mult)

@@ -80,10 +80,20 @@ class TestRob03ThreadSafeWrites:
     """Verify PersistentMemory writes are thread-safe via _write_lock."""
 
     def test_write_lock_exists(self, tmp_path):
-        """PersistentMemory has a _write_lock attribute (threading.Lock)."""
+        """PersistentMemory has a _write_lock attribute (threading.Lock or RLock).
+
+        ROB-18 (R07.21 CLOSED): the lock type is RLock, not Lock — RLock is
+        a strict superset of Lock (same mutual-exclusion guarantee, same
+        unlock semantics) but allows the holding thread to re-acquire
+        without deadlock. The test accepts either type so the ROB-18 fix
+        doesn't break the ROB-03 regression pin.
+        """
         pm = PersistentMemory(db_path=str(tmp_path / "test.db"))
         assert hasattr(pm, "_write_lock")
-        assert isinstance(pm._write_lock, type(threading.Lock()))
+        # Accept Lock OR RLock — both satisfy the ROB-03 thread-safety contract.
+        # RLock is the post-ROB-18 type (allows nested locked calls); Lock
+        # is the pre-ROB-18 type (kept for the historical contract).
+        assert isinstance(pm._write_lock, (type(threading.Lock()), type(threading.RLock())))
 
     def test_concurrent_writes_no_error(self, tmp_path):
         """Concurrent writes from multiple threads don't raise OperationalError.

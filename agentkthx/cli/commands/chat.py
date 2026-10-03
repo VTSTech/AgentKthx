@@ -1704,6 +1704,30 @@ def cmd_chat(args: argparse.Namespace) -> int:
                 if result.steps:
                     _last_err = getattr(result.steps[-1], "error", "") or ""
                 _low = _last_err.lower()
+                # ROB-38 (R07.21 CLOSED): detect definitive FATAL errors
+                # (auth/quota/credits) BEFORE the throttle branch. The old
+                # boilerplate blamed every empty answer on a rate limit and
+                # advised "try again in a few seconds" — correct for 429,
+                # wrong for 401 (key bad), 402 (out of credits), 403 (key
+                # lacks permission for this model). A user who followed the
+                # advice for a 402 would just hit the same wall again. The
+                # fatal branch names the real problem and points at the
+                # remedy (regenerate key / add credits / pick a different
+                # model). The throttle branch is unchanged for genuine 429s.
+                _fatal = (
+                    "401" in _low
+                    or "unauthorized" in _low
+                    or "authentication failed" in _low
+                    or "invalid api key" in _low
+                    or "402" in _low
+                    or "payment required" in _low
+                    or "insufficient credit" in _low
+                    or "out of credit" in _low
+                    or "quota" in _low
+                    or "403" in _low
+                    or "forbidden" in _low
+                    or "permission" in _low
+                )
                 _throttled = (
                     "rate limit" in _low
                     or "ratelimit" in _low
@@ -1712,7 +1736,31 @@ def cmd_chat(args: argparse.Namespace) -> int:
                     or "no choices" in _low
                     or "provider returned error" in _low
                 )
-                if _throttled:
+                if _fatal:
+                    print(f"\n{red('AgentKthx: (empty response)')}")
+                    print(
+                        red(
+                            "  The model returned no content because of a fatal "
+                            "error — NOT a rate limit."
+                        )
+                    )
+                    # Print the actual error so the user can see the real
+                    # cause (the upstream error message is the truth).
+                    if _last_err:
+                        print(dim(f"  Last error: {_last_err[:200]}"))
+                    print(
+                        yellow(
+                            "  Fix: check your API key (401), add credits (402), "
+                            "or switch to a model your key can access (403)."
+                        )
+                    )
+                    print(
+                        dim(
+                            "  Use /auth to set a new key, or /model to pick a "
+                            "different model, then send 'continue'."
+                        )
+                    )
+                elif _throttled:
                     print(f"\n{yellow('⏸  Run paused — the provider kept rate-limiting this model '
                                    'even after repeated retries.')}")
                     print(

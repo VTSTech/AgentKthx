@@ -1,17 +1,17 @@
 # Audit Deltas — Closed & Wontfix Archive
 
 **Project:** AgentKthx  
-**Release:** R07.15
-**Date:** 2026-09-29  
-**Archived:** 2026-09-29 (R07.15 closure batch)
-**Counts:** 70 CLOSED · 7 WONTFIX · 77 total
+**Release:** R07.21  
+**Date:** 2026-10-03  
+**Archived:** 2026-10-03 (R07.21 closure batch — ROB-18, ROB-35, ROB-36, ROB-38, ROB-39)  
+**Counts:** 75 CLOSED · 7 WONTFIX · 82 total
 
-> Counts corrected 2026-09-30 during the R07.16 re-audit: the R07.15 second
-> batch (ROB-11, ROB-22, FEAT-02, TEST-06) was archived without updating this
-> header, which still read 64 CLOSED · 7 WONTFIX · 71 total. The 75 detail
-> sections below were always the source of truth. Counts updated again at
-> R07.19 (ROB-34 and ROB-37 closures): 70 CLOSED · 7 WONTFIX ·
-> 77 total — the 77 detail sections below remain the source of truth.
+> Counts updated at R07.21 (5 closures: ROB-18, ROB-35, ROB-36, ROB-38, ROB-39 —
+> all surgical non-breaking fixes with clear patterns; +36 regression tests in
+> `tests/test_r07_21_audit_closures.py`, +1 test relaxed in
+> `tests/test_r07_05_audit_fixes.py` to accept either Lock or RLock since
+> ROB-18 changed the type). The 82 detail sections below are the source of
+> truth. Prior count: 70 CLOSED · 7 WONTFIX · 77 total at R07.19.
 
 This file is the archive of CLOSED and WONTFIX findings moved out of
 `audit.md` to keep the active audit focused on OPEN findings.
@@ -101,6 +101,11 @@ This file is the archive of CLOSED and WONTFIX findings moved out of
 | TEST-06 | Medium | Testing | ✓ CLOSED R07.15 | CI doesn't run black --check or ruff check — code style drift undetected |
 | ROB-11 | Low | Robustness | ✓ CLOSED R07.15 | Plugin load-failure path calls unregister() which may itself fail — leaves partial registrations |
 | ROB-22 | Low | Robustness | ✓ CLOSED R07.15 | _iter_sse_lines has no exhaustion-raise matching non-streaming path — minor UX inconsistency |
+| ROB-18 | Low | Robustness | ✓ CLOSED R07.21 | PersistentMemory write-lock was threading.Lock (not RLock) — brittle if future code adds nested locked calls; RLock is a strict superset (same mutual-exclusion guarantee, allows reentrancy) |
+| ROB-35 | Low | Robustness | ✓ CLOSED R07.21 | parse_shared_args or-coalescing dropped the documented 0 sentinel — --repeat-last-n 0 / --num-ctx 0 reached SharedConfig as None; now uses is-not-None so 0 is preserved |
+| ROB-36 | Low | Robustness | ✓ CLOSED R07.21 | _parse_token_size accepted inf/1e400 numeric parts — OverflowError escaped argparse's clean-error path; math.isfinite guard turns both into a clean ValueError |
+| ROB-38 | Low | Robustness | ✓ CLOSED R07.21 | Empty-final-answer boilerplate blamed every empty response on a rate limit and advised "try again in a few seconds" even after definitive fatal errors (401/402/403/quota/auth); fatal-error branch now detects these and shows the right remedy |
+| ROB-39 | Low | Robustness | ✓ CLOSED R07.21 | OpenRouter test_tool_support returned NATIVE unconditionally — non-chat slugs (image/audio/moderation/embedding) displayed tools ✓ native despite not accepting chat-completions; now classified as UNTESTED via _NON_CHAT_SLUG_PATTERNS |
 
 ---
 
@@ -1362,7 +1367,83 @@ All 5 OPEN Architecture findings closed in a single pass. Suite: 1849 → 1882 p
 
 ---
 
-## Release Delta Log
+## R07.21 Audit Closure Batch
+
+5 OPEN findings closed in a single pass — all surgical, non-breaking fixes with clear fix patterns. Suite: 2747 → 2783 passed (+36 tests in `tests/test_r07_21_audit_closures.py`, +1 test relaxed in `tests/test_r07_05_audit_fixes.py` to accept either Lock or RLock since ROB-18 changed the type), zero regressions. Lint clean (ruff + black).
+
+### Robustness
+
+#### ROB-18: PersistentMemory write-lock was threading.Lock (not RLock) — brittle if future code adds nested locked calls
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Robustness |
+| **File(s)** | `agentkthx/core/persistent_memory.py:73-98` |
+
+**Status:** ✓ CLOSED R07.21
+
+**Detail:** Changed `_get_write_lock()` to return `threading.RLock()` instead of `threading.Lock()`. RLock is a strict superset of Lock for every external caller — same mutual-exclusion guarantee, same unlock semantics — but allows the holding thread to re-acquire without deadlock. A plain Lock deadlocks the moment a future code path adds a nested locked call (e.g. `add()` calling `_write_message()` which acquires the same lock); RLock tracks the owning thread and a reentrancy counter, so nested acquisitions succeed and must be balanced by matching releases. The MAINT-15 per-DB-path write-lock registry keeps its semantics unchanged — the WeakValueDictionary still holds the only strong reference via `self._write_lock`, entries still vanish when the last handle for a path is garbage-collected, and the guard lock still makes get-or-create atomic. The ROB-03 regression test (`tests/test_r07_05_audit_fixes.py::TestRob03ThreadSafeWrites::test_write_lock_exists`) was relaxed to accept either Lock or RLock since the new type satisfies the same thread-safety contract. The `tests/test_r07_21_audit_closures.py::TestROB18WriteLockIsRLock` class pins the new contract: (1) the returned lock is an RLock; (2) nested acquisition by the same thread succeeds; (3) balanced releases allow a different thread to acquire.
+
+---
+
+#### ROB-35: `parse_shared_args` `or`-coalescing dropped the documented `0` sentinel — `--repeat-last-n 0` reached SharedConfig as None
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Robustness |
+| **File(s)** | `agentkthx/shared_args.py:435-498` |
+
+**Status:** ✓ CLOSED R07.21
+
+**Detail:** The `or`-coalescing pattern (`getattr(args, "num_ctx", None) or _env_int("AGENTKTHX_NUM_CTX")`) short-circuits to the env fallback when the arg is `0`, because `0 or X` evaluates to `X`. This dropped the documented `0` sentinel — `--repeat-last-n 0` ("0 = full context" per its own help text) reached `SharedConfig` as `None` (or the env-var value). Main CLI was unaffected (it bypasses `SharedConfig` and passes args straight to `_build_agent`); the bug bit example scripts + programmatic `SharedConfig` users. The fix: explicit `is not None` checks for the 7 integer/float fields (`num_ctx`, `num_predict`, `num_batch`, `repeat_penalty`, `repeat_last_n`, `temperature`, `top_p`) so `0` is preserved. Boolean fields (`force_react`, `debug`, `acp`, `fast`, `use_modelfile_system`) keep the `or` pattern because `False` falling through to the env var is the correct behavior for them. String fields (`model`, `acp_url`) keep `or` because empty string is not a meaningful value. The `tests/test_r07_21_audit_closures.py::TestROB35ZeroSentinelPreserved` class pins: (1) `0` is preserved for every integer/float field; (2) non-zero values still flow through unchanged; (3) unset fields (None) still fall back to env; (4) when both arg=0 AND env are set, the arg's `0` wins (env is only consulted when arg is None, not when it's falsy).
+
+---
+
+#### ROB-36: `_parse_token_size` accepted `inf`/`1e400` numeric parts — `OverflowError` escaped argparse's clean-error path
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Robustness |
+| **File(s)** | `agentkthx/shared_args.py:574-588` |
+
+**Status:** ✓ CLOSED R07.21
+
+**Detail:** `_parse_token_size` parsed the suffix-form numeric part via `float(num_part)`, which succeeds for `"inf"` and `"1e400"` (the latter overflows to `inf`). The subsequent `int(num * mult)` then raised `OverflowError`, which argparse does NOT convert to a clean usage error (it only catches `ValueError`/`TypeError`), so the user saw a raw traceback. The `_env_int` wrapper's `except (ValueError, TypeError)` also missed `OverflowError`. The fix: a `math.isfinite(num)` guard after the `float()` cast, before the `int()` cast — turns both `inf` and `nan` into a clean `ValueError` with a clear diagnostic (`"token size: numeric part X in Y is not finite (inf/nan are not valid token sizes)"`) that argparse formats with the flag name. The `tests/test_r07_21_audit_closures.py::TestROB36ParseTokenSizeFiniteGuard` class pins: (1) `infk`/`infm`/`infg` all raise ValueError; (2) `1e400k` (overflows to inf) raises ValueError; (3) `nank` raises ValueError with the finite-guard diagnostic; (4) normal values (`128k`, `1m`, `2g`, `2.5k`, `131072`, `0`, `-1`) still parse correctly — no happy-path regression; (5) `OverflowError` never escapes `_parse_token_size` to argparse.
+
+---
+
+#### ROB-38: Empty-final-answer boilerplate blamed every empty response on a rate limit and advised "try again in a few seconds" even after definitive fatal errors
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Robustness |
+| **File(s)** | `agentkthx/cli/commands/chat.py:1707-1762` |
+
+**Status:** ✓ CLOSED R07.21
+
+**Detail:** The empty-final-answer handler in `cmd_chat` classified every empty response as a rate limit (`_throttled` branch) and advised "try again in a few seconds" — correct for HTTP 429, wrong for HTTP 401 (key bad), 402 (out of credits), 403 (key lacks permission), or any quota/auth message. A user who followed the advice for a 402 would just hit the same wall again. The fix: a `_fatal` branch BEFORE the `_throttled` branch that detects 12 fatal-error markers (`401`, `unauthorized`, `authentication failed`, `invalid api key`, `402`, `payment required`, `insufficient credit`, `out of credit`, `quota`, `403`, `forbidden`, `permission`). When fatal, the handler prints the actual upstream error (the truth), names the real remedy (check API key / add credits / switch model), and points at `/auth` + `/model` as the next-step slash commands. The throttle branch is unchanged for genuine 429s. Fatal takes precedence over throttle when both markers appear (e.g. "Provider rate-limited after quota exhaustion" → fatal wins, because the underlying cause is quota, not throttling). The `tests/test_r07_21_audit_closures.py::TestROB38FatalErrorDetection` class pins: (1) 401/402/403/quota/authentication-failed all classify as fatal; (2) 429/provider-returned-error still classify as throttled (no behavior change for the genuine rate-limit path); (3) fatal takes precedence over throttle; (4) unknown errors classify as 'other' (the generic 'empty response' boilerplate).
+
+---
+
+#### ROB-39: OpenRouter `test_tool_support` returned NATIVE unconditionally — non-chat slugs displayed `tools ✓ native` despite not accepting chat-completions
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Robustness |
+| **File(s)** | `agentkthx/plugins/openrouter/openrouter.py:865-963` |
+
+**Status:** ✓ CLOSED R07.21
+
+**Detail:** OpenRouter's `/v1/models` endpoint lists non-chat slugs (image generation like `google/lyria-3-clip-preview`, audio transcription/TTS like `openai/whisper-1`/`openai/tts-1`, moderation/guard like `meta-llama/llama-guard-4-12b`, embeddings like `openai/text-embedding-3-large`). The unconditional `return ToolSupportLevel.NATIVE` made the models-table display `tools ✓ native` for them, overstating the capability. Runtime was always safe (the 400 → ReAct fallback in `generate()` catches them at request time), but the table lied. The fix: a static `_NON_CHAT_SLUG_PATTERNS` frozenset on the `OpenRouterBackend` class carries 23 lowercase substring patterns (whisper, tts, speech, lyria, imagen, flux, stable-diffusion, sdxl, dall-e, llama-guard, guard, moderation, embed, clip, audio-clip, veo, sora, kling, pika, etc.). `test_tool_support` now does a case-insensitive substring match against the lowercase model id and returns `ToolSupportLevel.UNTESTED` for matches (so the table renders the honest `tools ? unknown`); everything else still returns NATIVE. The patterns are conservative — only slugs that are unambiguously non-chat are listed. New patterns can be added to the frozenset without touching the rest of the method. The `tests/test_r07_21_audit_closures.py::TestROB39NonChatSlugClassification` class pins: (1) chat-capable models still return NATIVE; (2) whisper/tts/image-gen/moderation/embedding slugs all return UNTESTED; (3) classification is case-insensitive; (4) the conservative-false-positive trade-off is documented (a chat-capable model whose vendor name contains a non-chat substring will be misclassified as UNTESTED — runtime is safe via the 400 → ReAct fallback, the table just shows the conservative verdict).
+
+---
+
+
 
 <!-- Per-release delta notes, moved verbatim from audit.md's header at split time. -->
 
