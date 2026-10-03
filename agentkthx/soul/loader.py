@@ -647,6 +647,12 @@ def build_system_prompt_with_tools(
         tool_choice: Optional ToolChoice object to communicate constraints
         native_tools: If True, tools are passed via API body (native function calling).
             Skip ReAct format instructions in the tool section.
+            If False, the tool section still does NOT emit ReAct format
+            instructions — those live in the default prompt's ReAct branch
+            or in the soul's SOUL.md (MAINT-24 R07.21 CLOSED: the docstring
+            previously promised ReAct instructions the body no longer
+            includes). The tool section contributes only the reference
+            table + CRITICAL RULE.
 
     Returns:
         System prompt with tools injected
@@ -817,7 +823,13 @@ def _build_tool_section(tools: list, native_tools: bool = False) -> str:
         tools: List of Tool objects available
         native_tools: If True, tools are passed via the API body (native function calling).
             Skip ReAct format instructions — the model already knows how to call tools.
-            If False, include ReAct Action/Action Input format instructions.
+            If False, the section does NOT include ReAct format instructions
+            either — those live in the default prompt's ReAct branch or in
+            the soul's SOUL.md (MAINT-24 R07.21 CLOSED: the docstring
+            previously promised format instructions the body no longer
+            includes). This function contributes only the tool reference
+            table + CRITICAL RULE; the ReAct format block is the caller's
+            responsibility.
     """
     if not tools:
         return ""

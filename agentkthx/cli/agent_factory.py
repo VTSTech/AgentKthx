@@ -301,52 +301,65 @@ def _build_agent(args: argparse.Namespace, config) -> Agent:
     # cache saying REACT, clear the cache (~/.agentkthx/tool_support.json)
     # or set AGENTKTHX_FORCE_REACT=0 + run `agentkthx models --no-test`
     # (when that flag exists — currently no opt-out beyond cache clearing).
-    effective_force_react = bool(getattr(args, "force_react", False))
-    if not effective_force_react and not getattr(backend, "is_cloud", False) and tools:
-        try:
-            from ..core.types import ToolSupportLevel
+    # MAINT-25 (R07.21 CLOSED): --force-react is now tri-state (on/off/auto).
+    #   "on"   → force ReAct (skip auto-detection) — backwards compat with bare flag
+    #   "off"  → force native tools (skip auto-detection) — the NEW opt-out
+    #   "auto"/None → run auto-detection (the original R07.16 behavior)
+    _fr_val = getattr(args, "force_react", None)
+    if _fr_val == "on" or _fr_val is True:
+        # "on" (new tri-state) or True (legacy store_true) → force ReAct
+        effective_force_react = True
+    elif _fr_val == "off":
+        # "off" → force native tools (the NEW opt-out — MAINT-25)
+        effective_force_react = False
+    else:  # "auto", None, False (legacy store_true default) — run auto-detection
+        effective_force_react = False
+        if not getattr(backend, "is_cloud", False) and tools:
+            try:
+                from ..core.types import ToolSupportLevel
 
-            support = backend.test_tool_support(model, force_test=False)
-            if support == ToolSupportLevel.NATIVE:
+                support = backend.test_tool_support(model, force_test=False)
+                if support == ToolSupportLevel.NATIVE:
+                    if args.debug:
+                        print(
+                            f"[AgentKthx] Tool support for '{model}': NATIVE (cached) "
+                            f"→ using OpenAI native function calling"
+                        )
+                elif support == ToolSupportLevel.REACT:
+                    effective_force_react = True
+                    if args.debug:
+                        print(
+                            f"[AgentKthx] Tool support for '{model}': REACT (cached) "
+                            f"→ switching to ReAct text-based prompting "
+                            f"(use --force-react off to suppress, or clear "
+                            f"~/.agentkthx/tool_support.json to re-test)"
+                        )
+                else:  # UNTESTED (or legacy NONE) — no usable verdict yet
+                    # R07.19 (follow-up #10): NONE now lands here too — it IS
+                    # untested as far as capabilities go, so default to ReAct
+                    # (safer for small CPU models that typically aren't trained
+                    # on native function calling). For cloud backends we'd
+                    # default to native, but this branch only fires when
+                    # is_cloud=False.
+                    effective_force_react = True
+                    if args.debug:
+                        label = (
+                            "NONE (legacy cache → untested)"
+                            if support == ToolSupportLevel.NONE
+                            else "UNTESTED (no cache)"
+                        )
+                        print(
+                            f"[AgentKthx] Tool support for '{model}': {label} "
+                            f"→ defaulting to ReAct for local backend "
+                            f"(use --force-react off to force native, or "
+                            f"run `agentkthx models` to populate the cache)"
+                        )
+            except Exception as e:
                 if args.debug:
                     print(
-                        f"[AgentKthx] Tool support for '{model}': NATIVE (cached) "
-                        f"→ using OpenAI native function calling"
+                        f"[AgentKthx] test_tool_support lookup failed ({e}); "
+                        f"using args.force_react={effective_force_react}"
                     )
-            elif support == ToolSupportLevel.REACT:
-                effective_force_react = True
-                if args.debug:
-                    print(
-                        f"[AgentKthx] Tool support for '{model}': REACT (cached) "
-                        f"→ switching to ReAct text-based prompting "
-                        f"(use --force-react=False to suppress, or clear "
-                        f"~/.agentkthx/tool_support.json to re-test)"
-                    )
-            else:  # UNTESTED (or legacy NONE) — no usable verdict yet
-                # R07.19 (follow-up #10): NONE now lands here too — it IS
-                # untested as far as capabilities go, so default to ReAct
-                # (safer for small CPU models that typically aren't trained
-                # on native function calling). For cloud backends we'd
-                # default to native, but this branch only fires when
-                # is_cloud=False.
-                effective_force_react = True
-                if args.debug:
-                    label = (
-                        "NONE (legacy cache → untested)"
-                        if support == ToolSupportLevel.NONE
-                        else "UNTESTED (no cache)"
-                    )
-                    print(
-                        f"[AgentKthx] Tool support for '{model}': {label} "
-                        f"→ defaulting to ReAct for local backend "
-                        f"(run `agentkthx models` to populate the cache)"
-                    )
-        except Exception as e:
-            if args.debug:
-                print(
-                    f"[AgentKthx] test_tool_support lookup failed ({e}); "
-                    f"using args.force_react={effective_force_react}"
-                )
 
     agent = Agent(
         model=model,
@@ -774,7 +787,14 @@ def apply_model_switch(agent, new_model: str) -> dict:
     """
     old_model = agent.model
     old_ctx = agent.num_ctx
-    old_predict = getattr(agent, "_num_predict", None)
+    # ROB-20 (R07.21 CLOSED): prefer the public num_predict property; fall
+    # back to the private _num_predict for test stubs that haven't been
+    # updated. The asymmetry (num_ctx public, _num_predict private) was the
+    # finding — now both are public on Agent, but getattr-with-fallback keeps
+    # test stubs working without requiring them to inherit from Agent.
+    old_predict = getattr(agent, "num_predict", None)
+    if old_predict is None and hasattr(agent, "_num_predict"):
+        old_predict = agent._num_predict
 
     agent.model = new_model
 
@@ -808,7 +828,12 @@ def apply_model_switch(agent, new_model: str) -> dict:
     if not getattr(agent, "_num_predict_explicit", False):
         new_predict = catalog.get("num_predict")
         if new_predict != old_predict:
-            agent._num_predict = new_predict
+            # ROB-20 (R07.21 CLOSED): use the public setter when available
+            # (real Agent), fall back to the private attr for test stubs.
+            if hasattr(agent, "num_predict") or hasattr(type(agent), "num_predict"):
+                agent.num_predict = new_predict
+            else:
+                agent._num_predict = new_predict
             changes["num_predict"] = (old_predict, new_predict)
 
     # R07.17: num_batch is intentionally NOT re-derived here. It's a

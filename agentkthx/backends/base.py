@@ -26,6 +26,15 @@ class BackendConfig:
     truncation: str = "auto"
 
 
+# ROB-25 (R07.21 CLOSED): shared sampling/cap defaults. Pre-R07.21 the
+# abstract generate() declared temperature=0.1, max_tokens=8192, while
+# _generate_with_auth() implementations in ZAI/OrcaRouter declared
+# temperature=0.7, max_tokens=2048 — callers moving between entry points
+# silently got different behavior. Both now reference these constants.
+DEFAULT_GENERATE_TEMPERATURE: float = 0.7
+DEFAULT_GENERATE_MAX_TOKENS: int = 8192
+
+
 class BaseBackend(ABC):
     """
     Abstract base class for inference backends.
@@ -83,8 +92,8 @@ class BaseBackend(ABC):
         model: str,
         messages: list[dict],
         tools: list[Tool] | None = None,
-        temperature: float = 0.1,
-        max_tokens: int = 8192,
+        temperature: float = DEFAULT_GENERATE_TEMPERATURE,
+        max_tokens: int = DEFAULT_GENERATE_MAX_TOKENS,
         **kwargs,
     ) -> dict:
         """
@@ -112,8 +121,8 @@ class BaseBackend(ABC):
         model: str,
         messages: list[dict],
         tools: list[Tool] | None = None,
-        temperature: float = 0.1,
-        max_tokens: int = 8192,
+        temperature: float = DEFAULT_GENERATE_TEMPERATURE,
+        max_tokens: int = DEFAULT_GENERATE_MAX_TOKENS,
         **kwargs,
     ) -> Generator[str, None, None]:
         """

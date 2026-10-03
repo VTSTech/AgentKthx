@@ -59,6 +59,7 @@ import time
 from typing import Any, Generator
 
 from agentkthx import model_cache
+from agentkthx.backends.base import DEFAULT_GENERATE_MAX_TOKENS, DEFAULT_GENERATE_TEMPERATURE
 from agentkthx.backends.cloud_base import CloudBackend
 from agentkthx.config import (
     ORCAROUTER_BASE_URL,
@@ -912,8 +913,10 @@ class OrcaRouterBackend(CloudBackend):
         model: str,
         messages: list[dict],
         tools: list[Tool] | None = None,
-        temperature: float = 0.7,
-        max_tokens: int = 2048,
+        # ROB-25 (R07.21 CLOSED): reference the shared defaults from base.py
+        # so this signature can't drift from the abstract generate() again.
+        temperature: float = DEFAULT_GENERATE_TEMPERATURE,
+        max_tokens: int = DEFAULT_GENERATE_MAX_TOKENS,
         **kwargs,
     ) -> dict:
         """Make a non-streaming POST to OrcaRouter's /chat/completions.

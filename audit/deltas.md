@@ -4,14 +4,14 @@
 **Release:** R07.21  
 **Date:** 2026-10-03  
 **Archived:** 2026-10-03 (R07.21 closure batch — ROB-18, ROB-35, ROB-36, ROB-38, ROB-39)  
-**Counts:** 75 CLOSED · 7 WONTFIX · 82 total
+**Counts:** 83 CLOSED · 7 WONTFIX · 90 total
 
-> Counts updated at R07.21 (5 closures: ROB-18, ROB-35, ROB-36, ROB-38, ROB-39 —
-> all surgical non-breaking fixes with clear patterns; +36 regression tests in
-> `tests/test_r07_21_audit_closures.py`, +1 test relaxed in
-> `tests/test_r07_05_audit_fixes.py` to accept either Lock or RLock since
-> ROB-18 changed the type). The 82 detail sections below are the source of
-> truth. Prior count: 70 CLOSED · 7 WONTFIX · 77 total at R07.19.
+> Counts updated at R07.21 (13 closures across two batches: ROB-18, ROB-35,
+> ROB-36, ROB-38, ROB-39 in batch 1; ROB-09, ROB-17, ROB-20, ROB-25, ROB-30,
+> MAINT-24, MAINT-25, MAINT-26 in batch 2 — all surgical non-breaking fixes
+> with clear patterns; +36 regression tests in `test_r07_21_audit_closures.py`,
+> +19 in `test_r07_21_audit_closures_batch2.py`). The 90 detail sections below
+> are the source of truth. Prior count: 70 CLOSED · 7 WONTFIX · 77 total at R07.19.
 
 This file is the archive of CLOSED and WONTFIX findings moved out of
 `audit.md` to keep the active audit focused on OPEN findings.
@@ -106,6 +106,14 @@ This file is the archive of CLOSED and WONTFIX findings moved out of
 | ROB-36 | Low | Robustness | ✓ CLOSED R07.21 | _parse_token_size accepted inf/1e400 numeric parts — OverflowError escaped argparse's clean-error path; math.isfinite guard turns both into a clean ValueError |
 | ROB-38 | Low | Robustness | ✓ CLOSED R07.21 | Empty-final-answer boilerplate blamed every empty response on a rate limit and advised "try again in a few seconds" even after definitive fatal errors (401/402/403/quota/auth); fatal-error branch now detects these and shows the right remedy |
 | ROB-39 | Low | Robustness | ✓ CLOSED R07.21 | OpenRouter test_tool_support returned NATIVE unconditionally — non-chat slugs (image/audio/moderation/embedding) displayed tools ✓ native despite not accepting chat-completions; now classified as UNTESTED via _NON_CHAT_SLUG_PATTERNS |
+| ROB-09 | Low | Robustness | ✓ CLOSED R07.21 | validate_path used os.path.abspath (doesn't follow symlinks) — symlink traversal security hole; now uses os.path.realpath which resolves symlinks recursively |
+| ROB-17 | Low | Robustness | ✓ CLOSED R07.21 | Token-tier pruning left a single over-budget message (loop exited at len-1); now truncates the surviving message (keeping the tail) with a visible [...truncated...] marker |
+| ROB-20 | Low | Robustness | ✓ CLOSED R07.21 | agent.num_ctx (public) vs agent._num_predict (private) naming inconsistency; now Agent.num_predict is a public @property backed by _num_predict, mirroring num_ctx |
+| ROB-25 | Low | Robustness | ✓ CLOSED R07.21 | generate() vs _generate_with_auth() defaults mismatch (0.1/8192 vs 0.7/2048); now both reference shared DEFAULT_GENERATE_TEMPERATURE (0.7) + DEFAULT_GENERATE_MAX_TOKENS (8192) constants |
+| ROB-30 | Low | Robustness | ✓ CLOSED R07.21 | _fetch_model_cards catch-all Exception silently degraded to static catalog; narrowed to (JSONDecodeError, UnicodeDecodeError, ValueError) — card-shape bugs now surface with tracebacks |
+| MAINT-24 | Low | Maintainability | ✓ CLOSED R07.21 | _build_tool_section docstring still promised ReAct format instructions the body no longer includes; docstrings updated to document the new contract (format instructions live in the default prompt or soul's SOUL.md) |
+| MAINT-25 | Low | Maintainability | ✓ CLOSED R07.21 | Local-backend tool-support auto-detection had no opt-out; --force-react was store_true (couldn't accept =False); now tri-state (on/off/auto) with bare-flag backwards compat — 'off' forces native tools |
+| MAINT-26 | Low | Maintainability | ✓ CLOSED R07.21 | OpenRouter App Attribution was missing X-OpenRouter-Categories + X-OpenRouter-Title headers; R07.21 added them (hardcoded cli-agent). The directory description/main_url/slug fields have NO documented mechanism to set them (no header, no API endpoint, no dashboard) — the gap is structural on OpenRouter's side, not an AgentKthx defect. Code + tests + doc work is complete. |
 
 ---
 

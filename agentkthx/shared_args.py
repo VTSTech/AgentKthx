@@ -75,8 +75,16 @@ def add_shared_args(parser: argparse.ArgumentParser) -> None:
     """
     parser.add_argument(
         "--force-react",
-        action="store_true",
-        help="Force ReAct text-based tool calling for all models",
+        nargs="?",
+        const="on",
+        default=None,
+        choices=["on", "off", "auto"],
+        # MAINT-25 (R07.21 CLOSED): tri-state — 'on' forces ReAct (bare flag
+        # = 'on' for backwards compat), 'off' forces native tools (the opt-out
+        # that was missing), 'auto' preserves auto-detection.
+        help="Force ReAct text-based tool calling: 'on' forces ReAct (default "
+        "when flag is bare), 'off' forces native tools (opt-out from "
+        "auto-detection), 'auto' preserves auto-detection",
     )
     parser.add_argument(
         "--use-mf-sys",
@@ -257,8 +265,16 @@ def add_agent_args(
     )
     parser.add_argument(
         "--force-react",
-        action="store_true",
-        help="Force ReAct mode for tool calling",
+        nargs="?",
+        const="on",
+        default=None,
+        choices=["on", "off", "auto"],
+        # MAINT-25 (R07.21 CLOSED): tri-state — 'on' forces ReAct (bare flag
+        # = 'on' for backwards compat), 'off' forces native tools (the opt-out
+        # that was missing), 'auto' preserves auto-detection.
+        help="Force ReAct mode for tool calling: 'on' forces ReAct (default "
+        "when flag is bare), 'off' forces native tools, 'auto' preserves "
+        "auto-detection",
     )
     parser.add_argument(
         "--max-steps",
@@ -479,9 +495,16 @@ def parse_shared_args(args) -> SharedConfig:
     if _top_p is None:
         _top_p = _env_float("AGENTKTHX_TOP_P")
 
+    # MAINT-25 (R07.21 CLOSED): --force-react is now tri-state (on/off/auto).
+    # SharedConfig.force_react stays bool for the examples path: "on"→True,
+    # "off"→False, "auto"/None→False (auto-detection is a _build_agent concern,
+    # not a SharedConfig concern). The CLI path in agent_factory.py reads the
+    # raw string value directly to distinguish "auto" from "off".
+    _fr_raw = getattr(args, "force_react", None)
+    _fr_bool = _fr_raw == "on"
+
     return SharedConfig(
-        force_react=getattr(args, "force_react", False)
-        or os.environ.get("AGENTKTHX_FORCE_REACT", "0") == "1",
+        force_react=_fr_bool or os.environ.get("AGENTKTHX_FORCE_REACT", "0") == "1",
         use_modelfile_system=getattr(args, "use_modelfile_system", False)
         or os.environ.get("AGENTKTHX_USE_MF_SYS", "0") == "1",
         model=getattr(args, "model", None) or os.environ.get("AGENTKTHX_MODEL"),

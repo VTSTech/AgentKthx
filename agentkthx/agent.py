@@ -100,6 +100,21 @@ class Agent(AgentSetupMixin, CompactionMixin, ToolExecutionMixin, StreamingMixin
         agent = Agent(model="llama3", tools=["calculator"], tool_choice=ToolChoice.specific("calculator"))
     """
 
+    # ROB-20 (R07.21 CLOSED): public num_predict property — mirrors the
+    # public ``num_ctx`` attribute. Pre-R07.21 ``apply_model_switch`` read
+    # ``agent.num_ctx`` (public) but ``getattr(agent, "_num_predict", None)``
+    # (private) — one attribute public, its sibling private. The asymmetry
+    # propagated to every model-switch consumer. Now both are public; the
+    # property is backed by ``_num_predict`` for backwards compat.
+    @property
+    def num_predict(self) -> "int | None":
+        """Max tokens to generate per request (None = backend/model default)."""
+        return getattr(self, "_num_predict", None)
+
+    @num_predict.setter
+    def num_predict(self, value: "int | None") -> None:
+        self._num_predict = value
+
     def run(self, prompt: str, stream: bool = False) -> AgentRun:
         """
         Run the agent on a prompt (v0.2: emits plugin lifecycle hooks).

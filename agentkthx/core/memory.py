@@ -381,6 +381,31 @@ class Memory:
             drop += 1
         kept = non_system[drop:]
 
+        # ROB-17 (R07.21 CLOSED): if a single message's token estimate
+        # still exceeds the budget after pruning everything else, truncate
+        # its content (keeping the tail, which is usually the recent part)
+        # so the over-budget window doesn't ship to the backend as-is.
+        # The loop above deliberately keeps at least one message, but a
+        # single 100K-char pasted file read can still exceed max_tokens —
+        # silently defeating the tier exactly when the budget is most
+        # exceeded. We now truncate + emit a visible marker so the model
+        # sees the truncation and the user can tell from the footer.
+        if len(kept) == 1 and acc > target:
+            _msg = kept[0]
+            _msg_tokens = estimates[drop] if drop < len(estimates) else acc
+            # Estimate chars from tokens (4 chars/token heuristic).
+            _max_chars = max(100, int(target * 4))
+            _orig_len = len(_msg.content)
+            if _orig_len > _max_chars:
+                _tail = _msg.content[-_max_chars:]
+                _msg.content = (
+                    f"[...truncated {_orig_len - _max_chars} chars — "
+                    f"message exceeded token-tier budget...]\n" + _tail
+                )
+                # Update the estimates list so the post-trim acc reflects
+                # the truncation (cosmetic — the tier has already committed).
+                acc = target
+
         # Pairing-safe head trim, same rule as the count tier: a kept
         # window must not START with a tool result whose call is gone.
         while kept and kept[0].role == "tool":

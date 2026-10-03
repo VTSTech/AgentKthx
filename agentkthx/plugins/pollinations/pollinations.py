@@ -573,9 +573,16 @@ class PollinationsBackend(CloudBackend):
             if os.environ.get("AGENTKTHX_DEBUG"):
                 print(f"  [Pollinations] Model discovery failed ({e}), using static catalog")
             return {}
-        except Exception as e:  # malformed body, decode errors, ...
+        except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as e:
+            # ROB-30 (R07.21 CLOSED): narrowed from bare Exception. The
+            # documented failure modes are: malformed JSON body, decode
+            # errors, and gateway quirk responses. Card-shape bugs
+            # (a renamed field, a None where a dict is expected) now
+            # surface with tracebacks instead of masquerading as "catalog
+            # unreachable" — the agent loop's resilience layer handles
+            # the crash, and the user sees the real error.
             if os.environ.get("AGENTKTHX_DEBUG"):
-                print(f"  [Pollinations] Model discovery error ({e}), using static catalog")
+                print(f"  [Pollinations] Model discovery parse error ({e}), using static catalog")
             return {}
 
         cards: dict[str, dict] = {}

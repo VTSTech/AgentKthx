@@ -240,8 +240,13 @@ def cmd_test(args: argparse.Namespace) -> int:
                     test_argv.extend(["--backend", args.backend])
                 if getattr(args, "api_mode", "openre") != "openre":
                     test_argv.extend(["--api", args.api_mode])
-                if getattr(args, "force_react", False):
-                    test_argv.append("--force-react")
+                # MAINT-25 (R07.21 CLOSED): --force-react is tri-state.
+                # Forward the value (or bare flag for "on") to the test subprocess.
+                _fr = getattr(args, "force_react", None)
+                if _fr == "on":
+                    test_argv.append("--force-react")  # bare = "on"
+                elif _fr in ("off", "auto"):
+                    test_argv.extend(["--force-react", _fr])
                 if getattr(args, "use_modelfile_system", False):
                     test_argv.append("--use-mf-sys")
                 if getattr(args, "soul", None):

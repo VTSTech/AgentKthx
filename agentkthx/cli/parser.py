@@ -332,7 +332,13 @@ def create_parser() -> argparse.ArgumentParser:
         help="Send warmup request before testing (avoids cold start timeout)",
     )
     test_parser.add_argument(
-        "--force-react", action="store_true", help="Force ReAct mode for tool calling"
+        "--force-react",
+        nargs="?",
+        const="on",
+        default=None,
+        choices=["on", "off", "auto"],
+        # MAINT-25 (R07.21 CLOSED): tri-state — bare flag = 'on' (backwards compat).
+        help="Force ReAct mode: 'on' (default bare), 'off' forces native, 'auto' preserves auto-detection",
     )
     test_parser.add_argument(
         "--soul", default=None, help="Path to Soul Spec package (disabled by default)"

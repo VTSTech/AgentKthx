@@ -574,10 +574,13 @@ def validate_path(path: str, allowed_dirs: list[str] | None = None) -> tuple[boo
     if path.startswith("\\\\") or normalized.startswith("\\\\"):
         return False, "UNC paths not allowed"
 
-    # Resolve to absolute path for consistent security checks
-    # This ensures relative paths like "../../../etc/passwd" are properly evaluated
+    # Resolve to absolute path for consistent security checks.
+    # ROB-09 (R07.21 CLOSED): use realpath, NOT abspath — abspath doesn't
+    # follow symlinks, so a symlink to /etc/passwd inside an allowed dir
+    # would pass the check while the actual open() follows the link to the
+    # protected file. realpath resolves symlinks recursively.
     try:
-        resolved = os.path.abspath(path)
+        resolved = os.path.realpath(path)
     except Exception:
         resolved = normalized
 

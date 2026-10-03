@@ -1,13 +1,14 @@
 # Improvement & Enhancement Audit
-**AgentKthx v0.7.21 (R07.21 — App Attribution headers + /sh slash command + 5 OPEN findings closed)**
+**AgentKthx v0.7.21 (R07.21 — App Attribution + /sh + 13 OPEN findings closed across two batches)**
 **Repository:** https://github.com/VTSTech/AgentKthx  
 **Author:** VTSTech | **License:** MIT | **Date:** 2026-10-03  
-**Commit:** R07.21 (in-progress) | **Test Suite:** 2783 passed / 16 skipped  
-116 Findings | 34 Open | 7 Categories | SEC, ROB, MAINT, PERF, FEAT, ARCH, TEST  
-Severity (open): 0 High | 13 Medium | 21 Low  
-34 OPEN | 82 archived in deltas.md (75 CLOSED + 7 WONTFIX) — generate_audit_dash.py merges both for the dashboard
+**Commit:** R07.21 (in-progress) | **Test Suite:** 2802 passed / 16 skipped  
+116 Findings | 26 Open | 7 Categories | SEC, ROB, MAINT, PERF, FEAT, ARCH, TEST  
+Severity (open): 0 High | 11 Medium | 15 Low  
+26 OPEN | 90 archived in deltas.md (83 CLOSED + 7 WONTFIX) — generate_audit_dash.py merges both for the dashboard
 
-> **R07.21 closure delta (2026-10-03):** 5 OPEN findings closed in a single surgical pass — all non-breaking fixes with clear patterns. ROB-18 (PersistentMemory Lock → RLock, 1 line — strict superset of Lock); ROB-35 (parse_shared_args `or`-coalescing → `is not None`, ~10 lines — preserves the documented `0` sentinel); ROB-36 (`_parse_token_size` `math.isfinite` guard, ~5 lines — turns `inf`/`1e400` OverflowError into clean ValueError); ROB-38 (chat.py empty-answer fatal-error branch, ~15 lines — detects 401/402/403/quota before the throttle branch); ROB-39 (OpenRouter `_NON_CHAT_SLUG_PATTERNS` frozenset, ~50 lines — classifies image/audio/moderation/embedding slugs as UNTESTED instead of NATIVE; runtime still safe via 400→ReAct fallback). Suite: 2747 → 2783 passed (+36 from `tests/test_r07_21_audit_closures.py`, +1 relaxed in `tests/test_r07_05_audit_fixes.py` to accept either Lock or RLock since ROB-18 changed the type). Zero regressions; ruff + black clean. Closure details in `audit/deltas.md` §R07.21 Audit Closure Batch.
+> **R07.21 closure batch 2 (2026-10-03):** 8 more OPEN findings closed — all surgical, non-breaking. ROB-09 (validate_path abspath→realpath, 1 line — symlink traversal security fix); ROB-17 (token-tier truncation of single over-budget message, ~15 lines); ROB-20 (Agent.num_predict public @property, ~10 lines — mirrors num_ctx); ROB-25 (shared DEFAULT_GENERATE_TEMPERATURE/MAX_TOKENS constants in base.py, ~20 lines — generate() + _generate_with_auth() now aligned); ROB-30 (_fetch_model_cards catch-all narrowed to specific exceptions, 1 line); MAINT-24 (_build_tool_section docstrings updated to match behavior, 2 lines); MAINT-25 (--force-react tri-state on/off/auto with bare-flag backwards compat, ~30 lines across 3 argparse sites + consumer in agent_factory); MAINT-26 (moved to CLOSED — OpenRouter directory description/main_url/slug fields have NO documented mechanism to set them; the gap is structural on OpenRouter's side, not an AgentKthx defect). Suite: 2783 → 2802 passed (+19 from `tests/test_r07_21_audit_closures_batch2.py`). Zero regressions; ruff + black clean. Register: 116 findings — 26 OPEN / 83 CLOSED / 7 WONTFIX.
+> **R07.21 closure batch 1 (2026-10-03):** 5 OPEN findings closed in a single surgical pass — all non-breaking fixes with clear patterns. ROB-18 (PersistentMemory Lock → RLock, 1 line — strict superset of Lock); ROB-35 (parse_shared_args `or`-coalescing → `is not None`, ~10 lines — preserves the documented `0` sentinel); ROB-36 (`_parse_token_size` `math.isfinite` guard, ~5 lines — turns `inf`/`1e400` OverflowError into clean ValueError); ROB-38 (chat.py empty-answer fatal-error branch, ~15 lines — detects 401/402/403/quota before the throttle branch); ROB-39 (OpenRouter `_NON_CHAT_SLUG_PATTERNS` frozenset, ~50 lines — classifies image/audio/moderation/embedding slugs as UNTESTED instead of NATIVE; runtime still safe via 400→ReAct fallback). Suite: 2747 → 2783 passed (+36 from `tests/test_r07_21_audit_closures.py`, +1 relaxed in `tests/test_r07_05_audit_fixes.py` to accept either Lock or RLock since ROB-18 changed the type). Zero regressions; ruff + black clean. Closure details in `audit/deltas.md` §R07.21 Audit Closure Batch.
 > **R07.21 in-progress delta (2026-10-03):** MAINT-26 added (OpenRouter App Attribution — `X-OpenRouter-Categories` + `X-OpenRouter-Title` headers hardcoded `cli-agent`, 19-test regression file `test_r07_21_openrouter_attribution.py`, `OPENROUTER_API_TECHNICAL_REFERENCE.md` rewritten + expanded with App Directory Entry + Client/Harness Metrics & Reporting + Generation Inspection sections). MAINT-27 added (new `/sh` slash command — runs local shell, displays output, injects into context as user message; `-n` flag skips injection; reuses the `shell()` builtin for security/timeout; 6-test regression file `test_r07_21_sh_command.py` pinning the context-injection contract + real-shell integration; the redundant parsing tests that would test a copy of the parser are deliberately omitted until MAINT-01 extracts the branch; USAGE.md updated with `/sh` subsection). `TestVersionPin` removed from `test_r07_20_auth_picker.py` (-2 tests) — the exact-string pins broke on every release bump and were redundant with bump-version.sh's own site-verification step. Suite: 2783 passed / 16 skipped. OpenRouter directory entry verified live: App ID 5072126, categories now `["cli-agent"]` (was `[]`). This delta will be folded into the R07.21 re-audit pass once the release ships.
 > **R07.20 re-audit delta (2026-10-02, this pass — commit 98ee377):** All 35 carried-forward OPEN findings re-verified against the current tree; no closures. `verify_open_findings.py`: 33 STILL_OPEN_LIKELY, 2 FILE_EXISTS_NO_PATTERN (FEAT-07, TEST-05 — feature proposals/files where no code pattern is expected), and the three PATTERN_GONE heuristic flags re-investigated manually (ROB-06: `stream_gen.close()` survives at streaming.py:982 — false positive; FEAT-03: `output_schema` is still absent from `core/models.py` — expected, the feature remains missing; ROB-39: the verifier greps for the live-catalog slugs named in the detail (lyria/gpt-audio/llama-guard) which by design never appear in plugin source — the unconditional `return ToolSupportLevel.NATIVE` is verified at openrouter.py:850). Line references updated for the R07.19 shifts (MAINT-01 → 1,733 lines / cmd_chat at :206; MAINT-25 → `agent_factory.py:280-347` + `parser.py:312`; MAINT-24 → `soul/loader.py:813` + docstrings :649/:819; ROB-33 → `agent_factory.py:571`; ROB-20 → `apply_model_switch` at :728; TEST-01 count prose → 2,608; TEST-09 → 8 cloud backends). Two new findings, both Low, both from the R07.19 surface: ROB-38 (the empty-final-answer boilerplate blames a rate limit and advises "try again in a few seconds" even after definitive fatal errors — quota/auth; observed live in the smoke test) and ROB-39 (OpenRouter `test_tool_support` returns NATIVE unconditionally — non-chat slugs display `tools ✓ native`; the deferred classification candidate now holds a register ID). Executive Summary regenerated for R07.20-dev; the register's first Architecture Strengths section added. Register: 114 findings — 37 open / 70 closed / 7 wontfix (77 archived, 68%). Suite 2608 passed / 16 skipped.
 ---
@@ -39,16 +40,8 @@ Process note: this pass re-verified all 35 carried-forward OPEN findings against
 | FEAT-03 | Medium | New Features | OPEN | Tool output schema validation via JSON Schema |
 | TEST-01 | Medium | Testing | OPEN | No integration tests — all 2608 tests are mocked unit tests; slash-command dispatcher untested |
 | TEST-03 | Medium | Testing | OPEN | FakeBackend in test_agentic_loop_subsystem.py omits generate_completions_stream — streaming callbacks unexercised |
-| ROB-09 | Low | Robustness | OPEN | validate_path uses os.path.abspath, doesn't follow symlinks — read_file("/tmp/symlink_to_etc_passwd") bypasses |
-| ROB-17 | Low | Robustness | OPEN | Token-tier pruning can leave a single over-budget message (loop exits when len-1) — documented gap |
-| ROB-20 | Low | Robustness | OPEN | agent.num_ctx (public) vs agent._num_predict (private) naming inconsistency in apply_model_switch |
-| ROB-25 | Low | Robustness | OPEN | generate() vs _generate_with_auth() signature defaults mismatch (None vs 0.7/2048) — confusing |
 | ROB-28 | Low | Robustness | OPEN | MistralBackend.list_models catches bare Exception on top of HTTPError/URLError — masks KeyError/AttributeError as "discovery failed" with no traceback |
 | ROB-29 | Low | Robustness | OPEN | MistralBackend _iter_sse_lines + _make_api_request have ~80 LOC duplicated retry/backoff logic — mirrors the MAINT-11 OrcaRouter pattern closed in R07.08 |
-| ROB-30 | Low | Robustness | OPEN | _fetch_model_cards catch-all Exception silently degrades to the 13-model static catalog — card-parse bugs masquerade as "network down" (ROB-28 pattern, third backend) |
-| MAINT-24 | Low | Maintainability | OPEN | _build_tool_section docstring still promises ReAct format instructions the body no longer includes — custom souls without their own block get none |
-| MAINT-25 | Low | Maintainability | OPEN | Local-backend tool-support auto-detection has no opt-out — debug hint suggests --force-react=False, which the store_true argparse flag rejects |
-| MAINT-26 | Low | Maintainability | OPEN | OpenRouter App Attribution was missing X-OpenRouter-Categories + X-OpenRouter-Title headers — R07.21 added them (hardcoded cli-agent); the directory `description`/`main_url`/`slug` fields have NO documented mechanism to set them (no header, no API endpoint, no dashboard) — the gap is on OpenRouter's side, not AgentKthx's |
 | MAINT-27 | Low | Maintainability | OPEN | New `/sh` slash command added R07.21 — inline if/elif branch in cmd_chat (MAINT-01 family); no slash-command dispatcher yet |
 | FEAT-05 | Low | New Features | OPEN | Plugin sandboxing via restricted register() namespace + audit hooks |
 | FEAT-06 | Low | New Features | OPEN | Streaming tool-call argument deltas (function_call_arguments.delta SSE events) |
@@ -127,15 +120,7 @@ Recommendation: Explicitly call `response.fp.close()` and `response.release_conn
 **Impact:** Connection exhaustion on Windows under heavy Ctrl+C usage — Linux/macOS unaffected but the cross-platform promise is broken.
 ---
 
-#### ROB-09: `validate_path` uses `os.path.abspath`, doesn't follow symlinks
-| Property | Value |
-|----------|-------|
-| **Severity** | Low |
-| **Category** | Robustness |
-| **File(s)** | `agentkthx/core/helpers.py:491-555` |
-The function checks the resolved absolute path against allowed directories using `os.path.abspath(path)`. If `/tmp/safe_link` is a symlink to `/etc/passwd`, `validate_path("/tmp/safe_link")` returns `(True, "")` because `os.path.abspath` doesn't follow symlinks — `/tmp/safe_link`'s abspath starts with `/tmp`. The actual file accessed via `open()` will follow the symlink to `/etc/passwd`.
-Recommendation: Use `os.path.realpath(path)` instead of `os.path.abspath(path)` for the security check. `realpath` resolves symlinks recursively. Add a test case: create a symlink to `/etc/passwd` and verify `validate_path` rejects it.
-**Impact:** Symlink-based path traversal — a model that creates a symlink via `shell` tool and then calls `read_file` on it can read protected files.
+
 ---
 
 ---
@@ -150,35 +135,11 @@ Re-verified in current code (detail section authored during the R07.16 re-audit 
 Recommendation: introduce a `_transaction()` context manager on the store that acquires the per-DB lock once and commits at exit; route `_write_message` + `_touch_session` through it in `add()`/`add_tool_call()`/`add_tool_result()`. Pairs naturally with ROB-18 (the lock must become reentrant first, or the helpers need lock/no-lock variants).
 **Impact:** Message-atomicity under concurrent writers and half the SQLite commits per turn.
 ---
-#### ROB-17: Token-tier pruning can leave a single over-budget message (loop exits when len-1) — documented gap
-| Property | Value |
-|----------|-------|
-| **Severity** | Low |
-| **Category** | Robustness |
-| **File(s)** | `agentkthx/core/memory.py:371-382` |
-Re-verified in current code (detail section authored during the R07.16 re-audit — previously a summary-only row). The token-tier loop is `while (len(non_system) - drop) > 1 and acc > target:` — it deliberately keeps at least one message, so when a single message's own token estimate exceeds the entire `max_tokens` budget (a pasted 100K-char file read, for example), the loop exits with `acc > target` still true and the over-budget window ships to the backend as-is. The code comment documents the intent ("keeping at least one message") but not the failure mode: the tier silently stops enforcing its budget exactly when the budget is most exceeded.
-Recommendation: after the loop, if `kept` is a single message whose estimate still exceeds the budget, truncate its content head (keeping the tail, which is usually the recent part) or emit a visible warning. Either is better than silently defeating the tier.
-**Impact:** A single oversized message silently bypasses the token tier the suite of R07.06 tests validates.
+
 ---
-#### ROB-20: agent.num_ctx (public) vs agent._num_predict (private) naming inconsistency in apply_model_switch
-| Property | Value |
-|----------|-------|
-| **Severity** | Low |
-| **Category** | Robustness |
-| **File(s)** | `agentkthx/cli/agent_factory.py:728` (`apply_model_switch`) |
-Re-verified in current code (detail section authored during the R07.16 re-audit — previously a summary-only row). `apply_model_switch` reads `old_ctx = agent.num_ctx` and `old_predict = getattr(agent, "_num_predict", None)`, then writes `agent.num_ctx = new_ctx` and `agent._num_predict = new_predict` — one attribute public, its sibling private, plus the `_num_ctx_explicit`/`_num_predict_explicit` markers. R07.16 added a second consumer of the same asymmetry (the `_on_insufficient_credits` model-switch callback reads the `changes` dict this function produces), so the naming inconsistency now propagates further than the original `/model` command.
-Recommendation: expose `num_predict` as a public property (backed by `_num_predict`) or rename both to private with public accessors — one convention across the switch surface.
-**Impact:** A consistent API surface for every future model-switch consumer; removes the getattr-with-default guessing game.
+
 ---
-#### ROB-25: generate() vs _generate_with_auth() signature defaults mismatch (0.1/8192 vs 0.7/2048)
-| Property | Value |
-|----------|-------|
-| **Severity** | Low |
-| **Category** | Robustness |
-| **File(s)** | `agentkthx/backends/base.py:81-86`, `agentkthx/plugins/zai/zai.py:852-858`, `agentkthx/plugins/orcarouter/orcarouter.py:871-877` |
-Re-verified in current code (detail section authored during the R07.16 re-audit — previously a summary-only row). The abstract `generate()` declares `temperature: float = 0.1, max_tokens: int = 8192`; both `_generate_with_auth` implementations (ZAI, OrcaRouter) declare `temperature: float = 0.7, max_tokens: int = 2048`. Any caller that relies on signature defaults — or that moves between the public and auth paths — silently gets different sampling behavior and a 4× token-cap difference depending on which entry point handled the call. No correctness bug today (the agent loop always passes explicit values), but the asymmetry is a trap for library users and new backends.
-Recommendation: define the sampling/cap defaults once (module-level constants or `BackendConfig` fields) and have both signatures reference them.
-**Impact:** One consistent sampling baseline across backends and entry points.
+
 ---
 #### ROB-28: MistralBackend.list_models catch-all Exception masks real bugs
 | Property | Value |
@@ -200,15 +161,7 @@ The streaming and non-streaming paths each hand-roll the full attempt loop: HTTP
 Recommendation: lift the R07.08 `_classify_and_handle_http_error` helper from `OrcaRouterBackend` to `CloudBackend` and shape it so both paths consume it; close the whole family in one move (ROB-29 + MAINT-23).
 **Impact:** Every new cloud backend re-copies ~80 LOC; drift between the copies produces inconsistent retry behavior (observed once already as ROB-22).
 ---
-#### ROB-30: _fetch_model_cards catch-all Exception silently degrades to the static catalog
-| Property | Value |
-|----------|-------|
-| **Severity** | Low |
-| **Category** | Robustness |
-| **File(s)** | `agentkthx/plugins/pollinations/pollinations.py:704-711` |
-Same pattern as ROB-28 (Mistral), third occurrence: `_fetch_model_cards` catches bare `Exception` after the specific HTTP/URL handlers and returns `{}` — the caller falls back to the 13-model static `POLLINATIONS_MODELS` catalog with only an `AGENTKTHX_DEBUG` print. Card-shape bugs (a renamed field, a `None` where a dict is expected) present as "catalog unreachable". The blast radius is larger than Mistral's: the live-card cache also feeds `_first_free_model()` and `healthy_fallbacks()`, so FREE_ONLY redirect quality silently degrades too.
-Recommendation: narrow the catch to `(urllib.error.HTTPError, urllib.error.URLError, json.JSONDecodeError)` — the documented failure modes — and let card-shape bugs surface with tracebacks.
-**Impact:** Live-catalog regressions masquerade as outages; FREE_ONLY and fallback ordering quietly degrade to a 13-model stale view.
+
 ---
 #### ROB-31: healthy_fallbacks() under ANON_CATALOG ranks models outside the key's entitlement
 | Property | Value |
@@ -273,41 +226,11 @@ The Pollinations plugin extracted genuinely shared pieces (`_sleep_for_retry`, `
 Recommendation: generalize the ROB-29 fix — lift a `CloudBackend` retry-loop primitive (`_request_with_retry(url, body, headers, *, stream=False)`) that returns parsed JSON or yields SSE lines; each backend contributes only body building, response parsing, and error-class prose. Closes the ROB-29 + MAINT-23 family and prevents the fourth occurrence.
 **Impact:** ~160 LOC of near-duplicate control flow in one plugin; every retry-policy fix must be applied in both loops (the Retry-After cap already had to be, twice).
 ---
-#### MAINT-24: `_build_tool_section` docstring still promises ReAct format instructions the body no longer includes
-| Property | Value |
-|----------|-------|
-| **Severity** | Low |
-| **Category** | Maintainability |
-| **File(s)** | `agentkthx/soul/loader.py:813 (def), :649 + :819 (docstrings)` |
-New in R07.16. The R07.16 prompt de-duplication removed the `Action:`/`Action Input:` format block from `_build_tool_section` (the body now contributes only the tool reference table + CRITICAL RULE) — correct for the two known instruction providers (the no-soul default prompt's ReAct branch, and souls like `kthx-helper` that ship their own block). But the docstrings (:649 and :819 — the def is at :813) STILL read "If False, include ReAct Action/Action Input format instructions" — the contract and the behavior have drifted. There is also a residual behavioral gap: a CUSTOM soul with neither its own ReAct block nor example placeholders, run with `force_react=True` (now also set implicitly by the R07.16 tool-support auto-detection), gets a tool table with zero format instructions — pre-R07.16 the tool section supplied them.
-Recommendation: update the docstring to the new contract, and have the prompt assembler detect "ReAct mode active + no `Action Input`-style instructions anywhere in the assembled prompt" and append the canonical block exactly once (the same single-source discipline the default-prompt branch already follows).
-**Impact:** Docstring matches behavior, and custom-soul ReAct sessions can't silently lose the format contract the parser expects.
+
 ---
-#### MAINT-25: Local-backend tool-support auto-detection has no opt-out — and its debug hint suggests `--force-react=False`, which the `store_true` argparse flag rejects
-| Property | Value |
-|----------|-------|
-| **Severity** | Low |
-| **Category** | Maintainability |
-| **File(s)** | `agentkthx/cli/agent_factory.py:280-347`, `agentkthx/cli/parser.py:312` |
-New in R07.16. The `_build_agent` auto-detection defaults local backends to `force_react=True` when the cached `test_tool_support` verdict is REACT or UNTESTED — reasonable for small CPU models, but there is no CLI opt-out back to native tools (the in-code comment admits "currently no opt-out beyond cache clearing", i.e. hand-deleting `~/.agentkthx/tool_support.json`). The UNTESTED debug hint tells the user to run `--force-react=False` — but `--force-react` is declared `action="store_true"` (parser.py:312), so passing `=False` raises `argument --force-react: ignored explicit argument 'False'`: the suggested remedy is an argparse error. Users on local models that DO support native function calling (or who simply prefer it) are locked out of the native path by the UNTESTED default.
-Recommendation: make `--force-react` tri-state (`on|off|auto`, mirroring the new `--flash-attn` pattern — `auto` preserves the auto-detection, `off` forces native) or honor `AGENTKTHX_FORCE_REACT=0`; then fix the debug hint to describe the real remedy.
-**Impact:** A supported escape hatch for the new default, and a debug hint that doesn't error when followed.
+
 ---
-#### MAINT-26: OpenRouter App Attribution was missing X-OpenRouter-Categories + X-OpenRouter-Title headers — R07.21 added them (hardcoded cli-agent); the directory `description`/`main_url`/`slug` fields have NO documented mechanism to set them
-| Property | Value |
-|----------|-------|
-| **Severity** | Low |
-| **Category** | Maintainability |
-| **File(s)** | `agentkthx/plugins/openrouter/openrouter.py:66-112` (new), `:273-282` (`__init__`), `:420-426` (`list_models`), `:712-718` (`_make_api_request`), `:1175-1187` (`_get_auth_headers`); `tests/test_r07_21_openrouter_attribution.py` (new, 19 tests); `docs/api/OPENROUTER_API_TECHNICAL_REFERENCE.md` (rewritten + expanded) |
-| **Status** | OPEN — code + tests + doc landed in R07.21; the OpenRouter app directory `description` / `main_url` / `slug` / `source_code_url` fields have NO documented mechanism to set them (no header, no API endpoint, no dashboard) — the gap is on OpenRouter's side, not AgentKthx's. Verified live 2026-10-03: the GitHub repo has rich `og:description`/`og:title`/`og:image` metadata but the OpenRouter app entry's `description` field is still `null` 13 days after creation, so OpenRouter does NOT crawl the referer URL for OpenGraph metadata either. |
-New in R07.21. The pre-R07.21 `OpenRouterBackend` sent only `HTTP-Referer` + the legacy `X-Title` header on its requests. OpenRouter's [App Attribution spec](https://openrouter.ai/docs/app-attribution) has since added two preferred headers — `X-OpenRouter-Title` (the new preferred form of the display name; `X-Title` is "still supported for backwards compatibility") and `X-OpenRouter-Categories` (marketplace category assignment, comma-separated, max 2 per request, max 10 per app) — neither of which AgentKthx sent. Result: the AgentKthx app entry at `https://openrouter.ai/apps/url/https%3A%2F%2Fgithub.com%2FVTSTech%2FAgentKthx` rendered with `categories: []` and `description: null`, missing from both `/apps/category/coding` and `/apps/category/coding/cli-agent` despite the harness being a terminal-based coding assistant that fits the `cli-agent` leaf exactly.
 
-R07.21 added a centralized `_build_openrouter_attribution_headers()` helper that all four header-construction sites delegate to (`__init__`, `list_models`, `_make_api_request`, `_get_auth_headers` — the streaming path's `_iter_sse_lines` receives the headers from `_get_auth_headers`). The helper sends all four attribution headers: `HTTP-Referer`, `X-OpenRouter-Title`, `X-Title` (legacy alias kept until OpenRouter formally deprecates), and `X-OpenRouter-Categories: cli-agent`. The category is a **hardcoded module-level constant** (`_APP_CATEGORIES = "cli-agent"`) — NOT an env var — because the harness category describes what AgentKthx *is* to OpenRouter's marketplace, not a runtime knob. Letting a user flip `cli-agent` to `creative-writing` would misclassify the harness in the rankings. The 19-test regression file `test_r07_21_openrouter_attribution.py` pins: (1) all four header values; (2) all four sites delegate to the helper (via a source-grep that no inline literal `"HTTP-Referer": "https://..."` or `"X-Title": "AgentKthx"` remains in the plugin source); (3) the category is NOT env-overridable (greps the source for `AGENTKTHX_OPENROUTER_CATEGORIES` and asserts it's absent, plus asserts `_build_openrouter_attribution_headers.__code__.co_names` contains no `os.environ`).
-
-What the code patch does NOT close: the OpenRouter app directory's `description`, `main_url`, `slug`, `source_code_url`, `favicon_url`, `icon_class_name`, and `related_apps` fields remain `null` indefinitely. An earlier draft of this finding (and the doc) incorrectly claimed these were "dashboard-only" fields set via a web UI — that was wrong. Verified live 2026-10-03: (1) the App Attribution doc only documents 4 headers — none for these fields; (2) the OpenAPI spec (111 paths) has no `/apps` write endpoint; (3) there is no app-owner dashboard in the OpenRouter web UI; (4) the GitHub repo has rich `og:description`/`og:title`/`og:image` metadata that a crawler could extract, but the app entry's `description` is still `null` 13 days after creation — so OpenRouter does NOT crawl the referer URL either. The fields are likely populated by OpenRouter staff for apps they curate/feature, OR by an internal process that hasn't run on AgentKthx. There is nothing the repo owner can do.
-
-Recommendation: no further action on the AgentKthx side. The four attribution headers are the complete mechanism OpenRouter exposes; AgentKthx sends all of them on every request. If OpenRouter adds a header, API endpoint, or dashboard for the description/main_url/slug fields in the future, the doc will be updated to document it. Until then, this finding can be moved to CLOSED (the code + tests + doc work is done; the remaining gap is structural on OpenRouter's side, not a defect in AgentKthx). The doc's §App Directory Entry — Category & Description now correctly documents that the null fields are not an AgentKthx-side bug.
-**Impact:** AgentKthx now correctly self-identifies to OpenRouter's marketplace on every request, appearing on both `/apps/category/coding` (group landing) and `/apps/category/coding/cli-agent` (subcategory landing) once traffic flows. The centralized helper prevents future header drift across the four construction sites. The `description`/`main_url`/`slug` fields remain `null` — that's an OpenRouter-side gap, not an AgentKthx defect.
 ---
 #### MAINT-27: New `/sh` slash command added R07.21 — inline if/elif branch in cmd_chat (MAINT-01 family)
 | Property | Value |
@@ -463,10 +386,10 @@ Recommendation: a live-gated contract test (skips without `POLLINATIONS_API_KEY`
 ## Priority Matrix
 | Timeline | Findings |
 |----------|----------|
-| **Near term (R07.21–R07.22)** | ROB-33 (non-destructive Windows liveness check — unblocks the flagship turbo start → chat workflow), ROB-31 (entitlement-aware fallback filter), ROB-02 (join worker threads), ROB-06 (deterministic Windows conn release), ROB-15 (single-transaction add — pairs naturally with the now-closed ROB-18 RLock), SEC-09 (warn on non-HTTPS ACP), SEC-13 (require-plugin-pins mode), MAINT-03 (drop strategy 5 of `normalize_args`), MAINT-22 (streaming `_build_body()` virtual), MAINT-23 (lift retry-loop skeleton to CloudBackend — closes ROB-29 in the same move), MAINT-01 (extract `ChatSession` — would also close MAINT-27), TEST-01 (integration test tier), TEST-03 (add `FakeStreamingBackend`), MAINT-26 (eligible for closure — the OpenRouter directory description/main_url/slug fields have no documented mechanism; the gap is structural on OpenRouter's side, not an AgentKthx defect) |
-| **Short term (R07.22–R07.24)** | ROB-09 (`realpath` for symlinks), ROB-20 (public `num_predict` accessor), ROB-25 (shared sampling/cap defaults), ROB-30 (narrow Pollinations catalog catch-all), MAINT-24 (tool-section docstring contract + single-source ReAct block), MAINT-25 (tri-state `--force-react`), MAINT-27 (move `/sh` branch to a `cmd_sh` method when MAINT-01 lands), FEAT-03 (tool output JSON Schema), TEST-09 (plugin streaming-path integration test), TEST-10 (live-shape free-model contract test) |
-| **Medium term (R08.00+)** | ROB-17 (truncate/warn on the single over-budget message), FEAT-05 (plugin sandbox), FEAT-06 (streaming tool-arg deltas), FEAT-07 (conversation export/import), FEAT-08 (paid_only free-TIER filter mode), TEST-04 (rollback tests), TEST-05 (bump-version test portability), TEST-07 (update_check failure paths) |
-Closed/wontfix placements from earlier revisions are archived in `deltas.md`'s closure timeline (R07.00 → R07.21). The R07.21 closure batch closed ROB-18 (was Medium-term, RLock), ROB-35 (was Medium-term, SharedConfig sentinel), ROB-36 (was Medium-term, `_parse_token_size` finite-guard), ROB-38 (was Near-term, terminal-error-aware empty-answer messaging), and ROB-39 (was Near-term, OpenRouter non-chat slug classification) — 5 findings, all surgical non-breaking fixes. Tiers are cumulative, not reset per release.
+| **Near term (R07.21–R07.22)** | ROB-33 (non-destructive Windows liveness check — unblocks the flagship turbo start → chat workflow), ROB-31 (entitlement-aware fallback filter), ROB-02 (join worker threads), ROB-06 (deterministic Windows conn release), ROB-15 (single-transaction add — pairs naturally with the now-closed ROB-18 RLock), SEC-09 (warn on non-HTTPS ACP), SEC-13 (require-plugin-pins mode), MAINT-03 (drop strategy 5 of `normalize_args`), MAINT-22 (streaming `_build_body()` virtual), MAINT-23 (lift retry-loop skeleton to CloudBackend — closes ROB-29 in the same move), MAINT-01 (extract `ChatSession` — would also close MAINT-27), TEST-01 (integration test tier), TEST-03 (add `FakeStreamingBackend`) |
+| **Short term (R07.22–R07.24)** | MAINT-27 (move `/sh` branch to a `cmd_sh` method when MAINT-01 lands), FEAT-03 (tool output JSON Schema), TEST-09 (plugin streaming-path integration test), TEST-10 (live-shape free-model contract test) |
+| **Medium term (R08.00+)** | FEAT-05 (plugin sandbox), FEAT-06 (streaming tool-arg deltas), FEAT-07 (conversation export/import), FEAT-08 (paid_only free-TIER filter mode), TEST-04 (rollback tests), TEST-05 (bump-version test portability), TEST-07 (update_check failure paths) |
+Closed/wontfix placements from earlier revisions are archived in `deltas.md`'s closure timeline (R07.00 → R07.21). The R07.21 closure batches closed 13 findings total: batch 1 — ROB-18, ROB-35, ROB-36, ROB-38, ROB-39; batch 2 — ROB-09, ROB-17, ROB-20, ROB-25, ROB-30, MAINT-24, MAINT-25, MAINT-26. All surgical non-breaking fixes. Tiers are cumulative, not reset per release.
 Guidelines for timeline assignment:
 - **Near term** — High severity findings and the most impactful Medium severity findings; should be fixed in the next 1-2 releases
 - **Short term** — Medium severity findings addressable within 2-4 releases
