@@ -63,6 +63,55 @@ serves as the initial defaults of the persistent model-catalog cache
 backend's cache from the live API) instead of editing code here.
 """
 
+# OpenRouter app-directory attribution (R07.21).
+#
+# OpenRouter's App Attribution spec (https://openrouter.ai/docs/app-attribution)
+# lets a harness self-identify so it appears in the public apps marketplace
+# (https://openrouter.ai/apps) and the per-category rankings
+# (https://openrouter.ai/apps/category/coding, /apps/category/coding/cli-agent).
+# Attribution is set via HTTP headers on every request:
+#
+#   HTTP-Referer                   (required)  — primary URL identifier
+#   X-OpenRouter-Title             (preferred) — display name (X-Title still
+#                                                accepted for backwards compat)
+#   X-OpenRouter-Categories        (optional)  — comma-separated leaf
+#                                                categories, max 2 per request,
+#                                                max 10 per app
+#   X-OpenRouter-App-Visibility     (optional)  — "hidden" creates the app
+#                                                hidden from public rankings
+#
+# Hardcoded (NOT user-overridable): the harness category describes what
+# AgentKthx *is* to OpenRouter's marketplace, not a runtime knob. Letting a
+# user flip ``cli-agent`` to ``creative-writing`` would misclassify the
+# harness in the rankings. The constants below are the single source of truth
+# for AgentKthx's OpenRouter identity.
+_APP_REFERER_URL = "https://github.com/VTSTech/AgentKthx"
+_APP_TITLE = "AgentKthx"
+# Default category: ``cli-agent`` — the "Terminal-based coding assistants"
+# leaf under the Coding group. This single leaf auto-includes AgentKthx on
+# BOTH /apps/category/coding (the group landing) AND
+# /apps/category/coding/cli-agent (the subcategory landing).
+_APP_CATEGORIES = "cli-agent"
+
+
+def _build_openrouter_attribution_headers() -> dict:
+    """Return the OpenRouter app-attribution headers (R07.21).
+
+    Sends BOTH ``X-OpenRouter-Title`` (the current preferred form per the
+    App Attribution doc) AND ``X-Title`` (the legacy form, kept for backwards
+    compat with OpenRouter rankings that haven't been re-indexed yet —
+    OpenRouter's docs state ``X-Title`` is "still supported for backwards
+    compatibility"). Adds ``X-OpenRouter-Categories`` for marketplace
+    categorization (hardcoded ``cli-agent`` — see module comment above).
+    """
+    return {
+        "HTTP-Referer": _APP_REFERER_URL,
+        "X-OpenRouter-Title": _APP_TITLE,
+        "X-Title": _APP_TITLE,  # legacy alias — kept until OpenRouter deprecates
+        "X-OpenRouter-Categories": _APP_CATEGORIES,
+    }
+
+
 # OpenRouter's free-tier model whitelist. When OPENROUTER_FREE_ONLY=true,
 # only models matching this whitelist are listed/accepted. Consists of:
 #   1. ``openrouter/free`` — the named "Free Models Router" that auto-routes
@@ -204,12 +253,15 @@ class OpenRouterBackend(OpenAICompatibleBackend):
         # model's reported max_completion_tokens. Set to None initially.
         self._context_safe_max_tokens: int | None = None
 
-        # Set headers for OpenRouter
+        # Set headers for OpenRouter. R07.21: attribution headers
+        # (HTTP-Referer, X-OpenRouter-Title, X-Title, X-OpenRouter-Categories)
+        # centralized in _build_openrouter_attribution_headers() so the four
+        # header-construction sites (__init__, list_models, _make_api_request,
+        # _get_auth_headers) can never drift.
         self.headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
-            "HTTP-Referer": "https://github.com/VTSTech/AgentKthx",
-            "X-Title": "AgentKthx",
+            **_build_openrouter_attribution_headers(),
         }
 
         # Force model list to be loaded on initialization so cache is populated
@@ -349,11 +401,10 @@ class OpenRouterBackend(OpenAICompatibleBackend):
         model_cache.ensure_seeded(self.MODEL_CACHE_KEY, self._catalog_fallback_list())
 
         try:
-            # Use proper headers for API call
-            headers = {
-                "HTTP-Referer": "https://github.com/VTSTech/AgentKthx",
-                "X-Title": "AgentKthx",
-            }
+            # Use proper headers for API call. R07.21: attribution headers
+            # (HTTP-Referer / X-OpenRouter-Title / X-Title / X-OpenRouter-Categories)
+            # centralized in _build_openrouter_attribution_headers().
+            headers = {**_build_openrouter_attribution_headers()}
             if self.api_key:
                 headers["Authorization"] = f"Bearer {self.api_key}"
 
@@ -641,12 +692,12 @@ class OpenRouterBackend(OpenAICompatibleBackend):
         if not self.api_key:
             raise ValueError("OPENROUTER_API_KEY environment variable is required for API calls")
 
-        # Update headers with API key if available
+        # Update headers with API key if available. R07.21: attribution
+        # headers centralized in _build_openrouter_attribution_headers().
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
-            "HTTP-Referer": "https://github.com/VTSTech/AgentKthx",
-            "X-Title": "AgentKthx",
+            **_build_openrouter_attribution_headers(),
         }
 
         if stream:
@@ -1105,12 +1156,17 @@ class OpenRouterBackend(OpenAICompatibleBackend):
         return f"{self.base_url}/chat/completions"
 
     def _get_auth_headers(self) -> dict:
-        """OpenRouter requires Bearer token + HTTP-Referer + X-Title headers."""
+        """OpenRouter requires Bearer token + attribution headers.
+
+        R07.21: attribution headers (HTTP-Referer, X-OpenRouter-Title,
+        X-Title, X-OpenRouter-Categories) are centralized in
+        ``_build_openrouter_attribution_headers()`` so every header site
+        stays in sync with the App Attribution spec.
+        """
         return {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
-            "HTTP-Referer": "https://github.com/VTSTech/AgentKthx",
-            "X-Title": "AgentKthx",
+            **_build_openrouter_attribution_headers(),
         }
 
     def _iter_sse_lines(self, url: str, body: dict, headers: dict):
