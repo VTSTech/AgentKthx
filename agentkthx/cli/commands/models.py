@@ -288,12 +288,35 @@ def cmd_models(args: argparse.Namespace) -> int:
         Single check → single cache entry → single column. Legacy "none"
         verdicts (old cache entries) normalize to react; no model is ever
         displayed as none.
+
+        R07.21 (ZAI fix): the default models listing (no --tool-support)
+        now consults the cache, then falls back to the backend's default
+        verdict (force_test=False) — for cloud backends this returns
+        NATIVE (the cloud-backend contract). Only --tool-support forces
+        the live probe. Pre-R07.21 this always called force_test=True,
+        which made every ZAI model show "? untested" when the live probe
+        couldn't run (no API key, transient failure, etc.) — even though
+        cloud backends default to NATIVE.
         """
         if not args.no_cache:
             cached = get_cached_tool_support(name)
             if cached is not None:
                 return ToolSupportLevel.effective(cached).value
 
+        # R07.21: if the user didn't ask for --tool-support, don't force
+        # a live probe. Use the backend's default verdict — cloud backends
+        # return NATIVE; local backends return UNTESTED (and the user
+        # runs --tool-support to populate the cache). This matches the
+        # documented contract: --tool-support is the explicit "probe live"
+        # trigger; without it, the cache + backend default is the truth.
+        if not args.tool_support:
+            try:
+                support = backend.test_tool_support(name, family=family, force_test=False)
+                return ToolSupportLevel.effective(support).value
+            except Exception:
+                return "error"
+
+        # --tool-support: do the live probe + cache the definitive verdict
         try:
             support = backend.test_tool_support(name, family=family, force_test=True)
             return ToolSupportLevel.effective(support).value
