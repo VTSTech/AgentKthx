@@ -618,7 +618,16 @@ class OpenAICompatibleBackend(BaseBackend):
 
         # Parse OpenAI tool_calls format:
         #   { "id": "...", "type": "function",
-        #     "function": { "name": "...", "arguments": "<JSON string>" } }
+        #     "function": { "name": "...", "arguments": "<JSON string>" },
+        #     "extra_content": { "google": { "thought_signature": "..." } } }
+        # ROB-40 (R07.21 CLOSED): capture thought_signature from Gemini
+        # thinking models. The signature lives at
+        # ``tool_calls[].extra_content.google.thought_signature`` — it must
+        # be passed back on the assistant message's tool_calls when the
+        # conversation history is sent to Gemini, or the API 400s with
+        # "Function call is missing a thought_signature" on the second turn.
+        # The field is Gemini-specific; other backends ignore it (the
+        # serializer only includes it when present).
         parsed_tool_calls: list[dict] = []
         for tc in raw_tool_calls:
             func = tc.get("function", {}) or {}
@@ -628,11 +637,18 @@ class OpenAICompatibleBackend(BaseBackend):
                     args = json.loads(args) if args.strip() else {}
                 except json.JSONDecodeError:
                     args = {"_raw_arguments": args}
+            # ROB-40: capture Gemini's thought_signature (per-tool-call).
+            # Lives under extra_content.google.thought_signature. Other
+            # backends don't emit this field — the .get() chain returns "".
+            extra = tc.get("extra_content") or {}
+            google_extra = extra.get("google") or {} if isinstance(extra, dict) else {}
+            thought_sig = google_extra.get("thought_signature") or ""
             parsed_tool_calls.append(
                 {
                     "id": tc.get("id", ""),
                     "name": func.get("name", ""),
                     "arguments": args,
+                    "thought_signature": thought_sig,
                 }
             )
 

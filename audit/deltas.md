@@ -4,14 +4,13 @@
 **Release:** R07.21  
 **Date:** 2026-10-03  
 **Archived:** 2026-10-03 (R07.21 closure batch — ROB-18, ROB-35, ROB-36, ROB-38, ROB-39)  
-**Counts:** 83 CLOSED · 7 WONTFIX · 90 total
+**Counts:** 84 CLOSED · 7 WONTFIX · 91 total
 
-> Counts updated at R07.21 (13 closures across two batches: ROB-18, ROB-35,
+> Counts updated at R07.21 (14 closures across three batches: ROB-18, ROB-35,
 > ROB-36, ROB-38, ROB-39 in batch 1; ROB-09, ROB-17, ROB-20, ROB-25, ROB-30,
-> MAINT-24, MAINT-25, MAINT-26 in batch 2 — all surgical non-breaking fixes
-> with clear patterns; +36 regression tests in `test_r07_21_audit_closures.py`,
-> +19 in `test_r07_21_audit_closures_batch2.py`). The 90 detail sections below
-> are the source of truth. Prior count: 70 CLOSED · 7 WONTFIX · 77 total at R07.19.
+> MAINT-24, MAINT-25, MAINT-26 in batch 2; ROB-40 in batch 3 — all surgical
+> non-breaking fixes with clear patterns). The 91 detail sections below are
+> the source of truth. Prior count: 70 CLOSED · 7 WONTFIX · 77 total at R07.19.
 
 This file is the archive of CLOSED and WONTFIX findings moved out of
 `audit.md` to keep the active audit focused on OPEN findings.
@@ -114,6 +113,7 @@ This file is the archive of CLOSED and WONTFIX findings moved out of
 | MAINT-24 | Low | Maintainability | ✓ CLOSED R07.21 | _build_tool_section docstring still promised ReAct format instructions the body no longer includes; docstrings updated to document the new contract (format instructions live in the default prompt or soul's SOUL.md) |
 | MAINT-25 | Low | Maintainability | ✓ CLOSED R07.21 | Local-backend tool-support auto-detection had no opt-out; --force-react was store_true (couldn't accept =False); now tri-state (on/off/auto) with bare-flag backwards compat — 'off' forces native tools |
 | MAINT-26 | Low | Maintainability | ✓ CLOSED R07.21 | OpenRouter App Attribution was missing X-OpenRouter-Categories + X-OpenRouter-Title headers; R07.21 added them (hardcoded cli-agent). The directory description/main_url/slug fields have NO documented mechanism to set them (no header, no API endpoint, no dashboard) — the gap is structural on OpenRouter's side, not an AgentKthx defect. Code + tests + doc work is complete. |
+| ROB-40 | Medium | Robustness | ✓ CLOSED R07.21 | Gemini thinking models require thought_signature on tool-call results — agent dropped it, causing HTTP 400 "Function call is missing a thought_signature" on the second turn; now captured in _parse_openai_response and re-attached via Message.to_dict() as extra_content.google.thought_signature |
 
 ---
 

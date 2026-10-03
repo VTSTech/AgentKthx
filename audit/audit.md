@@ -1,11 +1,11 @@
 # Improvement & Enhancement Audit
-**AgentKthx v0.7.21 (R07.21 — App Attribution + /sh + 13 OPEN findings closed across two batches)**
+**AgentKthx v0.7.21 (R07.21 — App Attribution + /sh + 14 OPEN findings closed)**
 **Repository:** https://github.com/VTSTech/AgentKthx  
 **Author:** VTSTech | **License:** MIT | **Date:** 2026-10-03  
 **Commit:** R07.21 (in-progress) | **Test Suite:** 2802 passed / 16 skipped  
-116 Findings | 26 Open | 7 Categories | SEC, ROB, MAINT, PERF, FEAT, ARCH, TEST  
+117 Findings | 26 Open | 7 Categories | SEC, ROB, MAINT, PERF, FEAT, ARCH, TEST  
 Severity (open): 0 High | 11 Medium | 15 Low  
-26 OPEN | 90 archived in deltas.md (83 CLOSED + 7 WONTFIX) — generate_audit_dash.py merges both for the dashboard
+26 OPEN | 91 archived in deltas.md (84 CLOSED + 7 WONTFIX) — generate_audit_dash.py merges both for the dashboard
 
 > **R07.21 closure batch 2 (2026-10-03):** 8 more OPEN findings closed — all surgical, non-breaking. ROB-09 (validate_path abspath→realpath, 1 line — symlink traversal security fix); ROB-17 (token-tier truncation of single over-budget message, ~15 lines); ROB-20 (Agent.num_predict public @property, ~10 lines — mirrors num_ctx); ROB-25 (shared DEFAULT_GENERATE_TEMPERATURE/MAX_TOKENS constants in base.py, ~20 lines — generate() + _generate_with_auth() now aligned); ROB-30 (_fetch_model_cards catch-all narrowed to specific exceptions, 1 line); MAINT-24 (_build_tool_section docstrings updated to match behavior, 2 lines); MAINT-25 (--force-react tri-state on/off/auto with bare-flag backwards compat, ~30 lines across 3 argparse sites + consumer in agent_factory); MAINT-26 (moved to CLOSED — OpenRouter directory description/main_url/slug fields have NO documented mechanism to set them; the gap is structural on OpenRouter's side, not an AgentKthx defect). Suite: 2783 → 2802 passed (+19 from `tests/test_r07_21_audit_closures_batch2.py`). Zero regressions; ruff + black clean. Register: 116 findings — 26 OPEN / 83 CLOSED / 7 WONTFIX.
 > **R07.21 closure batch 1 (2026-10-03):** 5 OPEN findings closed in a single surgical pass — all non-breaking fixes with clear patterns. ROB-18 (PersistentMemory Lock → RLock, 1 line — strict superset of Lock); ROB-35 (parse_shared_args `or`-coalescing → `is not None`, ~10 lines — preserves the documented `0` sentinel); ROB-36 (`_parse_token_size` `math.isfinite` guard, ~5 lines — turns `inf`/`1e400` OverflowError into clean ValueError); ROB-38 (chat.py empty-answer fatal-error branch, ~15 lines — detects 401/402/403/quota before the throttle branch); ROB-39 (OpenRouter `_NON_CHAT_SLUG_PATTERNS` frozenset, ~50 lines — classifies image/audio/moderation/embedding slugs as UNTESTED instead of NATIVE; runtime still safe via 400→ReAct fallback). Suite: 2747 → 2783 passed (+36 from `tests/test_r07_21_audit_closures.py`, +1 relaxed in `tests/test_r07_05_audit_fixes.py` to accept either Lock or RLock since ROB-18 changed the type). Zero regressions; ruff + black clean. Closure details in `audit/deltas.md` §R07.21 Audit Closure Batch.
@@ -303,6 +303,8 @@ Proposal: Add `agent.export_session(session_id) -> dict` that returns the conver
 `POLLINATIONS_FREE_ONLY` filters on `_card_is_free()` — the zero-cost tier (currency-only pricing, 16 models live). But Pollinations' practical "free" surface is the free TIER: every `paid_only != True` model (102 text cards, Quest-Pollen-eligible — exactly what the keyed entitlement feed returns and what enter.pollinations.ai labels "free"). That boundary lives only on the bare `GET /models` feed (`paid_only` field), which the plugin never fetches. Result: FREE_ONLY hides ~86 Quest-Pollen-runnable models from users whose key can actually use them.
 Proposal: a `POLLINATIONS_FREE_TIER=1` mode (or tri-state FREE_ONLY = off | zero-cost | tier) that fetches the bare feed once, marks cached cards with the tier boundary, and filters/redirects on it. `scripts/probe_pollinations.sh` already demonstrates the full discovery logic to port.
 **Impact:** Users who want "everything my key can run without paying cash" get a 16-model subset of the ~102-model tier they're entitled to browse.
+---
+
 ---
 ### Architecture
 <!-- ARCH-02, ARCH-03, ARCH-04, ARCH-05, ARCH-06 all CLOSED in R07.13.

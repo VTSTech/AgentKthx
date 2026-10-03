@@ -60,6 +60,15 @@ class Message:
             # Note: arguments MUST be a JSON string, not an object!
             openai_tool_calls = []
             for tc in self.tool_calls:
+                # ROB-40 (R07.21 CLOSED): preserve Gemini's thought_signature
+                # on each tool_call. The signature lives at
+                # extra_content.google.thought_signature in the OpenAI-compat
+                # shape. Gemini thinking models require it to be present on
+                # the assistant message's tool_calls when the conversation
+                # history is sent back, or the API 400s on the second turn.
+                # The field is only present on Gemini responses; other
+                # backends don't emit it (thought_sig stays "" → skipped).
+                _thought_sig = tc.get("thought_signature") or ""
                 if "function" in tc:
                     # Already in function format, ensure arguments is a string
                     func = tc.get("function", {})
@@ -75,6 +84,9 @@ class Message:
                             "arguments": args,
                         },
                     }
+                    # ROB-40: re-attach thought_signature if present
+                    if _thought_sig:
+                        openai_tc["extra_content"] = {"google": {"thought_signature": _thought_sig}}
                     openai_tool_calls.append(openai_tc)
                 else:
                     # Convert from internal format
@@ -90,6 +102,9 @@ class Message:
                             "arguments": args,
                         },
                     }
+                    # ROB-40: re-attach thought_signature if present
+                    if _thought_sig:
+                        openai_tc["extra_content"] = {"google": {"thought_signature": _thought_sig}}
                     openai_tool_calls.append(openai_tc)
             result["tool_calls"] = openai_tool_calls
         if self.tool_call_id:

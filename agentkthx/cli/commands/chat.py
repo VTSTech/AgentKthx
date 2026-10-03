@@ -1714,11 +1714,20 @@ def cmd_chat(args: argparse.Namespace) -> int:
                 # fatal branch names the real problem and points at the
                 # remedy (regenerate key / add credits / pick a different
                 # model). The throttle branch is unchanged for genuine 429s.
+                #
+                # R07.21 follow-up: broadened "api key" marker — Gemini
+                # returns HTTP 400 (not 401) with "Please pass a valid API
+                # key" for auth failures. The original "invalid api key"
+                # marker missed this (the message says "valid", not
+                # "invalid"). The bare "api key" substring catches every
+                # variant: "valid api key", "invalid api key", "missing api
+                # key", "no api key", "api key not set", "api key required".
                 _fatal = (
                     "401" in _low
                     or "unauthorized" in _low
                     or "authentication failed" in _low
                     or "invalid api key" in _low
+                    or "api key" in _low  # broadened — catches "valid api key"
                     or "402" in _low
                     or "payment required" in _low
                     or "insufficient credit" in _low
