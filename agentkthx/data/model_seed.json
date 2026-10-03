@@ -751,7 +751,7 @@
     "gemini-2.5-flash": {
       "context_length": 1048576,
       "max_completion_tokens": 65536,
-      "free_tier": true,
+      "free_tier": false,
       "supports_thinking": true,
       "thinking_budget_range": [
         0,
@@ -760,12 +760,12 @@
       "thinking_can_disable": true,
       "min_cache_tokens": 2048,
       "family": "gemini-2.5",
-      "description": "Gemini 2.5 Flash — legacy"
+      "description": "Gemini 2.5 Flash — DEPRECATED by Google (returns 404 for new users); use gemini-3.8-flash instead"
     },
     "gemini-2.5-flash-lite": {
       "context_length": 1048576,
       "max_completion_tokens": 65536,
-      "free_tier": true,
+      "free_tier": false,
       "supports_thinking": true,
       "thinking_budget_range": [
         0,
@@ -774,7 +774,7 @@
       "thinking_can_disable": true,
       "min_cache_tokens": 2048,
       "family": "gemini-2.5",
-      "description": "Gemini 2.5 Flash-Lite — legacy"
+      "description": "Gemini 2.5 Flash-Lite — DEPRECATED by Google (returns 404 for new users); use gemini-3.5-flash-lite instead"
     }
   },
   "mistral": {

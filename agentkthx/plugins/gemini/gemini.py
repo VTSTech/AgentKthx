@@ -29,7 +29,7 @@ Configuration:
 Usage:
   # CLI
   agentkthx chat --backend gemini --model gemini-3.8-flash --tools calculator
-  agentkthx run "What is 15 * 8?" --backend gemini --model gemini-2.5-flash
+  agentkthx run "What is 15 * 8?" --backend gemini --model gemini-3.8-flash
 
   # Python API
   from agentkthx import Agent
@@ -106,8 +106,8 @@ from agentkthx.model_cache import load_seed_catalog
 
 FREE_TIER_LIMITS: dict[str, dict[str, int]] = {
     # === Text-out chat models (FREE on Free tier) ===
-    "gemini-2.5-flash": {"rpm": 5, "tpm": 250_000, "rpd": 20},
-    "gemini-2.5-flash-lite": {"rpm": 10, "tpm": 250_000, "rpd": 20},
+    # R07.21: gemini-2.5-flash + flash-lite moved to the deprecated/paid
+    # section below — Google returns 404 for new users on the 2.5 series.
     "gemini-3-flash-preview": {"rpm": 5, "tpm": 250_000, "rpd": 20},
     "gemini-3.1-flash-lite": {"rpm": 15, "tpm": 250_000, "rpd": 500},
     "gemini-3.5-flash": {"rpm": 5, "tpm": 250_000, "rpd": 20},
@@ -149,6 +149,16 @@ FREE_TIER_LIMITS: dict[str, dict[str, int]] = {
     # === NOT on Free tier (0/0/0 — listed for completeness / future ref) ===
     "gemini-2.0-flash": {"rpm": 0, "tpm": 0, "rpd": 0},  # legacy, being shut down
     "gemini-2.0-flash-lite": {"rpm": 0, "tpm": 0, "rpd": 0},  # legacy, being shut down
+    "gemini-2.5-flash": {
+        "rpm": 0,
+        "tpm": 0,
+        "rpd": 0,
+    },  # R07.21: DEPRECATED by Google (404 for new users)
+    "gemini-2.5-flash-lite": {
+        "rpm": 0,
+        "tpm": 0,
+        "rpd": 0,
+    },  # R07.21: DEPRECATED by Google (404 for new users)
     "gemini-2.5-pro": {"rpm": 0, "tpm": 0, "rpd": 0},  # Pro = paid
     "gemini-3.1-pro-preview": {"rpm": 0, "tpm": 0, "rpd": 0},  # Pro = paid
     "gemini-3.1-pro-preview-customtools": {"rpm": 0, "tpm": 0, "rpd": 0},  # Pro = paid
