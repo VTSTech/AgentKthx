@@ -180,45 +180,42 @@ AgentKthx sends a single category, `cli-agent`, on every request. This is the mo
 
 ### Description
 
-OpenRouter's app directory has a `description` field on each app entry, but **it cannot be set via HTTP headers** — only via the web UI at `openrouter.ai/apps/url/<your-referer-url>`. OpenRouter's app data model includes `description` as a nullable string that the app owner populates through the dashboard.
+OpenRouter's app directory has a `description` field on each app entry, but **there is no documented mechanism to set it**. The App Attribution doc (https://openrouter.ai/docs/app-attribution) only defines four headers — `HTTP-Referer`, `X-OpenRouter-Title`, `X-OpenRouter-Categories`, `X-OpenRouter-App-Visibility`. There is no header for `description`, `main_url`, `slug`, `source_code_url`, `favicon_url`, `icon_class_name`, or `related_apps`. The OpenAPI spec (https://openrouter.ai/openapi.json — 111 paths) has no `/apps` write endpoint. There is no app-owner dashboard in the OpenRouter web UI.
 
-The first time traffic with attribution headers lands at OpenRouter, the app entry is created with `description: null`. The owner (anyone who can prove control of the referer URL, or who holds the API key that created the entry) then visits `https://openrouter.ai/apps/url/<referer>` while logged in and uses the dashboard form to set the description.
+The first time traffic with attribution headers lands at OpenRouter, the app entry is created with `description: null` and stays that way. The other dashboard-only fields (`main_url`, `slug`, `source_code_url`, `favicon_url`, `icon_class_name`, `related_apps`) are likewise `null` indefinitely.
 
-AgentKthx's directory entry currently shows:
+AgentKthx's directory entry currently shows (verified live 2026-10-03):
 ```json
 {
   "app": {
     "categories": ["cli-agent"],
     "created_at": "2026-09-20T14:56:39.444Z",
-    "description": null,       // <-- set this via the web dashboard
-    "favicon_url": null,
-    "icon_class_name": null,
+    "description": null,       // no mechanism to set this
+    "favicon_url": null,       // no mechanism to set this
+    "icon_class_name": null,   // no mechanism to set this
     "id": 5072126,
-    "main_url": null,
+    "main_url": null,          // no mechanism to set this
     "origin_url": "https://github.com/VTSTech/AgentKthx",
-    "related_apps": [],
-    "slug": null,
-    "source_code_url": null,
+    "related_apps": [],        // no mechanism to set this
+    "slug": null,              // no mechanism to set this
+    "source_code_url": null,   // no mechanism to set this
     "title": "AgentKthx"
   },
-  "totalTokens": 32995314,
+  "totalTokens": 37198922,
   "rank": null,
   "modelsUsed": 14
 }
 ```
 
-The fields `description`, `main_url`, `slug`, `source_code_url`, `favicon_url`, `icon_class_name`, and `related_apps` are all set via the dashboard, not headers. Recommended values for AgentKthx:
+The fields OpenRouter **does** populate from the attribution headers are working correctly:
+- `title` ← `X-OpenRouter-Title` / `X-Title` header (AgentKthx sends `"AgentKthx"`)
+- `categories` ← `X-OpenRouter-Categories` header (AgentKthx sends `"cli-agent"`)
+- `origin_url` ← `HTTP-Referer` header (AgentKthx sends `"https://github.com/VTSTech/AgentKthx"`)
+- `id` ← assigned by OpenRouter at app creation
+- `created_at` ← timestamp of first attributed request
+- `totalTokens`, `modelsUsed`, `rank` ← computed from attributed traffic
 
-| Field | Recommended value |
-|-------|-------------------|
-| `description` | `A minimal, hackable, stdlib-only agentic framework + CLI for autonomous LLM agents with local and cloud backends, tool calling, streaming, plugins, souls, and skills.` |
-| `main_url` | `https://github.com/VTSTech/AgentKthx` (same as `origin_url`) |
-| `source_code_url` | `https://github.com/VTSTech/AgentKthx` |
-| `slug` | `agentkthx` (lowercase, hyphen-separated) |
-| `favicon_url` | (path to a square logo once one is published) |
-| `icon_class_name` | (leave null — used for FontAwesome/CSS class icons) |
-
-These dashboard-only fields are intentionally outside the plugin's control surface — they're presentation metadata, not runtime behavior, and OpenRouter gates them through web authentication to prevent arbitrary harnesses from spoofing identity.
+The null fields are **not an AgentKthx-side bug** — OpenRouter's app directory simply doesn't expose a way to populate them. If OpenRouter adds a mechanism in the future (a header, an API endpoint, or a dashboard), the doc will be updated to document it. Until then, the app entry's visible identity is fully driven by the four headers AgentKthx already sends.
 
 ---
 
@@ -1250,8 +1247,8 @@ AgentKthx uses the `AGENTKTHX_*` env var prefix (renamed from `AGENTNOVA_*` in R
 | Token count way too high | Conversation history growing unbounded | Use `/clear` in chat mode; or `--session` to persist between runs |
 | App not appearing in OpenRouter rankings | Missing `HTTP-Referer` header | Verify `_build_openrouter_attribution_headers()` is called from all header sites (R07.21 regression tests pin this) |
 | App category missing from directory | Missing or unrecognized `X-OpenRouter-Categories` | Default is `cli-agent` (hardcoded). Verify via `/generation?id=<gen-id>` → `http_referer` field |
-| App description is null | Dashboard field — not settable via headers | Visit `https://openrouter.ai/apps/url/<referer>` while logged in to set via the web UI |
-| `OverflowError` on `--num-ctx infk` | `_parse_token_size` accepts `inf` (ROB-36 OPEN) | Use a finite value: `--num-ctx 128k` |
+| App description is null | OpenRouter provides no mechanism to set it — not a header, not an API endpoint, not a dashboard. The field stays null for ALL apps unless OpenRouter staff curate it | No action needed on AgentKthx's side; the four attribution headers AgentKthx sends are the complete mechanism |
+| `OverflowError` on `--num-ctx infk` | `_parse_token_size` accepts `inf` (ROB-36 CLOSED in R07.21 — `math.isfinite` guard now turns this into a clean ValueError) | Use a finite value: `--num-ctx 128k` |
 
 ---
 
