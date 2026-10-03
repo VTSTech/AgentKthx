@@ -156,13 +156,22 @@ except Exception as e:
   fi
   # Strategy: strip ANSI codes, find lines that are only-dashes after
   # stripping whitespace, count them, and after the 2nd separator, print
-  # the first field of the next non-empty line.
+  # the first field of the next non-empty line. SKIP non-chat models
+  # (TTS, audio, image, transcription, embeddings) — they can't run
+  # the shell tool and will 400 with "response modalities not supported".
+  # Non-chat patterns: -tts, -transcribe, -image, -preview-tts, embed,
+  # dall-e, flux, lyria, whisper, veo, sora, etc.
   eval "$cmd 2>/dev/null" \
     | sed 's/\x1b\[[0-9;]*m//g' \
     | awk '
         { gsub(/^[[:space:]]+|[[:space:]]+$/, "") }
         /^[-─]+$/ { sep++; next }
-        sep == 2 && NF > 0 { print $1; exit }
+        sep == 2 && NF > 0 {
+          name = $1
+          # Skip non-chat models — they 400 on text requests
+          if (name ~ /-tts$|-tts-|-transcribe|-image$|-preview-tts|^embed|dall-e|flux|lyria|whisper|^tts-|-speech/) next
+          print name; exit
+        }
       '
 }
 

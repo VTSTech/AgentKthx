@@ -234,6 +234,32 @@ class MistralBackend(CloudBackend):
         }
     )
 
+    # R07.21: agent-internal fields that the agent loop forwards as kwargs
+    # but that must NEVER reach the Mistral API (they're Ollama/llama-server
+    # specific). Without this skip list, Mistral 422s with:
+    #   "extra_forbidden: loc=['body','num_ctx'] msg='Extra inputs not permitted'"
+    # These fields are consumed by the agent loop / agent_factory for context
+    # sizing — they don't belong in the request body.
+    _AGENT_INTERNAL_FIELDS = frozenset(
+        {
+            "num_ctx",
+            "num_predict",
+            "num_batch",
+            "truncation",
+            "repeat_penalty",
+            "repeat_last_n",
+            "think",
+            "thinking",
+            "thinking_config",
+            "include_thoughts",
+            "thought_signature",
+            "cached_content",
+            "flash_attn",
+            "model_family",
+            "api_mode",
+        }
+    )
+
     # ───────────────────────────────────────────────────────────────────
     # __init__ — delegate to CloudBackend
     # ───────────────────────────────────────────────────────────────────
@@ -630,9 +656,14 @@ class MistralBackend(CloudBackend):
             body["prompt_cache_key"] = f"agentkthx-{session_id}"
 
         # Forward any other kwargs the caller explicitly passes, EXCEPT
-        # the OpenAI-only fields that would 422 on Mistral.
+        # the OpenAI-only fields and agent-internal fields that would 422
+        # on Mistral. R07.21: _AGENT_INTERNAL_FIELDS added — num_ctx,
+        # num_predict, truncation, etc. are Ollama/llama-server specific
+        # and must never reach the Mistral API.
         for key, value in kwargs.items():
             if key in self._OPENAI_ONLY_FIELDS:
+                continue
+            if key in self._AGENT_INTERNAL_FIELDS:
                 continue
             if key in (
                 "model",
