@@ -1080,9 +1080,13 @@ class ZaiBackend(CloudBackend):
         Test model's tool support capability.
 
         ZAI's GLM models support native function calling via the standard
-        OpenAI tools format. Returns NATIVE for known GLM models.
+        OpenAI tools format. Returns NATIVE by default (cloud-backend
+        contract — matches OpenRouter, OrcaRouter, HuggingFace). Cached
+        REACT verdicts (from a prior --tool-support run that definitively
+        caught a 400 tools-rejection) are honored.
 
-        When force_test=True, makes a live API call to verify.
+        When force_test=True, makes a live API call to verify and caches
+        the definitive result.
 
         R07.19 (follow-up #12) probe hardening — live finding: the free
         tier rate-limits rapid sequential probes (HTTP 429 "code 1302"),
@@ -1114,7 +1118,17 @@ class ZaiBackend(CloudBackend):
             if cached is not None:
                 # Legacy "none" entries normalize to REACT (follow-up #10)
                 return ToolSupportLevel.effective(cached)
-            return ToolSupportLevel.UNTESTED
+            # R07.21: cloud backends default to NATIVE when the cache is empty
+            # — this is the cloud-backend contract (OpenRouter, OrcaRouter,
+            # HuggingFace all return NATIVE unconditionally; Gemini/OpenAI
+            # return NATIVE for known chat models). ZAI was the outlier
+            # returning UNTESTED, which made the models table show
+            # "? untested" for every GLM model that hadn't been probed with
+            # --tool-support. The force_test=True path still does the live
+            # probe and caches definitive verdicts (including REACT for
+            # models that definitively reject the tools param, like
+            # glm-4.5-flash and glm-4.7-flash).
+            return ToolSupportLevel.NATIVE
 
         # Check API key before making a test call
         if not self._api_key:
