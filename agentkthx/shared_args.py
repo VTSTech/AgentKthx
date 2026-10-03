@@ -448,6 +448,34 @@ def add_agent_args(
             help="Require confirmation before executing dangerous tools (shell, write_file, edit_file)",
         )
 
+    # R07.22 MCP client (Phase 1.2): --mcp enables servers declared in
+    # ~/.agentkthx/mcp.json. Pass server names to enable only those;
+    # bare --mcp enables all. --mcp-config overrides the config path.
+    # Servers are connected AFTER agent construction (in _build_agent)
+    # so a failure to start an MCP server doesn't kill the session —
+    # the agent still works, just without that server's tools.
+    parser.add_argument(
+        "--mcp",
+        nargs="*",
+        default=None,
+        metavar="SERVER",
+        help="Enable MCP (Model Context Protocol) client mode. Bare --mcp "
+        "enables all servers declared in the config; --mcp fs git enables "
+        "only the named servers. Servers are connected lazily at startup; "
+        "see ~/.agentkthx/mcp.json (use `agentkthx mcp init` to create). "
+        "Note: for `run`, put the prompt before --mcp (e.g. "
+        "`agentkthx run hello --mcp fs`) because nargs='*' greedily consumes "
+        "everything after the flag.",
+    )
+    parser.add_argument(
+        "--mcp-config",
+        default=None,
+        metavar="PATH",
+        dest="mcp_config",
+        help="Path to an MCP server config file (default: ~/.agentkthx/mcp.json). "
+        "Use this to maintain multiple server sets (e.g. work vs personal).",
+    )
+
 
 def parse_shared_args(args) -> SharedConfig:
     """Parse shared args into a SharedConfig, falling back to env vars.

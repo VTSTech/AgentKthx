@@ -174,6 +174,42 @@ def create_parser() -> argparse.ArgumentParser:
         "--backend", choices=get_backend_choices(), default=None, help="Backend to use"
     )
 
+    # MCP command (R07.22 Phase 1.6) — manage MCP client config + probes
+    mcp_parser = subparsers.add_parser(
+        "mcp", help="Manage MCP (Model Context Protocol) client servers"
+    )
+    mcp_sub = mcp_parser.add_subparsers(dest="mcp_command", help="MCP subcommand")
+    mcp_sub.add_parser("list", help="List configured MCP servers (from ~/.agentkthx/mcp.json)")
+    mcp_init = mcp_sub.add_parser(
+        "init", help="Write a commented example ~/.agentkthx/mcp.json (refuses to overwrite)"
+    )
+    mcp_init.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite an existing mcp.json (you will lose current config)",
+    )
+    mcp_init.add_argument(
+        "--path",
+        default=None,
+        help="Write to this path instead of ~/.agentkthx/mcp.json",
+    )
+    mcp_probe = mcp_sub.add_parser(
+        "probe", help="Connect to one MCP server, list its tools, then disconnect"
+    )
+    mcp_probe.add_argument("name", help="Server name (from `mcp list`) to probe")
+    mcp_probe.add_argument(
+        "--call",
+        nargs=2,
+        metavar=("TOOL", "JSON_ARGS"),
+        default=None,
+        help="After probing, call one tool with a JSON arguments object and print the result",
+    )
+    mcp_probe.add_argument(
+        "--config",
+        default=None,
+        help="Path to an MCP config file (default: ~/.agentkthx/mcp.json)",
+    )
+
     # Plugins command (v0.2 spec §CLI integration) — registered before run
     # so the root -h subcommand list stays alphabetical (R07.19 follow-up #6)
     plugins_parser = subparsers.add_parser("plugins", help="List and manage plugins")

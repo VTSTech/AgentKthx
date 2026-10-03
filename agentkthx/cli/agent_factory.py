@@ -429,7 +429,119 @@ def _build_agent(args: argparse.Namespace, config) -> Agent:
     # a silent per-request fallback flag the user can't see.
     register_insufficient_credits_switch(agent)
 
+    # R07.22 MCP client (Phase 1.4): connect to MCP servers declared in
+    # ~/.agentkthx/mcp.json (or --mcp-config PATH) and bridge their tools
+    # into the agent's existing ToolRegistry. The manager is stashed on
+    # the agent so the chat REPL can close it in its finally block.
+    #
+    # Failure semantics: a server that fails to connect or list tools is
+    # SKIPPED with a stderr warning (MCPManager.connect_all(skip_failures=
+    # True)). The agent still works without that server's tools. This is
+    # the operator's expectation — a misconfigured MCP server shouldn't
+    # kill the chat session.
+    _wire_mcp(agent, args, tools)
+
     return agent
+
+
+def _wire_mcp(agent, args, tools) -> None:
+    """Connect MCP servers and bridge their tools into the agent's registry.
+
+    Phase 1 implementation: eager connect (every configured server starts
+    at agent construction). Lazy mode is on the roadmap (MCP-04).
+
+    The agent's ToolRegistry may be ``None`` (JEV mode, or --tools "" with
+    no builtins). In that case we still connect the MCP servers (so
+    ``agentkthx mcp list`` works mid-session via /mcp if added later), but
+    we can't bridge tools — there's no registry to bridge into. The
+    operator should pass --tools explicitly if they want MCP tools only.
+    """
+    mcp_flag = getattr(args, "mcp", None)
+    if mcp_flag is None:
+        # --mcp not passed — MCP is opt-in, do nothing
+        return
+
+    try:
+        from ..mcp import MCPManager, load_mcp_config
+    except ImportError:
+        import sys
+
+        print(
+            "[MCP] agentkthx.mcp module not available — skipping MCP setup",
+            file=sys.stderr,
+        )
+        return
+
+    config_path = getattr(args, "mcp_config", None)
+    try:
+        all_configs = load_mcp_config(config_path)
+    except Exception as e:
+        import sys
+
+        print(f"[MCP] config load failed: {e}", file=sys.stderr)
+        return
+
+    if not all_configs:
+        import sys
+
+        if config_path is None:
+            print(
+                "[MCP] no servers configured — create ~/.agentkthx/mcp.json "
+                "with `agentkthx mcp init`",
+                file=sys.stderr,
+            )
+        else:
+            print(f"[MCP] no servers in {config_path}", file=sys.stderr)
+        return
+
+    # Filter to the user's --mcp name list if they passed one
+    if mcp_flag:  # non-empty list (nargs="*" with bare --mcp gives [])
+        wanted = set(mcp_flag)
+        unknown = wanted - {c.name for c in all_configs}
+        if unknown:
+            import sys
+
+            available = ", ".join(c.name for c in all_configs)
+            print(
+                f"[MCP] warning: unknown server(s) requested: "
+                f"{', '.join(sorted(unknown))} (available: {available})",
+                file=sys.stderr,
+            )
+        all_configs = [c for c in all_configs if c.name in wanted]
+
+    if not all_configs:
+        import sys
+
+        print("[MCP] no enabled servers match the request", file=sys.stderr)
+        return
+
+    manager = MCPManager(all_configs)
+    failures = manager.connect_all(skip_failures=True)
+
+    import sys
+
+    if failures:
+        for name, err in failures:
+            print(
+                f"[MCP] {name}: failed to connect ({err}); skipped",
+                file=sys.stderr,
+            )
+
+    # Bridge tools if the agent has a registry (tools is None in JEV mode
+    # or when --tools is empty). When None, the agent still benefits from
+    # the manager being stashed (future /mcp slash command can list/probe).
+    if tools is not None:
+        try:
+            count = manager.register_into(tools)
+            print(
+                f"[MCP] connected {len(manager.server_names)} server(s), "
+                f"bridged {count} tool(s) into the registry",
+                file=sys.stderr,
+            )
+        except Exception as e:
+            print(f"[MCP] tool bridge failed: {e}", file=sys.stderr)
+
+    agent._mcp_manager = manager
 
 
 def register_insufficient_credits_switch(agent) -> None:

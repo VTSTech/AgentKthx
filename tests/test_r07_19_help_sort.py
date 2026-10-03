@@ -145,6 +145,7 @@ class TestSubcommandListingSorted:
             "agent",
             "chat",
             "config",
+            "mcp",
             "modelfile",
             "models",
             "plugins",

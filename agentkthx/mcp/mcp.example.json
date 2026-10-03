@@ -1,0 +1,41 @@
+{
+  "version": "0.1",
+  "servers": [
+    {
+      "name": "filesystem",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/REPLACE_ME/projects"],
+      "enabled": true,
+      "timeout_seconds": 30,
+      "comment": "Sandboxed file read/write — verified working 2026-10-04"
+    },
+    {
+      "name": "sequential-thinking",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"],
+      "enabled": true,
+      "comment": "Chain-of-thought scratchpad tool — verified on npm 2026-10-04. Useful for complex multi-step reasoning; the agent calls it to externalize its thinking."
+    },
+    {
+      "name": "git",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-git", "/home/REPLACE_ME/projects"],
+      "enabled": false,
+      "comment": "DISABLED 2026-10-04: @modelcontextprotocol/server-git was removed from npm (404). Check github.com/modelcontextprotocol/servers for the current recommended git MCP server, or use serena (LSP-based, includes git ops)."
+    },
+    {
+      "name": "memory",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-memory"],
+      "enabled": false,
+      "comment": "Persistent knowledge graph (JSON file). Enable if you want long-term agent memory."
+    },
+    {
+      "name": "audit",
+      "command": "python3",
+      "args": ["-m", "agentkthx.skills.codebase_audit.mcp_server", "--repo", "/home/REPLACE_ME/repo"],
+      "enabled": false,
+      "comment": "Phase 2 — kthx-audit MCP server. See docs/mcp/ROADMAP.md. Disabled until implemented."
+    }
+  ]
+}

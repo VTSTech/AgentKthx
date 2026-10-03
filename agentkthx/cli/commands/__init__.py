@@ -9,6 +9,7 @@ from __future__ import annotations
 from .agent import cmd_agent
 from .chat import cmd_chat
 from .config import cmd_config
+from .mcp import cmd_mcp
 from .modelfile import cmd_modelfile
 from .models import cmd_models
 from .plugins import cmd_plugins
@@ -39,4 +40,5 @@ __all__ = [
     "cmd_souls",
     "cmd_sessions",
     "cmd_plugins",
+    "cmd_mcp",
 ]

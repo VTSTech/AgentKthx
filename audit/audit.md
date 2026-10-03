@@ -385,12 +385,69 @@ The v0.1.2 bug is the evidence: `_card_is_free()` required zero-valued price fie
 Recommendation: a live-gated contract test (skips without `POLLINATIONS_API_KEY`): fetch the real `/v1/models`; if any card carries currency-only pricing, assert `_card_is_free()` is True for it and FREE_ONLY listing is non-empty. Cheap, runs in CI when the secret is configured, and fails the moment the gateway re-encodes the boundary.
 **Impact:** Gateway encoding drift is invisible to the suite until a user reports it — the exact class of bug v0.1.2 shipped with.
 ---
+
+### MCP (R07.22 — new category)
+#### MCP-01: StdioTransport uses blocking readline — per-call timeouts don't actually interrupt
+| Property | Value |
+|----------|-------|
+| **Severity** | Medium |
+| **Category** | Robustness (MCP) |
+| **File(s)** | `agentkthx/mcp/transport.py:170-205` (`_read_response`) |
+The scaffold's `_read_response` calls `self._proc.stdout.readline()` with no timeout. The `timeout` parameter is honored only via the loop's deadline check, but a hung MCP server that produces no output blocks the calling thread on `readline()` indefinitely — the deadline check never gets a chance to fire. Same shape as ROB-06 (Windows conn release) and ROB-02 (orchestrator thread join): a blocking stdlib I/O call with no cancellation path. In practice this means a misbehaving MCP server can freeze the agent's main thread for the full `timeout_seconds` window, and Ctrl+C is unreliable because the signal won't interrupt the readline on all platforms.
+Recommendation: thread+queue pattern — spawn a daemon thread that does the blocking `readline()` and pushes the result to a `queue.Queue`; the main thread does `queue.get(timeout=remaining)`. On timeout, mark the transport as poisoned (subsequent calls raise immediately) and let the daemon thread die naturally on subprocess close. This is the same pattern `subprocess.communicate` uses internally. Bonus: also fixes Ctrl+C interruptibility.
+**Impact:** A hung MCP server freezes the agent's main thread for up to `timeout_seconds` (default 30s) with no clean escape. Multi-server setups where one server hangs block all tool calls to other servers (because each transport serializes its own calls, but the manager's `connect_all` calls each server sequentially).
+---
+
+#### MCP-02: MCP server configs have no sha256 pin equivalent (SEC-13 analogue)
+| Property | Value |
+|----------|-------|
+| **Severity** | Medium |
+| **Category** | Security (MCP) |
+| **File(s)** | `agentkthx/mcp/config.py:88-110` (`MCPServerConfig.resolve_command`) |
+An MCP server entry declares `command` (string) + `args` (list). The launcher resolves `command` via `shutil.which` or treats it as an absolute path, then spawns it with `subprocess.Popen(shell=False)`. There is no sha256 pin on the binary itself — an attacker who can write `~/.agentkthx/mcp.json` (or any path the operator passes via `--mcp-config`) can substitute any binary for a declared server name. The config file permission check warns on group/world-writable (line 156-167) but does not fail, and on containers running as root with default umask the warning is the only signal. This is the direct analogue of SEC-13 for plugins, with the same opt-in trust posture.
+Recommendation: add an optional `sha256` field to `MCPServerConfig` (string, hex). When present, `resolve_command` hashes the resolved binary and refuses to launch on mismatch (fail-closed, same as `_validate_sha256_pin` for plugins). Add `AGENTKTHX_REQUIRE_MCP_PINS=1` env var that refuses to load any MCP server entry without a pin. Document both in `docs/mcp/ROADMAP.md` and in `SECURITY.md`. Future: consider a `paths` allowlist field that restricts where binaries can be resolved from.
+**Impact:** The MCP trust boundary is advisory — same as SEC-13 for plugins. A tampered `mcp.json` substitutes arbitrary code under a trusted server name with no signal to the operator beyond a file-permission warning that's easy to miss.
+---
+
+#### MCP-03: Complex JSON Schema constructs flatten to default `string` in inputSchema conversion
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Maintainability (MCP) |
+| **File(s)** | `agentkthx/mcp/manager.py:191-225` (`_extract_params`) |
+The `_extract_params` helper converts an MCP tool's `inputSchema` (JSON Schema) into the project's flat `ToolParam` list. It handles `type: object` with `properties` + `required` and the common type cases (`string`/`integer`/`number`/`boolean`/`array`/`object`), plus nullable unions (`["string", "null"]`). It does NOT handle `oneOf`, `anyOf`, `allOf`, `$ref`, or nested `properties` deeper than one level — these fall through to `param_type = "string"` (the default). A tool with a sophisticated schema will appear simpler to the model than the server actually accepts, leading to malformed tool calls and the model being blamed for "hallucinating" args that the schema actually permitted.
+Recommendation: when `_extract_params` encounters a schema construct it can't structurally convert, emit a single `arguments_json` string parameter whose description tells the model to pass the full arguments object as JSON. The MCP client then parses the JSON and forwards it as the `arguments` field. This preserves the rich schema (the model sees a JSON string with the original schema in its description) at the cost of slightly more prompt tokens. Alternative: extend `ToolParam` to carry an arbitrary JSON Schema dict (bigger change — touches `to_json_schema` in `core/models.py`).
+**Impact:** Tools with `oneOf`/`anyOf`/`$ref` schemas appear deceptively simple to the model. Tool calls fail with "missing required field" or "wrong type" errors that the model can't easily diagnose because the schema it was shown didn't reflect reality.
+---
+
+#### MCP-04: Eager server startup adds latency to every `--mcp` session even when no MCP tools are called
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Performance (MCP) |
+| **File(s)** | `agentkthx/cli/agent_factory.py:513-514` (`MCPManager.connect_all`) |
+The scaffold's `connect_all` is eager — every configured server is spawned at agent construction, the `initialize` handshake runs, and `tools/list` is queried for every server, all before the agent's first turn. For a user with 4–5 MCP servers configured (filesystem + git + memory + serena + audit), this adds ~1–3 seconds to `agentkthx chat` startup. If the user's session ends up not calling any MCP tools (e.g., they just ask the model a coding question and the agent uses built-in `shell`/`read_file`), the startup cost was wasted.
+Recommendation: lazy mode — `MCPManager.connect_all` records the configured servers but does not spawn them; a server is spawned on first tool call to that server's namespace. The agent's tool registry still shows all the namespaced tool names (queried lazily via a separate `tools/list` on first access), so the model can pick the tool; the actual subprocess spawn happens when the tool is dispatched. Trade-off: the first tool call to a server pays the spawn + handshake latency (~200–500ms), which the model can't predict. Mitigation: warm-up the most-likely servers (filesystem, git) eagerly and the rest lazily.
+**Impact:** Every `--mcp` session pays ~1–3s of startup latency for servers that may never be used. Not a correctness bug but a UX regression vs. the non-MCP path.
+---
+
+#### MCP-05: No `notifications/tools/list_changed` handling — runtime tool surface changes invisible to the registry
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Robustness (MCP) |
+| **File(s)** | `agentkthx/mcp/client.py` (no handler for the notification) |
+The MCP protocol allows a server to push `notifications/tools/list_changed` when its tool surface changes at runtime (e.g., a filesystem MCP server that adds/removes tools based on which directories are accessible). The scaffold's `MCPClient` does not register a handler for this notification — `StdioTransport._read_response` skips any message without an `id` field (line 242-244), so the notification is silently dropped. The agent's `ToolRegistry` therefore shows the tool surface as it was at `connect_all` time; tools added or removed at runtime are invisible until the next `connect_all` (typically the next session).
+Recommendation: register a per-server callback in `MCPClient` for `notifications/tools/list_changed`. When fired, the client re-queries `tools/list`, diffs against the previous list, and notifies the `MCPManager` to add/remove the shim Tools in the agent's `ToolRegistry`. The manager needs an `unregister_tool(name)` method on `ToolRegistry` (currently has `register_tool` only). Trade-off: tool removal mid-session is a slight surprise to the model if it just picked a tool that's now gone — wrap the removal in a small grace period (1 turn) and emit a system message.
+**Impact:** Tools added/removed at runtime by MCP servers are invisible to the agent until session restart. Most current MCP servers have a static tool surface, so this is rarely hit in practice — but it's a latent gap that will bite when dynamic-tool servers become common.
+---
+
 ## Priority Matrix
 | Timeline | Findings |
 |----------|----------|
-| **Near term (R07.21–R07.22)** | ROB-33 (non-destructive Windows liveness check — unblocks the flagship turbo start → chat workflow), ROB-31 (entitlement-aware fallback filter), ROB-02 (join worker threads), ROB-06 (deterministic Windows conn release), ROB-15 (single-transaction add — pairs naturally with the now-closed ROB-18 RLock), SEC-09 (warn on non-HTTPS ACP), SEC-13 (require-plugin-pins mode), MAINT-03 (drop strategy 5 of `normalize_args`), MAINT-22 (streaming `_build_body()` virtual), MAINT-23 (lift retry-loop skeleton to CloudBackend — closes ROB-29 in the same move), MAINT-01 (extract `ChatSession` — would also close MAINT-27), TEST-01 (integration test tier), TEST-03 (add `FakeStreamingBackend`) |
-| **Short term (R07.22–R07.24)** | MAINT-27 (move `/sh` branch to a `cmd_sh` method when MAINT-01 lands), FEAT-03 (tool output JSON Schema), TEST-09 (plugin streaming-path integration test), TEST-10 (live-shape free-model contract test) |
-| **Medium term (R08.00+)** | FEAT-05 (plugin sandbox), FEAT-06 (streaming tool-arg deltas), FEAT-07 (conversation export/import), FEAT-08 (paid_only free-TIER filter mode), TEST-04 (rollback tests), TEST-05 (bump-version test portability), TEST-07 (update_check failure paths) |
+| **Near term (R07.22–R07.23)** | ROB-33 (non-destructive Windows liveness check — unblocks the flagship turbo start → chat workflow), ROB-31 (entitlement-aware fallback filter), ROB-02 (join worker threads), ROB-06 (deterministic Windows conn release), ROB-15 (single-transaction add — pairs naturally with the now-closed ROB-18 RLock), SEC-09 (warn on non-HTTPS ACP), SEC-13 (require-plugin-pins mode), MAINT-03 (drop strategy 5 of `normalize_args`), MAINT-22 (streaming `_build_body()` virtual), MAINT-23 (lift retry-loop skeleton to CloudBackend — closes ROB-29 in the same move), MAINT-01 (extract `ChatSession` — would also close MAINT-27), TEST-01 (integration test tier), TEST-03 (add `FakeStreamingBackend`), MCP-01 (thread+queue for StdioTransport — unblocks Ctrl+C and per-call timeouts), MCP-02 (MCP server sha256 pins — SEC-13 analogue, same enforcement-mode gap) |
+| **Short term (R07.23–R07.25)** | MAINT-27 (move `/sh` branch to a `cmd_sh` method when MAINT-01 lands), FEAT-03 (tool output JSON Schema), TEST-09 (plugin streaming-path integration test), TEST-10 (live-shape free-model contract test), MCP-03 (oneOf/anyOf/$ref schema flattening — arguments_json fallback), MCP-04 (lazy MCP server startup — eager mode is a UX regression for multi-server configs) |
+| **Medium term (R08.00+)** | FEAT-05 (plugin sandbox), FEAT-06 (streaming tool-arg deltas), FEAT-07 (conversation export/import), FEAT-08 (paid_only free-TIER filter mode), TEST-04 (rollback tests), TEST-05 (bump-version test portability), TEST-07 (update_check failure paths), MCP-05 (notifications/tools/list_changed handler — wait until dynamic-tool MCP servers are common) |
 Closed/wontfix placements from earlier revisions are archived in `deltas.md`'s closure timeline (R07.00 → R07.21). The R07.21 closure batches closed 13 findings total: batch 1 — ROB-18, ROB-35, ROB-36, ROB-38, ROB-39; batch 2 — ROB-09, ROB-17, ROB-20, ROB-25, ROB-30, MAINT-24, MAINT-25, MAINT-26. All surgical non-breaking fixes. Tiers are cumulative, not reset per release.
 Guidelines for timeline assignment:
 - **Near term** — High severity findings and the most impactful Medium severity findings; should be fixed in the next 1-2 releases

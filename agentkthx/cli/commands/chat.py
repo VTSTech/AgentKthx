@@ -1887,5 +1887,16 @@ def cmd_chat(args: argparse.Namespace) -> int:
         # Tear down terminal scroll region on ALL exit paths so the
         # terminal is never left in a broken state.
         _teardown_footer_region()
+        # R07.22 MCP client (Phase 1.5): close every MCP server subprocess
+        # the agent opened. Skip silently if MCP wasn't enabled (no
+        # _mcp_manager attr). Best-effort — close errors are swallowed
+        # because we're tearing down anyway and the user can't act on
+        # them mid-exit.
+        _mcp_mgr = getattr(agent, "_mcp_manager", None)
+        if _mcp_mgr is not None:
+            try:
+                _mcp_mgr.close_all(timeout=1.0)
+            except Exception:
+                pass
 
     return 0

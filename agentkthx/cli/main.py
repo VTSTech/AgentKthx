@@ -12,6 +12,7 @@ from .commands import (
     cmd_agent,
     cmd_chat,
     cmd_config,
+    cmd_mcp,
     cmd_modelfile,
     cmd_models,
     cmd_plugins,
@@ -121,8 +122,10 @@ def main(argv: Optional[list[str]] = None) -> int:
     # Update check — live PyPI+GitHub query, silent on failure / opt-out
     # (AGENTKTHX_NO_UPDATE_CHECK=1). Runs once per process (R07.00: always
     # live, no cache); `version` does its own inline check;
-    # `update` obviously doesn't need one.
-    if args.command not in ("version", "update"):
+    # `update` obviously doesn't need one. `mcp` is skipped because
+    # `mcp probe` is a diagnostic against a local subprocess — hitting
+    # pypi.org on every probe would be pure latency.
+    if args.command not in ("version", "update", "mcp"):
         _run_update_check()
 
     commands = {
@@ -141,6 +144,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         "souls": cmd_souls,
         "sessions": cmd_sessions,
         "plugins": cmd_plugins,
+        "mcp": cmd_mcp,
         "update": cmd_update,
     }
 
