@@ -361,6 +361,26 @@ def _build_agent(args: argparse.Namespace, config) -> Agent:
                         f"using args.force_react={effective_force_react}"
                     )
 
+    # R07.22 MCP client (Phase 1.4): connect to MCP servers declared in
+    # ~/.agentkthx/mcp.json (or --mcp-config PATH) and bridge their tools
+    # into the ToolRegistry BEFORE the agent is constructed. This is
+    # critical — the system prompt is built during Agent.__init__, and it
+    # only includes the Tool Reference section when has_tools=True. If we
+    # wired MCP after construction, the prompt would have no tool section
+    # and the model would hallucinate `shell` (which isn't even in the
+    # registry) instead of picking an MCP tool.
+    #
+    # When --mcp is passed but --tools is empty, we create an empty
+    # ToolRegistry here so MCP tools have somewhere to land. This is the
+    # "MCP-only session" case — the agent gets filesystem/git/audit tools
+    # without any built-in tools competing for the model's attention.
+    _mcp_manager = _wire_mcp(args, tools)
+    if _mcp_manager is not None:
+        # _wire_mcp may have promoted tools from None → ToolRegistry
+        # (when --mcp is passed without --tools). Re-read the registry
+        # it populated so Agent.__init__ sees the full tool list.
+        tools = _mcp_manager._bridged_registry  # set by _wire_mcp
+
     agent = Agent(
         model=model,
         tools=tools,
@@ -422,6 +442,10 @@ def _build_agent(args: argparse.Namespace, config) -> Agent:
     # Set compaction threshold from --compaction arg
     agent._compaction_threshold = compaction_threshold
 
+    # Stash the MCP manager so the chat REPL can close it in its finally block.
+    if _mcp_manager is not None:
+        agent._mcp_manager = _mcp_manager
+
     # Insufficient-credits session switch: when a cloud backend reports the
     # session model can't be billed (ZAI 429 "insufficient credits"), run the
     # proper /model switch path (apply_model_switch) so the whole session
@@ -429,37 +453,28 @@ def _build_agent(args: argparse.Namespace, config) -> Agent:
     # a silent per-request fallback flag the user can't see.
     register_insufficient_credits_switch(agent)
 
-    # R07.22 MCP client (Phase 1.4): connect to MCP servers declared in
-    # ~/.agentkthx/mcp.json (or --mcp-config PATH) and bridge their tools
-    # into the agent's existing ToolRegistry. The manager is stashed on
-    # the agent so the chat REPL can close it in its finally block.
-    #
-    # Failure semantics: a server that fails to connect or list tools is
-    # SKIPPED with a stderr warning (MCPManager.connect_all(skip_failures=
-    # True)). The agent still works without that server's tools. This is
-    # the operator's expectation — a misconfigured MCP server shouldn't
-    # kill the chat session.
-    _wire_mcp(agent, args, tools)
-
     return agent
 
 
-def _wire_mcp(agent, args, tools) -> None:
-    """Connect MCP servers and bridge their tools into the agent's registry.
+def _wire_mcp(args, tools):
+    """Connect MCP servers and bridge their tools into the ToolRegistry.
+
+    Returns the MCPManager (or None if --mcp was not passed). The manager
+    is also stashed on the agent by the caller so the chat REPL can close
+    it on exit.
+
+    When --mcp is passed but tools is None (no --tools flag), this creates
+    an empty ToolRegistry so MCP tools have somewhere to land. The
+    populated registry is stashed on the manager as ``_bridged_registry``
+    so the caller can pass it to Agent.__init__.
 
     Phase 1 implementation: eager connect (every configured server starts
     at agent construction). Lazy mode is on the roadmap (MCP-04).
-
-    The agent's ToolRegistry may be ``None`` (JEV mode, or --tools "" with
-    no builtins). In that case we still connect the MCP servers (so
-    ``agentkthx mcp list`` works mid-session via /mcp if added later), but
-    we can't bridge tools — there's no registry to bridge into. The
-    operator should pass --tools explicitly if they want MCP tools only.
     """
     mcp_flag = getattr(args, "mcp", None)
     if mcp_flag is None:
         # --mcp not passed — MCP is opt-in, do nothing
-        return
+        return None
 
     try:
         from ..mcp import MCPManager, load_mcp_config
@@ -470,7 +485,7 @@ def _wire_mcp(agent, args, tools) -> None:
             "[MCP] agentkthx.mcp module not available — skipping MCP setup",
             file=sys.stderr,
         )
-        return
+        return None
 
     config_path = getattr(args, "mcp_config", None)
     try:
@@ -479,7 +494,7 @@ def _wire_mcp(agent, args, tools) -> None:
         import sys
 
         print(f"[MCP] config load failed: {e}", file=sys.stderr)
-        return
+        return None
 
     if not all_configs:
         import sys
@@ -492,7 +507,7 @@ def _wire_mcp(agent, args, tools) -> None:
             )
         else:
             print(f"[MCP] no servers in {config_path}", file=sys.stderr)
-        return
+        return None
 
     # Filter to the user's --mcp name list if they passed one
     if mcp_flag:  # non-empty list (nargs="*" with bare --mcp gives [])
@@ -513,7 +528,7 @@ def _wire_mcp(agent, args, tools) -> None:
         import sys
 
         print("[MCP] no enabled servers match the request", file=sys.stderr)
-        return
+        return None
 
     manager = MCPManager(all_configs)
     failures = manager.connect_all(skip_failures=True)
@@ -527,21 +542,35 @@ def _wire_mcp(agent, args, tools) -> None:
                 file=sys.stderr,
             )
 
-    # Bridge tools if the agent has a registry (tools is None in JEV mode
-    # or when --tools is empty). When None, the agent still benefits from
-    # the manager being stashed (future /mcp slash command can list/probe).
-    if tools is not None:
-        try:
-            count = manager.register_into(tools)
-            print(
-                f"[MCP] connected {len(manager.server_names)} server(s), "
-                f"bridged {count} tool(s) into the registry",
-                file=sys.stderr,
-            )
-        except Exception as e:
-            print(f"[MCP] tool bridge failed: {e}", file=sys.stderr)
+    # R07.22: when --mcp is passed without --tools, create an empty
+    # ToolRegistry so MCP tools have somewhere to land. This is the
+    # "MCP-only session" case — the agent gets filesystem/git/audit
+    # tools without any built-in tools competing for the model's
+    # attention. The system prompt's Tool Reference section will list
+    # only MCP tools, and the model won't hallucinate `shell` (which
+    # isn't even in the registry).
+    if tools is None:
+        from ..tools.registry import ToolRegistry
 
-    agent._mcp_manager = manager
+        tools = ToolRegistry()
+
+    try:
+        count = manager.register_into(tools)
+        print(
+            f"[MCP] connected {len(manager.server_names)} server(s), "
+            f"bridged {count} tool(s) into the registry",
+            file=sys.stderr,
+        )
+    except Exception as e:
+        print(f"[MCP] tool bridge failed: {e}", file=sys.stderr)
+
+    # Stash the populated registry so the caller can pass it to Agent.__init__.
+    # This is critical: the system prompt is built during Agent.__init__,
+    # and it only includes the Tool Reference section when has_tools=True.
+    # If we don't expose the populated registry, the prompt won't mention
+    # MCP tools and the model won't know they exist.
+    manager._bridged_registry = tools
+    return manager
 
 
 def register_insufficient_credits_switch(agent) -> None:

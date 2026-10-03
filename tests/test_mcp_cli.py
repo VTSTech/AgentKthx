@@ -244,46 +244,63 @@ class TestMcpProbe:
 
 
 class TestWireMcpNoOp:
-    """When --mcp is not passed, _wire_mcp should be a complete no-op."""
+    """When --mcp is not passed, _wire_mcp should return None (complete no-op)."""
 
     def test_no_mcp_flag_is_noop(self):
-        """An args namespace without `mcp` should not touch the agent."""
-
-        class FakeAgent:
-            pass
-
+        """An args namespace without `mcp` should return None."""
         args = argparse.Namespace()  # no `mcp` attr at all
-        # Should not raise, should not set any attr on the agent
-        _wire_mcp(FakeAgent(), args, tools=None)
-        # Agent should have no _mcp_manager
-        assert not hasattr(FakeAgent(), "_mcp_manager")
+        result = _wire_mcp(args, tools=None)
+        assert result is None
 
     def test_mcp_none_is_noop(self):
-        """args.mcp = None (flag absent) should not touch the agent."""
-
-        class FakeAgent:
-            pass
-
-        agent = FakeAgent()
+        """args.mcp = None (flag absent) should return None."""
         args = argparse.Namespace(mcp=None, mcp_config=None)
-        _wire_mcp(agent, args, tools=None)
-        assert not hasattr(agent, "_mcp_manager")
+        result = _wire_mcp(args, tools=None)
+        assert result is None
 
     def test_mcp_with_missing_config_does_not_raise(self, capsys):
-        """--mcp passed but config file missing → warn + no _mcp_manager set."""
-
-        class FakeAgent:
-            pass
-
-        agent = FakeAgent()
+        """--mcp passed but config file missing → warn + return None."""
         # load_mcp_config returns [] (no servers) — simulates missing/empty config
         with patch("agentkthx.mcp.load_mcp_config", return_value=[]):
             args = argparse.Namespace(mcp=[], mcp_config=None)
-            _wire_mcp(agent, args, tools=None)
+            result = _wire_mcp(args, tools=None)
         # Should have printed a warning, not raised
         captured = capsys.readouterr()
         assert "no servers configured" in captured.err
-        assert not hasattr(agent, "_mcp_manager")
+        assert result is None
+
+    def test_mcp_only_session_creates_empty_registry(self):
+        """--mcp without --tools: empty ToolRegistry created, MCP tools bridged in.
+
+        This is the regression guard for the R07.22 fix. Before the fix,
+        passing --mcp without --tools left tools=None, so MCP tools were
+        never bridged and the system prompt had no Tool Reference section.
+        The model would then hallucinate `shell` (not in the registry)
+        instead of picking an MCP tool.
+
+        After the fix: _wire_mcp creates an empty ToolRegistry, bridges
+        MCP tools into it, and stashes it as manager._bridged_registry
+        so the caller can pass it to Agent.__init__.
+        """
+        from agentkthx.mcp.config import MCPServerConfig
+        from agentkthx.mcp.manager import MCPManager
+        from agentkthx.tools.registry import ToolRegistry
+
+        # Mock a successful MCP connection with one server + one tool
+        mock_config = MCPServerConfig(name="testserver", command="python3")
+        with patch("agentkthx.mcp.load_mcp_config", return_value=[mock_config]):
+            with patch.object(MCPManager, "connect_all", return_value=[]):
+                with patch.object(MCPManager, "register_into", return_value=1):
+                    args = argparse.Namespace(mcp=[], mcp_config=None)
+                    manager = _wire_mcp(args, tools=None)
+
+        # Manager should be returned (not None)
+        assert manager is not None
+        # The bridged registry should exist and be a ToolRegistry
+        assert hasattr(manager, "_bridged_registry")
+        assert isinstance(manager._bridged_registry, ToolRegistry)
+        # The caller (agent_factory._build_agent) reads this to pass to Agent.__init__
+        # so the system prompt builder sees has_tools=True
 
 
 if __name__ == "__main__":
