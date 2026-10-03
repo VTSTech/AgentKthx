@@ -253,15 +253,25 @@ test_backend() {
 
   if [[ $skip_think -eq 1 ]]; then
     step "agentkthx run --backend $backend --model $model --no-stream (think SKIPPED — Gemma doesn't support thinking_config)"
-    local think_output
-    think_output=$(timeout 120 env ${DEBUG:+AGENTKTHX_DEBUG=1} agentkthx run --backend "$backend" --model "$model" \
-      --no-stream "Count from 1 to 5. Brief." 2>&1)
-    local think_exit=$?
+    if [[ $DEBUG -eq 1 ]]; then
+      echo "${C_DIM}  ┌─── run output ───────────────────────────────────────────────────${C_RESET}"
+      timeout 120 env AGENTKTHX_DEBUG=1 agentkthx run --backend "$backend" --model "$model" \
+        --no-stream "Count from 1 to 5. Brief." 2>&1 | sed 's/^/  │ /'
+      think_exit=${PIPESTATUS[0]}
+      think_output=""
+      echo "${C_DIM}  └──────────────────────────────────────────────────────────────────${C_RESET}"
+    else
+      think_output=$(timeout 120 agentkthx run --backend "$backend" --model "$model" \
+        --no-stream "Count from 1 to 5. Brief." 2>&1)
+      think_exit=$?
+    fi
     if [[ $think_exit -eq 124 ]]; then
       fail "run (no-think) timed out after 120s"
     elif [[ $think_exit -ne 0 ]]; then
       fail "run (no-think) exited $think_exit"
-      echo "$think_output" | show_output | sed 's/^/    /'
+      [[ $DEBUG -eq 0 ]] && echo "$think_output" | show_output | sed 's/^/    /'
+    elif [[ $DEBUG -eq 1 ]]; then
+      ok "run (no-think) completed (Gemma doesn't support thinking — see output above)"
     elif echo "$think_output" | grep -qE '[1-5]'; then
       ok "run (no-think) produced output (Gemma doesn't support thinking — content OK)"
     else
@@ -270,15 +280,25 @@ test_backend() {
     fi
   else
     step "agentkthx run --backend $backend --model $model --think --no-stream \"count to 5\""
-    local think_output
-    think_output=$(timeout 120 env ${DEBUG:+AGENTKTHX_DEBUG=1} agentkthx run --backend "$backend" --model "$model" \
-      --think --no-stream "Count from 1 to 5. Brief." 2>&1)
-    local think_exit=$?
+    if [[ $DEBUG -eq 1 ]]; then
+      echo "${C_DIM}  ┌─── run output (think) ───────────────────────────────────────────${C_RESET}"
+      timeout 120 env AGENTKTHX_DEBUG=1 agentkthx run --backend "$backend" --model "$model" \
+        --think --no-stream "Count from 1 to 5. Brief." 2>&1 | sed 's/^/  │ /'
+      think_exit=${PIPESTATUS[0]}
+      think_output=""
+      echo "${C_DIM}  └──────────────────────────────────────────────────────────────────${C_RESET}"
+    else
+      think_output=$(timeout 120 agentkthx run --backend "$backend" --model "$model" \
+        --think --no-stream "Count from 1 to 5. Brief." 2>&1)
+      think_exit=$?
+    fi
     if [[ $think_exit -eq 124 ]]; then
       fail "run --think timed out after 120s"
     elif [[ $think_exit -ne 0 ]]; then
       fail "run --think exited $think_exit"
-      echo "$think_output" | show_output | sed 's/^/    /'
+      [[ $DEBUG -eq 0 ]] && echo "$think_output" | show_output | sed 's/^/    /'
+    elif [[ $DEBUG -eq 1 ]]; then
+      ok "run --think completed (see output above)"
     elif echo "$think_output" | grep -qiE 'reasoning:|thinking:|thought'; then
       ok "thinking output detected (reasoning panel surfaced)"
     elif echo "$think_output" | grep -qE '[1-5]'; then
@@ -291,16 +311,27 @@ test_backend() {
 
   # ─── step 3: shell tool call ──────────────────────────────────────────
   step "agentkthx run --backend $backend --model $model --tools shell --no-stream"
-  local tool_output
-  tool_output=$(timeout 120 env ${DEBUG:+AGENTKTHX_DEBUG=1} agentkthx run --backend "$backend" --model "$model" \
-    --tools shell --security off --no-stream \
-    "Use the shell tool to run: echo $SMOKE_MARKER" 2>&1)
-  local tool_exit=$?
+  if [[ $DEBUG -eq 1 ]]; then
+    echo "${C_DIM}  ┌─── run output (shell tool) ──────────────────────────────────────${C_RESET}"
+    timeout 120 env AGENTKTHX_DEBUG=1 agentkthx run --backend "$backend" --model "$model" \
+      --tools shell --security off --no-stream \
+      "Use the shell tool to run: echo $SMOKE_MARKER" 2>&1 | sed 's/^/  │ /'
+    tool_exit=${PIPESTATUS[0]}
+    tool_output=""
+    echo "${C_DIM}  └──────────────────────────────────────────────────────────────────${C_RESET}"
+  else
+    tool_output=$(timeout 120 agentkthx run --backend "$backend" --model "$model" \
+      --tools shell --security off --no-stream \
+      "Use the shell tool to run: echo $SMOKE_MARKER" 2>&1)
+    tool_exit=$?
+  fi
   if [[ $tool_exit -eq 124 ]]; then
     fail "run --tools shell timed out after 120s"
   elif [[ $tool_exit -ne 0 ]]; then
     fail "run --tools shell exited $tool_exit"
-    echo "$tool_output" | show_output | sed 's/^/    /'
+    [[ $DEBUG -eq 0 ]] && echo "$tool_output" | show_output | sed 's/^/    /'
+  elif [[ $DEBUG -eq 1 ]]; then
+    ok "run --tools shell completed (see output above)"
   elif echo "$tool_output" | grep -q "$SMOKE_MARKER"; then
     ok "shell tool executed — marker '$SMOKE_MARKER' found in output"
   elif echo "$tool_output" | grep -qiE 'tool shell|tool_calls'; then
