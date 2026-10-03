@@ -125,9 +125,26 @@ In chat mode, use these slash commands to manage tools, skills, and models mid-s
 /param num_batch 256     # Ollama: per-request prompt-processing batch size
 /param repeat_penalty 1.4  # llama.cpp: discourages repetition (BitNet default 1.3)
 /param repeat_last_n 128   # llama.cpp: repetition window in tokens
+/sh ls -la              # Run a local shell command (output added to context)
+/sh -n pwd              # Run a shell command, output displayed only (not added to context)
 /status              # Show model, backend, tools, skills, memory info
 /help                # Show all slash commands
 ```
+
+#### `/sh` — Local Shell Command (R07.21)
+
+The `/sh` slash command runs a local shell command, displays the output, and (by default) injects the output into the agent's context as a user-role message so the model can use it on the next turn. Pass `-n` before the command to display the output without injecting it into context — useful for quick lookups (`/sh -n pwd`, `/sh -n date`) that don't need the model's attention.
+
+```bash
+/sh git log --oneline -5    # Display + inject (model sees the output)
+/sh -n git status           # Display only (model doesn't see it)
+/sh ls -la /tmp             # Display + inject
+/sh cat README.md | head -50  # Pipes work — the whole arg is one command
+```
+
+The command reuses the built-in `shell()` tool from `agentkthx.tools.builtins`, so the same security checks (`sanitize_command` — blocked patterns, heredoc/shell-injection guards), timeout clamping (max 300s), and exit-code formatting apply. Output is formatted as `<shell_output command='...'>...</shell_output>` when injected into context so the model can parse it cleanly.
+
+**Security**: `/sh` runs locally and synchronously, NOT through the model — so the security-mode setting (`/security max|off`) applies via `sanitize_command` the same way it does for the model's own tool calls. A blocked command (e.g. `rm -rf /`, `:(){:|:&};:`) is rejected with the same `Security error: ...` message the shell tool returns.
 
 ### Interactive Model Picker (R07.19 follow-up #7)
 

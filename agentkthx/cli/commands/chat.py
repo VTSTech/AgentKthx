@@ -557,8 +557,9 @@ def cmd_chat(args: argparse.Namespace) -> int:
                 print(f"  {cyan('/security')}   Show or set security mode (max|off)")
                 print(f"  {cyan('/skills')}     Show available skills (✓ = loaded)")
                 print(
-                    f"  {cyan('/skill')}      Load a skill mid-session (e.g. /skill codebase-audit, crypto-signals)"
+                    f"  {cyan('/sh')}         Run a local shell command (display + add to context; -n to display only)"
                 )
+                print(f"  {cyan('/skill')}      Load a skill mid-session (e.g. /skill codebase-audit, crypto-signals)")
                 print(f"  {cyan('/souls')}      Show available souls (\u2713 = active)")
                 print(
                     f"  {cyan('/soul')}       Show or switch the active soul (e.g. /soul kthx-trading)"
@@ -1525,6 +1526,89 @@ def cmd_chat(args: argparse.Namespace) -> int:
                 print(f"Debug: {green('ON') if agent.debug else red('OFF')}")
                 if agent.soul:
                     print(f"Soul: {cyan(agent.soul.display_name)} v{agent.soul.version}")
+                continue
+
+            # ───────────────────────────────────────────────────────────────
+            # /sh — run a local shell command, display output, and (by default)
+            # inject the output into the agent's context as a user-role
+            # message so the model can use it on the next turn. Pass `-n`
+            # before the command to display-only (skip the context injection).
+            #
+            # Examples:
+            #   /sh ls -la              → display + inject into context
+            #   /sh -n ls -la           → display only (don't inject)
+            #   /sh git log --oneline   → display + inject
+            #   /sh -n pwd              → display only
+            #
+            # Reuses the built-in `shell()` tool from agentkthx.tools.builtins
+            # so the same security checks (sanitize_command — blocked patterns,
+            # heredoc/shell-injection guards), timeout clamping (max 300s), and
+            # exit-code formatting apply. The user's prompt is NOT routed
+            # through the model — it runs locally and synchronously.
+            #
+            # R07.21.
+            if user_input == "/sh" or user_input.startswith("/sh "):
+                from ...tools.builtins import shell as _shell_tool
+
+                # Parse: /sh [-n] <command...>
+                # -n must be the first token after /sh to count as the
+                # display-only flag. Anything else is treated as the command.
+                _sh_parts = user_input.split(None, 1)
+                if len(_sh_parts) < 2 or not _sh_parts[1].strip():
+                    print(yellow("Usage: /sh [-n] <command...>"))
+                    print(dim("  Run a local shell command and display the output."))
+                    print(dim("  By default, the output is also added to the agent's context."))
+                    print(dim("  Pass -n before the command to display only (no context injection)."))
+                    print(dim("  Examples:"))
+                    print(dim("    /sh ls -la"))
+                    print(dim("    /sh -n pwd"))
+                    print(dim("    /sh git log --oneline -5"))
+                    continue
+
+                _sh_arg = _sh_parts[1].strip()
+                _sh_no_inject = False
+                if _sh_arg == "-n":
+                    # Bare `/sh -n` with no command
+                    print(yellow("Usage: /sh -n <command...>"))
+                    continue
+                if _sh_arg.startswith("-n ") or _sh_arg == "-n":
+                    _sh_no_inject = True
+                    _sh_arg = _sh_arg[2:].lstrip()
+                if not _sh_arg:
+                    print(yellow("No command provided. Usage: /sh [-n] <command...>"))
+                    continue
+
+                # Run the command via the shell builtin. This applies
+                # sanitize_command (blocked patterns, injection guards) and
+                # the 1-300s timeout clamp. The user sees the raw output
+                # (exit code marker + stdout + stderr per builtins.shell).
+                print(dim(f"  $ {_sh_arg}"))
+                _sh_output = _shell_tool(_sh_arg)
+
+                # Display to the user (always, regardless of -n).
+                print()
+                print(_sh_output)
+                print()
+
+                # Inject into the agent's context as a user-role message
+                # (skip when -n was passed). The message shape mirrors the
+                # shell tool's `<tool_output>` convention so the model can
+                # parse it cleanly: a tagged block with the command + result.
+                if not _sh_no_inject:
+                    _sh_context_msg = (
+                        f"<shell_output command={_sh_arg!r}>\n"
+                        f"{_sh_output}\n"
+                        f"</shell_output>"
+                    )
+                    agent.memory.add("user", _sh_context_msg)
+                    print(
+                        dim(
+                            f"  [Added shell output to context — "
+                            f"{len(agent.memory)} turns in memory]"
+                        )
+                    )
+                else:
+                    print(dim("  [-n] output not added to context"))
                 continue
 
             # Log user message to ACP
