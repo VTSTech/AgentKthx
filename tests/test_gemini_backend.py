@@ -558,8 +558,9 @@ class TestFreeTierClassification(unittest.TestCase):
     # ── Confirmed FREE (from AI Studio data, in FREE_TIER_LIMITS table) ──
 
     def test_chat_flash_models_are_free(self):
+        # R07.21: gemini-2.5-flash removed — Google deprecated it (404 for
+        # new users). The 3.x flash series is the current free surface.
         for name in (
-            "gemini-2.5-flash",
             "gemini-3.5-flash",
             "gemini-3.6-flash",
             "gemini-3.7-flash",
