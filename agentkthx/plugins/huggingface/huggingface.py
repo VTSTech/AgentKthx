@@ -77,6 +77,7 @@ import urllib.error
 import urllib.request
 from typing import Generator, Iterable
 
+from agentkthx import model_cache
 from agentkthx.backends.base import BackendConfig
 from agentkthx.backends.openai_compat import OpenAICompatibleBackend
 from agentkthx.config import (
@@ -88,6 +89,7 @@ from agentkthx.config import (
 )
 from agentkthx.core.models import Tool
 from agentkthx.core.types import ApiMode, BackendType, ToolSupportLevel
+from agentkthx.model_cache import load_seed_catalog
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Static model catalog — fallback when /v1/models is unreachable
@@ -99,138 +101,13 @@ from agentkthx.core.types import ApiMode, BackendType, ToolSupportLevel
 #
 # Updated: 2026-09-26 (matches HUGGINGFACE_API_TECHNICAL_REFERENCE.md §Free
 # model whitelist)
-HF_MODELS: dict[str, dict] = {
-    # OpenAI open-weighted models (free at HF partner providers)
-    "openai/gpt-oss-20b": {
-        "context_length": 131_072,
-        "max_completion_tokens": 8_192,
-        "provider": "openai",
-        "description": "gpt-oss-20b — open-weight conversational model",
-    },
-    "openai/gpt-oss-120b": {
-        "context_length": 131_072,
-        "max_completion_tokens": 32_768,
-        "provider": "openai",
-        "description": "gpt-oss-120b — flagship open-weight model with tool calling",
-    },
-    # Qwen family — Alibaba
-    "Qwen/Qwen3-4B-Thinking-2507": {
-        "context_length": 32_768,
-        "max_completion_tokens": 8_192,
-        "provider": "qwen",
-        "description": "Qwen3-4B Thinking — small reasoning model",
-        "supports_thinking": True,
-    },
-    "Qwen/Qwen3-Coder-480B-A35B-Instruct": {
-        "context_length": 262_144,
-        "max_completion_tokens": 32_768,
-        "provider": "qwen",
-        "description": "Qwen3-Coder 480B — MoE coding model",
-    },
-    "Qwen/Qwen2.5-Coder-32B-Instruct": {
-        "context_length": 131_072,
-        "max_completion_tokens": 8_192,
-        "provider": "qwen",
-        "description": "Qwen2.5-Coder 32B — coding model",
-    },
-    "Qwen/Qwen2.5-72B-Instruct": {
-        "context_length": 131_072,
-        "max_completion_tokens": 8_192,
-        "provider": "qwen",
-        "description": "Qwen2.5-72B Instruct",
-    },
-    # DeepSeek family — reasoning models
-    "deepseek-ai/DeepSeek-R1": {
-        "context_length": 65_536,
-        "max_completion_tokens": 32_768,
-        "provider": "deepseek",
-        "description": "DeepSeek-R1 — open reasoning model",
-        "supports_thinking": True,
-    },
-    "deepseek-ai/DeepSeek-V3": {
-        "context_length": 65_536,
-        "max_completion_tokens": 8_192,
-        "provider": "deepseek",
-        "description": "DeepSeek-V3 chat model",
-    },
-    "deepseek-ai/DeepSeek-V3.1": {
-        "context_length": 131_072,
-        "max_completion_tokens": 32_768,
-        "provider": "deepseek",
-        "description": "DeepSeek-V3.1 — improved chat + tool calling",
-    },
-    # Meta Llama family
-    "meta-llama/Llama-3.3-70B-Instruct": {
-        "context_length": 131_072,
-        "max_completion_tokens": 8_192,
-        "provider": "meta",
-        "description": "Llama 3.3 70B Instruct",
-    },
-    "meta-llama/Llama-3.1-8B-Instruct": {
-        "context_length": 131_072,
-        "max_completion_tokens": 4_096,
-        "provider": "meta",
-        "description": "Llama 3.1 8B Instruct",
-    },
-    # Google Gemma family
-    "google/gemma-3-4b-it": {
-        "context_length": 32_768,
-        "max_completion_tokens": 4_096,
-        "provider": "google",
-        "description": "Gemma 3 4B instruct",
-    },
-    "google/gemma-3-12b-it": {
-        "context_length": 32_768,
-        "max_completion_tokens": 4_096,
-        "provider": "google",
-        "description": "Gemma 3 12B instruct",
-    },
-    "google/gemma-3-27b-it": {
-        "context_length": 32_768,
-        "max_completion_tokens": 4_096,
-        "provider": "google",
-        "description": "Gemma 3 27B instruct",
-    },
-    # Mistral family
-    # zai-org / GLM (also accessible via HF router)
-    "zai-org/GLM-4.5": {
-        "context_length": 131_072,
-        "max_completion_tokens": 8_192,
-        "provider": "zai",
-        "description": "GLM-4.5 — powerful text generation model",
-    },
-    "zai-org/GLM-4.5-Air": {
-        "context_length": 131_072,
-        "max_completion_tokens": 8_192,
-        "provider": "zai",
-        "description": "GLM-4.5-Air — lighter variant",
-    },
-    # Phi family — Microsoft
-    # Cohere Command R family
-    # === Genuinely $0/token models (verified via live API probe 2026-09-26) ===
-    # These 3 models have pricing: {input: 0, output: 0} on at least one
-    # partner provider. is_free=false for all 3 (HF's flag is conservative)
-    # but the pricing data confirms $0/token — truly free, zero cost.
-    "inclusionAI/Ling-3.0-flash-Fin": {
-        "context_length": 131_072,
-        "max_completion_tokens": 8_192,
-        "provider": "inclusionai",
-        "description": "Ling-3.0-flash-Fin — financial domain, $0/token via Novita",
-    },
-    "prism-ml/Ternary-Bonsai-27B-gguf": {
-        "context_length": 131_072,
-        "max_completion_tokens": 4_096,
-        "provider": "prism-ml",
-        "description": "Ternary-Bonsai-27B GGUF — 1.58-bit ternary, $0/token via Together",
-    },
-    "prism-ml/Ternary-Bonsai-27B-AWQ-4bit": {
-        "context_length": 131_072,
-        "max_completion_tokens": 4_096,
-        "provider": "prism-ml",
-        "description": "Ternary-Bonsai-27B AWQ 4-bit, $0/token via Together",
-    },
-}
-
+HF_MODELS: dict[str, dict] = load_seed_catalog("huggingface")
+"""Static catalog for the huggingface backend — R07.20 moved the literal
+dict out of Python into ``agentkthx/data/model_seed.json``, where it
+serves as the initial defaults of the persistent model-catalog cache
+(and the offline fallback list). Update the seed JSON (or refresh a
+backend's cache from the live API) instead of editing code here.
+"""
 
 # ─────────────────────────────────────────────────────────────────────────────
 # HF_FREE_MODEL_WHITELIST — models eligible for HF_FREE_ONLY=true mode
@@ -399,6 +276,9 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
     _model_cache: list[dict] | None = None
     _cache_time: float = 0.0
     _CACHE_TIMEOUT: int = 3600  # 1 hour in seconds
+
+    # R07.20: persistent JSON model-catalog cache key (L2 -- see list_models).
+    MODEL_CACHE_KEY = "huggingface"
 
     # R07.02 polish: process-scoped flag so the free-tier warning
     # prints at most once per process. The CLI may instantiate
@@ -864,15 +744,32 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
     def list_models(self) -> list[dict]:
         """List available models from HF Router /v1/models with caching.
 
-        Cache timeout: 1 hour (3600 seconds).
-        Refresh endpoint: GET /v1/models (anonymous — no auth required).
+        Cache layers (R07.20): L1 in-process class cache (1 hour) + L2
+        persistent JSON cache (30-minute TTL,
+        ``AGENTKTHX_MODEL_CACHE_TTL`` to override) shared across
+        processes — each CLI invocation no longer re-fetches /v1/models
+        (anonymous — no auth required).
 
-        When ``HF_FREE_ONLY`` is true, the cache is filtered to only
-        include models in ``HF_FREE_MODEL_WHITELIST``.
+        The JSON cache stores the UNFILTERED determined catalog;
+        ``HF_FREE_ONLY`` filters the RESULT (static whitelist OR a live
+        ``is_free`` provider flag).
         """
         current_time = time.time()
         if self._model_cache is not None and current_time - self._cache_time < self._CACHE_TIMEOUT:
             return self._model_cache
+
+        # R07.20 L2: persistent JSON cache — a fresh entry replaces the
+        # live fetch entirely.
+        cached = model_cache.get_cached_models(self.MODEL_CACHE_KEY)
+        if cached is not None:
+            result = self._apply_free_only(cached)
+            type(self)._model_cache = result
+            type(self)._cache_time = current_time
+            return result
+
+        # First JSON-cache contact: seed the static catalog defaults
+        # (stale-stamped so the live fetch below still runs).
+        model_cache.ensure_seeded(self.MODEL_CACHE_KEY, self._catalog_fallback_list())
 
         try:
             # /v1/models is anonymous on HF Router — no Authorization
@@ -915,22 +812,20 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
                         }
                     )
 
-            # HF_FREE_ONLY: filter to whitelist only (R07.02 polish: use
-            # self._free_only_effective so auto-detected free-tier mode
-            # also filters — and consult both the static whitelist AND
-            # the live is_free flag from freshly-parsed providers).
-            if self._free_only_effective:
-                available_models = [
-                    m
-                    for m in available_models
-                    if _is_free_model(m["name"])
-                    or any(bool(p.get("is_free", False)) for p in (m.get("providers") or []))
-                ]
+            # R07.20: persist the UNFILTERED determined catalog (30-min
+            # TTL; persistent pins re-attached by the cache manager).
+            sorted_stored = sorted(
+                model_cache.store_models(self.MODEL_CACHE_KEY, available_models),
+                key=lambda x: x["name"],
+            )
+            available_models = sorted_stored
 
             # MAINT-19 (R07.15): class-level cache via type(self) — see the
             # attribute comment above. Returns the local so a test-seeded
             # instance attribute can never shadow the fresh result.
-            sorted_models = sorted(available_models, key=lambda x: x["name"])
+            # R07.20: HF_FREE_ONLY filters the RETURN value (the JSON
+            # cache keeps the full catalog).
+            sorted_models = self._apply_free_only(sorted_stored)
             type(self)._model_cache = sorted_models
             type(self)._cache_time = current_time
 
@@ -944,33 +839,59 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
             return sorted_models
 
         except Exception as e:
+            # R07.20: offline -> serve the stale JSON cache (any age) when
+            # present. Instance-level L1 write (MAINT-19: a failure must
+            # not poison the shared class cache).
+            stale = model_cache.get_stale_models(self.MODEL_CACHE_KEY)
+            if stale is not None:
+                result = self._apply_free_only(sorted(stale, key=lambda x: x["name"]))
+                self._model_cache = result
+                self._cache_time = current_time
+                return result
+
             # Fallback to static catalog if API fails
             if os.environ.get("AGENTKTHX_DEBUG"):
                 print(f"  [HF Debug] /v1/models unreachable, using static catalog: {e}")
 
-            catalog_models: list[dict] = []
-            for name, info in HF_MODELS.items():
-                catalog_models.append(
-                    {
-                        "name": name,
-                        "size": 0,
-                        "details": {
-                            "family": info.get("provider", "unknown"),
-                            "backend": "huggingface",
-                            "context_length": info.get("context_length", 128_000),
-                            "max_completion_tokens": info.get("max_completion_tokens", 4096),
-                        },
-                    }
-                )
-
-            if self._free_only_effective:
-                catalog_models = [m for m in catalog_models if _is_free_model(m["name"])]
+            catalog_models: list[dict] = self._catalog_fallback_list()
 
             # MAINT-19: failure fallback stays INSTANCE-level (must not
             # poison the shared class cache — see attribute comment).
             self._model_cache = sorted(catalog_models, key=lambda x: x["name"])
             self._cache_time = current_time
             return self._model_cache
+
+    def _catalog_fallback_list(self) -> list[dict]:
+        """Shape the static (seed) catalog into ``list_models()`` entries.
+
+        The API-failure fallback and the JSON-cache seed source (R07.20).
+        """
+        catalog_models: list[dict] = []
+        for name, info in HF_MODELS.items():
+            catalog_models.append(
+                {
+                    "name": name,
+                    "size": 0,
+                    "details": {
+                        "family": info.get("provider", "unknown"),
+                        "backend": "huggingface",
+                        "context_length": info.get("context_length", 128_000),
+                        "max_completion_tokens": info.get("max_completion_tokens", 4096),
+                    },
+                }
+            )
+        return catalog_models
+
+    def _apply_free_only(self, models: list[dict]) -> list[dict]:
+        """Apply the HF_FREE_ONLY filter (whitelist OR live is_free flag)."""
+        if self._free_only_effective:
+            return [
+                m
+                for m in models
+                if _is_free_model(m["name"])
+                or any(bool(p.get("is_free", False)) for p in (m.get("providers") or []))
+            ]
+        return models
 
     def is_running(self) -> bool:
         """HF Router is a cloud API, so it's always 'running'."""

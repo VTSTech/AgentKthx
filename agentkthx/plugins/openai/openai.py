@@ -88,6 +88,7 @@ import urllib.error
 import urllib.request
 from typing import Generator, Iterable
 
+from agentkthx import model_cache
 from agentkthx.backends.base import BackendConfig
 from agentkthx.backends.openai_compat import OpenAICompatibleBackend
 from agentkthx.config import (
@@ -102,6 +103,7 @@ from agentkthx.config import (
 )
 from agentkthx.core.models import Tool
 from agentkthx.core.types import ApiMode, BackendType, ToolSupportLevel
+from agentkthx.model_cache import load_seed_catalog
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Static model catalog — fallback when /v1/models is unreachable
@@ -112,392 +114,13 @@ from agentkthx.core.types import ApiMode, BackendType, ToolSupportLevel
 #
 # Pricing is USD per 1M tokens, "standard" service tier (long-context
 # pricing differs; see OpenAI pricing page).
-OPENAI_MODELS: dict[str, dict] = {
-    # === GPT-6 family — current flagship generation ===
-    "gpt-6-astra": {
-        "context_length": 400_000,
-        "max_completion_tokens": 65_536,
-        "supports_thinking": True,
-        "supports_reasoning_effort": True,
-        "supports_reasoning_mode": True,  # standard + pro
-        "supports_function_calling": True,
-        "supports_parallel_function_calling": True,
-        "supports_response_format_json_schema": True,
-        "supports_multimodal_input": True,  # text, image, audio, file
-        "supports_multimodal_output": True,  # text, audio
-        "supports_web_search_tool": True,
-        "supports_file_search_tool": True,
-        "supports_code_interpreter_tool": True,
-        "supports_computer_use_tool": True,
-        "family": "gpt-6",
-        "tier": "flagship",
-        "standard_input_per_1m": 10.00,
-        "standard_output_per_1m": 50.00,
-        "cached_input_per_1m": 1.00,
-    },
-    "gpt-6-sol": {
-        "context_length": 400_000,
-        "max_completion_tokens": 65_536,
-        "supports_thinking": True,
-        "supports_reasoning_effort": True,
-        "supports_reasoning_mode": True,
-        "supports_function_calling": True,
-        "supports_parallel_function_calling": True,
-        "supports_response_format_json_schema": True,
-        "supports_multimodal_input": True,
-        "supports_multimodal_output": True,
-        "supports_web_search_tool": True,
-        "supports_file_search_tool": True,
-        "supports_code_interpreter_tool": True,
-        "supports_computer_use_tool": True,
-        "family": "gpt-6",
-        "tier": "standard",
-        "standard_input_per_1m": 2.00,
-        "standard_output_per_1m": 10.00,
-    },
-    "gpt-6-luna": {
-        "context_length": 400_000,
-        "max_completion_tokens": 65_536,
-        "supports_thinking": True,
-        "supports_reasoning_effort": True,
-        "supports_reasoning_mode": True,
-        "supports_function_calling": True,
-        "supports_parallel_function_calling": True,
-        "supports_response_format_json_schema": True,
-        "supports_multimodal_input": True,
-        "supports_multimodal_output": True,
-        "supports_web_search_tool": True,
-        "supports_file_search_tool": True,
-        "supports_code_interpreter_tool": True,
-        "supports_computer_use_tool": False,  # not supported on Luna
-        "family": "gpt-6",
-        "tier": "lite",
-        "standard_input_per_1m": 0.10,
-        "standard_output_per_1m": 0.50,
-        "free_tier_eligible": True,  # covered by monthly credit
-    },
-    # === GPT-5.6 family — Daybreak program ===
-    "gpt-5.6-sol": {  # alias: gpt-daybreak-blue-latest
-        "context_length": 200_000,
-        "max_completion_tokens": 65_536,
-        "supports_thinking": True,
-        "supports_reasoning_effort": True,
-        "supports_reasoning_mode": True,
-        "supports_function_calling": True,
-        "supports_response_format_json_schema": True,
-        "supports_multimodal_input": True,
-        "family": "gpt-5.6",
-        "tier": "daybreak",
-        "standard_input_per_1m": 4.00,
-        "standard_output_per_1m": 20.00,
-    },
-    # === GPT-5.x family — legacy but still served ===
-    "gpt-5.5": {
-        "context_length": 200_000,
-        "max_completion_tokens": 65_536,
-        "supports_thinking": True,
-        "supports_reasoning_effort": True,
-        "supports_function_calling": True,
-        "supports_response_format_json_schema": True,
-        "supports_multimodal_input": True,
-        "family": "gpt-5",
-        "tier": "standard",
-    },
-    "gpt-5.4": {
-        "context_length": 128_000,
-        "max_completion_tokens": 16_384,
-        "supports_thinking": True,
-        "supports_interleaved_thinking": True,
-        "supports_function_calling": True,
-        "family": "gpt-5",
-        "tier": "standard",
-    },
-    "gpt-5.3-codex": {
-        "context_length": 200_000,
-        "max_completion_tokens": 65_536,
-        "supports_thinking": True,
-        "supports_reasoning_effort": True,
-        "supports_function_calling": True,
-        "supports_code_interpreter_tool": True,
-        "family": "gpt-5",
-        "tier": "codex",
-        "standard_input_per_1m": 1.75,
-        "standard_output_per_1m": 14.00,
-    },
-    # === GPT-4o family — legacy chat models (no reasoning) ===
-    "gpt-4o": {
-        "context_length": 128_000,
-        "max_completion_tokens": 16_384,
-        "supports_thinking": False,
-        "supports_function_calling": True,
-        "supports_parallel_function_calling": True,
-        "supports_response_format_json_schema": True,
-        "supports_multimodal_input": True,  # text, image, audio
-        "supports_multimodal_output": True,  # text, audio
-        "supports_web_search_tool": True,
-        "family": "gpt-4o",
-        "tier": "standard",
-    },
-    "gpt-4o-mini": {
-        "context_length": 128_000,
-        "max_completion_tokens": 16_384,
-        "supports_thinking": False,
-        "supports_function_calling": True,
-        "supports_response_format_json_schema": True,
-        "supports_multimodal_input": True,
-        "supports_web_search_tool": True,
-        "family": "gpt-4o",
-        "tier": "mini",
-        "free_tier_eligible": True,
-    },
-    "gpt-4.1-mini": {
-        "context_length": 1_000_000,  # 1M tokens
-        "max_completion_tokens": 32_768,
-        "supports_thinking": False,
-        "supports_function_calling": True,
-        "supports_response_format_json_schema": True,
-        "supports_multimodal_input": True,
-        "supports_web_search_tool": True,
-        "family": "gpt-4.1",
-        "tier": "mini",
-        "free_tier_eligible": True,
-    },
-    # === Specialized models ===
-    "chat-latest": {  # ChatGPT backend model
-        "context_length": 128_000,
-        "max_completion_tokens": 16_384,
-        "supports_thinking": False,
-        "supports_function_calling": True,
-        "family": "chatgpt",
-        "tier": "chat-latest",
-        "standard_input_per_1m": 5.00,
-        "standard_output_per_1m": 30.00,
-    },
-    # === Realtime / audio / image models (not chat backends — listed for completeness) ===
-    "gpt-realtime-2.1": {
-        "context_length": 128_000,
-        "family": "realtime",
-        "supports_streaming": True,
-        "supports_multimodal_input": True,  # text, audio, image
-        "supports_multimodal_output": True,  # text, audio
-        "tier": "standard",
-    },
-    "gpt-realtime-2.1-mini": {
-        "context_length": 128_000,
-        "family": "realtime",
-        "supports_streaming": True,
-        "supports_multimodal_input": True,
-        "supports_multimodal_output": True,
-        "tier": "mini",
-        "free_tier_eligible": True,
-    },
-    # === o-series — reasoning models (added R07.03 polish, discovered via live API) ===
-    "o1": {
-        "context_length": 200_000,
-        "max_completion_tokens": 100_000,
-        "supports_thinking": True,
-        "supports_reasoning_effort": True,
-        "supports_function_calling": True,
-        "supports_multimodal_input": True,
-        "family": "o-series",
-        "tier": "flagship",
-    },
-    "o3": {
-        "context_length": 200_000,
-        "max_completion_tokens": 100_000,
-        "supports_thinking": True,
-        "supports_reasoning_effort": True,
-        "supports_function_calling": True,
-        "supports_multimodal_input": True,
-        "family": "o-series",
-        "tier": "flagship",
-    },
-    "o3-mini": {
-        "context_length": 200_000,
-        "max_completion_tokens": 100_000,
-        "supports_thinking": True,
-        "supports_reasoning_effort": True,
-        "supports_function_calling": True,
-        "supports_multimodal_input": True,
-        "family": "o-series",
-        "tier": "mini",
-    },
-    "o4-mini": {
-        "context_length": 200_000,
-        "max_completion_tokens": 100_000,
-        "supports_thinking": True,
-        "supports_reasoning_effort": True,
-        "supports_function_calling": True,
-        "supports_multimodal_input": True,
-        "family": "o-series",
-        "tier": "mini",
-    },
-    # === GPT-5.0 family — original gpt-5 release (discovered via live API) ===
-    "gpt-5": {
-        "context_length": 200_000,
-        "max_completion_tokens": 100_000,
-        "supports_thinking": True,
-        "supports_reasoning_effort": True,
-        "supports_function_calling": True,
-        "supports_multimodal_input": True,
-        "family": "gpt-5",
-        "tier": "flagship",
-    },
-    "gpt-5-mini": {
-        "context_length": 200_000,
-        "max_completion_tokens": 100_000,
-        "supports_thinking": True,
-        "supports_reasoning_effort": True,
-        "supports_function_calling": True,
-        "family": "gpt-5",
-        "tier": "mini",
-    },
-    "gpt-5-nano": {
-        "context_length": 200_000,
-        "max_completion_tokens": 100_000,
-        "supports_thinking": True,
-        "supports_reasoning_effort": True,
-        "supports_function_calling": True,
-        "family": "gpt-5",
-        "tier": "nano",
-    },
-    "gpt-5-pro": {
-        "context_length": 200_000,
-        "max_completion_tokens": 100_000,
-        "supports_thinking": True,
-        "supports_reasoning_effort": True,
-        "supports_function_calling": True,
-        "supports_multimodal_input": True,
-        "family": "gpt-5",
-        "tier": "pro",
-    },
-    # R07.13: gpt-5-codex retired — shutdown_date 2026-07-23 (68 days past at cleanup time)
-    # R07.13: gpt-5.1-codex retired — shutdown_date 2026-07-23 (68 days past at cleanup time)
-    # === GPT-5.1 family (discovered via live API) ===
-    "gpt-5.1": {
-        "context_length": 200_000,
-        "max_completion_tokens": 100_000,
-        "supports_thinking": True,
-        "supports_reasoning_effort": True,
-        "supports_function_calling": True,
-        "family": "gpt-5",
-        "tier": "standard",
-    },
-    # === GPT-5.2 family (discovered via live API) ===
-    "gpt-5.2": {
-        "context_length": 200_000,
-        "max_completion_tokens": 100_000,
-        "supports_thinking": True,
-        "supports_reasoning_effort": True,
-        "supports_function_calling": True,
-        "family": "gpt-5",
-        "tier": "standard",
-    },
-    "gpt-5.2-pro": {
-        "context_length": 200_000,
-        "max_completion_tokens": 100_000,
-        "supports_thinking": True,
-        "supports_reasoning_effort": True,
-        "supports_function_calling": True,
-        "family": "gpt-5",
-        "tier": "pro",
-    },
-    # === GPT-5.4 expanded family (discovered via live API — had only base 5.4) ===
-    "gpt-5.4-mini": {
-        "context_length": 128_000,
-        "max_completion_tokens": 16_384,
-        "supports_thinking": True,
-        "supports_function_calling": True,
-        "family": "gpt-5",
-        "tier": "mini",
-    },
-    "gpt-5.4-nano": {
-        "context_length": 128_000,
-        "max_completion_tokens": 16_384,
-        "supports_thinking": True,
-        "supports_function_calling": True,
-        "family": "gpt-5",
-        "tier": "nano",
-    },
-    "gpt-5.4-pro": {
-        "context_length": 200_000,
-        "max_completion_tokens": 100_000,
-        "supports_thinking": True,
-        "supports_reasoning_effort": True,
-        "supports_function_calling": True,
-        "family": "gpt-5",
-        "tier": "pro",
-    },
-    # === GPT-5.5 pro variant (discovered via live API — had only base 5.5) ===
-    "gpt-5.5-pro": {
-        "context_length": 200_000,
-        "max_completion_tokens": 100_000,
-        "supports_thinking": True,
-        "supports_reasoning_effort": True,
-        "supports_function_calling": True,
-        "family": "gpt-5",
-        "tier": "pro",
-    },
-    # === GPT-5.6 Daybreak expanded (discovered via live API — had only sol+cyber) ===
-    "gpt-5.6-luna": {
-        "context_length": 200_000,
-        "max_completion_tokens": 65_536,
-        "supports_thinking": True,
-        "supports_reasoning_effort": True,
-        "supports_function_calling": True,
-        "family": "gpt-5.6",
-        "tier": "daybreak",
-    },
-    "gpt-5.6-terra": {
-        "context_length": 200_000,
-        "max_completion_tokens": 65_536,
-        "supports_thinking": True,
-        "supports_reasoning_effort": True,
-        "supports_function_calling": True,
-        "family": "gpt-5.6",
-        "tier": "daybreak",
-    },
-    # === Legacy GPT-3.5 (still served, chat-capable via /chat/completions) ===
-    "gpt-3.5-turbo": {
-        "context_length": 16_384,
-        "max_completion_tokens": 4_096,
-        "supports_thinking": False,
-        "supports_function_calling": True,
-        "family": "gpt-3.5",
-        "tier": "legacy",
-    },
-    "gpt-3.5-turbo-16k": {
-        "context_length": 16_384,
-        "max_completion_tokens": 4_096,
-        "supports_thinking": False,
-        "supports_function_calling": True,
-        "family": "gpt-3.5",
-        "tier": "legacy",
-    },
-    # === GPT-4.1 family (discovered via live API — had only gpt-4.1-mini) ===
-    "gpt-4.1": {
-        "context_length": 1_047_576,  # ~1M tokens
-        "max_completion_tokens": 32_768,
-        "supports_thinking": False,
-        "supports_function_calling": True,
-        "supports_parallel_function_calling": True,
-        "supports_response_format_json_schema": True,
-        "supports_multimodal_input": True,
-        "family": "gpt-4.1",
-        "tier": "standard",
-    },
-    "gpt-4.1-nano": {
-        "context_length": 1_047_576,
-        "max_completion_tokens": 32_768,
-        "supports_thinking": False,
-        "supports_function_calling": True,
-        "supports_response_format_json_schema": True,
-        "supports_multimodal_input": True,
-        "family": "gpt-4.1",
-        "tier": "nano",
-    },
-}
-
+OPENAI_MODELS: dict[str, dict] = load_seed_catalog("openai")
+"""Static catalog for the openai backend — R07.20 moved the literal
+dict out of Python into ``agentkthx/data/model_seed.json``, where it
+serves as the initial defaults of the persistent model-catalog cache
+(and the offline fallback list). Update the seed JSON (or refresh a
+backend's cache from the live API) instead of editing code here.
+"""
 
 # ─────────────────────────────────────────────────────────────────────────────
 # OPENAI_FREE_MODEL_WHITELIST — models eligible for OPENAI_FREE_ONLY=true mode
@@ -706,6 +329,9 @@ class OpenAIBackend(OpenAICompatibleBackend):
     _cache_time: float = 0.0
     _CACHE_TIMEOUT: int = 3600  # 1 hour in seconds
 
+    # R07.20: persistent JSON model-catalog cache key (L2 -- see list_models).
+    MODEL_CACHE_KEY = "openai"
+
     # R06.54: maximum retries for rate-limit (429) and transient server
     # (502/503/504) responses before giving up. OpenAI's rate limits are
     # tier-based (free: 100 RPM/90k TPM; paid: tier-dependent) — match
@@ -902,16 +528,34 @@ class OpenAIBackend(OpenAICompatibleBackend):
     def list_models(self) -> list[dict]:
         """List available models from OpenAI /v1/models with caching.
 
-        Cache timeout: 1 hour (3600 seconds).
-        Refresh endpoint: GET /v1/models (auth required — unlike HF
-        Router which is anonymous).
+        Cache layers (R07.20):
+          L1 — in-process class cache, 1 hour (MAINT-19 semantics kept);
+          L2 — persistent JSON cache (``~/.cache/agentkthx/model_catalog.json``,
+               30-minute TTL, ``AGENTKTHX_MODEL_CACHE_TTL`` to override)
+               shared across processes — each CLI invocation no longer
+               re-fetches ``/v1/models`` (auth required — unlike HF
+               Router which is anonymous).
 
-        When ``OPENAI_FREE_ONLY`` is true, the cache is filtered to only
-        include models in ``OPENAI_FREE_MODEL_WHITELIST``.
+        The JSON cache stores the UNFILTERED determined catalog;
+        ``OPENAI_FREE_ONLY`` is applied at return time (whitelist models
+        only).
         """
         current_time = time.time()
         if self._model_cache is not None and current_time - self._cache_time < self._CACHE_TIMEOUT:
             return self._model_cache
+
+        # R07.20 L2: persistent JSON cache — a fresh entry replaces the
+        # live fetch entirely.
+        cached = model_cache.get_cached_models(self.MODEL_CACHE_KEY)
+        if cached is not None:
+            result = self._apply_free_only(cached)
+            type(self)._model_cache = result
+            type(self)._cache_time = current_time
+            return result
+
+        # First JSON-cache contact: seed the static catalog defaults
+        # (stale-stamped so the live fetch below still runs).
+        model_cache.ensure_seeded(self.MODEL_CACHE_KEY, self._catalog_fallback_list())
 
         try:
             # OpenAI requires auth for /v1/models — fail fast if no API key
@@ -967,19 +611,20 @@ class OpenAIBackend(OpenAICompatibleBackend):
                         }
                     )
 
+            # R07.20: persist the UNFILTERED determined catalog to the
+            # JSON cache (30-min TTL; persistent pins re-attached by the
+            # cache manager). The FREE_ONLY whitelist applies to what we
+            # return, never to what we store.
+            sorted_stored = sorted(
+                model_cache.store_models(self.MODEL_CACHE_KEY, available_models),
+                key=lambda x: x["name"],
+            )
+
             # OPENAI_FREE_ONLY: filter to whitelist only
             if OPENAI_FREE_ONLY:
-                available_models = [m for m in available_models if _is_free_model(m["name"])]
-
-            # MAINT-19 (R07.15): cache at CLASS level (type(self)) so every
-            # instance of this backend shares one fetch per TTL window.
-            # __init__ calls list_models() on EVERY construction (the CLI's
-            # agent_factory builds a temp backend for model discovery plus
-            # the real one), so the old instance-level write re-fetched
-            # /v1/models once per instance. type(self) assigns on the actual
-            # class, keeping subclasses isolated (each gets its own attribute
-            # on first write).
-            sorted_models = sorted(available_models, key=lambda x: x["name"])
+                sorted_models = [m for m in sorted_stored if _is_free_model(m["name"])]
+            else:
+                sorted_models = sorted_stored
             type(self)._model_cache = sorted_models
             type(self)._cache_time = current_time
 
@@ -993,36 +638,21 @@ class OpenAIBackend(OpenAICompatibleBackend):
             return sorted_models
 
         except Exception as e:
+            # R07.20: offline -> serve the stale JSON cache (any age) when
+            # present. Instance-level L1 write (MAINT-19: a failure must
+            # not poison the shared class cache).
+            stale = model_cache.get_stale_models(self.MODEL_CACHE_KEY)
+            if stale is not None:
+                result = self._apply_free_only(sorted(stale, key=lambda x: x["name"]))
+                self._model_cache = result
+                self._cache_time = current_time
+                return result
+
             # Fallback to static catalog if API fails
             if os.environ.get("AGENTKTHX_DEBUG"):
                 print(f"  [OpenAI Debug] /v1/models unreachable, using static catalog: {e}")
 
-            catalog_models: list[dict] = []
-            for name, info in OPENAI_MODELS.items():
-                catalog_models.append(
-                    {
-                        "name": name,
-                        "size": 0,
-                        "details": {
-                            "family": info.get("family", "unknown"),
-                            "backend": "openai",
-                            "context_length": info.get("context_length", 128_000),
-                            "max_completion_tokens": info.get("max_completion_tokens", 16_384),
-                            "supports_thinking": info.get("supports_thinking", False),
-                            "supports_function_calling": info.get(
-                                "supports_function_calling", True
-                            ),
-                            "supports_multimodal_input": info.get(
-                                "supports_multimodal_input", False
-                            ),
-                            "free_tier_eligible": info.get("free_tier_eligible", False),
-                            "owned_by": "openai",
-                            "standard_input_per_1m": info.get("standard_input_per_1m"),
-                            "standard_output_per_1m": info.get("standard_output_per_1m"),
-                            "tier": info.get("tier", "unknown"),
-                        },
-                    }
-                )
+            catalog_models: list[dict] = self._catalog_fallback_list()
 
             if OPENAI_FREE_ONLY:
                 catalog_models = [m for m in catalog_models if _is_free_model(m["name"])]
@@ -1043,6 +673,41 @@ class OpenAIBackend(OpenAICompatibleBackend):
     def _get_model_info(self, model_name: str) -> dict | None:
         """Get model metadata from the static catalog."""
         return OPENAI_MODELS.get(model_name)
+
+    def _catalog_fallback_list(self) -> list[dict]:
+        """Shape the static (seed) catalog into ``list_models()`` entries.
+
+        The API-failure fallback and the JSON-cache seed source (R07.20).
+        """
+        catalog_models: list[dict] = []
+        for name, info in OPENAI_MODELS.items():
+            catalog_models.append(
+                {
+                    "name": name,
+                    "size": 0,
+                    "details": {
+                        "family": info.get("family", "unknown"),
+                        "backend": "openai",
+                        "context_length": info.get("context_length", 128_000),
+                        "max_completion_tokens": info.get("max_completion_tokens", 16_384),
+                        "supports_thinking": info.get("supports_thinking", False),
+                        "supports_function_calling": info.get("supports_function_calling", True),
+                        "supports_multimodal_input": info.get("supports_multimodal_input", False),
+                        "free_tier_eligible": info.get("free_tier_eligible", False),
+                        "owned_by": "openai",
+                        "standard_input_per_1m": info.get("standard_input_per_1m"),
+                        "standard_output_per_1m": info.get("standard_output_per_1m"),
+                        "tier": info.get("tier", "unknown"),
+                    },
+                }
+            )
+        return catalog_models
+
+    def _apply_free_only(self, models: list[dict]) -> list[dict]:
+        """Apply the OPENAI_FREE_ONLY whitelist filter."""
+        if OPENAI_FREE_ONLY:
+            return [m for m in models if _is_free_model(m["name"])]
+        return models
 
     def get_model_max_context(self, model: str, family: str | None = None) -> int:
         """Get the model's maximum trained context window size."""

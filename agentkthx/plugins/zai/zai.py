@@ -58,11 +58,13 @@ import os
 import time
 from typing import Generator
 
+from agentkthx import model_cache
 from agentkthx.backends.base import BackendConfig
 from agentkthx.backends.cloud_base import CloudBackend
 from agentkthx.config import ZAI_BASE_URL, ZAI_FREE_FALLBACK_MODEL, ZAI_FREE_ONLY
 from agentkthx.core.models import Tool, ToolParam
 from agentkthx.core.types import ApiMode, BackendType, ToolSupportLevel
+from agentkthx.model_cache import load_seed_catalog
 
 # ZAI model catalog with metadata for context sizing and defaults.
 # Keys are model identifiers accepted by the ZAI API.
@@ -72,117 +74,13 @@ from agentkthx.core.types import ApiMode, BackendType, ToolSupportLevel
 # Updated: 2026-09-27 — pricing synced with ZAI's official per-1M-token table.
 # Free models (zero pricing): glm-4.5-flash and glm-4.7-flash ONLY.
 # glm-5.3-flash is NOT free ($0.15/$0.50) despite the name.
-ZAI_MODELS: dict[str, dict] = {
-    # ── GLM 5.x ──────────────────────────────────────────────────────
-    "glm-5.1": {
-        "context_length": 204800,  # 200K for display (200 * 1024)
-        "default_temperature": 0.7,
-        "default_max_tokens": 131072,  # 128K maximum output
-        "pricing": {"input": 1.4, "output": 4.4},
-    },
-    "glm-5.2": {
-        "context_length": 1048576,  # 1M for display (1024 * 1024)
-        "default_temperature": 0.7,
-        "default_max_tokens": 131072,  # 128K maximum output
-        "pricing": {"input": 1.4, "output": 4.4},  # $1.4 / $4.4 per 1M
-    },
-    "glm-5": {
-        "context_length": 204800,  # 200K for display (200 * 1024)
-        "default_temperature": 0.7,
-        "default_max_tokens": 131072,  # 128K maximum output
-        "pricing": {"input": 1.0, "output": 3.2},
-    },
-    "glm-5-turbo": {
-        "context_length": 204800,  # 200K for display (200 * 1024)
-        "default_temperature": 0.7,
-        "default_max_tokens": 131072,  # 128K maximum output
-        "pricing": {"input": 1.2, "output": 4.0},
-    },
-    # ── GLM 5.3 ─────────────────────────────────────────────────────
-    "glm-5.3": {
-        "context_length": 1048576,  # 1M for display (1024 * 1024)
-        "default_temperature": 0.7,
-        "default_max_tokens": 131072,  # 128K maximum output
-        "pricing": {"input": 1.4, "output": 4.4},  # $1.4 / $4.4 per 1M
-    },
-    "glm-5.3-flash": {
-        "context_length": 1048576,  # 1M for display (1024 * 1024)
-        "default_temperature": 0.7,
-        "default_max_tokens": 131072,  # 128K maximum output
-        "pricing": {"input": 0.15, "output": 0.5},  # $0.15 / $0.50 per 1M — NOT free
-    },
-    "glm-5.3-flashx": {
-        "context_length": 1048576,  # 1M for display (1024 * 1024)
-        "default_temperature": 0.7,
-        "default_max_tokens": 131072,  # 128K maximum output
-        "pricing": {"input": 0.37, "output": 1.25},  # $0.37 / $1.25 per 1M
-    },
-    # ── GLM 4.7 ─────────────────────────────────────────────────────
-    "glm-4.7": {
-        "context_length": 204800,  # 200K for display (200 * 1024)
-        "default_temperature": 0.7,
-        "default_max_tokens": 131072,  # 128K maximum output
-        "pricing": {"input": 0.6, "output": 2.2},
-    },
-    "glm-4.7-flash": {
-        "context_length": 204800,  # 200K for display (200 * 1024)
-        "default_temperature": 0.7,
-        "default_max_tokens": 131072,  # 128K maximum output
-        "pricing": {"input": 0.0, "output": 0.0},  # Free
-    },
-    "glm-4.7-flashx": {
-        "context_length": 204800,  # 200K for display (200 * 1024)
-        "default_temperature": 0.7,
-        "default_max_tokens": 131072,  # 128K maximum output
-        "pricing": {"input": 0.07, "output": 0.4},  # $0.07 / $0.40 per 1M
-    },
-    # ── GLM 4.6 ─────────────────────────────────────────────────────
-    "glm-4.6": {
-        "context_length": 204800,  # 200K for display (200 * 1024)
-        "default_temperature": 0.7,
-        "default_max_tokens": 131072,  # 128K maximum output
-        "pricing": {"input": 0.6, "output": 2.2},
-    },
-    # ── GLM 4.5 ─────────────────────────────────────────────────────
-    "glm-4.5": {
-        "context_length": 132000,  # 128K rounded for display
-        "default_temperature": 0.7,
-        "default_max_tokens": 98304,  # Model-specific maximum (96K)
-        "pricing": {"input": 0.6, "output": 2.2},
-    },
-    "glm-4.5-flash": {
-        "context_length": 132000,  # 128K rounded for display
-        "default_temperature": 0.7,
-        "default_max_tokens": 98304,  # Model-specific maximum (96K)
-        "pricing": {"input": 0.0, "output": 0.0},  # Free
-    },
-    "glm-4.5-air": {
-        "context_length": 132000,  # 128K rounded for display
-        "default_temperature": 0.7,
-        "default_max_tokens": 98304,  # Model-specific maximum (96K)
-        "pricing": {"input": 0.2, "output": 1.1},
-    },
-    "glm-4.5-x": {
-        "context_length": 132000,  # 128K rounded for display
-        "default_temperature": 0.7,
-        "default_max_tokens": 98304,  # Model-specific maximum (96K)
-        "pricing": {"input": 2.2, "output": 8.9},  # $2.2 / $8.9 per 1M
-    },
-    "glm-4.5-airx": {
-        "context_length": 132000,  # 128K rounded for display
-        "default_temperature": 0.7,
-        "default_max_tokens": 98304,  # Model-specific maximum (96K)
-        "pricing": {"input": 1.1, "output": 4.5},  # $1.1 / $4.5 per 1M
-    },
-    "glm-4-32b-0414-128k": {
-        "context_length": 131072,  # 128K
-        "default_temperature": 0.7,
-        "default_max_tokens": 16384,
-        "pricing": {"input": 0.1, "output": 0.1},  # $0.1 / $0.1 per 1M
-    },
-    # ── GLM 4.x variants ─────────────────────────────────────────────
-}
-
+ZAI_MODELS: dict[str, dict] = load_seed_catalog("zai")
+"""Static catalog for the zai backend — R07.20 moved the literal
+dict out of Python into ``agentkthx/data/model_seed.json``, where it
+serves as the initial defaults of the persistent model-catalog cache
+(and the offline fallback list). Update the seed JSON (or refresh a
+backend's cache from the live API) instead of editing code here.
+"""
 # Default model when none specified.
 ZAI_DEFAULT_MODEL = "glm-5.1"
 
@@ -233,6 +131,16 @@ class ZaiBackend(CloudBackend):
     _default_base_url = ZAI_BASE_URL
     _default_model = ZAI_DEFAULT_MODEL
     _provider_label = "ZAI"
+
+    # R07.20: key for the persistent JSON model-catalog cache
+    # (agentkthx/model_cache.py). ZAI previously had NO model-list cache —
+    # every list_models() call hit /api/paas/v4/models.
+    MODEL_CACHE_KEY = "zai"
+
+    # R07.20: in-process mirror of the last resolved catalog (fresh cache
+    # hit, live fetch, or offline fallback). The JSON cache remains the
+    # cross-process source of truth.
+    _model_cache: list[dict] | None = None
 
     def __init__(
         self,
@@ -316,64 +224,50 @@ class ZaiBackend(CloudBackend):
     def _catalog_backend_name(self) -> str:
         return "zai"
 
-    def list_models(self) -> list[dict]:
+    def _fetch_live_models(self) -> list[dict]:
         """
-        List available ZAI models.
+        Query ZAI's ``/api/paas/v4/models`` discovery endpoint and build
+        the merged live catalog (API models enriched + catalog gap-fill).
 
-        Queries the ZAI API /api/paas/v4/models endpoint dynamically, then
-        merges with the static catalog. The API may not return all models
-        (e.g., flash variants), so the catalog fills in the gaps.
-
-        Enriches API results with context_length from the static catalog.
-
-        R07.05 fix: sets ``free_tier`` from the catalog pricing via
-        ``_is_free_model()``. The in-chat ``/models`` command labels each
-        model free/paid from ``details.free_tier`` (defaulting to False =
-        paid), so without this every ZAI model — including the genuinely
-        free glm-4.5-flash / glm-4.7-flash — displayed as ``paid``. Same
-        bug class OpenRouter had in R07.05 (see
+        R07.05 fix carried over: sets ``free_tier`` from the catalog
+        pricing via ``_is_free_model()``. The in-chat ``/models`` command
+        labels each model free/paid from ``details.free_tier`` (defaulting
+        to False = paid), so without this every ZAI model — including the
+        genuinely free glm-4.5-flash / glm-4.7-flash — displayed as
+        ``paid``. Same bug class OpenRouter had in R07.05 (see
         ``tests/test_openrouter_free_models.py``); the catalog pricing is
         the ground truth here because ZAI's discovery endpoint does not
         return pricing data.
+
+        R07.20: raises on any discovery failure — the offline handling
+        (persistent JSON cache → seed defaults) lives in ``list_models()``.
         """
-        import urllib.error
         import urllib.request
+
+        url = f"{self._base_url}/api/paas/v4/models"
+
+        headers = {"Content-Type": "application/json"}
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
+
+        req = urllib.request.Request(url, headers=headers, method="GET")
+
+        with urllib.request.urlopen(req, timeout=15) as response:
+            result = json.loads(response.read().decode("utf-8"))
 
         # Track which models the API knows about
         api_model_keys: set[str] = set()
+        api_models = result.get("data", [])
+        for m in api_models:
+            name = m.get("id", "")
+            if not name:
+                continue
+            # Strip provider prefix if present (e.g., "zai/glm-4-flash")
+            model_key = name.split("/")[-1] if "/" in name else name
+            api_model_keys.add(model_key)
 
-        # Try dynamic discovery from the API
-        try:
-            url = f"{self._base_url}/api/paas/v4/models"
-
-            headers = {"Content-Type": "application/json"}
-            if self._api_key:
-                headers["Authorization"] = f"Bearer {self._api_key}"
-
-            req = urllib.request.Request(url, headers=headers, method="GET")
-
-            with urllib.request.urlopen(req, timeout=15) as response:
-                result = json.loads(response.read().decode("utf-8"))
-
-            api_models = result.get("data", [])
-            if api_models:
-                for m in api_models:
-                    name = m.get("id", "")
-                    if not name:
-                        continue
-                    # Strip provider prefix if present (e.g., "zai/glm-4-flash")
-                    model_key = name.split("/")[-1] if "/" in name else name
-                    api_model_keys.add(model_key)
-
-                if os.environ.get("AGENTKTHX_DEBUG"):
-                    print(f"  [ZAI] API returned {len(api_model_keys)} models")
-
-        except (urllib.error.HTTPError, urllib.error.URLError) as e:
-            if os.environ.get("AGENTKTHX_DEBUG"):
-                print(f"  [ZAI] Model discovery failed ({e}), using static catalog")
-        except Exception as e:
-            if os.environ.get("AGENTKTHX_DEBUG"):
-                print(f"  [ZAI] Model discovery error ({e}), using static catalog")
+        if os.environ.get("AGENTKTHX_DEBUG"):
+            print(f"  [ZAI] API returned {len(api_model_keys)} models")
 
         # Build unified list: start with full static catalog
         # API-discovered models get the same treatment (catalog enriches them)
@@ -436,6 +330,78 @@ class ZaiBackend(CloudBackend):
             )
 
         return models
+
+    def _catalog_fallback_list(self) -> list[dict]:
+        """Shape the static (seed) catalog into ``list_models()`` entries.
+
+        The offline fallback when the discovery endpoint is unreachable:
+        this same list seeds the persistent model-catalog cache (R07.20),
+        so the fallback and the cache's initial defaults never diverge.
+        """
+        models = []
+        for name in sorted(ZAI_MODELS.keys()):
+            meta = ZAI_MODELS[name]
+            models.append(
+                {
+                    "name": name,
+                    "size": 0,
+                    "details": {
+                        "family": self._catalog_family_name(),
+                        "backend": self._catalog_backend_name(),
+                        "context_length": meta.get(
+                            "context_length", self._DEFAULT_CONTEXT_FALLBACK
+                        ),
+                        "free_tier": self._is_free_model(name),
+                        "is_chat_model": True,
+                        "pricing": meta.get("pricing", {}),
+                    },
+                }
+            )
+        return models
+
+    def list_models(self) -> list[dict]:
+        """
+        List available ZAI models (R07.20: via the persistent JSON cache).
+
+        Flow: fresh persistent-cache entry → return it (no API call).
+        Otherwise ensure the cache carries the seed defaults, query
+        ``/api/paas/v4/models`` (via ``_fetch_live_models()`` — API models
+        first, then catalog-only models the API omits, e.g. flash
+        variants), store the merged list in the cache (30-minute TTL,
+        ``AGENTKTHX_MODEL_CACHE_TTL`` to override), and return it. When
+        discovery fails, the stale cache (seed defaults at minimum)
+        serves as the offline fallback — same list the old code built
+        inline, now cache-backed so it survives process restarts.
+        """
+        # R07.20: fresh persistent cache short-circuits the API entirely.
+        cached = model_cache.get_cached_models(self.MODEL_CACHE_KEY)
+        if cached is not None:
+            self._model_cache = cached
+            return cached
+
+        # First contact for this backend: put the static catalog in the
+        # cache as the initial defaults (stale-stamped, so the live fetch
+        # below still runs and replaces it on success).
+        model_cache.ensure_seeded(self.MODEL_CACHE_KEY, self._catalog_fallback_list())
+
+        try:
+            live = self._fetch_live_models()
+        except Exception as e:
+            if os.environ.get("AGENTKTHX_DEBUG"):
+                print(f"  [ZAI] Model discovery failed ({e}), using cached/seed catalog")
+            live = None
+
+        if live is None:
+            # Offline: stale cache (which always holds at least the seed
+            # defaults after ensure_seeded) — never store the fallback.
+            stale = model_cache.get_stale_models(self.MODEL_CACHE_KEY)
+            result = stale if stale is not None else self._catalog_fallback_list()
+        else:
+            result = model_cache.store_models(self.MODEL_CACHE_KEY, live)
+
+        # In-process mirror for consumers that read _model_cache directly.
+        self._model_cache = result
+        return result
 
     def get_model_info(self, model: str) -> dict | None:
         """Get model information from the ZAI catalog.

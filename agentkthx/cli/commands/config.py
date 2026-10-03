@@ -388,6 +388,18 @@ def _print_config_summary(
             "Run independent tool calls in parallel (default: enabled; 0 disables)",
         ),
         (
+            "AGENTKTHX_MODEL_CACHE",
+            "Full path of the persistent model-catalog JSON cache (default: <cache-dir>/model_catalog.json)",
+        ),
+        (
+            "AGENTKTHX_MODEL_CACHE_TTL",
+            "Model-catalog cache TTL in seconds (default: 1800 = 30 minutes; 0 disables caching)",
+        ),
+        (
+            "AGENTKTHX_MODEL_SEED",
+            "Override path of the packaged static-catalog seed JSON (testing/offline)",
+        ),
+        (
             "AGENTKTHX_USER_AGENT",
             "User-Agent header for the http_fetch tool (default: spoofed Firefox UA)",
         ),

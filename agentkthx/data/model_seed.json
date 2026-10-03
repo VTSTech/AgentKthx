@@ -1,0 +1,1257 @@
+{
+  "_meta": {
+    "release": "R07.20",
+    "generated": "2026-10-03",
+    "note": "Static model catalogs extracted from the plugin modules by scripts/generate_model_seed.py. Loaded by agentkthx.model_cache.load_seed_catalog() and used as the initial defaults of the persistent model-catalog cache (and the offline fallback lists). Backend keys must not start with '_' — that prefix is reserved for metadata."
+  },
+  "zai": {
+    "glm-5.1": {
+      "context_length": 204800,
+      "default_temperature": 0.7,
+      "default_max_tokens": 131072,
+      "pricing": {
+        "input": 1.4,
+        "output": 4.4
+      }
+    },
+    "glm-5.2": {
+      "context_length": 1048576,
+      "default_temperature": 0.7,
+      "default_max_tokens": 131072,
+      "pricing": {
+        "input": 1.4,
+        "output": 4.4
+      }
+    },
+    "glm-5": {
+      "context_length": 204800,
+      "default_temperature": 0.7,
+      "default_max_tokens": 131072,
+      "pricing": {
+        "input": 1.0,
+        "output": 3.2
+      }
+    },
+    "glm-5-turbo": {
+      "context_length": 204800,
+      "default_temperature": 0.7,
+      "default_max_tokens": 131072,
+      "pricing": {
+        "input": 1.2,
+        "output": 4.0
+      }
+    },
+    "glm-5.3": {
+      "context_length": 1048576,
+      "default_temperature": 0.7,
+      "default_max_tokens": 131072,
+      "pricing": {
+        "input": 1.4,
+        "output": 4.4
+      }
+    },
+    "glm-5.3-flash": {
+      "context_length": 1048576,
+      "default_temperature": 0.7,
+      "default_max_tokens": 131072,
+      "pricing": {
+        "input": 0.15,
+        "output": 0.5
+      }
+    },
+    "glm-5.3-flashx": {
+      "context_length": 1048576,
+      "default_temperature": 0.7,
+      "default_max_tokens": 131072,
+      "pricing": {
+        "input": 0.37,
+        "output": 1.25
+      }
+    },
+    "glm-4.7": {
+      "context_length": 204800,
+      "default_temperature": 0.7,
+      "default_max_tokens": 131072,
+      "pricing": {
+        "input": 0.6,
+        "output": 2.2
+      }
+    },
+    "glm-4.7-flash": {
+      "context_length": 204800,
+      "default_temperature": 0.7,
+      "default_max_tokens": 131072,
+      "pricing": {
+        "input": 0.0,
+        "output": 0.0
+      }
+    },
+    "glm-4.7-flashx": {
+      "context_length": 204800,
+      "default_temperature": 0.7,
+      "default_max_tokens": 131072,
+      "pricing": {
+        "input": 0.07,
+        "output": 0.4
+      }
+    },
+    "glm-4.6": {
+      "context_length": 204800,
+      "default_temperature": 0.7,
+      "default_max_tokens": 131072,
+      "pricing": {
+        "input": 0.6,
+        "output": 2.2
+      }
+    },
+    "glm-4.5": {
+      "context_length": 132000,
+      "default_temperature": 0.7,
+      "default_max_tokens": 98304,
+      "pricing": {
+        "input": 0.6,
+        "output": 2.2
+      }
+    },
+    "glm-4.5-flash": {
+      "context_length": 132000,
+      "default_temperature": 0.7,
+      "default_max_tokens": 98304,
+      "pricing": {
+        "input": 0.0,
+        "output": 0.0
+      }
+    },
+    "glm-4.5-air": {
+      "context_length": 132000,
+      "default_temperature": 0.7,
+      "default_max_tokens": 98304,
+      "pricing": {
+        "input": 0.2,
+        "output": 1.1
+      }
+    },
+    "glm-4.5-x": {
+      "context_length": 132000,
+      "default_temperature": 0.7,
+      "default_max_tokens": 98304,
+      "pricing": {
+        "input": 2.2,
+        "output": 8.9
+      }
+    },
+    "glm-4.5-airx": {
+      "context_length": 132000,
+      "default_temperature": 0.7,
+      "default_max_tokens": 98304,
+      "pricing": {
+        "input": 1.1,
+        "output": 4.5
+      }
+    },
+    "glm-4-32b-0414-128k": {
+      "context_length": 131072,
+      "default_temperature": 0.7,
+      "default_max_tokens": 16384,
+      "pricing": {
+        "input": 0.1,
+        "output": 0.1
+      }
+    }
+  },
+  "openai": {
+    "gpt-6-astra": {
+      "context_length": 400000,
+      "max_completion_tokens": 65536,
+      "supports_thinking": true,
+      "supports_reasoning_effort": true,
+      "supports_reasoning_mode": true,
+      "supports_function_calling": true,
+      "supports_parallel_function_calling": true,
+      "supports_response_format_json_schema": true,
+      "supports_multimodal_input": true,
+      "supports_multimodal_output": true,
+      "supports_web_search_tool": true,
+      "supports_file_search_tool": true,
+      "supports_code_interpreter_tool": true,
+      "supports_computer_use_tool": true,
+      "family": "gpt-6",
+      "tier": "flagship",
+      "standard_input_per_1m": 10.0,
+      "standard_output_per_1m": 50.0,
+      "cached_input_per_1m": 1.0
+    },
+    "gpt-6-sol": {
+      "context_length": 400000,
+      "max_completion_tokens": 65536,
+      "supports_thinking": true,
+      "supports_reasoning_effort": true,
+      "supports_reasoning_mode": true,
+      "supports_function_calling": true,
+      "supports_parallel_function_calling": true,
+      "supports_response_format_json_schema": true,
+      "supports_multimodal_input": true,
+      "supports_multimodal_output": true,
+      "supports_web_search_tool": true,
+      "supports_file_search_tool": true,
+      "supports_code_interpreter_tool": true,
+      "supports_computer_use_tool": true,
+      "family": "gpt-6",
+      "tier": "standard",
+      "standard_input_per_1m": 2.0,
+      "standard_output_per_1m": 10.0
+    },
+    "gpt-6-luna": {
+      "context_length": 400000,
+      "max_completion_tokens": 65536,
+      "supports_thinking": true,
+      "supports_reasoning_effort": true,
+      "supports_reasoning_mode": true,
+      "supports_function_calling": true,
+      "supports_parallel_function_calling": true,
+      "supports_response_format_json_schema": true,
+      "supports_multimodal_input": true,
+      "supports_multimodal_output": true,
+      "supports_web_search_tool": true,
+      "supports_file_search_tool": true,
+      "supports_code_interpreter_tool": true,
+      "supports_computer_use_tool": false,
+      "family": "gpt-6",
+      "tier": "lite",
+      "standard_input_per_1m": 0.1,
+      "standard_output_per_1m": 0.5,
+      "free_tier_eligible": true
+    },
+    "gpt-5.6-sol": {
+      "context_length": 200000,
+      "max_completion_tokens": 65536,
+      "supports_thinking": true,
+      "supports_reasoning_effort": true,
+      "supports_reasoning_mode": true,
+      "supports_function_calling": true,
+      "supports_response_format_json_schema": true,
+      "supports_multimodal_input": true,
+      "family": "gpt-5.6",
+      "tier": "daybreak",
+      "standard_input_per_1m": 4.0,
+      "standard_output_per_1m": 20.0
+    },
+    "gpt-5.5": {
+      "context_length": 200000,
+      "max_completion_tokens": 65536,
+      "supports_thinking": true,
+      "supports_reasoning_effort": true,
+      "supports_function_calling": true,
+      "supports_response_format_json_schema": true,
+      "supports_multimodal_input": true,
+      "family": "gpt-5",
+      "tier": "standard"
+    },
+    "gpt-5.4": {
+      "context_length": 128000,
+      "max_completion_tokens": 16384,
+      "supports_thinking": true,
+      "supports_interleaved_thinking": true,
+      "supports_function_calling": true,
+      "family": "gpt-5",
+      "tier": "standard"
+    },
+    "gpt-5.3-codex": {
+      "context_length": 200000,
+      "max_completion_tokens": 65536,
+      "supports_thinking": true,
+      "supports_reasoning_effort": true,
+      "supports_function_calling": true,
+      "supports_code_interpreter_tool": true,
+      "family": "gpt-5",
+      "tier": "codex",
+      "standard_input_per_1m": 1.75,
+      "standard_output_per_1m": 14.0
+    },
+    "gpt-4o": {
+      "context_length": 128000,
+      "max_completion_tokens": 16384,
+      "supports_thinking": false,
+      "supports_function_calling": true,
+      "supports_parallel_function_calling": true,
+      "supports_response_format_json_schema": true,
+      "supports_multimodal_input": true,
+      "supports_multimodal_output": true,
+      "supports_web_search_tool": true,
+      "family": "gpt-4o",
+      "tier": "standard"
+    },
+    "gpt-4o-mini": {
+      "context_length": 128000,
+      "max_completion_tokens": 16384,
+      "supports_thinking": false,
+      "supports_function_calling": true,
+      "supports_response_format_json_schema": true,
+      "supports_multimodal_input": true,
+      "supports_web_search_tool": true,
+      "family": "gpt-4o",
+      "tier": "mini",
+      "free_tier_eligible": true
+    },
+    "gpt-4.1-mini": {
+      "context_length": 1000000,
+      "max_completion_tokens": 32768,
+      "supports_thinking": false,
+      "supports_function_calling": true,
+      "supports_response_format_json_schema": true,
+      "supports_multimodal_input": true,
+      "supports_web_search_tool": true,
+      "family": "gpt-4.1",
+      "tier": "mini",
+      "free_tier_eligible": true
+    },
+    "chat-latest": {
+      "context_length": 128000,
+      "max_completion_tokens": 16384,
+      "supports_thinking": false,
+      "supports_function_calling": true,
+      "family": "chatgpt",
+      "tier": "chat-latest",
+      "standard_input_per_1m": 5.0,
+      "standard_output_per_1m": 30.0
+    },
+    "gpt-realtime-2.1": {
+      "context_length": 128000,
+      "family": "realtime",
+      "supports_streaming": true,
+      "supports_multimodal_input": true,
+      "supports_multimodal_output": true,
+      "tier": "standard"
+    },
+    "gpt-realtime-2.1-mini": {
+      "context_length": 128000,
+      "family": "realtime",
+      "supports_streaming": true,
+      "supports_multimodal_input": true,
+      "supports_multimodal_output": true,
+      "tier": "mini",
+      "free_tier_eligible": true
+    },
+    "o1": {
+      "context_length": 200000,
+      "max_completion_tokens": 100000,
+      "supports_thinking": true,
+      "supports_reasoning_effort": true,
+      "supports_function_calling": true,
+      "supports_multimodal_input": true,
+      "family": "o-series",
+      "tier": "flagship"
+    },
+    "o3": {
+      "context_length": 200000,
+      "max_completion_tokens": 100000,
+      "supports_thinking": true,
+      "supports_reasoning_effort": true,
+      "supports_function_calling": true,
+      "supports_multimodal_input": true,
+      "family": "o-series",
+      "tier": "flagship"
+    },
+    "o3-mini": {
+      "context_length": 200000,
+      "max_completion_tokens": 100000,
+      "supports_thinking": true,
+      "supports_reasoning_effort": true,
+      "supports_function_calling": true,
+      "supports_multimodal_input": true,
+      "family": "o-series",
+      "tier": "mini"
+    },
+    "o4-mini": {
+      "context_length": 200000,
+      "max_completion_tokens": 100000,
+      "supports_thinking": true,
+      "supports_reasoning_effort": true,
+      "supports_function_calling": true,
+      "supports_multimodal_input": true,
+      "family": "o-series",
+      "tier": "mini"
+    },
+    "gpt-5": {
+      "context_length": 200000,
+      "max_completion_tokens": 100000,
+      "supports_thinking": true,
+      "supports_reasoning_effort": true,
+      "supports_function_calling": true,
+      "supports_multimodal_input": true,
+      "family": "gpt-5",
+      "tier": "flagship"
+    },
+    "gpt-5-mini": {
+      "context_length": 200000,
+      "max_completion_tokens": 100000,
+      "supports_thinking": true,
+      "supports_reasoning_effort": true,
+      "supports_function_calling": true,
+      "family": "gpt-5",
+      "tier": "mini"
+    },
+    "gpt-5-nano": {
+      "context_length": 200000,
+      "max_completion_tokens": 100000,
+      "supports_thinking": true,
+      "supports_reasoning_effort": true,
+      "supports_function_calling": true,
+      "family": "gpt-5",
+      "tier": "nano"
+    },
+    "gpt-5-pro": {
+      "context_length": 200000,
+      "max_completion_tokens": 100000,
+      "supports_thinking": true,
+      "supports_reasoning_effort": true,
+      "supports_function_calling": true,
+      "supports_multimodal_input": true,
+      "family": "gpt-5",
+      "tier": "pro"
+    },
+    "gpt-5.1": {
+      "context_length": 200000,
+      "max_completion_tokens": 100000,
+      "supports_thinking": true,
+      "supports_reasoning_effort": true,
+      "supports_function_calling": true,
+      "family": "gpt-5",
+      "tier": "standard"
+    },
+    "gpt-5.2": {
+      "context_length": 200000,
+      "max_completion_tokens": 100000,
+      "supports_thinking": true,
+      "supports_reasoning_effort": true,
+      "supports_function_calling": true,
+      "family": "gpt-5",
+      "tier": "standard"
+    },
+    "gpt-5.2-pro": {
+      "context_length": 200000,
+      "max_completion_tokens": 100000,
+      "supports_thinking": true,
+      "supports_reasoning_effort": true,
+      "supports_function_calling": true,
+      "family": "gpt-5",
+      "tier": "pro"
+    },
+    "gpt-5.4-mini": {
+      "context_length": 128000,
+      "max_completion_tokens": 16384,
+      "supports_thinking": true,
+      "supports_function_calling": true,
+      "family": "gpt-5",
+      "tier": "mini"
+    },
+    "gpt-5.4-nano": {
+      "context_length": 128000,
+      "max_completion_tokens": 16384,
+      "supports_thinking": true,
+      "supports_function_calling": true,
+      "family": "gpt-5",
+      "tier": "nano"
+    },
+    "gpt-5.4-pro": {
+      "context_length": 200000,
+      "max_completion_tokens": 100000,
+      "supports_thinking": true,
+      "supports_reasoning_effort": true,
+      "supports_function_calling": true,
+      "family": "gpt-5",
+      "tier": "pro"
+    },
+    "gpt-5.5-pro": {
+      "context_length": 200000,
+      "max_completion_tokens": 100000,
+      "supports_thinking": true,
+      "supports_reasoning_effort": true,
+      "supports_function_calling": true,
+      "family": "gpt-5",
+      "tier": "pro"
+    },
+    "gpt-5.6-luna": {
+      "context_length": 200000,
+      "max_completion_tokens": 65536,
+      "supports_thinking": true,
+      "supports_reasoning_effort": true,
+      "supports_function_calling": true,
+      "family": "gpt-5.6",
+      "tier": "daybreak"
+    },
+    "gpt-5.6-terra": {
+      "context_length": 200000,
+      "max_completion_tokens": 65536,
+      "supports_thinking": true,
+      "supports_reasoning_effort": true,
+      "supports_function_calling": true,
+      "family": "gpt-5.6",
+      "tier": "daybreak"
+    },
+    "gpt-3.5-turbo": {
+      "context_length": 16384,
+      "max_completion_tokens": 4096,
+      "supports_thinking": false,
+      "supports_function_calling": true,
+      "family": "gpt-3.5",
+      "tier": "legacy"
+    },
+    "gpt-3.5-turbo-16k": {
+      "context_length": 16384,
+      "max_completion_tokens": 4096,
+      "supports_thinking": false,
+      "supports_function_calling": true,
+      "family": "gpt-3.5",
+      "tier": "legacy"
+    },
+    "gpt-4.1": {
+      "context_length": 1047576,
+      "max_completion_tokens": 32768,
+      "supports_thinking": false,
+      "supports_function_calling": true,
+      "supports_parallel_function_calling": true,
+      "supports_response_format_json_schema": true,
+      "supports_multimodal_input": true,
+      "family": "gpt-4.1",
+      "tier": "standard"
+    },
+    "gpt-4.1-nano": {
+      "context_length": 1047576,
+      "max_completion_tokens": 32768,
+      "supports_thinking": false,
+      "supports_function_calling": true,
+      "supports_response_format_json_schema": true,
+      "supports_multimodal_input": true,
+      "family": "gpt-4.1",
+      "tier": "nano"
+    }
+  },
+  "openrouter": {
+    "openai/gpt-4o": {
+      "max_tokens": 128000,
+      "pricing": {
+        "prompt": 2.5,
+        "completion": 10.0
+      },
+      "context_length": 128000,
+      "provider": "openai",
+      "description": "GPT-4o - multimodal model"
+    },
+    "openai/gpt-4o-mini": {
+      "max_tokens": 128000,
+      "pricing": {
+        "prompt": 0.15,
+        "completion": 0.6
+      },
+      "context_length": 128000,
+      "provider": "openai",
+      "description": "GPT-4o mini - fast and affordable"
+    },
+    "openai/gpt-4-turbo": {
+      "max_tokens": 128000,
+      "pricing": {
+        "prompt": 10.0,
+        "completion": 30.0
+      },
+      "context_length": 128000,
+      "provider": "openai",
+      "description": "GPT-4 Turbo - previous flagship"
+    },
+    "openai/gpt-4": {
+      "max_tokens": 8192,
+      "pricing": {
+        "prompt": 30.0,
+        "completion": 60.0
+      },
+      "context_length": 8192,
+      "provider": "openai",
+      "description": "GPT-4 - legacy model"
+    },
+    "deepseek/deepseek-chat": {
+      "max_tokens": 131072,
+      "pricing": {
+        "prompt": 1.0,
+        "completion": 2.0
+      },
+      "context_length": 131072,
+      "provider": "deepseek",
+      "description": "DeepSeek Chat - open-source model"
+    },
+    "deepseek/deepseek-coder": {
+      "max_tokens": 131072,
+      "pricing": {
+        "prompt": 1.0,
+        "completion": 2.0
+      },
+      "context_length": 131072,
+      "provider": "deepseek",
+      "description": "DeepSeek Coder - programming model"
+    },
+    "google/gemini-2.0-flash-exp": {
+      "max_tokens": 131072,
+      "pricing": {
+        "prompt": 0.15,
+        "completion": 0.6
+      },
+      "context_length": 131072,
+      "provider": "google",
+      "description": "Gemini 2.0 Flash Experimental"
+    },
+    "meta-llama/llama-3.1-70b-instruct": {
+      "max_tokens": 131072,
+      "pricing": {
+        "prompt": 0.88,
+        "completion": 0.88
+      },
+      "context_length": 131072,
+      "provider": "meta",
+      "description": "Llama 3.1 70B Instruct"
+    },
+    "qwen/qwen-2.5-72b-instruct": {
+      "max_tokens": 131072,
+      "pricing": {
+        "prompt": 0.5,
+        "completion": 0.5
+      },
+      "context_length": 131072,
+      "provider": "qwen",
+      "description": "Qwen 2.5 72B Instruct"
+    }
+  },
+  "gemini": {
+    "gemini-3.8-flash": {
+      "context_length": 1048576,
+      "max_completion_tokens": 65536,
+      "free_tier": true,
+      "supports_thinking": true,
+      "thinking_levels": [
+        "minimal",
+        "low",
+        "medium",
+        "high"
+      ],
+      "thinking_can_disable": false,
+      "supports_thought_signatures": true,
+      "min_cache_tokens": 4096,
+      "family": "gemini-3",
+      "description": "Gemini 3.8 Flash — current flagship flash model"
+    },
+    "gemini-3.7-flash": {
+      "context_length": 1048576,
+      "max_completion_tokens": 65536,
+      "free_tier": true,
+      "supports_thinking": true,
+      "thinking_levels": [
+        "minimal",
+        "low",
+        "medium",
+        "high"
+      ],
+      "thinking_can_disable": false,
+      "min_cache_tokens": 4096,
+      "family": "gemini-3",
+      "description": "Gemini 3.7 Flash"
+    },
+    "gemini-3.6-flash": {
+      "context_length": 1048576,
+      "max_completion_tokens": 65536,
+      "free_tier": true,
+      "supports_thinking": true,
+      "thinking_levels": [
+        "minimal",
+        "low",
+        "medium",
+        "high"
+      ],
+      "thinking_can_disable": false,
+      "min_cache_tokens": 4096,
+      "family": "gemini-3",
+      "description": "Gemini 3.6 Flash"
+    },
+    "gemini-3.5-flash": {
+      "context_length": 1048576,
+      "max_completion_tokens": 65536,
+      "free_tier": true,
+      "supports_thinking": true,
+      "thinking_levels": [
+        "minimal",
+        "low",
+        "medium",
+        "high"
+      ],
+      "thinking_can_disable": false,
+      "min_cache_tokens": 4096,
+      "family": "gemini-3",
+      "description": "Gemini 3.5 Flash"
+    },
+    "gemini-3.5-flash-lite": {
+      "context_length": 1048576,
+      "max_completion_tokens": 65536,
+      "free_tier": true,
+      "supports_thinking": true,
+      "thinking_levels": [
+        "minimal",
+        "low",
+        "medium",
+        "high"
+      ],
+      "thinking_can_disable": false,
+      "min_cache_tokens": 4096,
+      "family": "gemini-3",
+      "description": "Gemini 3.5 Flash-Lite — lowest cost in 3.5 family"
+    },
+    "gemini-3.1-flash-lite": {
+      "context_length": 1048576,
+      "max_completion_tokens": 65536,
+      "free_tier": true,
+      "supports_thinking": true,
+      "thinking_levels": [
+        "minimal",
+        "low",
+        "medium",
+        "high"
+      ],
+      "thinking_can_disable": false,
+      "min_cache_tokens": 4096,
+      "family": "gemini-3",
+      "description": "Gemini 3.1 Flash-Lite"
+    },
+    "gemini-3.1-pro-preview": {
+      "context_length": 2097152,
+      "max_completion_tokens": 65536,
+      "free_tier": false,
+      "supports_thinking": true,
+      "thinking_levels": [
+        "minimal",
+        "low",
+        "medium",
+        "high"
+      ],
+      "thinking_can_disable": false,
+      "min_cache_tokens": 4096,
+      "family": "gemini-3",
+      "description": "Gemini 3.1 Pro Preview — 2M context, paid tier only"
+    },
+    "gemini-2.5-pro": {
+      "context_length": 2097152,
+      "max_completion_tokens": 65536,
+      "free_tier": false,
+      "supports_thinking": true,
+      "thinking_budget_range": [
+        0,
+        24576
+      ],
+      "thinking_can_disable": true,
+      "supports_thought_signatures": false,
+      "min_cache_tokens": 2048,
+      "family": "gemini-2.5",
+      "description": "Gemini 2.5 Pro — legacy flagship, 2M context"
+    },
+    "gemini-2.5-flash": {
+      "context_length": 1048576,
+      "max_completion_tokens": 65536,
+      "free_tier": true,
+      "supports_thinking": true,
+      "thinking_budget_range": [
+        0,
+        24576
+      ],
+      "thinking_can_disable": true,
+      "min_cache_tokens": 2048,
+      "family": "gemini-2.5",
+      "description": "Gemini 2.5 Flash — legacy"
+    },
+    "gemini-2.5-flash-lite": {
+      "context_length": 1048576,
+      "max_completion_tokens": 65536,
+      "free_tier": true,
+      "supports_thinking": true,
+      "thinking_budget_range": [
+        0,
+        24576
+      ],
+      "thinking_can_disable": true,
+      "min_cache_tokens": 2048,
+      "family": "gemini-2.5",
+      "description": "Gemini 2.5 Flash-Lite — legacy"
+    }
+  },
+  "mistral": {
+    "mistral-medium-latest": {
+      "context_length": 262144,
+      "default_temperature": 0.7,
+      "default_max_tokens": 8192,
+      "pricing": {
+        "input": 2.0,
+        "output": 6.0
+      },
+      "family": "mistral-medium",
+      "supports_vision": true,
+      "supports_reasoning": true,
+      "supports_function_calling": true,
+      "supports_response_format_json_schema": true,
+      "supports_prefix_prefill": true,
+      "license": "Modified MIT"
+    },
+    "mistral-medium-3-5": {
+      "context_length": 262144,
+      "default_temperature": 0.7,
+      "default_max_tokens": 8192,
+      "pricing": {
+        "input": 2.0,
+        "output": 6.0
+      },
+      "family": "mistral-medium"
+    },
+    "mistral-medium-3": {
+      "context_length": 262144,
+      "default_temperature": 0.7,
+      "default_max_tokens": 8192,
+      "pricing": {
+        "input": 2.0,
+        "output": 6.0
+      },
+      "family": "mistral-medium"
+    },
+    "mistral-small-latest": {
+      "context_length": 262144,
+      "default_temperature": 0.7,
+      "default_max_tokens": 8192,
+      "pricing": {
+        "input": 0.2,
+        "output": 0.5
+      },
+      "family": "mistral-small",
+      "supports_vision": true,
+      "supports_reasoning": true,
+      "supports_function_calling": true,
+      "supports_response_format_json_schema": true,
+      "license": "Apache 2.0"
+    },
+    "mistral-small-4": {
+      "context_length": 262144,
+      "default_temperature": 0.7,
+      "default_max_tokens": 8192,
+      "pricing": {
+        "input": 0.2,
+        "output": 0.5
+      },
+      "family": "mistral-small"
+    },
+    "mistral-large-latest": {
+      "context_length": 262144,
+      "default_temperature": 0.7,
+      "default_max_tokens": 8192,
+      "pricing": {
+        "input": 0.5,
+        "output": 1.5
+      },
+      "family": "mistral-large",
+      "supports_vision": true,
+      "supports_reasoning": true,
+      "supports_function_calling": true,
+      "supports_n_completions": false,
+      "license": "Apache 2.0"
+    },
+    "mistral-large-3": {
+      "context_length": 262144,
+      "default_temperature": 0.7,
+      "default_max_tokens": 8192,
+      "pricing": {
+        "input": 0.5,
+        "output": 1.5
+      },
+      "family": "mistral-large"
+    },
+    "ministral-14b-latest": {
+      "context_length": 262144,
+      "default_temperature": 0.7,
+      "default_max_tokens": 8192,
+      "pricing": {
+        "input": 0.2,
+        "output": 0.5
+      },
+      "family": "ministral",
+      "supports_vision": true,
+      "supports_function_calling": true,
+      "license": "Apache 2.0"
+    },
+    "ministral-8b-latest": {
+      "context_length": 262144,
+      "default_temperature": 0.7,
+      "default_max_tokens": 8192,
+      "pricing": {
+        "input": 0.1,
+        "output": 0.3
+      },
+      "family": "ministral",
+      "supports_vision": true,
+      "supports_function_calling": true,
+      "license": "Apache 2.0"
+    },
+    "ministral-3b-latest": {
+      "context_length": 262144,
+      "default_temperature": 0.7,
+      "default_max_tokens": 8192,
+      "pricing": {
+        "input": 0.04,
+        "output": 0.04
+      },
+      "family": "ministral",
+      "supports_vision": true,
+      "supports_function_calling": true,
+      "license": "Apache 2.0"
+    },
+    "devstral-latest": {
+      "context_length": 262144,
+      "default_temperature": 0.7,
+      "default_max_tokens": 8192,
+      "pricing": {
+        "input": 0.2,
+        "output": 0.5
+      },
+      "family": "devstral",
+      "supports_function_calling": true,
+      "license": "Apache 2.0",
+      "note": "Tool-calling-first tuning; best AgentKthx backend model per token"
+    },
+    "magistral-medium-latest": {
+      "context_length": 131072,
+      "default_temperature": 0.7,
+      "default_max_tokens": 8192,
+      "pricing": {
+        "input": 2.0,
+        "output": 6.0
+      },
+      "family": "magistral",
+      "supports_reasoning": true,
+      "supports_function_calling": true
+    },
+    "magistral-small-latest": {
+      "context_length": 131072,
+      "default_temperature": 0.7,
+      "default_max_tokens": 8192,
+      "pricing": {
+        "input": 0.5,
+        "output": 1.5
+      },
+      "family": "magistral",
+      "supports_reasoning": true,
+      "supports_function_calling": true
+    },
+    "codestral-latest": {
+      "context_length": 131072,
+      "default_temperature": 0.7,
+      "default_max_tokens": 8192,
+      "pricing": {
+        "input": 0.2,
+        "output": 0.6
+      },
+      "family": "codestral",
+      "supports_function_calling": true,
+      "supports_fim": true
+    },
+    "labs-mistral-small-creative": {
+      "context_length": 262144,
+      "default_temperature": 0.9,
+      "default_max_tokens": 8192,
+      "pricing": {
+        "input": 0.0,
+        "output": 0.0
+      },
+      "family": "labs",
+      "supports_function_calling": true,
+      "note": "Labs model — silent updates, no data opt-out, not for production"
+    }
+  },
+  "pollinations": {
+    "openai/gpt-5.4-nano": {
+      "context_length": 400000,
+      "default_temperature": 0.7,
+      "default_max_tokens": 8192,
+      "pricing": {
+        "input": 0.15,
+        "output": 0.9375
+      },
+      "family": "openai",
+      "supports_vision": true,
+      "supports_reasoning": true,
+      "supports_function_calling": true,
+      "note": "Platform default; alias 'openai' resolves here"
+    },
+    "openai/gpt-5.4-mini": {
+      "context_length": 128000,
+      "default_temperature": 0.7,
+      "default_max_tokens": 8192,
+      "pricing": {
+        "input": 0.75,
+        "output": 3.0
+      },
+      "family": "openai",
+      "supports_vision": true,
+      "supports_reasoning": true,
+      "supports_function_calling": true
+    },
+    "openai/gpt-5.4": {
+      "context_length": 128000,
+      "default_temperature": 0.7,
+      "default_max_tokens": 8192,
+      "pricing": {
+        "input": 1.875,
+        "output": 7.5
+      },
+      "family": "openai",
+      "supports_vision": true,
+      "supports_reasoning": true,
+      "supports_function_calling": true,
+      "note": "Chat transform REMOVES sampling controls — don't rely on temperature"
+    },
+    "openai/gpt-oss-20b": {
+      "context_length": 128000,
+      "default_temperature": 0.7,
+      "default_max_tokens": 8192,
+      "pricing": {
+        "input": 0.05,
+        "output": 0.3
+      },
+      "family": "openai",
+      "supports_reasoning": true,
+      "supports_function_calling": true,
+      "note": "Same weights as the legacy anonymous 'openai-fast' tier; forwards temperature/top_p"
+    },
+    "z-ai/glm-5.3-flash": {
+      "context_length": 128000,
+      "default_temperature": 0.7,
+      "default_max_tokens": 8192,
+      "pricing": {
+        "input": 0.1,
+        "output": 0.4
+      },
+      "family": "z-ai",
+      "supports_reasoning": true,
+      "supports_function_calling": true,
+      "note": "Cheap alternate family — POLLINATIONS_FALLBACK_MODEL"
+    },
+    "z-ai/glm-5.3-flashx": {
+      "context_length": 1000000,
+      "default_temperature": 0.7,
+      "default_max_tokens": 8192,
+      "pricing": {
+        "input": 0.15,
+        "output": 0.6
+      },
+      "family": "z-ai",
+      "supports_reasoning": true,
+      "supports_function_calling": true,
+      "note": "1M-token context — long-session / codebase-audit tier"
+    },
+    "deepseek/deepseek-v4-flash": {
+      "context_length": 128000,
+      "default_temperature": 0.7,
+      "default_max_tokens": 8192,
+      "pricing": {
+        "input": 0.1,
+        "output": 0.4
+      },
+      "family": "deepseek",
+      "supports_reasoning": true,
+      "supports_function_calling": true
+    },
+    "anthropic/claude-sonnet-4.6": {
+      "context_length": 200000,
+      "default_temperature": 0.7,
+      "default_max_tokens": 8192,
+      "pricing": {
+        "input": 1.875,
+        "output": 9.375
+      },
+      "family": "anthropic",
+      "supports_vision": true,
+      "supports_reasoning": true,
+      "supports_function_calling": true,
+      "note": "temperature/top_p mutually exclusive (temperature wins); supports json_schema NOT json_object"
+    },
+    "anthropic/claude-haiku-4.5": {
+      "context_length": 200000,
+      "default_temperature": 0.7,
+      "default_max_tokens": 8192,
+      "pricing": {
+        "input": 0.625,
+        "output": 3.125
+      },
+      "family": "anthropic",
+      "supports_vision": true,
+      "supports_function_calling": true
+    },
+    "google/gemini-3.7-flash": {
+      "context_length": 1000000,
+      "default_temperature": 0.7,
+      "default_max_tokens": 8192,
+      "pricing": {
+        "input": 0.1,
+        "output": 0.4
+      },
+      "family": "google",
+      "supports_vision": true,
+      "supports_reasoning": true,
+      "supports_function_calling": true,
+      "note": "Prompt caching — but NOT cached when tools are present"
+    },
+    "mistralai/mistral-small-4": {
+      "context_length": 262144,
+      "default_temperature": 0.7,
+      "default_max_tokens": 8192,
+      "pricing": {
+        "input": 0.2,
+        "output": 0.5
+      },
+      "family": "mistralai",
+      "supports_vision": true,
+      "supports_reasoning": true,
+      "supports_function_calling": true
+    },
+    "meta/llama-4-scout": {
+      "context_length": 128000,
+      "default_temperature": 0.7,
+      "default_max_tokens": 8192,
+      "pricing": {
+        "input": 0.075,
+        "output": 0.3
+      },
+      "family": "meta",
+      "supports_vision": true,
+      "supports_function_calling": true
+    },
+    "qwen/qwen3.8-flash": {
+      "context_length": 128000,
+      "default_temperature": 0.7,
+      "default_max_tokens": 8192,
+      "pricing": {
+        "input": 0.1,
+        "output": 0.4
+      },
+      "family": "qwen",
+      "supports_reasoning": true,
+      "supports_function_calling": true
+    }
+  },
+  "huggingface": {
+    "openai/gpt-oss-20b": {
+      "context_length": 131072,
+      "max_completion_tokens": 8192,
+      "provider": "openai",
+      "description": "gpt-oss-20b — open-weight conversational model"
+    },
+    "openai/gpt-oss-120b": {
+      "context_length": 131072,
+      "max_completion_tokens": 32768,
+      "provider": "openai",
+      "description": "gpt-oss-120b — flagship open-weight model with tool calling"
+    },
+    "Qwen/Qwen3-4B-Thinking-2507": {
+      "context_length": 32768,
+      "max_completion_tokens": 8192,
+      "provider": "qwen",
+      "description": "Qwen3-4B Thinking — small reasoning model",
+      "supports_thinking": true
+    },
+    "Qwen/Qwen3-Coder-480B-A35B-Instruct": {
+      "context_length": 262144,
+      "max_completion_tokens": 32768,
+      "provider": "qwen",
+      "description": "Qwen3-Coder 480B — MoE coding model"
+    },
+    "Qwen/Qwen2.5-Coder-32B-Instruct": {
+      "context_length": 131072,
+      "max_completion_tokens": 8192,
+      "provider": "qwen",
+      "description": "Qwen2.5-Coder 32B — coding model"
+    },
+    "Qwen/Qwen2.5-72B-Instruct": {
+      "context_length": 131072,
+      "max_completion_tokens": 8192,
+      "provider": "qwen",
+      "description": "Qwen2.5-72B Instruct"
+    },
+    "deepseek-ai/DeepSeek-R1": {
+      "context_length": 65536,
+      "max_completion_tokens": 32768,
+      "provider": "deepseek",
+      "description": "DeepSeek-R1 — open reasoning model",
+      "supports_thinking": true
+    },
+    "deepseek-ai/DeepSeek-V3": {
+      "context_length": 65536,
+      "max_completion_tokens": 8192,
+      "provider": "deepseek",
+      "description": "DeepSeek-V3 chat model"
+    },
+    "deepseek-ai/DeepSeek-V3.1": {
+      "context_length": 131072,
+      "max_completion_tokens": 32768,
+      "provider": "deepseek",
+      "description": "DeepSeek-V3.1 — improved chat + tool calling"
+    },
+    "meta-llama/Llama-3.3-70B-Instruct": {
+      "context_length": 131072,
+      "max_completion_tokens": 8192,
+      "provider": "meta",
+      "description": "Llama 3.3 70B Instruct"
+    },
+    "meta-llama/Llama-3.1-8B-Instruct": {
+      "context_length": 131072,
+      "max_completion_tokens": 4096,
+      "provider": "meta",
+      "description": "Llama 3.1 8B Instruct"
+    },
+    "google/gemma-3-4b-it": {
+      "context_length": 32768,
+      "max_completion_tokens": 4096,
+      "provider": "google",
+      "description": "Gemma 3 4B instruct"
+    },
+    "google/gemma-3-12b-it": {
+      "context_length": 32768,
+      "max_completion_tokens": 4096,
+      "provider": "google",
+      "description": "Gemma 3 12B instruct"
+    },
+    "google/gemma-3-27b-it": {
+      "context_length": 32768,
+      "max_completion_tokens": 4096,
+      "provider": "google",
+      "description": "Gemma 3 27B instruct"
+    },
+    "zai-org/GLM-4.5": {
+      "context_length": 131072,
+      "max_completion_tokens": 8192,
+      "provider": "zai",
+      "description": "GLM-4.5 — powerful text generation model"
+    },
+    "zai-org/GLM-4.5-Air": {
+      "context_length": 131072,
+      "max_completion_tokens": 8192,
+      "provider": "zai",
+      "description": "GLM-4.5-Air — lighter variant"
+    },
+    "inclusionAI/Ling-3.0-flash-Fin": {
+      "context_length": 131072,
+      "max_completion_tokens": 8192,
+      "provider": "inclusionai",
+      "description": "Ling-3.0-flash-Fin — financial domain, $0/token via Novita"
+    },
+    "prism-ml/Ternary-Bonsai-27B-gguf": {
+      "context_length": 131072,
+      "max_completion_tokens": 4096,
+      "provider": "prism-ml",
+      "description": "Ternary-Bonsai-27B GGUF — 1.58-bit ternary, $0/token via Together"
+    },
+    "prism-ml/Ternary-Bonsai-27B-AWQ-4bit": {
+      "context_length": 131072,
+      "max_completion_tokens": 4096,
+      "provider": "prism-ml",
+      "description": "Ternary-Bonsai-27B AWQ 4-bit, $0/token via Together"
+    }
+  }
+}

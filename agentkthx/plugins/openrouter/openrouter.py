@@ -38,6 +38,7 @@ import urllib.error
 import urllib.request
 from typing import Generator
 
+from agentkthx import model_cache
 from agentkthx.backends.base import BackendConfig
 from agentkthx.backends.openai_compat import OpenAICompatibleBackend
 from agentkthx.config import (
@@ -46,6 +47,7 @@ from agentkthx.config import (
 )
 from agentkthx.core.models import Tool
 from agentkthx.core.types import ApiMode, BackendType, ToolSupportLevel
+from agentkthx.model_cache import load_seed_catalog
 
 # OpenRouter model catalog with metadata for context sizing and defaults.
 # Keys are model identifiers accepted by the OpenRouter API.
@@ -53,76 +55,13 @@ from agentkthx.core.types import ApiMode, BackendType, ToolSupportLevel
 # The /models endpoint returns dynamic data, but this catalog ensures
 # common models are always available with proper defaults.
 # Updated: 2026-09-29 (R07.13: retired 9 models confirmed absent from live /models API)
-OPENROUTER_MODELS: dict[str, dict] = {
-    # OpenAI
-    "openai/gpt-4o": {
-        "max_tokens": 128000,
-        "pricing": {"prompt": 2.50, "completion": 10.00},
-        "context_length": 128000,
-        "provider": "openai",
-        "description": "GPT-4o - multimodal model",
-    },
-    "openai/gpt-4o-mini": {
-        "max_tokens": 128000,
-        "pricing": {"prompt": 0.15, "completion": 0.60},
-        "context_length": 128000,
-        "provider": "openai",
-        "description": "GPT-4o mini - fast and affordable",
-    },
-    "openai/gpt-4-turbo": {
-        "max_tokens": 128000,
-        "pricing": {"prompt": 10.00, "completion": 30.00},
-        "context_length": 128000,
-        "provider": "openai",
-        "description": "GPT-4 Turbo - previous flagship",
-    },
-    "openai/gpt-4": {
-        "max_tokens": 8192,
-        "pricing": {"prompt": 30.00, "completion": 60.00},
-        "context_length": 8192,
-        "provider": "openai",
-        "description": "GPT-4 - legacy model",
-    },
-    # DeepSeek
-    "deepseek/deepseek-chat": {
-        "max_tokens": 131072,
-        "pricing": {"prompt": 1.00, "completion": 2.00},
-        "context_length": 131072,
-        "provider": "deepseek",
-        "description": "DeepSeek Chat - open-source model",
-    },
-    "deepseek/deepseek-coder": {
-        "max_tokens": 131072,
-        "pricing": {"prompt": 1.00, "completion": 2.00},
-        "context_length": 131072,
-        "provider": "deepseek",
-        "description": "DeepSeek Coder - programming model",
-    },
-    # Google
-    "google/gemini-2.0-flash-exp": {
-        "max_tokens": 131072,
-        "pricing": {"prompt": 0.15, "completion": 0.60},
-        "context_length": 131072,
-        "provider": "google",
-        "description": "Gemini 2.0 Flash Experimental",
-    },
-    # Local models (via OpenRouter)
-    "meta-llama/llama-3.1-70b-instruct": {
-        "max_tokens": 131072,
-        "pricing": {"prompt": 0.88, "completion": 0.88},
-        "context_length": 131072,
-        "provider": "meta",
-        "description": "Llama 3.1 70B Instruct",
-    },
-    "qwen/qwen-2.5-72b-instruct": {
-        "max_tokens": 131072,
-        "pricing": {"prompt": 0.50, "completion": 0.50},
-        "context_length": 131072,
-        "provider": "qwen",
-        "description": "Qwen 2.5 72B Instruct",
-    },
-}
-
+OPENROUTER_MODELS: dict[str, dict] = load_seed_catalog("openrouter")
+"""Static catalog for the openrouter backend — R07.20 moved the literal
+dict out of Python into ``agentkthx/data/model_seed.json``, where it
+serves as the initial defaults of the persistent model-catalog cache
+(and the offline fallback list). Update the seed JSON (or refresh a
+backend's cache from the live API) instead of editing code here.
+"""
 
 # OpenRouter's free-tier model whitelist. When OPENROUTER_FREE_ONLY=true,
 # only models matching this whitelist are listed/accepted. Consists of:
@@ -217,6 +156,9 @@ class OpenRouterBackend(OpenAICompatibleBackend):
     _model_cache = None
     _cache_time = 0
     _CACHE_TIMEOUT = 3600  # 1 hour in seconds
+
+    # R07.20: persistent JSON model-catalog cache key (L2 — see list_models).
+    MODEL_CACHE_KEY = "openrouter"
 
     def __init__(
         self,
@@ -374,15 +316,37 @@ class OpenRouterBackend(OpenAICompatibleBackend):
     def list_models(self) -> list[dict]:
         """List available models from OpenRouter API with caching.
 
-        Cache timeout: 1 hour (3600 seconds)
-        Refresh endpoint: GET /v1/models (automatic refresh when cache expires)
+        Cache layers (R07.20):
+          L1 — in-process class cache, 1 hour (MAINT-19 semantics kept);
+          L2 — persistent JSON cache (``~/.cache/agentkthx/model_catalog.json``,
+               30-minute TTL, ``AGENTKTHX_MODEL_CACHE_TTL`` to override)
+               shared across processes, so each CLI invocation no longer
+               re-fetches ``/models``.
+
+        The JSON cache stores the UNFILTERED determined catalog;
+        ``OPENROUTER_FREE_ONLY`` is applied at return time, so toggling
+        the env var no longer requires waiting out the cache TTL.
         """
         import time
 
-        # Check cache first
+        # L1: in-process class cache
         current_time = time.time()
         if self._model_cache is not None and current_time - self._cache_time < self._CACHE_TIMEOUT:
             return self._model_cache
+
+        # L2: persistent JSON cache — a fresh entry replaces the live
+        # fetch entirely (models listed by an earlier process are served
+        # without touching the API).
+        cached = model_cache.get_cached_models(self.MODEL_CACHE_KEY)
+        if cached is not None:
+            result = self._apply_free_only(cached)
+            type(self)._model_cache = result
+            type(self)._cache_time = current_time
+            return result
+
+        # First JSON-cache contact: seed the static catalog defaults
+        # (stale-stamped so the live fetch below still runs).
+        model_cache.ensure_seeded(self.MODEL_CACHE_KEY, self._catalog_fallback_list())
 
         try:
             # Use proper headers for API call
@@ -436,15 +400,23 @@ class OpenRouterBackend(OpenAICompatibleBackend):
             if not any(m["name"] == "openrouter/free" for m in available_models):
                 available_models.append(_free_router_entry())
 
+            # R07.20: persist the UNFILTERED determined catalog to the
+            # JSON cache (30-min TTL; persistent pins re-attached by the
+            # cache manager). The FREE_ONLY filter applies to what we
+            # return, never to what we store.
+            sorted_stored = sorted(
+                model_cache.store_models(self.MODEL_CACHE_KEY, available_models),
+                key=lambda x: x["name"],
+            )
+
             # Filter models if OPENROUTER_FREE_ONLY is enabled
             if OPENROUTER_FREE_ONLY:
                 # R07.09 fix: use the shared _is_free_model() helper so the
                 # named ``openrouter/free`` router is also accepted, not
                 # just ``:free``-suffix models.
-                free_models = [m for m in available_models if _is_free_model(m["name"])]
-                sorted_models = sorted(free_models, key=lambda x: x["name"])
+                sorted_models = [m for m in sorted_stored if _is_free_model(m["name"])]
             else:
-                sorted_models = sorted(available_models, key=lambda x: x["name"])
+                sorted_models = sorted_stored
 
             # MAINT-19 (R07.15): class-level cache via type(self) — see the
             # attribute comment above.
@@ -458,23 +430,18 @@ class OpenRouterBackend(OpenAICompatibleBackend):
             return sorted_models
 
         except Exception:
-            # Fallback to catalog if API fails
-            catalog_models = []
-            for name, model_info in OPENROUTER_MODELS.items():
-                # Create mock model data for fallback
-                mock_model_data = {
-                    "id": name,
-                    "context_length": model_info.get("context_length", 128000),
-                    "top_provider": {"max_completion_tokens": model_info.get("max_tokens", 4096)},
-                }
-                parsed_model = self._parse_openrouter_model(mock_model_data)
-                catalog_models.append(parsed_model)
+            # R07.20: offline → serve the stale JSON cache (any age) when
+            # present. Instance-level L1 write (MAINT-19: a failure must
+            # not poison the shared class cache).
+            stale = model_cache.get_stale_models(self.MODEL_CACHE_KEY)
+            if stale is not None:
+                result = self._apply_free_only(sorted(stale, key=lambda x: x["name"]))
+                self._model_cache = result
+                self._cache_time = current_time
+                return result
 
-            # R07.15: the static catalog contains no free models at all, so
-            # without the router a FREE_ONLY fallback list would be empty.
-            # Same guarantee as the live path above.
-            if not any(m["name"] == "openrouter/free" for m in catalog_models):
-                catalog_models.append(_free_router_entry())
+            # Fallback to catalog if API fails
+            catalog_models = self._catalog_fallback_list()
 
             if OPENROUTER_FREE_ONLY:
                 # R07.09 fix: replaced the prior substring hack ("free" in
@@ -492,6 +459,36 @@ class OpenRouterBackend(OpenAICompatibleBackend):
 
             self._cache_time = current_time
             return self._model_cache
+
+    def _catalog_fallback_list(self) -> list[dict]:
+        """Shape the static (seed) catalog into ``list_models()`` entries.
+
+        The API-failure fallback: parsed through ``_parse_openrouter_model``
+        with mock model data. R07.15 guarantee kept: the named Free Models
+        Router is injected (the static catalog contains no free models at
+        all, so a FREE_ONLY fallback list would otherwise be empty). This
+        same list seeds the persistent JSON cache (R07.20).
+        """
+        catalog_models = []
+        for name, model_info in OPENROUTER_MODELS.items():
+            # Create mock model data for fallback
+            mock_model_data = {
+                "id": name,
+                "context_length": model_info.get("context_length", 128000),
+                "top_provider": {"max_completion_tokens": model_info.get("max_tokens", 4096)},
+            }
+            parsed_model = self._parse_openrouter_model(mock_model_data)
+            catalog_models.append(parsed_model)
+
+        if not any(m["name"] == "openrouter/free" for m in catalog_models):
+            catalog_models.append(_free_router_entry())
+        return catalog_models
+
+    def _apply_free_only(self, models: list[dict]) -> list[dict]:
+        """Apply the OPENROUTER_FREE_ONLY filter (shared _is_free_model)."""
+        if OPENROUTER_FREE_ONLY:
+            return [m for m in models if _is_free_model(m["name"])]
+        return models
 
     def is_running(self) -> bool:
         """OpenRouter is a cloud API, so it's always 'running'."""

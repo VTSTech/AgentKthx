@@ -82,6 +82,7 @@ import urllib.error
 import urllib.request
 from typing import Generator
 
+from agentkthx import model_cache
 from agentkthx.backends.base import BackendConfig
 from agentkthx.backends.cloud_base import CloudBackend
 from agentkthx.config import (
@@ -92,6 +93,7 @@ from agentkthx.config import (
 )
 from agentkthx.core.models import Tool
 from agentkthx.core.types import ApiMode, BackendType
+from agentkthx.model_cache import load_seed_catalog
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Mistral model catalog
@@ -109,160 +111,13 @@ from agentkthx.core.types import ApiMode, BackendType
 # 3.5 / Small 4 is 256K context window — but ``default_max_tokens`` is the
 # conservative 8K output cap (matches the AgentKthx shared pattern). Override
 # at runtime via ``max_tokens=``.
-MISTRAL_MODELS: dict[str, dict] = {
-    # ── Mistral Medium — frontier multimodal, agentic + coding ──────────
-    "mistral-medium-latest": {
-        "context_length": 262_144,  # 256K
-        "default_temperature": 0.7,
-        "default_max_tokens": 8192,
-        "pricing": {"input": 2.00, "output": 6.00},
-        "family": "mistral-medium",
-        "supports_vision": True,
-        "supports_reasoning": True,
-        "supports_function_calling": True,
-        "supports_response_format_json_schema": True,
-        "supports_prefix_prefill": True,
-        "license": "Modified MIT",
-    },
-    "mistral-medium-3-5": {
-        "context_length": 262_144,
-        "default_temperature": 0.7,
-        "default_max_tokens": 8192,
-        "pricing": {"input": 2.00, "output": 6.00},
-        "family": "mistral-medium",
-    },
-    "mistral-medium-3": {
-        "context_length": 262_144,
-        "default_temperature": 0.7,
-        "default_max_tokens": 8192,
-        "pricing": {"input": 2.00, "output": 6.00},
-        "family": "mistral-medium",
-    },
-    # ── Mistral Small — efficient hybrid (instruct + reasoning + code) ──
-    "mistral-small-latest": {
-        "context_length": 262_144,  # 256K
-        "default_temperature": 0.7,
-        "default_max_tokens": 8192,
-        "pricing": {"input": 0.20, "output": 0.50},
-        "family": "mistral-small",
-        "supports_vision": True,
-        "supports_reasoning": True,
-        "supports_function_calling": True,
-        "supports_response_format_json_schema": True,
-        "license": "Apache 2.0",
-    },
-    "mistral-small-4": {
-        "context_length": 262_144,
-        "default_temperature": 0.7,
-        "default_max_tokens": 8192,
-        "pricing": {"input": 0.20, "output": 0.50},
-        "family": "mistral-small",
-    },
-    # ── Mistral Large — open-weight general-purpose multimodal ──────────
-    "mistral-large-latest": {
-        "context_length": 262_144,
-        "default_temperature": 0.7,
-        "default_max_tokens": 8192,
-        "pricing": {"input": 0.50, "output": 1.50},
-        "family": "mistral-large",
-        "supports_vision": True,
-        "supports_reasoning": True,
-        "supports_function_calling": True,
-        "supports_n_completions": False,  # mistral-large-2512 rejects n > 1
-        "license": "Apache 2.0",
-    },
-    "mistral-large-3": {
-        "context_length": 262_144,
-        "default_temperature": 0.7,
-        "default_max_tokens": 8192,
-        "pricing": {"input": 0.50, "output": 1.50},
-        "family": "mistral-large",
-    },
-    # ── Ministral — small on-device-class tier (text + vision) ──────────
-    "ministral-14b-latest": {
-        "context_length": 262_144,
-        "default_temperature": 0.7,
-        "default_max_tokens": 8192,
-        "pricing": {"input": 0.20, "output": 0.50},
-        "family": "ministral",
-        "supports_vision": True,
-        "supports_function_calling": True,
-        "license": "Apache 2.0",
-    },
-    "ministral-8b-latest": {
-        "context_length": 262_144,
-        "default_temperature": 0.7,
-        "default_max_tokens": 8192,
-        "pricing": {"input": 0.10, "output": 0.30},
-        "family": "ministral",
-        "supports_vision": True,
-        "supports_function_calling": True,
-        "license": "Apache 2.0",
-    },
-    "ministral-3b-latest": {
-        "context_length": 262_144,
-        "default_temperature": 0.7,
-        "default_max_tokens": 8192,
-        "pricing": {"input": 0.04, "output": 0.04},
-        "family": "ministral",
-        "supports_vision": True,
-        "supports_function_calling": True,
-        "license": "Apache 2.0",
-    },
-    # ── Devstral — SWE-agent coding specialist ───────────────────────────
-    "devstral-latest": {
-        "context_length": 262_144,
-        "default_temperature": 0.7,
-        "default_max_tokens": 8192,
-        "pricing": {"input": 0.20, "output": 0.50},
-        "family": "devstral",
-        "supports_function_calling": True,
-        "license": "Apache 2.0",
-        "note": "Tool-calling-first tuning; best AgentKthx backend model per token",
-    },
-    # ── Magistral — dedicated reasoning ladder (128K context) ───────────
-    "magistral-medium-latest": {
-        "context_length": 131_072,  # 128K — smaller than sibling Medium
-        "default_temperature": 0.7,
-        "default_max_tokens": 8192,
-        "pricing": {"input": 2.00, "output": 6.00},
-        "family": "magistral",
-        "supports_reasoning": True,  # prompt_mode="reasoning", ThinkChunk output
-        "supports_function_calling": True,
-    },
-    "magistral-small-latest": {
-        "context_length": 131_072,
-        "default_temperature": 0.7,
-        "default_max_tokens": 8192,
-        "pricing": {"input": 0.50, "output": 1.50},
-        "family": "magistral",
-        "supports_reasoning": True,
-        "supports_function_calling": True,
-    },
-    # ── Codestral — FIM + chat code completion (128K context) ────────────
-    "codestral-latest": {
-        "context_length": 131_072,
-        "default_temperature": 0.7,
-        "default_max_tokens": 8192,
-        "pricing": {"input": 0.20, "output": 0.60},
-        "family": "codestral",
-        "supports_function_calling": True,
-        "supports_fim": True,  # dedicated /fim/completions endpoint
-    },
-    # ── Labs — free of charge, silent updates, NOT production-grade ─────
-    # Pinned in the catalog so MISTRAL_FREE_ONLY mode has something to
-    # fall back to without requiring a live API discovery call.
-    "labs-mistral-small-creative": {
-        "context_length": 262_144,
-        "default_temperature": 0.9,  # creative bias
-        "default_max_tokens": 8192,
-        "pricing": {"input": 0.0, "output": 0.0},  # Labs = free
-        "family": "labs",
-        "supports_function_calling": True,
-        "note": "Labs model — silent updates, no data opt-out, not for production",
-    },
-}
-
+MISTRAL_MODELS: dict[str, dict] = load_seed_catalog("mistral")
+"""Static catalog for the mistral backend — R07.20 moved the literal
+dict out of Python into ``agentkthx/data/model_seed.json``, where it
+serves as the initial defaults of the persistent model-catalog cache
+(and the offline fallback list). Update the seed JSON (or refresh a
+backend's cache from the live API) instead of editing code here.
+"""
 # Default model when none is specified. Resolved from env var → catalog.
 MISTRAL_DEFAULT_MODEL_FALLBACK = "mistral-small-latest"
 
@@ -325,6 +180,14 @@ class MistralBackend(CloudBackend):
     _default_base_url = MISTRAL_BASE_URL
     _default_model = MISTRAL_DEFAULT_MODEL or MISTRAL_DEFAULT_MODEL_FALLBACK
     _provider_label = "Mistral"
+
+    # R07.20: persistent JSON model-catalog cache key. Mistral previously
+    # had NO model-list cache — every list_models() call hit /v1/models.
+    MODEL_CACHE_KEY = "mistral"
+
+    # R07.20: in-process mirror of the last resolved catalog (fresh cache
+    # hit, live fetch, or offline fallback).
+    _model_cache: list[dict] | None = None
 
     # Mistral's API keys are 32-char hex strings by default. CloudBackend
     # enforces _MIN_API_KEY_LEN=20 (R07.07 ROB-21), which is satisfied.
@@ -457,15 +320,8 @@ class MistralBackend(CloudBackend):
     # list_models — query GET /v1/models, merge with static catalog
     # ───────────────────────────────────────────────────────────────────
 
-    def list_models(self) -> list[dict]:
-        """List available Mistral models.
-
-        Queries ``GET /v1/models`` dynamically and merges with the
-        static ``MISTRAL_MODELS`` catalog. The API returns richer model
-        cards than OpenAI's (``capabilities``, ``max_context_length``,
-        ``default_model_temperature``, ``aliases``, ``deprecation``) —
-        we surface the capabilities and context length in the AgentKthx
-        shape.
+    def _fetch_live_models(self) -> list[dict]:
+        """Query ``GET /v1/models`` and build the merged live catalog.
 
         Enriches API results with ``context_length`` from the static
         catalog (the API may omit it for some models). Sets
@@ -473,37 +329,28 @@ class MistralBackend(CloudBackend):
         (Mistral's cards don't expose pricing — Labs models are the
         only genuinely-free tier).
 
-        Falls back to the static catalog when the API is unreachable
-        (offline gateways, self-hosted ``mistral-inference``).
+        R07.20: raises on any discovery failure — the offline handling
+        (persistent JSON cache → seed defaults) lives in
+        ``list_models()``.
         """
+        url = self._get_models_url()
+        headers = self._get_auth_headers()
+        req = urllib.request.Request(url, headers=headers, method="GET")
+
+        with urllib.request.urlopen(req, timeout=15) as response:
+            result = json.loads(response.read().decode("utf-8"))
+
         api_model_keys: set[str] = set()
+        api_models = result.get("data", [])
+        for m in api_models:
+            name = m.get("id", "")
+            if not name:
+                continue
+            model_key = name.split("/")[-1] if "/" in name else name
+            api_model_keys.add(model_key)
 
-        try:
-            url = self._get_models_url()
-            headers = self._get_auth_headers()
-            req = urllib.request.Request(url, headers=headers, method="GET")
-
-            with urllib.request.urlopen(req, timeout=15) as response:
-                result = json.loads(response.read().decode("utf-8"))
-
-            api_models = result.get("data", [])
-            if api_models:
-                for m in api_models:
-                    name = m.get("id", "")
-                    if not name:
-                        continue
-                    model_key = name.split("/")[-1] if "/" in name else name
-                    api_model_keys.add(model_key)
-
-                if os.environ.get("AGENTKTHX_DEBUG"):
-                    print(f"  [Mistral] API returned {len(api_model_keys)} models")
-
-        except (urllib.error.HTTPError, urllib.error.URLError) as e:
-            if os.environ.get("AGENTKTHX_DEBUG"):
-                print(f"  [Mistral] Model discovery failed ({e}), using static catalog")
-        except Exception as e:
-            if os.environ.get("AGENTKTHX_DEBUG"):
-                print(f"  [Mistral] Model discovery error ({e}), using static catalog")
+        if os.environ.get("AGENTKTHX_DEBUG"):
+            print(f"  [Mistral] API returned {len(api_model_keys)} models")
 
         # Build unified list: API-discovered models first (confirmed
         # available), then catalog-only models (flash variants, Labs).
@@ -554,9 +401,9 @@ class MistralBackend(CloudBackend):
                 }
             )
 
-        if MISTRAL_FREE_ONLY:
-            models = [m for m in models if m["details"].get("free_tier")]
-
+        # R07.20: the FREE_ONLY filter moved to _apply_free_only() — the
+        # cache stores the FULL determined catalog so a mid-session env
+        # change re-filters without re-fetching.
         if os.environ.get("AGENTKTHX_DEBUG"):
             catalog_only = len(models) - len(api_model_keys)
             print(
@@ -565,6 +412,79 @@ class MistralBackend(CloudBackend):
             )
 
         return models
+
+    def _catalog_fallback_list(self) -> list[dict]:
+        """Shape the static (seed) catalog into ``list_models()`` entries.
+
+        The offline fallback when the discovery endpoint is unreachable
+        (offline gateways, self-hosted ``mistral-inference``): this same
+        list seeds the persistent model-catalog cache (R07.20), so the
+        fallback and the cache's initial defaults never diverge.
+        """
+        models: list[dict] = []
+        for name in sorted(MISTRAL_MODELS.keys()):
+            meta = MISTRAL_MODELS[name]
+            models.append(
+                {
+                    "name": name,
+                    "size": 0,
+                    "details": {
+                        "family": meta.get("family", self._catalog_family_name()),
+                        "backend": self._catalog_backend_name(),
+                        "context_length": meta.get(
+                            "context_length", self._DEFAULT_CONTEXT_FALLBACK
+                        ),
+                        "free_tier": _is_free_model(name),
+                        "is_chat_model": True,
+                        "pricing": meta.get("pricing", {}),
+                    },
+                }
+            )
+        return models
+
+    def _apply_free_only(self, models: list[dict]) -> list[dict]:
+        """Apply the MISTRAL_FREE_ONLY filter (Labs models only)."""
+        if MISTRAL_FREE_ONLY:
+            return [m for m in models if m["details"].get("free_tier")]
+        return models
+
+    def list_models(self) -> list[dict]:
+        """List available Mistral models (R07.20: via the persistent cache).
+
+        Flow: fresh persistent-cache entry → return it (no API call).
+        Otherwise ensure the cache carries the seed defaults, query
+        ``GET /v1/models`` (merged with the static catalog via
+        ``_fetch_live_models()``), store the merged list in the JSON
+        cache (30-minute TTL, ``AGENTKTHX_MODEL_CACHE_TTL`` to override),
+        and return it. When discovery fails, the stale cache (seed
+        defaults at minimum) serves as the offline fallback.
+        """
+        # R07.20: fresh persistent cache short-circuits the API entirely.
+        cached = model_cache.get_cached_models(self.MODEL_CACHE_KEY)
+        if cached is not None:
+            self._model_cache = cached
+            return self._apply_free_only(cached)
+
+        # First contact for this backend: cache the static catalog as the
+        # initial defaults (stale-stamped, so the live fetch below still
+        # runs and replaces it on success).
+        model_cache.ensure_seeded(self.MODEL_CACHE_KEY, self._catalog_fallback_list())
+
+        try:
+            live = self._fetch_live_models()
+        except Exception as e:
+            if os.environ.get("AGENTKTHX_DEBUG"):
+                print(f"  [Mistral] Model discovery failed ({e}), using cached/seed catalog")
+            live = None
+
+        if live is None:
+            stale = model_cache.get_stale_models(self.MODEL_CACHE_KEY)
+            result = stale if stale is not None else self._catalog_fallback_list()
+        else:
+            result = model_cache.store_models(self.MODEL_CACHE_KEY, live)
+
+        self._model_cache = result
+        return self._apply_free_only(result)
 
     def get_model_info(self, model: str) -> dict | None:
         """Get model information from the Mistral catalog.

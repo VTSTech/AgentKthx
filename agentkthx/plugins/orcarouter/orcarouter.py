@@ -58,6 +58,7 @@ import sys
 import time
 from typing import Any, Generator
 
+from agentkthx import model_cache
 from agentkthx.backends.cloud_base import CloudBackend
 from agentkthx.config import (
     ORCAROUTER_BASE_URL,
@@ -465,6 +466,9 @@ class OrcaRouterBackend(CloudBackend):
     # agent.run() — the list rarely changes within a session.
     _MODEL_CACHE_TTL_SECONDS = 3600  # 1 hour
 
+    # R07.20: persistent JSON model-catalog cache key (L2 -- see list_models).
+    MODEL_CACHE_KEY = "orcarouter"
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         # Live model cache: list[dict] + timestamp. Populated by list_models().
@@ -480,23 +484,37 @@ class OrcaRouterBackend(CloudBackend):
         shape. Each model entry has ``id``, ``owned_by``, and
         ``supported_endpoint_types`` (["openai"], ["anthropic", "openai"], etc.).
 
-        We cache the result for 1 hour to avoid hitting the endpoint on
-        every agent run. When ``ORCAROUTER_FREE_ONLY=true``, the list is
-        filtered to only the 4 free-tier models + the orcarouter/free router.
+        Cache layers (R07.20): L1 in-process cache (1 hour) + L2
+        persistent JSON cache (30-minute TTL,
+        ``AGENTKTHX_MODEL_CACHE_TTL`` to override) shared across
+        processes. When ``ORCAROUTER_FREE_ONLY=true``, the RETURN value
+        is filtered to the free whitelist (the JSON cache always stores
+        the full determined catalog).
 
         Returns:
             List of ``{"name": ..., "size": 0, "details": {...}}`` dicts
             in the shape expected by the CLI's ``--backend models`` command.
         """
-        # Return cache if fresh
+        # Return L1 cache if fresh
         now = time.time()
         if (
             self._model_cache is not None
             and (now - self._model_cache_ts) < self._MODEL_CACHE_TTL_SECONDS
         ):
-            if ORCAROUTER_FREE_ONLY:
-                return [m for m in self._model_cache if _is_free_model(m["name"])]
-            return list(self._model_cache)
+            return self._apply_free_only(list(self._model_cache))
+
+        # R07.20 L2: persistent JSON cache — a fresh entry replaces the
+        # live fetch entirely.
+        cached = model_cache.get_cached_models(self.MODEL_CACHE_KEY)
+        if cached is not None:
+            self._model_cache = cached
+            self._model_cache_ts = now
+            return self._apply_free_only(list(cached))
+
+        # First JSON-cache contact: seed the static defaults (named
+        # routers + free whitelist; stale-stamped so the live fetch
+        # below still runs).
+        model_cache.ensure_seeded(self.MODEL_CACHE_KEY, self._catalog_fallback_list())
 
         # Fetch fresh
         import urllib.error
@@ -556,7 +574,11 @@ class OrcaRouterBackend(CloudBackend):
                         }
                     )
 
-            # Update cache
+            # R07.20: persist the determined catalog (30-min TTL;
+            # persistent pins re-attached by the cache manager).
+            models = model_cache.store_models(self.MODEL_CACHE_KEY, models)
+
+            # Update L1 cache
             self._model_cache = models
             self._model_cache_ts = now
 
@@ -566,27 +588,44 @@ class OrcaRouterBackend(CloudBackend):
                     f"(+ {len(_ORCA_NAMED_ROUTERS)} named routers)"
                 )
 
-        except (urllib.error.HTTPError, urllib.error.URLError) as e:
+        except (urllib.error.HTTPError, urllib.error.URLError, OSError) as e:
             if os.environ.get("AGENTKTHX_DEBUG"):
                 print(f"  [OrcaRouter] Model discovery failed ({e}), using fallback list")
-            # Fallback: return just the named routers + free whitelist
-            for name in sorted(_ORCA_NAMED_ROUTERS | ORCAROUTER_FREE_MODEL_WHITELIST):
-                models.append(
-                    {
-                        "name": name,
-                        "size": 0,
-                        "details": {
-                            "family": name.split("/")[0] if "/" in name else "orcarouter",
-                            "backend": "orcarouter",
-                            "context_length": 128000,
-                        },
-                    }
-                )
+            # R07.20: offline -> serve the stale JSON cache (any age)
+            # before falling back to the static defaults.
+            stale = model_cache.get_stale_models(self.MODEL_CACHE_KEY)
+            if stale is not None:
+                models = stale
+            else:
+                # Fallback: just the named routers + free whitelist
+                models = self._catalog_fallback_list()
 
-        # Apply FREE_ONLY filter
+        return self._apply_free_only(models)
+
+    def _catalog_fallback_list(self) -> list[dict]:
+        """Static fallback list: named routers + free whitelist.
+
+        The API-failure fallback and the JSON-cache seed source (R07.20).
+        """
+        models: list[dict] = []
+        for name in sorted(_ORCA_NAMED_ROUTERS | ORCAROUTER_FREE_MODEL_WHITELIST):
+            models.append(
+                {
+                    "name": name,
+                    "size": 0,
+                    "details": {
+                        "family": name.split("/")[0] if "/" in name else "orcarouter",
+                        "backend": "orcarouter",
+                        "context_length": 128000,
+                    },
+                }
+            )
+        return models
+
+    def _apply_free_only(self, models: list[dict]) -> list[dict]:
+        """Apply the ORCAROUTER_FREE_ONLY whitelist filter."""
         if ORCAROUTER_FREE_ONLY:
-            models = [m for m in models if _is_free_model(m["name"])]
-
+            return [m for m in models if _is_free_model(m["name"])]
         return models
 
     def get_model_info(self, model: str) -> dict | None:

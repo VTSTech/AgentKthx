@@ -19,7 +19,16 @@ from __future__ import annotations
 import argparse
 
 from ...backends import OllamaBackend, get_backend
-from ...colors import bright_cyan, bright_green, cyan, dim, green, pad_colored, yellow
+from ...colors import (
+    bright_cyan,
+    bright_green,
+    bright_yellow,
+    cyan,
+    dim,
+    green,
+    pad_colored,
+    yellow,
+)
 from ...config import get_config
 from ...core.types import ApiMode, ToolSupportLevel
 from ..utils import _thinking_status, _tool_status
@@ -40,6 +49,84 @@ def cmd_models(args: argparse.Namespace) -> int:
 
     config = get_config()
     backend_name = args.backend or config.backend
+
+    # ── R07.20: model-catalog cache management --------------------------
+    # These actions run BEFORE backend construction (persist/unpersist/
+    # clear/status are pure JSON-cache operations — no API key required,
+    # no discovery call, works offline).
+    from ... import model_cache
+
+    persist_model = getattr(args, "persist", None)
+    unpersist_model = getattr(args, "unpersist", None)
+    clear_cache = getattr(args, "clear_cache", False)
+    cache_status = getattr(args, "cache_status", False)
+
+    if persist_model:
+        known = model_cache.get_stale_models(backend_name) is not None
+        ok = model_cache.set_persistent(backend_name, persist_model, True)
+        if ok:
+            print(
+                f"{bright_yellow('📌')} {cyan(persist_model)} marked persistent on "
+                f"{bright_green(backend_name)} — it will never expire or be "
+                f"cleared from the model cache."
+            )
+            if not known:
+                print(
+                    dim(
+                        "   (model was not in the cache yet — pinned as a stub entry; "
+                        "a successful refresh will attach the full catalog entry)"
+                    )
+                )
+            print(dim(f"   Cache: {model_cache.get_cache_path()}"))
+        else:
+            print(f"❌ Could not mark {persist_model} persistent.")
+        return 0
+
+    if unpersist_model:
+        existed = model_cache.is_persistent(backend_name, unpersist_model)
+        model_cache.set_persistent(backend_name, unpersist_model, False)
+        if existed:
+            print(
+                f"{cyan(unpersist_model)} unpersisted on {backend_name} (expires normally again)."
+            )
+        else:
+            print(f"{yellow(unpersist_model)} was not persistent on {backend_name}.")
+        return 0
+
+    if clear_cache:
+        removed = model_cache.clear_backend(backend_name)
+        kept = len(model_cache.persistent_names(backend_name))
+        print(f"Cleared {removed} cached model(s) for {bright_green(backend_name)}.")
+        if kept:
+            print(
+                f"  {bright_yellow('📌')} {kept} persistent model(s) kept "
+                f"(persistent models are never cleared)."
+            )
+        print(dim(f"   Cache: {model_cache.get_cache_path()}"))
+        return 0
+
+    if cache_status:
+        print(f"{bright_cyan('⚖ AgentKthx')} — Model Catalog Cache")
+        print(f"  {dim('Path:')} {model_cache.get_cache_path()}")
+        ttl = model_cache.get_ttl()
+        print(f"  {dim('TTL:')} {ttl}s ({ttl // 60}m)" + dim("  [AGENTKTHX_MODEL_CACHE_TTL]"))
+        cache = model_cache.load_cache()
+        backends = cache.get("backends", {})
+        if not backends:
+            print(dim("  (cache empty — each backend seeds its catalog on first use)"))
+        for name in sorted(backends):
+            info = model_cache.cache_info(name)
+            if info is None:
+                continue
+            age = info["age_seconds"]
+            age_str = "never refreshed" if age is None else f"{int(age // 60)}m {int(age % 60)}s"
+            state = bright_green("fresh") if info["fresh"] else yellow("stale")
+            print(
+                f"  {bright_green(name)}: {info['model_count']} models "
+                f"({info['persistent_count']} persistent), age {age_str}, {state}"
+                + (dim(f" [source: {info['source']}]") if info["source"] else "")
+            )
+        return 0
 
     # Use appropriate API mode for the backend
     # R06.57 (MAINT-05): replaced hardcoded ("openrouter", "gemini") allowlist

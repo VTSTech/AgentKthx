@@ -143,6 +143,29 @@ def create_parser() -> argparse.ArgumentParser:
     models_parser.add_argument(
         "--acp-url", default=None, help="ACP server URL (default: from config)"
     )
+    # R07.20: persistent JSON model-catalog cache management (no API calls)
+    models_parser.add_argument(
+        "--persist",
+        metavar="MODEL",
+        default=None,
+        help="Mark a model persistent in the JSON model cache (never expires, never cleared)",
+    )
+    models_parser.add_argument(
+        "--unpersist",
+        metavar="MODEL",
+        default=None,
+        help="Remove the persistent flag from a model in the JSON model cache",
+    )
+    models_parser.add_argument(
+        "--clear-cache",
+        action="store_true",
+        help="Drop the backend's cached model catalog (persistent models survive)",
+    )
+    models_parser.add_argument(
+        "--cache-status",
+        action="store_true",
+        help="Show model-cache status (path, TTL, per-backend freshness) and exit",
+    )
 
     # Modelfile command
     modelfile_parser = subparsers.add_parser("modelfile", help="Show model's Modelfile info")

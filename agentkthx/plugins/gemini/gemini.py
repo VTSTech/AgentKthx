@@ -65,6 +65,7 @@ import urllib.error
 import urllib.request
 from typing import Generator
 
+from agentkthx import model_cache
 from agentkthx.backends.base import BackendConfig
 from agentkthx.backends.openai_compat import OpenAICompatibleBackend
 from agentkthx.config import (
@@ -75,6 +76,7 @@ from agentkthx.config import (
 )
 from agentkthx.core.models import Tool
 from agentkthx.core.types import ApiMode, BackendType, ToolSupportLevel
+from agentkthx.model_cache import load_seed_catalog
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Free Tier rate-limit data (ground truth from Google AI Studio)
@@ -271,124 +273,13 @@ def _get_free_tier_limits(model_id: str) -> dict[str, int] | None:
 # Free-tier models are tagged with `free_tier=True` — GEMINI_FREE_ONLY filters
 # the cached model list to just these. The free_tier flags below MUST match
 # the FREE_TIER_LIMITS table above (which was transcribed from AI Studio).
-GEMINI_MODELS: dict[str, dict] = {
-    # === Gemini 3.x family — current flagship generation ===
-    "gemini-3.8-flash": {
-        "context_length": 1_048_576,
-        "max_completion_tokens": 65_536,
-        "free_tier": True,
-        "supports_thinking": True,
-        "thinking_levels": ["minimal", "low", "medium", "high"],
-        "thinking_can_disable": False,
-        "supports_thought_signatures": True,
-        "min_cache_tokens": 4096,
-        "family": "gemini-3",
-        "description": "Gemini 3.8 Flash — current flagship flash model",
-    },
-    "gemini-3.7-flash": {
-        "context_length": 1_048_576,
-        "max_completion_tokens": 65_536,
-        "free_tier": True,
-        "supports_thinking": True,
-        "thinking_levels": ["minimal", "low", "medium", "high"],
-        "thinking_can_disable": False,
-        "min_cache_tokens": 4096,
-        "family": "gemini-3",
-        "description": "Gemini 3.7 Flash",
-    },
-    "gemini-3.6-flash": {
-        "context_length": 1_048_576,
-        "max_completion_tokens": 65_536,
-        "free_tier": True,
-        "supports_thinking": True,
-        "thinking_levels": ["minimal", "low", "medium", "high"],
-        "thinking_can_disable": False,
-        "min_cache_tokens": 4096,
-        "family": "gemini-3",
-        "description": "Gemini 3.6 Flash",
-    },
-    "gemini-3.5-flash": {
-        "context_length": 1_048_576,
-        "max_completion_tokens": 65_536,
-        "free_tier": True,
-        "supports_thinking": True,
-        "thinking_levels": ["minimal", "low", "medium", "high"],
-        "thinking_can_disable": False,
-        "min_cache_tokens": 4096,
-        "family": "gemini-3",
-        "description": "Gemini 3.5 Flash",
-    },
-    "gemini-3.5-flash-lite": {
-        "context_length": 1_048_576,
-        "max_completion_tokens": 65_536,
-        "free_tier": True,
-        "supports_thinking": True,
-        "thinking_levels": ["minimal", "low", "medium", "high"],
-        "thinking_can_disable": False,
-        "min_cache_tokens": 4096,
-        "family": "gemini-3",
-        "description": "Gemini 3.5 Flash-Lite — lowest cost in 3.5 family",
-    },
-    "gemini-3.1-flash-lite": {
-        "context_length": 1_048_576,
-        "max_completion_tokens": 65_536,
-        "free_tier": True,
-        "supports_thinking": True,
-        "thinking_levels": ["minimal", "low", "medium", "high"],
-        "thinking_can_disable": False,
-        "min_cache_tokens": 4096,
-        "family": "gemini-3",
-        "description": "Gemini 3.1 Flash-Lite",
-    },
-    "gemini-3.1-pro-preview": {
-        "context_length": 2_097_152,  # 2M for Pro
-        "max_completion_tokens": 65_536,
-        "free_tier": False,  # Pro is not on free tier
-        "supports_thinking": True,
-        "thinking_levels": ["minimal", "low", "medium", "high"],
-        "thinking_can_disable": False,
-        "min_cache_tokens": 4096,
-        "family": "gemini-3",
-        "description": "Gemini 3.1 Pro Preview — 2M context, paid tier only",
-    },
-    # === Gemini 2.5 family — legacy but still served ===
-    # Available only to projects that used 2.5 before. For new projects,
-    # use gemini-3.5-flash-lite or gemini-3.8-flash.
-    "gemini-2.5-pro": {
-        "context_length": 2_097_152,
-        "max_completion_tokens": 65_536,
-        "free_tier": False,
-        "supports_thinking": True,
-        "thinking_budget_range": (0, 24_576),
-        "thinking_can_disable": True,
-        "supports_thought_signatures": False,
-        "min_cache_tokens": 2048,
-        "family": "gemini-2.5",
-        "description": "Gemini 2.5 Pro — legacy flagship, 2M context",
-    },
-    "gemini-2.5-flash": {
-        "context_length": 1_048_576,
-        "max_completion_tokens": 65_536,
-        "free_tier": True,
-        "supports_thinking": True,
-        "thinking_budget_range": (0, 24_576),
-        "thinking_can_disable": True,
-        "min_cache_tokens": 2048,
-        "family": "gemini-2.5",
-        "description": "Gemini 2.5 Flash — legacy",
-    },
-    "gemini-2.5-flash-lite": {
-        "context_length": 1_048_576,
-        "max_completion_tokens": 65_536,
-        "free_tier": True,
-        "supports_thinking": True,
-        "thinking_budget_range": (0, 24_576),
-        "thinking_can_disable": True,
-        "min_cache_tokens": 2048,
-        "family": "gemini-2.5",
-        "description": "Gemini 2.5 Flash-Lite — legacy",
-    },
-}
+GEMINI_MODELS: dict[str, dict] = load_seed_catalog("gemini")
+"""Static catalog for the gemini backend — R07.20 moved the literal
+dict out of Python into ``agentkthx/data/model_seed.json``, where it
+serves as the initial defaults of the persistent model-catalog cache
+(and the offline fallback list). Update the seed JSON (or refresh a
+backend's cache from the live API) instead of editing code here.
+"""
 
 
 def detect_gemini_family(model_name: str) -> dict:
@@ -774,6 +665,9 @@ class GeminiBackend(OpenAICompatibleBackend):
     _cache_time: float = 0.0
     _CACHE_TIMEOUT: int = 3600  # 1 hour
 
+    # R07.20: persistent JSON model-catalog cache key (L2 -- see list_models).
+    MODEL_CACHE_KEY = "gemini"
+
     # R06.54-style retry budget for 429/5xx. Free tier at 5 RPM returns
     # 429 RESOURCE_EXHAUSTED constantly — needs more patience than 3 quick
     # retries. Override with GEMINI_MAX_429_RETRIES.
@@ -949,12 +843,29 @@ class GeminiBackend(OpenAICompatibleBackend):
     def list_models(self) -> list[dict]:
         """List available Gemini models from /openai/models with caching.
 
-        Cache timeout: 1 hour. Refresh is automatic when the cache expires.
-        GEMINI_FREE_ONLY filters the result to free-tier models only.
+        Cache layers (R07.20): L1 in-process cache (1 hour) + L2
+        persistent JSON cache (30-minute TTL,
+        ``AGENTKTHX_MODEL_CACHE_TTL`` to override) shared across
+        processes — each CLI invocation no longer re-fetches /models.
+        GEMINI_FREE_ONLY filters the RESULT to free-tier models only
+        (the JSON cache always stores the full determined catalog).
         """
         current_time = time.time()
         if self._model_cache is not None and current_time - self._cache_time < self._CACHE_TIMEOUT:
             return self._model_cache
+
+        # R07.20 L2: persistent JSON cache — a fresh entry replaces the
+        # live fetch entirely.
+        cached = model_cache.get_cached_models(self.MODEL_CACHE_KEY)
+        if cached is not None:
+            result = self._apply_free_only(cached)
+            self._model_cache = result
+            self._cache_time = current_time
+            return result
+
+        # First JSON-cache contact: seed the static catalog defaults
+        # (stale-stamped so the live fetch below still runs).
+        model_cache.ensure_seeded(self.MODEL_CACHE_KEY, self._catalog_fallback_list())
 
         try:
             headers = {"Content-Type": "application/json"}
@@ -997,13 +908,13 @@ class GeminiBackend(OpenAICompatibleBackend):
                         }
                     )
 
-            if GEMINI_FREE_ONLY:
-                self._model_cache = sorted(
-                    [m for m in available_models if m["details"].get("free_tier")],
-                    key=lambda x: x["name"],
-                )
-            else:
-                self._model_cache = sorted(available_models, key=lambda x: x["name"])
+            # R07.20: persist the UNFILTERED determined catalog (30-min
+            # TTL; persistent pins re-attached by the cache manager).
+            sorted_stored = sorted(
+                model_cache.store_models(self.MODEL_CACHE_KEY, available_models),
+                key=lambda x: x["name"],
+            )
+            self._model_cache = self._apply_free_only(sorted_stored)
 
             if os.environ.get("AGENTKTHX_DEBUG"):
                 print(f"  [Gemini Debug] Cached {len(self._model_cache)} models")
@@ -1017,31 +928,50 @@ class GeminiBackend(OpenAICompatibleBackend):
             if os.environ.get("AGENTKTHX_DEBUG"):
                 print(f"  [Gemini Debug] /models call failed ({e}); using catalog fallback")
 
-            # Catalog fallback — static list above.
-            fallback = []
-            for name, info in GEMINI_MODELS.items():
-                fallback.append(
-                    {
-                        "name": name,
-                        "size": 0,
-                        "details": {
-                            "family": info.get("family", "gemini"),
-                            "backend": "gemini",
-                            "context_length": info.get("context_length", 1_048_576),
-                            "max_completion_tokens": info.get("max_completion_tokens", 65_536),
-                            "free_tier": info.get("free_tier", False),
-                            "supports_thinking": info.get("supports_thinking", True),
-                        },
-                    }
-                )
+            # R07.20: offline -> serve the stale JSON cache (any age)
+            # before falling back to the static catalog.
+            stale = model_cache.get_stale_models(self.MODEL_CACHE_KEY)
+            if stale is not None:
+                fallback = self._apply_free_only(sorted(stale, key=lambda x: x["name"]))
+                self._model_cache = fallback
+                self._cache_time = current_time
+                return fallback
 
-            if GEMINI_FREE_ONLY:
-                fallback = [m for m in fallback if m["details"].get("free_tier")]
-            fallback.sort(key=lambda x: x["name"])
-
+            # Catalog fallback — static (seed) list.
+            fallback = self._catalog_fallback_list()
             self._model_cache = fallback
             self._cache_time = current_time
             return self._model_cache
+
+    def _catalog_fallback_list(self) -> list[dict]:
+        """Shape the static (seed) catalog into ``list_models()`` entries.
+
+        The API-failure fallback and the JSON-cache seed source (R07.20).
+        """
+        fallback: list[dict] = []
+        for name, info in GEMINI_MODELS.items():
+            fallback.append(
+                {
+                    "name": name,
+                    "size": 0,
+                    "details": {
+                        "family": info.get("family", "gemini"),
+                        "backend": "gemini",
+                        "context_length": info.get("context_length", 1_048_576),
+                        "max_completion_tokens": info.get("max_completion_tokens", 65_536),
+                        "free_tier": info.get("free_tier", False),
+                        "supports_thinking": info.get("supports_thinking", True),
+                    },
+                }
+            )
+        fallback.sort(key=lambda x: x["name"])
+        return self._apply_free_only(fallback)
+
+    def _apply_free_only(self, models: list[dict]) -> list[dict]:
+        """Apply the GEMINI_FREE_ONLY filter (free-tier models only)."""
+        if GEMINI_FREE_ONLY:
+            return [m for m in models if m["details"].get("free_tier")]
+        return models
 
     def is_running(self) -> bool:
         """Gemini is a cloud API — always reachable in principle."""

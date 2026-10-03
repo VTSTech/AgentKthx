@@ -119,6 +119,7 @@ import urllib.error
 import urllib.request
 from typing import Any, Generator
 
+from agentkthx import model_cache
 from agentkthx.backends.base import BackendConfig
 from agentkthx.backends.cloud_base import CloudBackend
 from agentkthx.backends.openai_compat import OpenAICompatibleBackend
@@ -129,6 +130,7 @@ from agentkthx.config import (
 )
 from agentkthx.core.models import Tool
 from agentkthx.core.types import ApiMode, BackendType
+from agentkthx.model_cache import load_seed_catalog
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Pollinations model catalog (offline fallback)
@@ -148,147 +150,13 @@ from agentkthx.core.types import ApiMode, BackendType
 # card-verified where the reference documents them (gpt-5.4-nano 400K,
 # glm-5.3-flashx 1M); others use the conservative 128K default and are
 # overridden by live cards via list_models().
-POLLINATIONS_MODELS: dict[str, dict] = {
-    # ── OpenAI — nano is the cheap workhorse / platform default ─────────
-    "openai/gpt-5.4-nano": {
-        "context_length": 400_000,  # card-verified (Sep 2026)
-        "default_temperature": 0.7,
-        "default_max_tokens": 8192,
-        "pricing": {"input": 0.15, "output": 0.9375},
-        "family": "openai",
-        "supports_vision": True,
-        "supports_reasoning": True,
-        "supports_function_calling": True,
-        "note": "Platform default; alias 'openai' resolves here",
-    },
-    "openai/gpt-5.4-mini": {
-        "context_length": 128_000,
-        "default_temperature": 0.7,
-        "default_max_tokens": 8192,
-        "pricing": {"input": 0.75, "output": 3.0},
-        "family": "openai",
-        "supports_vision": True,
-        "supports_reasoning": True,
-        "supports_function_calling": True,
-    },
-    "openai/gpt-5.4": {
-        "context_length": 128_000,
-        "default_temperature": 0.7,
-        "default_max_tokens": 8192,
-        "pricing": {"input": 1.875, "output": 7.5},
-        "family": "openai",
-        "supports_vision": True,
-        "supports_reasoning": True,
-        "supports_function_calling": True,
-        "note": "Chat transform REMOVES sampling controls — don't rely on temperature",
-    },
-    "openai/gpt-oss-20b": {
-        "context_length": 128_000,
-        "default_temperature": 0.7,
-        "default_max_tokens": 8192,
-        "pricing": {"input": 0.05, "output": 0.3},
-        "family": "openai",
-        "supports_reasoning": True,
-        "supports_function_calling": True,
-        "note": "Same weights as the legacy anonymous 'openai-fast' tier; forwards temperature/top_p",
-    },
-    # ── Z-AI — GLM family, cheap alternates (fallback chain anchor) ─────
-    "z-ai/glm-5.3-flash": {
-        "context_length": 128_000,
-        "default_temperature": 0.7,
-        "default_max_tokens": 8192,
-        "pricing": {"input": 0.1, "output": 0.4},
-        "family": "z-ai",
-        "supports_reasoning": True,
-        "supports_function_calling": True,
-        "note": "Cheap alternate family — POLLINATIONS_FALLBACK_MODEL",
-    },
-    "z-ai/glm-5.3-flashx": {
-        "context_length": 1_000_000,  # 1M-token context
-        "default_temperature": 0.7,
-        "default_max_tokens": 8192,
-        "pricing": {"input": 0.15, "output": 0.6},
-        "family": "z-ai",
-        "supports_reasoning": True,
-        "supports_function_calling": True,
-        "note": "1M-token context — long-session / codebase-audit tier",
-    },
-    # ── DeepSeek — fast/cheap tier ──────────────────────────────────────
-    "deepseek/deepseek-v4-flash": {
-        "context_length": 128_000,
-        "default_temperature": 0.7,
-        "default_max_tokens": 8192,
-        "pricing": {"input": 0.1, "output": 0.4},
-        "family": "deepseek",
-        "supports_reasoning": True,
-        "supports_function_calling": True,
-    },
-    # ── Anthropic — prompt-caching capable (512/1024-token min prefix) ──
-    "anthropic/claude-sonnet-4.6": {
-        "context_length": 200_000,
-        "default_temperature": 0.7,
-        "default_max_tokens": 8192,
-        "pricing": {"input": 1.875, "output": 9.375},
-        "family": "anthropic",
-        "supports_vision": True,
-        "supports_reasoning": True,
-        "supports_function_calling": True,
-        "note": "temperature/top_p mutually exclusive (temperature wins); supports json_schema NOT json_object",
-    },
-    "anthropic/claude-haiku-4.5": {
-        "context_length": 200_000,
-        "default_temperature": 0.7,
-        "default_max_tokens": 8192,
-        "pricing": {"input": 0.625, "output": 3.125},
-        "family": "anthropic",
-        "supports_vision": True,
-        "supports_function_calling": True,
-    },
-    # ── Google — flash tier; ':search' variants ship built-in tools ─────
-    "google/gemini-3.7-flash": {
-        "context_length": 1_000_000,
-        "default_temperature": 0.7,
-        "default_max_tokens": 8192,
-        "pricing": {"input": 0.1, "output": 0.4},
-        "family": "google",
-        "supports_vision": True,
-        "supports_reasoning": True,
-        "supports_function_calling": True,
-        "note": "Prompt caching — but NOT cached when tools are present",
-    },
-    # ── Mistral — same models as the native Mistral backend ─────────────
-    "mistralai/mistral-small-4": {
-        "context_length": 262_144,  # 256K (matches native catalog)
-        "default_temperature": 0.7,
-        "default_max_tokens": 8192,
-        "pricing": {"input": 0.2, "output": 0.5},
-        "family": "mistralai",
-        "supports_vision": True,
-        "supports_reasoning": True,
-        "supports_function_calling": True,
-    },
-    # ── Meta — Llama 4 ──────────────────────────────────────────────────
-    "meta/llama-4-scout": {
-        "context_length": 128_000,
-        "default_temperature": 0.7,
-        "default_max_tokens": 8192,
-        "pricing": {"input": 0.075, "output": 0.3},
-        "family": "meta",
-        "supports_vision": True,
-        "supports_function_calling": True,
-    },
-    # ── Qwen — flash tier, VL variants take image/video input ───────────
-    "qwen/qwen3.8-flash": {
-        "context_length": 128_000,
-        "default_temperature": 0.7,
-        "default_max_tokens": 8192,
-        "pricing": {"input": 0.1, "output": 0.4},
-        "family": "qwen",
-        "supports_reasoning": True,
-        "supports_function_calling": True,
-    },
-}
-
+POLLINATIONS_MODELS: dict[str, dict] = load_seed_catalog("pollinations")
+"""Static catalog for the pollinations backend — R07.20 moved the literal
+dict out of Python into ``agentkthx/data/model_seed.json``, where it
+serves as the initial defaults of the persistent model-catalog cache
+(and the offline fallback list). Update the seed JSON (or refresh a
+backend's cache from the live API) instead of editing code here.
+"""
 # Default model when none is specified. Resolved from env var → catalog.
 POLLINATIONS_DEFAULT_MODEL_FALLBACK = "openai/gpt-5.4-nano"
 
@@ -428,6 +296,16 @@ class PollinationsBackend(CloudBackend):
     _default_base_url = POLLINATIONS_BASE_URL
     _default_model = POLLINATIONS_DEFAULT_MODEL or POLLINATIONS_DEFAULT_MODEL_FALLBACK
     _provider_label = "Pollinations"
+
+    # R07.20: persistent JSON model-catalog cache keys. Pollinations
+    # previously had NO model-list cache — every list_models() call hit
+    # GET /v1/models. The raw card cache re-hydrates _model_cards on
+    # fresh hits (see list_models).
+    MODEL_CACHE_KEY = "pollinations"
+    MODEL_CARDS_CACHE_KEY = "pollinations:cards"
+
+    # R07.20: in-process mirror of the last resolved catalog.
+    _model_cache: list[dict] | None = None
 
     # Pollinations keys are sk_ (secret, canonical) or pk_ (app/legacy
     # publishable). Length is not documented precisely, so the floor is
@@ -707,44 +585,44 @@ class PollinationsBackend(CloudBackend):
                 cards[mid] = m
         return cards
 
-    def list_models(self) -> list[dict]:
-        """List available Pollinations models.
+    def _merge_alias_map(self, cards: dict[str, dict]) -> dict[str, str]:
+        """Build the bare-alias → full-id map from live cards + static seeds.
 
-        Queries the public ``GET /v1/models`` catalog (311 cards,
-        verified 2026-09-27) and surfaces the ``category == "text"``
-        cards — image/video/audio/embedding/3d cards are not chat
-        backends. Falls back to the static ``POLLINATIONS_MODELS``
-        catalog when the gateway is unreachable.
+        Live ``aliases[]`` win over the doc-verified static seeds; catalog
+        short-names are the third resolution layer.
+        """
+        merged = dict(_STATIC_ALIASES)
+        for cid, card in cards.items():
+            for alias in card.get("aliases", []) or []:
+                if alias and "/" not in alias:
+                    merged[alias] = cid
+        for full_id in self.MODELS:
+            short = full_id.split("/")[-1]
+            merged.setdefault(short, full_id)
+        return merged
 
-        Side effects (cached for normalize_model_id / _get_model_defaults
-        / healthy_fallbacks):
-          - ``self._model_cards`` — ``{id: card}`` live card cache
-          - ``self._alias_map`` — bare alias → full id (live aliases[]
-            merged over doc-verified static seeds)
+    def _fetch_live_models(self) -> list[dict]:
+        """Fetch live cards + static gap-fill; raise when unreachable.
 
-        Each entry is shaped for AgentKthx's discovery UI:
-        ``{"name", "size", "details": {family, backend, context_length,
-        free_tier, is_chat_model, pricing (per-1M), health}}``.
+        Side effects (needed by normalize_model_id / _get_model_defaults /
+        healthy_fallbacks): hydrates ``self._model_cards`` and rebuilds
+        ``self._alias_map`` from the fresh cards.
+
+        R07.20: raises when the gateway is unreachable — the offline
+        handling (persistent JSON cache → seed defaults) lives in
+        ``list_models()``.
         """
         live_cards = self._fetch_model_cards()
-        if live_cards:
-            self._model_cards = live_cards
-            # alias map: live aliases[] over static seeds; catalog
-            # short-names as a third layer.
-            merged = dict(_STATIC_ALIASES)
-            for cid, card in live_cards.items():
-                for alias in card.get("aliases", []) or []:
-                    if alias and "/" not in alias:
-                        merged[alias] = cid
-            for full_id in self.MODELS:
-                short = full_id.split("/")[-1]
-                merged.setdefault(short, full_id)
-            self._alias_map = merged
-            if os.environ.get("AGENTKTHX_DEBUG"):
-                print(
-                    f"  [Pollinations] API returned {len(live_cards)} cards, "
-                    f"{len(self._alias_map)} aliases resolvable"
-                )
+        if not live_cards:
+            raise RuntimeError("pollinations /v1/models unreachable or empty")
+
+        self._model_cards = live_cards
+        self._alias_map = self._merge_alias_map(live_cards)
+        if os.environ.get("AGENTKTHX_DEBUG"):
+            print(
+                f"  [Pollinations] API returned {len(live_cards)} cards, "
+                f"{len(self._alias_map)} aliases resolvable"
+            )
 
         models: list[dict] = []
         seen: set[str] = set()
@@ -782,13 +660,106 @@ class PollinationsBackend(CloudBackend):
                 }
             )
 
+        return models
+
+    def _catalog_fallback_list(self) -> list[dict]:
+        """Shape the static (seed) catalog into ``list_models()`` entries.
+
+        The offline fallback when the gateway is unreachable: this same
+        list seeds the persistent model-catalog cache (R07.20), so the
+        fallback and the cache's initial defaults never diverge.
+        """
+        models: list[dict] = []
+        for name in sorted(self.MODELS.keys()):
+            meta = self.MODELS[name]
+            models.append(
+                {
+                    "name": name,
+                    "size": 0,
+                    "details": {
+                        "family": meta.get("family", name.split("/")[0]),
+                        "backend": self._catalog_backend_name(),
+                        "context_length": meta.get(
+                            "context_length", self._DEFAULT_CONTEXT_FALLBACK
+                        ),
+                        "free_tier": _card_is_free(meta),
+                        "is_chat_model": True,
+                        "pricing": meta.get("pricing", {}),
+                    },
+                }
+            )
+        return models
+
+    def _apply_free_only(self, models: list[dict]) -> list[dict]:
+        """Apply the POLLINATIONS_FREE_ONLY filter (zero-cost models only)."""
         if _env_flag("POLLINATIONS_FREE_ONLY"):
-            models = [m for m in models if m["details"].get("free_tier")]
+            return [m for m in models if m["details"].get("free_tier")]
+        return models
+
+    def list_models(self) -> list[dict]:
+        """List available Pollinations models (R07.20: via the JSON cache).
+
+        Queries the public ``GET /v1/models`` catalog and surfaces the
+        ``category == "text"`` cards — image/video/audio/embedding/3d
+        cards are not chat backends. Falls back to the stale cache (the
+        seeded static ``POLLINATIONS_MODELS`` defaults at minimum) when
+        the gateway is unreachable.
+
+        R07.20: the determined live catalog is cached persistently (30
+        min TTL) under the ``pollinations`` key, and the RAW live cards
+        under ``pollinations:cards`` — on a fresh cache hit the raw
+        cards are re-hydrated into ``self._model_cards`` (and the alias
+        map rebuilt) so normalize_model_id / _get_model_defaults /
+        healthy_fallbacks keep working WITHOUT re-fetching.
+        """
+        # R07.20: fresh persistent cache short-circuits the API entirely.
+        cached = model_cache.get_cached_models(self.MODEL_CACHE_KEY)
+        if cached is not None:
+            # Re-hydrate the raw-card side cache so downstream consumers
+            # (context/pricing lookups, healthy fallbacks) keep the live
+            # telemetry without a network round-trip.
+            raw_cards = model_cache.get_fresh(self.MODEL_CARDS_CACHE_KEY)
+            if isinstance(raw_cards, dict) and raw_cards:
+                self._model_cards = raw_cards
+                self._alias_map = self._merge_alias_map(raw_cards)
+            self._model_cache = cached
+            return self._apply_free_only(cached)
+
+        # First contact for this backend: cache the static catalog as the
+        # initial defaults (stale-stamped, so the live fetch below still
+        # runs and replaces it on success).
+        model_cache.ensure_seeded(self.MODEL_CACHE_KEY, self._catalog_fallback_list())
+
+        try:
+            live = self._fetch_live_models()
+            live_cards = self._model_cards
+        except Exception as e:
+            if os.environ.get("AGENTKTHX_DEBUG"):
+                print(f"  [Pollinations] Model discovery failed ({e}), using cached/seed catalog")
+            live = None
+            live_cards = None
+
+        if live is None:
+            stale = model_cache.get_stale_models(self.MODEL_CACHE_KEY)
+            result = stale if stale is not None else self._catalog_fallback_list()
+            # Serve whatever raw cards we have (any age) for consumers.
+            if not self._model_cards:
+                raw_cards = model_cache.get_stale(self.MODEL_CARDS_CACHE_KEY)
+                if isinstance(raw_cards, dict) and raw_cards:
+                    self._model_cards = raw_cards
+                    self._alias_map = self._merge_alias_map(raw_cards)
+        else:
+            result = model_cache.store_models(self.MODEL_CACHE_KEY, live)
+            # Raw cards side-cache (same TTL) — re-hydrates _model_cards
+            # on fresh cache hits so consumers never need the network.
+            if isinstance(live_cards, dict) and live_cards:
+                model_cache.store(self.MODEL_CARDS_CACHE_KEY, live_cards, source="api")
 
         if os.environ.get("AGENTKTHX_DEBUG"):
-            print(f"  [Pollinations] Total: {len(models)} chat models listed")
+            print(f"  [Pollinations] Total: {len(result)} chat models listed")
 
-        return models
+        self._model_cache = result
+        return self._apply_free_only(result)
 
     def _card_to_entry(self, cid: str, card: dict) -> dict:
         """Shape a live Pollinations card into AgentKthx's model dict."""
