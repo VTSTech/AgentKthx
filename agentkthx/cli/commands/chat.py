@@ -526,7 +526,22 @@ def cmd_chat(args: argparse.Namespace) -> int:
                 print(bright_cyan("👋 Goodbye!"))
                 break
 
+            if user_input == "/auth":
+                # R07.21: interactive auth picker — arrow-key menu over every
+                # cloud backend's API_KEY and FREE_ONLY env vars. Enter on a
+                # flag flips it; Enter on a key prompts for a value (hidden
+                # input on a TTY). Changes rebind os.environ + the config
+                # module + every imported plugin global, and patch the live
+                # session backend when it matches — session-local only.
+                from ..auth import run_auth_picker
+
+                run_auth_picker(agent)
+                continue
+
             if user_input == "/help":
+                print(
+                    f"  {cyan('/auth')}       Set API keys / toggle FREE_ONLY flags (interactive picker)"
+                )
                 print(f"  {cyan('/clear')}      Clear conversation memory")
                 print(f"  {cyan('/debug')}      Toggle debug output on/off")
                 print(f"  {cyan('/help')}       Show this help message")
