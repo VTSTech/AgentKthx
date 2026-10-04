@@ -95,13 +95,23 @@ class MCPManager:
 
     # ---- lifecycle ----
 
-    def connect_all(self, *, skip_failures: bool = True) -> list[tuple[str, str]]:
+    def connect_all(
+        self,
+        *,
+        skip_failures: bool = True,
+        verbose: bool = False,
+    ) -> list[tuple[str, str]]:
         """Connect to every configured server and enumerate their tools.
 
         Args:
             skip_failures: If True (default), a server that fails to
                 connect or list tools is skipped with a warning. If False,
                 the first failure raises :class:`MCPManagerError`.
+            verbose: If True, print per-server progress to stderr so the
+                operator sees what's happening during the (potentially
+                slow) probe loop. Each server prints a "probing" line
+                before connect, then a result line with the tool count
+                or the error. Default False — silent for programmatic use.
 
         Returns:
             List of ``(server_name, error_message)`` for servers that
@@ -109,7 +119,20 @@ class MCPManager:
         """
         failures: list[tuple[str, str]] = []
         with self._lock:
+            if verbose:
+                import sys
+
+                names = ", ".join(self._configs.keys())
+                count = len(self._configs)
+                print(
+                    f"[MCP] probing {count} server(s): {names}",
+                    file=sys.stderr,
+                )
             for name, cfg in self._configs.items():
+                if verbose:
+                    import sys
+
+                    print(f"[MCP]   {name}: connecting...", file=sys.stderr)
                 try:
                     client = MCPClient(cfg)
                     client.connect()
@@ -117,10 +140,20 @@ class MCPManager:
                     self._clients[name] = client
                     for tool_def in tools:
                         self._register_tool_def(name, tool_def)
+                    if verbose:
+                        print(
+                            f"[MCP]   {name}: {len(tools)} tool(s)",
+                            file=sys.stderr,
+                        )
                 except (MCPClientError, MCPTransportError) as e:
                     if not skip_failures:
                         raise MCPManagerError(f"MCP server '{name}' failed: {e}") from e
                     failures.append((name, str(e)))
+                    if verbose:
+                        print(
+                            f"[MCP]   {name}: failed ({e}); skipped",
+                            file=sys.stderr,
+                        )
             self._connected = True
         return failures
 

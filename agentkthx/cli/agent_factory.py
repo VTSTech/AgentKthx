@@ -531,16 +531,13 @@ def _wire_mcp(args, tools):
         return None
 
     manager = MCPManager(all_configs)
-    failures = manager.connect_all(skip_failures=True)
+    # Verbose output (per-server progress + failures) goes to stderr from
+    # connect_all itself — no need to inspect the return value here.
+    manager.connect_all(skip_failures=True, verbose=True)
 
+    # Per-server failures are already printed by connect_all(verbose=True)
+    # above — no need to repeat them here.
     import sys
-
-    if failures:
-        for name, err in failures:
-            print(
-                f"[MCP] {name}: failed to connect ({err}); skipped",
-                file=sys.stderr,
-            )
 
     # R07.22: when --mcp is passed without --tools, create an empty
     # ToolRegistry so MCP tools have somewhere to land. This is the

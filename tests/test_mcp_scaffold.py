@@ -315,6 +315,117 @@ def test_manager_register_into_requires_connect():
         mgr.register_into(ToolRegistry())
 
 
+# ----------------------------- connect_all verbose -----------------------------
+
+
+def test_connect_all_verbose_prints_progress(capsys, monkeypatch):
+    """connect_all(verbose=True) should print per-server progress to stderr.
+
+    Uses mocking to avoid spawning real subprocesses — verifies the verbose
+    output shape (header + per-server lines) without requiring a live MCP
+    server binary.
+    """
+    cfg_a = MCPServerConfig(name="alpha", command="python3")
+    cfg_b = MCPServerConfig(name="beta", command="python3")
+    mgr = MCPManager([cfg_a, cfg_b])
+
+    # Mock MCPClient so connect() + list_tools() succeed without subprocess
+    class FakeClient:
+        def __init__(self, cfg):
+            self.cfg = cfg
+
+        def connect(self):
+            pass
+
+        def list_tools(self):
+            return [{"name": f"{self.cfg.name}_tool", "description": "test"}]
+
+        def close(self, timeout=2.0):
+            pass
+
+        @property
+        def is_alive(self):
+            return True
+
+        @property
+        def server_info(self):
+            return {"name": "fake", "version": "1.0"}
+
+        @property
+        def server_capabilities(self):
+            return {}
+
+        @property
+        def stderr_tail(self):
+            return []
+
+    monkeypatch.setattr("agentkthx.mcp.manager.MCPClient", FakeClient)
+
+    failures = mgr.connect_all(verbose=True)
+    assert failures == []
+
+    captured = capsys.readouterr()
+    # Header should list both servers
+    assert "[MCP] probing 2 server(s): alpha, beta" in captured.err
+    # Per-server "connecting" line
+    assert "[MCP]   alpha: connecting..." in captured.err
+    assert "[MCP]   beta: connecting..." in captured.err
+    # Per-server result line with tool count
+    assert "[MCP]   alpha: 1 tool(s)" in captured.err
+    assert "[MCP]   beta: 1 tool(s)" in captured.err
+
+
+def test_connect_all_verbose_prints_failures(capsys, monkeypatch):
+    """connect_all(verbose=True) should print the error for skipped servers."""
+    cfg = MCPServerConfig(name="broken", command="python3")
+    mgr = MCPManager([cfg])
+
+    from agentkthx.mcp.client import MCPClientError
+
+    class FailingClient:
+        def __init__(self, cfg):
+            pass
+
+        def connect(self):
+            raise MCPClientError("simulated connect failure")
+
+    monkeypatch.setattr("agentkthx.mcp.manager.MCPClient", FailingClient)
+
+    failures = mgr.connect_all(skip_failures=True, verbose=True)
+    assert len(failures) == 1
+    assert failures[0][0] == "broken"
+
+    captured = capsys.readouterr()
+    assert "[MCP] probing 1 server(s): broken" in captured.err
+    assert "[MCP]   broken: connecting..." in captured.err
+    assert "[MCP]   broken: failed (simulated connect failure); skipped" in captured.err
+
+
+def test_connect_all_silent_by_default(capsys, monkeypatch):
+    """connect_all(verbose=False) (the default) should produce NO stderr output."""
+    cfg = MCPServerConfig(name="quiet", command="python3")
+    mgr = MCPManager([cfg])
+
+    class FakeClient:
+        def __init__(self, cfg):
+            pass
+
+        def connect(self):
+            pass
+
+        def list_tools(self):
+            return []
+
+        def close(self, timeout=2.0):
+            pass
+
+    monkeypatch.setattr("agentkthx.mcp.manager.MCPClient", FakeClient)
+
+    mgr.connect_all()  # verbose defaults to False
+    captured = capsys.readouterr()
+    assert captured.err == ""
+
+
 if __name__ == "__main__":
     # Allow running this file directly for quick smoke checks during dev
     sys.exit(pytest.main([__file__, "-v"]))
