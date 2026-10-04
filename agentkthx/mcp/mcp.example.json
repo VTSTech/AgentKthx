@@ -17,13 +17,6 @@
       "comment": "Chain-of-thought scratchpad tool — verified on npm 2026-10-04. Useful for complex multi-step reasoning; the agent calls it to externalize its thinking."
     },
     {
-      "name": "git",
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-git", "/home/REPLACE_ME/projects"],
-      "enabled": false,
-      "comment": "DISABLED 2026-10-04: @modelcontextprotocol/server-git was removed from npm (404). Check github.com/modelcontextprotocol/servers for the current recommended git MCP server, or use serena (LSP-based, includes git ops)."
-    },
-    {
       "name": "memory",
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-memory"],

@@ -49,6 +49,8 @@ Public API
 
 from __future__ import annotations
 
+from .cache import DEFAULT_TTL as CACHE_DEFAULT_TTL
+from .cache import cache_path, clear_cache, get_cached, set_cached
 from .client import MCPClient, MCPClientError
 from .config import (
     MCPConfigError,
@@ -58,21 +60,47 @@ from .config import (
     write_example_config,
 )
 from .manager import MCPManager, MCPManagerError
+from .registry import (
+    MCPRegistryError,
+    build_config_snippet,
+    derive_short_name,
+    github_search,
+    npm_package_info,
+    npm_search,
+    search_all,
+)
 from .transport import MCPTransportError, StdioTransport
 
 __all__ = [
+    # Config
     "MCPServerConfig",
     "MCPConfigError",
     "load_mcp_config",
     "write_example_config",
     "default_config_path",
+    # Transport + client
     "StdioTransport",
     "MCPTransportError",
     "MCPClient",
     "MCPClientError",
     "MCPManager",
     "MCPManagerError",
+    # Live registry (R07.23)
+    "MCPRegistryError",
+    "npm_search",
+    "npm_package_info",
+    "github_search",
+    "search_all",
+    "derive_short_name",
+    "build_config_snippet",
+    # Cache (R07.23)
+    "CACHE_DEFAULT_TTL",
+    "cache_path",
+    "get_cached",
+    "set_cached",
+    "clear_cache",
+    # Version
     "__version__",
 ]
 
-__version__ = "0.1.0-scaffold"
+__version__ = "0.2.0-scaffold"

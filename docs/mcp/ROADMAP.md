@@ -1,6 +1,6 @@
 # MCP Support — Roadmap & Design
 
-> Status: **Phase 1 CLI integration complete** — `agentkthx mcp` subcommand + `--mcp` flag wired
+> Status: **Phase 1 complete + live registry (`mcp search` + `mcp install`)** — `agentkthx mcp` subcommand (`list` / `init` / `probe` / `search` / `install`) + `--mcp` flag wired
 > Last updated: 2026-10-04
 > Maintainer: VTSTech
 
@@ -74,11 +74,16 @@ The `agentkthx/mcp/` package contains:
 | 1.8 | Documentation: `docs/mcp/USAGE.md` with worked examples | ☐ todo |
 | 1.9 | Audit findings MCP-01..05 filed in `audit/audit.md` | ✅ done |
 | 1.10 | `README.md` section: "Use MCP servers with AgentKthx" | ☐ todo |
+| 1.11 | `agentkthx mcp search` — live search across npm + GitHub, with 10m TTL cache (R07.23, replaces the offline catalog that briefly shipped mid-release) | ✅ done |
+| 1.12 | Removed deprecated `@modelcontextprotocol/server-git` from `mcp init` example (R07.23) | ✅ done |
+| 1.13 | `agentkthx mcp install <name>` — fetch live metadata, write directly to `~/.agentkthx/mcp.json`, overwrite by default (R07.23) | ✅ done |
 
-**Phase 1 status (2026-10-04):** 2856 passed / 16 skipped (up from 2802).
-48 new MCP tests across two files (`test_mcp_scaffold.py` + `test_mcp_cli.py`).
+**Phase 1 status (2026-10-04):** 2880 passed / 16 skipped (up from 2856 in R07.22).
+68 MCP tests across two files (`test_mcp_scaffold.py` + `test_mcp_cli.py`).
 End-to-end verified against a stdlib-only echo MCP server subprocess (initialize → tools/list → tools/call → clean shutdown).
 MCP-01..05 filed in `audit/audit.md` with priority-matrix placements.
+
+R07.23 (2026-10-04) added `mcp search` + `mcp install`. The first iteration shipped a curated offline catalog (`agentkthx/mcp/catalog.py`) — that module was deleted mid-release in favor of a live registry backed by npm + GitHub. `mcp search` hits `registry.npmjs.org` + `api.github.com/search/repositories` in parallel, with a 10-minute TTL cache in `~/.agentkthx/mcp_cache.json`. `mcp install` fetches live metadata for one server and writes it directly to `~/.agentkthx/mcp.json` — no copy-paste required. The replacement (`agentkthx/mcp/registry.py`) uses stdlib `urllib.request` — zero new runtime dependencies.
 
 ### Phase 2 — `kthx-audit` MCP server (planned, high priority)
 
@@ -203,16 +208,20 @@ These are tested to work with local LLMs and require no paid API keys. They are 
 | Server | Install | Use case |
 |--------|---------|----------|
 | `@modelcontextprotocol/server-filesystem` | `npx -y @modelcontextprotocol/server-filesystem <dir>` | Sandboxed file operations |
-| `@modelcontextprotocol/server-git` | `npx -y @modelcontextprotocol/server-git <dir>` | Repo operations |
+| ~~`@modelcontextprotocol/server-git`~~ | ~~`npx -y @modelcontextprotocol/server-git <dir>`~~ | **REMOVED from npm (404) as of 2026-10-04** — use `serena` instead. See `agentkthx mcp search git`. |
 | `@modelcontextprotocol/server-sqlite` | `npx -y @modelcontextprotocol/server-sqlite <db>` | NL → SQL |
 | `@modelcontextprotocol/server-memory` | `npx -y @modelcontextprotocol/server-memory` | Persistent knowledge graph |
 | `@modelcontextprotocol/server-time` | `npx -y @modelcontextprotocol/server-time` | Timezone conversion |
 | `@modelcontextprotocol/server-sequential-thinking` | `npx -y @modelcontextprotocol/server-sequential-thinking` | CoT scratchpad |
 | `mcp-server-fetch` | `uvx mcp-server-fetch` | Web page retrieval |
 | `mcp-server-puppeteer` | `npx -y @modelcontextprotocol/server-puppeteer` | Headless Chrome automation |
-| `oraios/serena` | `uvx --from git+https://github.com/oraios/serena serena start-mcp-server` | LSP-based code intelligence |
+| `oraios/serena` | `uvx --from git+https://github.com/oraios/serena serena start-mcp-server` | LSP-based code intelligence (recommended git-server replacement) |
 | `@modelcontextprotocol/server-brave-search` | `npx -y @modelcontextprotocol/server-brave-search` | Web search (free 2000 queries/mo) |
 | `@modelcontextprotocol/server-github` | `npx -y @modelcontextprotocol/server-github` | GitHub API (free PAT) |
+
+> **The table below is for human reference only.** For live, up-to-date
+> results, run `agentkthx mcp search <keyword>` — it queries npm + GitHub
+> in real time and caches results for 10 minutes.
 
 **Avoid:** community `mcp-shell` / `mcp-server-commands` variants that expose generic shell execution. They typically lack command filtering, timeout clamping, and output truncation — your built-in `shell()` tool is safer.
 

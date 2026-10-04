@@ -209,6 +209,115 @@ def create_parser() -> argparse.ArgumentParser:
         default=None,
         help="Path to an MCP config file (default: ~/.agentkthx/mcp.json)",
     )
+    # R07.23: `mcp search` — live search across npm, with a 10m TTL cache.
+    # Replaces the curated offline catalog that briefly shipped mid-release
+    # (catalog.py deleted). The catalog approach was too brittle — npm packages
+    # change, new ones appear, and a Python literal can't keep up. Live search
+    # + cache gives us freshness without paying the network cost on every invocation.
+    #
+    # R07.23 follow-up: GitHub search was removed from `mcp search` — too many
+    # non-stdio results (Java/Go/Rust repos, Ghidra/IDA extensions, browser
+    # plugins) that look like MCP servers but can't be launched as subprocesses.
+    # GitHub installs still work via `mcp install github:owner/repo` when the
+    # operator has manually verified the repo is stdio-capable.
+    mcp_search = mcp_sub.add_parser(
+        "search",
+        help="Search npm for MCP servers (live, 10m cache)",
+    )
+    mcp_search.add_argument(
+        "query",
+        nargs="?",
+        default="mcp",
+        help="Substring to search (default: 'mcp' — lists popular MCP servers). "
+        "Matched against package name, description, and tags.",
+    )
+    mcp_search.add_argument(
+        "--limit",
+        type=int,
+        default=25,
+        help="Max results (default: 25, max: 250).",
+    )
+    mcp_search.add_argument(
+        "--refresh",
+        action="store_true",
+        help="Bypass the cache and force a fresh fetch. The cache is updated with the "
+        "new results so subsequent calls within 10m are still fast.",
+    )
+    mcp_search.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit machine-readable JSON (one entry per object) instead of the human-readable table.",
+    )
+    # R07.23: `mcp install` — fetch live metadata for one server and write it
+    # directly to ~/.agentkthx/mcp.json. Always live (no offline catalog fallback).
+    # Overwrites existing entries with the same name by default (per maintainer spec).
+    #
+    # Name format (R07.23 redesign — avoids collisions since many MCP servers
+    # share project names like "ghidra", "git", "memory"):
+    #   - @scope/package         → npm install (e.g. @modelcontextprotocol/server-filesystem)
+    #   - github:owner/repo      → GitHub install (e.g. github:LaurieWired/GhidraMCP)
+    #   - owner/repo (no prefix)  → also GitHub, convenience shorthand
+    #   - bare-name               → npm search, prefers @modelcontextprotocol/* hits
+    mcp_install = mcp_sub.add_parser(
+        "install",
+        help="Install an MCP server to ~/.agentkthx/mcp.json (live fetch)",
+    )
+    mcp_install.add_argument(
+        "name",
+        help="Server to install. Formats: '@scope/package' (npm), "
+        "'github:owner/repo' (GitHub), 'owner/repo' (GitHub shorthand), or "
+        "'bare-name' (resolves via npm search).",
+    )
+    mcp_install.add_argument(
+        "--as",
+        dest="as_name",
+        default=None,
+        help="Override the short name written to mcp.json (default: derived from package).",
+    )
+    mcp_install.add_argument(
+        "--command",
+        dest="launch_command",
+        default=None,
+        help="Override the launch command (default: 'npx' for npm, 'uvx' for GitHub).",
+    )
+    mcp_install.add_argument(
+        "--args",
+        default=None,
+        help="Override the launch args as a single string (split on spaces). "
+        "Example: --args='-y @modelcontextprotocol/server-filesystem /tmp'.",
+    )
+    mcp_install.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the snippet that would be written to mcp.json, but don't write it.",
+    )
+    mcp_install.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit the resulting mcp.json entry as JSON instead of writing to the file.",
+    )
+    mcp_install.add_argument(
+        "--config",
+        default=None,
+        help="Path to the mcp.json file (default: ~/.agentkthx/mcp.json).",
+    )
+    # R07.23: `mcp uninstall <name>` — remove a server entry from mcp.json.
+    # Pairs with `mcp install` so users don't have to edit mcp.json by hand
+    # when an install doesn't work out (e.g. Java-only repos that can't be
+    # launched as a stdio subprocess).
+    mcp_uninstall = mcp_sub.add_parser(
+        "uninstall",
+        help="Remove a server entry from ~/.agentkthx/mcp.json",
+    )
+    mcp_uninstall.add_argument(
+        "name",
+        help="Server name (from `mcp list`) to remove from mcp.json.",
+    )
+    mcp_uninstall.add_argument(
+        "--config",
+        default=None,
+        help="Path to the mcp.json file (default: ~/.agentkthx/mcp.json).",
+    )
 
     # Plugins command (v0.2 spec §CLI integration) — registered before run
     # so the root -h subcommand list stays alphabetical (R07.19 follow-up #6)

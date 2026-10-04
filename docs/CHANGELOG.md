@@ -5,6 +5,104 @@ All notable changes to AgentKthx will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [R07.23] - 2026-10-04
+
+**`agentkthx mcp search` + `mcp install` + removal of deprecated `git` server.** R07.23 expands the `mcp` subcommand from three actions to five — `list`, `init`, `probe`, **`search`**, **`install`** — and removes the deprecated `@modelcontextprotocol/server-git` entry from `mcp init`'s example config. Two new `agentkthx/mcp/` modules (`registry.py` + `cache.py`) implement a live, stdlib-only search across npm + GitHub, with a 10-minute TTL cache so repeat calls don't re-hit the network.
+
+The motivation came directly from a maintainer probe: `@modelcontextprotocol/conformance` was mistakenly added to `mcp.json` (it's a CLI test harness, not an MCP server) and failed with `subprocess closed stdout while waiting for id=1`. The new `search` + `install` commands make server discovery and config population terminal-only operations — no browser, no copy-paste, no npm registry client.
+
+### Design pivot: offline catalog → live registry
+
+R07.23 started with a curated offline catalog (`agentkthx/mcp/catalog.py`) — a Python literal seeded from the table in `docs/mcp/ROADMAP.md`. That approach was replaced mid-release with a live registry backed by npm + GitHub. The catalog module was deleted; its replacement (`registry.py`) uses stdlib `urllib.request` — zero new runtime dependencies. The catalog was inherently stale (a Python literal can't track npm publishes), and live search + cache gives freshness without paying the network cost on every invocation: `mcp search filesystem` takes ~1.2s on first call and <50ms on cache hit.
+
+### Added — `agentkthx/mcp/registry.py` (new module)
+
+Stdlib-only live search across npm + GitHub:
+
+- **`npm_search(query, size=25)`** — hits `registry.npmjs.org/-/v1/search`, filters to packages whose name or description mentions MCP, returns normalized result dicts with name, package, version, description, source, is_official, homepage, install_hint, stars, license, search_score.
+- **`npm_package_info(name)`** — fetches full metadata for one npm package from `registry.npmjs.org/<name>`. Returns None on 404. Used by `mcp install` to verify the package exists + get the current version before writing to `mcp.json`.
+- **`github_search(query, size=25)`** — hits `api.github.com/search/repositories` with `sort=stars&order=desc`. Works anonymously at 10 req/min; set `AGENTKTHX_GITHUB_TOKEN` (or `GITHUB_TOKEN` / `GH_TOKEN`) for 5000/min. Catches repos not published to npm (e.g. `oraios/serena`, `github/github-mcp-server`).
+- **`search_all(query)`** — combined search across both sources, deduped by package identifier. Failures from either source are swallowed (graceful degradation — if npm is down, GitHub results still return).
+- **`derive_short_name(package)`** — heuristic: `@modelcontextprotocol/server-filesystem` → `filesystem`, `mcp-server-fetch` → `fetch`, `oraios/serena` → `serena`. Used by both `search` (for display) and `install` (for the mcp.json entry name).
+- **`build_config_snippet(package, ...)`** — generates a ready-to-paste mcp.json entry. For npm: `{"command": "npx", "args": ["-y", "<package>"]}`. For GitHub: `{"command": "uvx", "args": ["--from", "git+https://github.com/<owner>/<repo>", "<repo>"]}` (best-effort; user can override with `--command` / `--args`).
+- All network calls use stdlib `urllib.request` with a 10-second timeout. Failures (offline, DNS, HTTP error) raise `MCPRegistryError` with a clear message.
+
+### Added — `agentkthx/mcp/cache.py` (new module)
+
+JSON-backed TTL cache at `~/.agentkthx/mcp_cache.json` (mode 0o600):
+
+- **`get_cached(key)`** — returns `(hit, value)`. Expired entries are skipped (lazy eviction — not actively removed, just overwritten on next write).
+- **`set_cached(key, value, ttl=600)`** — writes an entry with a 10-minute TTL by default. Configurable via `AGENTKTHX_MCP_CACHE_TTL` env var (seconds). Set to `0` to disable caching entirely.
+- **`clear_cache()`** — explicitly clears all entries. Returns count removed.
+- Atomic writes via `tmp + rename` to prevent corruption on concurrent access. File access is not locked (two concurrent `mcp search` calls could race on write; worst case is a lost cache update, not corruption).
+- Cache key format: `"search:<source>:<query>:<limit>"` (e.g. `"search:all:filesystem:25"`).
+
+### Added — `agentkthx mcp search` (live, replaces the offline catalog)
+
+Replaces the deleted offline catalog. Always live (with cache); no `--live` flag needed.
+
+- **`agentkthx mcp search [query]`** — default query is `"mcp"` (lists popular MCP servers). Searches npm + GitHub in parallel, dedupes, sorts by official-first + relevance.
+- **`--source npm|github|all`** — restrict to one source (default: all). npm is faster and has versions; GitHub catches repos not on npm.
+- **`--limit N`** — max results per source (default: 25, max: 100 GitHub / 250 npm).
+- **`--refresh`** — bypass the cache and force a fresh fetch. The cache is updated with the new results.
+- **`--json`** — emit machine-readable JSON payload with `query`, `source`, `results`, and optional `errors` fields.
+
+### Added — `agentkthx mcp install <name>` (new subcommand)
+
+Fetches live metadata for one server and writes it directly to `~/.agentkthx/mcp.json`. Always live (no offline fallback); overwrites existing entries with the same name by default (per maintainer spec).
+
+- **`agentkthx mcp install filesystem`** — short name; resolves via npm search, preferring `@modelcontextprotocol/*` packages. Fetches full metadata for version + description.
+- **`agentkthx mcp install @modelcontextprotocol/server-filesystem`** — full npm package name; fetches metadata directly (no search step).
+- **`agentkthx mcp install oraios/serena --command uvx --args='...'`** — GitHub repo; requires `--command` and `--args` since the install command varies by repo.
+- **`--as <name>`** — override the derived short name in the written entry.
+- **`--command <cmd>`** / **`--args '<space-separated string>'`** — override the launch command and args. `--args` is a single string split on spaces (so values starting with `--` don't confuse argparse).
+- **`--dry-run`** — print the snippet that would be written, don't touch `mcp.json`.
+- **`--json`** — emit the snippet as JSON; doesn't write to `mcp.json`. Progress messages suppressed.
+- **`--config <path>`** — override the target `mcp.json` path.
+- **Exit codes**: 0 success, 1 import error, 2 network error, 3 package not found (404), 4 mcp.json unreadable.
+
+### Changed — `mcp init` no longer emits deprecated `git` entry
+
+- **Removed**: the `git` server entry from `_build_example_config()` in `agentkthx/mcp/config.py` and from `agentkthx/mcp/mcp.example.json`. The package `@modelcontextprotocol/server-git` was removed from npm (404 as of 2026-10-04); shipping it in the example config — even disabled — created noise and offered no path forward. Operators who want git operations should run `agentkthx mcp search git` to discover `serena` (LSP-based, includes git ops) or `github` (remote GitHub API access).
+- **The `mcp init` post-write message** was simplified — it no longer mentions the deprecated git entry. The list of default-enabled servers (`filesystem` + `sequential-thinking`) is unchanged.
+- **Footer hint**: the `mcp list` footer now reads `agentkthx chat --mcp filesystem sequential-thinking` (was `--mcp fs git`), matching the actual default-enabled server names.
+
+### Removed — `agentkthx/mcp/catalog.py` (deleted)
+
+The offline catalog module is gone. The `KNOWN_MCP_SERVERS` list, `search_catalog()` function, and `get_entry()` function are no longer available. All references removed from `agentkthx/mcp/__init__.py`. The `mcp search --copy <name>`, `--tag`, `--status`, and `--no-deprecated` flags are also gone — replaced by the live search flags above.
+
+### Tests
+
+- **`TestMcpSearch` (8 tests)** — all mock `agentkthx.mcp.registry._http_get_json` so no real network calls. Covers: basic search, cache write, cache hit on second call, `--refresh` bypass, `--source npm` only, `--json` payload shape, no-results message, graceful network-error handling.
+- **`TestMcpInstall` (9 tests)** — covers: short-name install (npm search + metadata fetch), full npm package name, creates `mcp.json` if missing, overwrites existing entry (per maintainer spec), `--dry-run` doesn't write, `--json` emits snippet without writing, GitHub repo with `--command`/`--args` overrides, 404 returns rc=3, `--as` overrides short name.
+- 1 new test `test_mcp_init_no_git_entry` — regression guard asserting `git` is no longer in the generated config (re-reads the raw JSON, not just the load_mcp_config-filtered list, to confirm the entry is gone entirely rather than just disabled).
+- Updated `tests/test_mcp_scaffold.py::test_write_example_config_round_trips` to assert `git` is absent from the raw generated JSON.
+- Updated `tests/test_mcp_cli.py::test_mcp_subcommands_registered` to include `search` + `install` in the expected subcommand set.
+- Updated `tests/test_mcp_cli.py::test_mcp_no_subcommand_prints_help` to assert `search` + `install` appear in the help banner.
+- Updated `tests/test_mcp_cli.py::test_mcp_list_with_servers` fixture to use `memory` instead of `git` for the disabled-server test case.
+
+**Suite: 2856 → 2880 passed (+24) / 16 skipped. Zero regressions; ruff + black clean.**
+
+### Audit
+
+- No new findings filed. The R07.23 work is feature-additive (new `search` + `install` subcommands + 2 new modules) and removes deprecated surface (the `git` entry + the offline catalog) — neither introduces a new defect shape. The pre-existing `_mcp_list` dead-code path for disabled-entry markers (○) is noted in the test fixture but not promoted to a finding; it's a cosmetic issue with no behavioral impact since `load_mcp_config` filters disabled entries before the listing iterates them.
+
+### Files touched
+
+- `agentkthx/mcp/registry.py` — NEW (~290 LOC) — `npm_search`, `npm_package_info`, `github_search`, `search_all`, `derive_short_name`, `build_config_snippet`, `MCPRegistryError`
+- `agentkthx/mcp/cache.py` — NEW (~150 LOC) — `get_cached`, `set_cached`, `clear_cache`, `cache_path`, `DEFAULT_TTL` (10m), env var `AGENTKTHX_MCP_CACHE_TTL`
+- `agentkthx/mcp/__init__.py` — exports the new registry + cache functions; removed catalog exports
+- `agentkthx/mcp/config.py` — removed `git` entry from `_build_example_config()`, added explanatory comment
+- `agentkthx/mcp/mcp.example.json` — removed `git` entry (kept `memory` as an example of a disabled server)
+- `agentkthx/cli/commands/mcp.py` — added `_mcp_search()` (live, ~120 LOC) + `_mcp_install()` (~150 LOC) handlers, dispatch entries, updated help banner + footer hint
+- `agentkthx/cli/parser.py` — registered `search` subparser (with `--source`, `--limit`, `--refresh`, `--json`) + `install` subparser (with `--as`, `--command`, `--args`, `--dry-run`, `--json`, `--config`)
+- `tests/test_mcp_cli.py` — added `TestMcpSearch` (8 tests, mocked urllib) + `TestMcpInstall` (9 tests, mocked urllib) + `test_mcp_init_no_git_entry`; updated 3 existing tests
+- `tests/test_mcp_scaffold.py` — updated `test_write_example_config_round_trips` to assert `git` is absent from raw JSON
+- `README.md` — replaced "deprecated git is included but disabled" paragraph with a `mcp search` + `mcp install` walkthrough
+- `docs/mcp/ROADMAP.md` — added steps 1.11–1.14 to the Phase 1 table; struck through the deprecated `server-git` row in the curated catalog; updated the "catalog table" note to point to `mcp search` for live results
+
+---
+
 ## [R07.22] - 2026-10-04
 
 **MCP (Model Context Protocol) client support — Phase 1 complete.** R07.22 lands stdio MCP client mode, the largest new feature surface since the R07.19 capabilities-first tool-support chain. Agents can now consume tools from external MCP servers (filesystem, sequential-thinking, sqlite, memory, git, serena, brave-search, ...) via stdio JSON-RPC 2.0, with their tools bridged into the existing `ToolRegistry` alongside built-ins. Zero runtime dependencies added — the implementation uses stdlib `subprocess` + `json` only, in keeping with the project's `dependencies = []` invariant.

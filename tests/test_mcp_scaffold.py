@@ -133,16 +133,24 @@ def test_write_example_config_round_trips(tmp_path):
     assert result_path == target
     configs = load_mcp_config(target)
     # The embedded _EXAMPLE_CONFIG (config.py) has 2 enabled servers
-    # (filesystem + sequential-thinking) and 2 disabled (git — deprecated
-    # on npm 2026-10-04; audit — Phase 2 placeholder). The repo's
+    # (filesystem + sequential-thinking) and 1 disabled (audit — Phase 2
+    # placeholder). R07.23 (2026-10-04): the deprecated 'git' entry was
+    # removed entirely from the embedded example — operators discover
+    # replacements via `agentkthx mcp search git`. The repo's
     # mcp.example.json has additional entries (memory) but
     # write_example_config() uses the embedded constant.
     assert len(configs) >= 2  # filesystem + sequential-thinking
     names = {c.name for c in configs}
     assert "filesystem" in names
     assert "sequential-thinking" in names
-    # git should NOT appear in the loaded (enabled-filtered) list because
-    # it's disabled by default in the embedded example since 2026-10-04.
+    # git should NOT appear in the generated config at all (R07.23 removed it)
+    # load_mcp_config filters disabled entries, so we re-read the raw file
+    # to confirm the entry is gone entirely, not just disabled.
+    import json as _json
+
+    raw = _json.loads(target.read_text())
+    raw_names = {s["name"] for s in raw["servers"]}
+    assert "git" not in raw_names
 
 
 def test_write_example_config_substitutes_home_dir(tmp_path, monkeypatch):

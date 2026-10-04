@@ -310,22 +310,6 @@ def _build_example_config(home: str) -> str:
                 "comment": "Chain-of-thought scratchpad — verified on npm 2026-10-04",
             },
             {
-                "name": "git",
-                "command": "npx",
-                "args": [
-                    "-y",
-                    "@modelcontextprotocol/server-git",
-                    projects,
-                ],
-                "enabled": False,
-                "comment": (
-                    "DISABLED 2026-10-04: package removed from npm (404). "
-                    "Check github.com/modelcontextprotocol/servers for "
-                    "current alternatives, or use serena (LSP-based, "
-                    "includes git ops)."
-                ),
-            },
-            {
                 "name": "audit",
                 "command": "python3",
                 "args": [
@@ -349,3 +333,9 @@ def _build_example_config(home: str) -> str:
 # The mcp.example.json file in this directory still ships the static
 # template (with REPLACE_ME) for repo readers; `agentkthx mcp init` uses
 # _build_example_config() and produces a ready-to-use config.
+#
+# R07.23 (2026-10-04): the deprecated `git` entry
+# (@modelcontextprotocol/server-git, removed from npm — 404) was removed
+# from the embedded example entirely. `agentkthx mcp search` is now the
+# recommended way to discover replacement git-server options (serena,
+# the community mcp-server-git forks, etc.).
