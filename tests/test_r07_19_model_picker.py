@@ -624,6 +624,114 @@ class TestStartupModelPick:
         assert captured["title"] == "Select a model (ollama)"
         assert captured["items"][0] == "glm-5.1  (200K)"
 
+    # ── R07.23: FREE_ONLY filter ─────────────────────────────────────────
+
+    MIXED_MODELS = [
+        {"name": "openai/gpt-4o", "details": {}},  # paid
+        {"name": "meta-llama/llama-3.1-8b-instruct:free", "details": {}},  # free
+        {"name": "openrouter/free", "details": {}},  # free (named router)
+        {"name": "openai/gpt-4o-mini", "details": {}},  # paid
+    ]
+
+    def test_free_only_filters_paid_models(self, monkeypatch):
+        """R07.23: when OPENROUTER_FREE_ONLY=1, the picker should only show
+        free models — paid models must NOT appear in the menu items."""
+        import agentkthx.cli.picker as picker
+        import agentkthx.config as cfg
+
+        # Force OPENROUTER_FREE_ONLY=True
+        monkeypatch.setattr(cfg, "OPENROUTER_FREE_ONLY", True)
+
+        # Mock the openrouter _is_free_model to recognize our test data
+        import agentkthx.plugins.openrouter.openrouter as or_plugin
+
+        def _fake_is_free(name):
+            return ":free" in name or name == "openrouter/free"
+
+        monkeypatch.setattr(or_plugin, "_is_free_model", _fake_is_free)
+
+        # Patch the backend to return our mixed list
+        self._patch_backend(monkeypatch, self.MIXED_MODELS)
+
+        # Spy on the menu to capture what items it was given
+        captured = {}
+
+        class _SpyMenu(picker.ArrowMenu):
+            def __init__(self, items, **kwargs):
+                captured["items"] = list(items)
+                super().__init__(items, **kwargs)
+
+            def run(self, **kw):
+                return 0  # pick the first (free) model
+
+        monkeypatch.setattr(picker, "ArrowMenu", _SpyMenu)
+
+        config = types.SimpleNamespace(backend="openrouter", default_model="openrouter/free")
+        with redirect_stdout(io.StringIO()):
+            result = _startup_model_pick(self._args(backend="openrouter"), config)
+
+        # Only 2 free models should be in the menu
+        assert len(captured["items"]) == 2
+        assert any("llama-3.1-8b" in item for item in captured["items"])
+        assert any("openrouter/free" in item for item in captured["items"])
+        # Paid models must NOT appear
+        assert not any("gpt-4o" in item for item in captured["items"])
+        # Result should be the first free model
+        assert result is not None
+
+    def test_free_only_empty_returns_none(self, monkeypatch):
+        """R07.23: if FREE_ONLY filters to empty, the picker should return
+        None (fall back to default model) with a helpful message."""
+        import agentkthx.config as cfg
+
+        monkeypatch.setattr(cfg, "OPENROUTER_FREE_ONLY", True)
+
+        import agentkthx.plugins.openrouter.openrouter as or_plugin
+
+        # Mock _is_free_model to return False for everything — simulates
+        # a catalog with no free models
+        monkeypatch.setattr(or_plugin, "_is_free_model", lambda name: False)
+
+        self._patch_backend(monkeypatch, self.MIXED_MODELS)
+
+        config = types.SimpleNamespace(backend="openrouter", default_model="openrouter/free")
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            result = _startup_model_pick(self._args(backend="openrouter"), config)
+
+        assert result is None
+        out = _plain(buf.getvalue())
+        assert "No free models found" in out
+        assert "FREE_ONLY" in out
+
+    def test_no_free_only_env_shows_all_models(self, monkeypatch):
+        """R07.23 regression guard: when FREE_ONLY is NOT set, the picker
+        should show ALL models (paid + free) — no filtering."""
+        import agentkthx.cli.picker as picker
+        import agentkthx.config as cfg
+
+        monkeypatch.setattr(cfg, "OPENROUTER_FREE_ONLY", False)
+        self._patch_backend(monkeypatch, self.MIXED_MODELS)
+
+        captured = {}
+
+        class _SpyMenu(picker.ArrowMenu):
+            def __init__(self, items, **kwargs):
+                captured["items"] = list(items)
+                super().__init__(items, **kwargs)
+
+            def run(self, **kw):
+                return 0
+
+        monkeypatch.setattr(picker, "ArrowMenu", _SpyMenu)
+
+        config = types.SimpleNamespace(backend="openrouter", default_model="openrouter/free")
+        with redirect_stdout(io.StringIO()):
+            _startup_model_pick(self._args(backend="openrouter"), config)
+
+        # All 4 models should appear — no filtering
+        assert len(captured["items"]) == 4
+
 
 # ═══════════════════════════════════════════════════════════════════════
 # 4. cmd_chat wiring pins

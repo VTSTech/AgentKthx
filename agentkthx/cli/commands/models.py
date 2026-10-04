@@ -34,6 +34,58 @@ from ...core.types import ApiMode, ToolSupportLevel
 from ..utils import _thinking_status, _tool_status
 
 
+def apply_free_only_filter(backend_name: str, backend: object, models: list[dict]) -> list[dict]:
+    """Filter ``models`` by the FREE_ONLY env vars for OpenRouter / ZAI.
+
+    Other cloud backends (Mistral, Gemini, HuggingFace, OpenAI, Pollinations,
+    OrcaRouter) handle ``FREE_ONLY`` at the backend level — their
+    ``list_models()`` already returns only free models when the env var is
+    set, so no CLI-level filter is needed for them.
+
+    OpenRouter and ZAI are different: their ``list_models()`` returns the
+    FULL catalog (paid + free), and the CLI post-filters. This helper
+    centralizes that post-filter so both ``cmd_models`` (the ``agentkthx
+    models`` table) and ``_startup_model_pick`` (the chat startup picker)
+    apply the same filter — R07.23 fix: the picker was showing paid models
+    when ``OPENROUTER_FREE_ONLY=1`` or ``ZAI_FREE_ONLY=1`` was set.
+
+    Args:
+        backend_name: The resolved backend name (e.g. ``"openrouter"``, ``"zai"``).
+        backend: The backend instance (used for ZAI's ``_is_free_model()``
+            method, which reads the live catalog).
+        models: The full model list from ``backend.list_models()``.
+
+    Returns:
+        The filtered list (possibly empty if FREE_ONLY is set and no models
+        are free). The caller is responsible for printing a "no models
+        found" message if the result is empty.
+    """
+    from ...config import OPENROUTER_FREE_ONLY, ZAI_FREE_ONLY
+
+    if backend_name == "openrouter" and OPENROUTER_FREE_ONLY:
+        # R07.15 fix: use the plugin's shared _is_free_model() instead of
+        # the bare ``:free``-suffix check. The named ``openrouter/free``
+        # router (the plugin's default model) is also a free model, but
+        # ``"openrouter/free".endswith(":free")`` is False, so the old
+        # suffix check stripped it here even though the backend's own
+        # R07.09 filter had correctly accepted it.
+        from ...plugins.openrouter.openrouter import _is_free_model
+
+        return [m for m in models if _is_free_model(m["name"])]
+    elif backend_name == "zai" and ZAI_FREE_ONLY:
+        # Free = zero pricing in the ZAI catalog (glm-4.5-flash and
+        # glm-4.7-flash ONLY — glm-5.3-flash is paid despite the name).
+        # Use the backend's _is_free_model() instead of a hard-coded list
+        # so catalog updates are picked up automatically.
+        return [
+            m
+            for m in models
+            if getattr(backend, "_is_free_model", None) and backend._is_free_model(m["name"])
+        ]
+    # No FREE_ONLY env var set for this backend — return unfiltered
+    return models
+
+
 def cmd_models(args: argparse.Namespace) -> int:
     """Execute the models command."""
 
@@ -162,36 +214,22 @@ def cmd_models(args: argparse.Namespace) -> int:
             print("Pull one with: ollama pull qwen2.5:0.5b")
         return 0
 
-    # Apply free-only filtering at the CLI level
-    from ...config import OPENROUTER_FREE_ONLY, ZAI_FREE_ONLY
+    # Apply free-only filtering at the CLI level (R07.23: extracted to
+    # apply_free_only_filter() so the chat startup picker can reuse it).
+    models = apply_free_only_filter(backend_name, backend, models)
+    if not models:
+        # Distinguish "FREE_ONLY filtered to empty" from "list_models() returned empty"
+        from ...config import OPENROUTER_FREE_ONLY, ZAI_FREE_ONLY
 
-    if backend_name == "openrouter" and OPENROUTER_FREE_ONLY:
-        # R07.15 fix: use the plugin's shared _is_free_model() instead of
-        # the bare ``:free``-suffix check. The named ``openrouter/free``
-        # router (the plugin's default model) is also a free model, but
-        # ``"openrouter/free".endswith(":free")`` is False, so the old
-        # suffix check stripped it here even though the backend's own
-        # R07.09 filter had correctly accepted it. Mirrors the ZAI
-        # branch's helper-based filter below.
-        from ...plugins.openrouter.openrouter import _is_free_model
-
-        models = [m for m in models if _is_free_model(m["name"])]
-        if not models:
-            print("No free models found on OpenRouter.")
-            return 0
-    elif backend_name == "zai" and ZAI_FREE_ONLY:
-        # Free = zero pricing in the ZAI catalog (glm-4.5-flash and
-        # glm-4.7-flash ONLY — glm-5.3-flash is paid despite the name).
-        # Use the backend's _is_free_model() instead of a hard-coded list
-        # so catalog updates are picked up automatically.
-        models = [
-            m
-            for m in models
-            if getattr(backend, "_is_free_model", None) and backend._is_free_model(m["name"])
-        ]
-        if not models:
-            print("No free models found on ZAI.")
-            return 0
+        if backend_name == "openrouter" and OPENROUTER_FREE_ONLY:
+            print("No free models found on OpenRouter (OPENROUTER_FREE_ONLY=1).")
+        elif backend_name == "zai" and ZAI_FREE_ONLY:
+            print("No free models found on ZAI (ZAI_FREE_ONLY=1).")
+        else:
+            print("No models found.")
+            if backend_name == "ollama":
+                print("Pull one with: ollama pull qwen2.5:0.5b")
+        return 0
 
     # Initialize ACP plugin if requested
     acp, _ = _cli._init_acp(args, config, "AgentKthx-Models")

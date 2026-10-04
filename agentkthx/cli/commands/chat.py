@@ -172,9 +172,14 @@ def _startup_model_pick(args: argparse.Namespace, config) -> str | None:
     ``_build_agent`` (bitnet discovery, then ``config.default_model``):
     listing failures, empty backends and cancellations all degrade to
     ``None`` instead of blocking the session.
+
+    R07.23: now applies the same FREE_ONLY filter that ``cmd_models``
+    uses (via ``apply_free_only_filter``) so the picker doesn't show paid
+    models when ``OPENROUTER_FREE_ONLY=1`` or ``ZAI_FREE_ONLY=1`` is set.
     """
     from ...backends import get_backend
     from ...core.types import ApiMode
+    from .models import apply_free_only_filter
 
     backend_name = getattr(args, "backend", None) or config.backend
     try:
@@ -190,6 +195,18 @@ def _startup_model_pick(args: argparse.Namespace, config) -> str | None:
 
     if not models:
         print(yellow("No models found on this backend — using the default model."))
+        return None
+
+    # R07.23: apply FREE_ONLY filter so the picker only shows free models
+    # when the operator has set OPENROUTER_FREE_ONLY / ZAI_FREE_ONLY.
+    models = apply_free_only_filter(backend_name, backend, models)
+    if not models:
+        print(
+            yellow(
+                f"No free models found on {backend_name} "
+                f"(FREE_ONLY is set) — using the default model."
+            )
+        )
         return None
 
     from ..picker import ArrowMenu
