@@ -900,6 +900,25 @@ class Agent(AgentSetupMixin, CompactionMixin, ToolExecutionMixin, StreamingMixin
             # mid-step too, not just at the top of the next step.
             if calls_this_step > 1:
                 self._check_compaction()
+            # R07.23: refresh the running-token snapshot + footer after
+            # every tool result is committed. Previously the footer only
+            # refreshed after a GENERATE call (via _on_generated →
+            # _on_step_callback), so during a long agentic run with many
+            # tool calls, the memory grew but ctx% stayed stuck at the
+            # value from the last generate. Now: snapshot the current
+            # memory size (which includes the just-added tool result) and
+            # ping the footer callback so the operator sees ctx% climb
+            # in real time as tool results accumulate.
+            self._snapshot_running_tokens()
+            if getattr(self, "_on_step_callback", None):
+                try:
+                    self._on_step_callback(
+                        0,  # step_num unknown here; footer ignores it for refresh
+                        self._running_tokens_in,
+                        self._running_tokens_out,
+                    )
+                except Exception:
+                    pass  # footer update failure must not break the run
 
         return self._run_loop_iteration(
             prompt,
