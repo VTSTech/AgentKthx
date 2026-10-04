@@ -78,10 +78,10 @@ jobs:
   coverage:
     name: coverage (Python 3.12)
     runs-on: ubuntu-latest
-    # Run in parallel with the test matrix — coverage does not gate PRs yet
-    # (no threshold enforced), so a coverage regression should not block a
-    # push that otherwise passes the test matrix. When a threshold is added,
-    # promote this to `needs: test` and add `if: always()` accordingly.
+    # Only push the badge back on push to main/master — skip on PRs
+    # (forks can't write to the base repo, and PR branches shouldn't get badge commits)
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -99,15 +99,31 @@ jobs:
           pip install -e .[dev]
 
       - name: Run pytest with coverage
-        # `--cov=agentkthx` reads [tool.coverage] config from pyproject.toml.
-        # term-missing prints the missing line numbers per module in the
-        # job log; the XML is uploaded as an artifact for offline analysis
-        # and is the format Codecov/Coveralls consume if/when added.
         run: |
           python -m pytest tests/ -q \
             --cov=agentkthx \
             --cov-report=term-missing \
             --cov-report=xml:coverage.xml
+
+      - name: Generate coverage badge
+        uses: tj-actions/coverage-badge-py@v2
+        with:
+          output: coverage.svg
+
+      - name: Verify changed files
+        uses: tj-actions/verify-changed-files@v20
+        id: changed
+        with:
+          files: coverage.svg
+
+      - name: Commit & push badge
+        if: steps.changed.outputs.files_changed == 'true' && github.event_name == 'push'
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add coverage.svg
+          git commit -m "chore: update coverage badge [skip ci]"
+          git push
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v4
