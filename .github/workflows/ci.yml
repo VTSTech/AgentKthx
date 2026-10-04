@@ -105,10 +105,10 @@ jobs:
             --cov-report=term-missing \
             --cov-report=xml:coverage.xml
 
-      - name: Generate coverage badge
-        uses: tj-actions/coverage-badge-py@v2
-        with:
-          output: coverage.svg
+     - name: Generate coverage badge
+        run: |
+          pip install "setuptools<81" coverage-badge
+          coverage-badge -f -o coverage.svg
 
       - name: Verify changed files
         uses: tj-actions/verify-changed-files@v20
