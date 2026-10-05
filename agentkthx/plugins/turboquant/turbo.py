@@ -163,12 +163,37 @@ def _is_process_alive(pid: int) -> bool:
     but is effectively dead — it won't do anything and may still hold a port
     socket in TIME_WAIT. Read ``/proc/<pid>/stat`` to check the process state
     and treat zombies as dead.
+
+    R07.24 (ROB-33): on Windows, ``os.kill(pid, 0)`` TERMINATES the target
+    process (the POSIX "signal 0 = liveness check" semantics don't hold —
+    Windows treats any signal as a kill). This was a latent bug since R06.57
+    but became user-facing in R07.16 when the call moved onto the chat
+    startup path via ``TurboState.load()``: a Windows user starting
+    ``agentkthx chat`` against a running turbo server would silently kill
+    the server in the process of checking if it was alive. The fix: branch
+    on ``os.name == 'nt'`` and use ``ctypes``'s ``OpenProcess`` +
+    ``GetExitCodeProcess`` for the Windows path (the standard non-destructive
+    liveness probe); keep ``os.kill(pid, 0)`` for POSIX (where signal 0 is
+    documented as a no-op liveness check).
     """
     if pid <= 0:
         return False
+
+    # R07.24 (ROB-33): Windows path — use OpenProcess + GetExitCodeProcess
+    # (non-destructive). os.kill(pid, 0) on Windows TERMINATES the target.
+    if os.name == "nt":
+        return _is_process_alive_windows(pid)
+
+    # POSIX path — os.kill(pid, 0) is documented as a liveness check
+    # (signal 0 = no signal sent, just existence/permission check).
     try:
         os.kill(pid, 0)  # Signal 0 = check existence
     except (ProcessLookupError, PermissionError, OSError):
+        return False
+    except OverflowError:
+        # R07.24 (ROB-33): pids that don't fit in pid_t (e.g. 0xFFFFFFFF
+        # on Linux) raise OverflowError, not OSError. These are clearly
+        # invalid — treat as not alive.
         return False
     # Check if it's a zombie (state 'Z') via /proc on Linux
     try:
@@ -181,6 +206,73 @@ def _is_process_alive(pid: int) -> bool:
     except (FileNotFoundError, IndexError, PermissionError, OSError):
         pass  # Not Linux or can't read /proc — assume alive (os.kill said so)
     return True
+
+
+def _is_process_alive_windows(pid: int) -> bool:
+    """R07.24 (ROB-33): Windows non-destructive liveness probe.
+
+    Uses ``ctypes`` to call ``kernel32!OpenProcess`` (PROCESS_QUERY_LIMITED_INFORMATION
+    access — read-only, no terminate rights) + ``GetExitCodeProcess``. The
+    exit code is ``STILL_ACTIVE`` (259) for a running process; any other
+    value (or failure to open the handle) means the process is dead.
+
+    Falls back to ``False`` on any ctypes error — fail-closed is correct
+    here: if we can't determine liveness, treat as dead so the caller
+    (``TurboState.load()`` + ``_free_port``) re-binds the port rather than
+    assuming the server is alive and crashing later.
+    """
+    # STILL_ACTIVE is the magic value Windows returns for a running process.
+    # See: https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getexitcodeprocess
+    STILL_ACTIVE = 259
+
+    try:
+        import ctypes
+        from ctypes import wintypes  # noqa: F401 (defines DWORD, HANDLE types)
+
+        # PROCESS_QUERY_LIMITED_INFORMATION (0x1000) — read-only access,
+        # doesn't grant PROCESS_TERMINATE (0x1) so we can't accidentally
+        # kill the process even if we wanted to.
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+
+        # OpenProcess returns 0 on failure; GetLastError() explains why.
+        # Common failures: ERROR_INVALID_PARAMETER (87) = the PID doesn't
+        # exist; ERROR_ACCESS_DENIED (5) = the process exists but we
+        # don't have permission to query it (still alive).
+        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            err = ctypes.get_last_error()
+            # ERROR_ACCESS_DENIED means the process exists — we just can't
+            # query it. Treat as alive (we'd have to be admin or the same
+            # user to get further info; either way it's running).
+            if err == 5:  # ERROR_ACCESS_DENIED
+                return True
+            # Other errors (most commonly ERROR_INVALID_PARAMETER = no such PID)
+            # → treat as dead.
+            return False
+
+        try:
+            # GetExitCodeProcess writes the exit code to the DWORD out-param.
+            # STILL_ACTIVE (259) means the process is running; any other
+            # value is the actual exit code (process exited with that code).
+            exit_code = ctypes.wintypes.DWORD()
+            ok = kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code))
+            if not ok:
+                # GetExitCodeProcess failed — can't determine state. Be
+                # conservative: assume alive (the OpenProcess succeeded,
+                # so the handle is valid; the process WAS running).
+                return True
+            return exit_code.value == STILL_ACTIVE
+        finally:
+            # Always close the handle — leaking handles exhausts the
+            # per-process handle table (default 10k on Windows).
+            kernel32.CloseHandle(handle)
+    except (OSError, AttributeError, ImportError):
+        # ctypes unavailable (non-Windows runtime) or kernel32 not loadable
+        # — fail-closed. Shouldn't happen since os.name == 'nt' was checked
+        # by the caller, but be defensive.
+        return False
 
 
 def _free_port(port: int, host: str = "localhost") -> bool:

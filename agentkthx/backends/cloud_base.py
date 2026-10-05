@@ -38,6 +38,7 @@ Written by VTSTech — https://www.vts-tech.org
 from __future__ import annotations
 
 import os
+import random
 
 from ..core.types import ApiMode, BackendType, ToolSupportLevel
 from .base import BackendConfig
@@ -378,6 +379,125 @@ class CloudBackend(OpenAICompatibleBackend):
         (e.g. OpenRouter's ``HTTP-Referer`` and ``X-Title``).
         """
         return {}
+
+    # ─────────────────────────────────────────────────────────────────────
+    # R07.24 (MAINT-23/ROB-29): shared HTTP retry helpers
+    # ─────────────────────────────────────────────────────────────────────
+    #
+    # The retry-loop skeleton was previously copy-pasted between Mistral's
+    # _iter_sse_lines (streaming) and _make_api_request (non-streaming),
+    # and again in Pollinations, OpenRouter, and OrcaRouter (the latter
+    # two having their own slight variants). This block lifts the truly
+    # shared pieces — Retry-After parsing + backoff calculation + 429/5xx
+    # retryable classification — so concrete backends can call the helpers
+    # instead of inlining the same ~30 LOC four times.
+    #
+    # The 4xx-specific handlers (401/404/422 + 400-context-length
+    # recovery) stay in each backend's caller because they differ in
+    # error-message wording and recovery strategy.
+
+    # Class-level backoff defaults — concrete backends override these
+    # to tune their own retry behavior. ROB-16 (R07.07): the cap matters;
+    # an uncapped ``Retry-After: 3600`` once hung a sibling backend for
+    # an hour. _BACKOFF_CAP clamps both the parsed Retry-After AND the
+    # computed exponential-backoff value.
+    _BACKOFF_BASE: float = 1.0
+    _BACKOFF_CAP: float = 60.0
+    _MAX_RETRIES: int = 4
+
+    def _max_retries(self) -> int:
+        """Resolve the retry budget — env override > class default.
+
+        Concrete backends can override to read their own env var
+        (e.g. Mistral reads ``MISTRAL_MAX_RETRIES``). The default
+        implementation reads ``AGENTKTHX_MAX_API_RETRIES`` (the
+        cross-backend override the agent loop's resilience layer
+        also reads); falls back to ``_MAX_RETRIES`` class attribute.
+        """
+        raw = os.environ.get("AGENTKTHX_MAX_API_RETRIES", "")
+        try:
+            val = int(raw)
+            if val >= 0:
+                return val
+        except (ValueError, TypeError):
+            pass
+        return self._MAX_RETRIES
+
+    def _compute_retry_after(self, headers, attempt: int) -> float:
+        """Parse Retry-After header or compute exponential backoff with jitter.
+
+        Honors ``Retry-After`` when present (429/503), capped at
+        ``_BACKOFF_CAP`` per the ROB-16 lesson. Falls back to
+        exponential backoff with full jitter (mirrors the official
+        cloud SDK recipe): ``base = _BACKOFF_BASE * 2**attempt``, clamped
+        to ``_BACKOFF_CAP``, plus 0–20% jitter on top to avoid
+        thundering-herd retries. The result is always ≥1s and ≤_BACKOFF_CAP.
+
+        Args:
+            headers: The HTTPError's ``.headers`` object (or None if
+                not available — e.g. a URLError has no headers).
+            attempt: Zero-indexed attempt number for the backoff
+                calculation (attempt 0 → ~1s base, attempt 1 → ~2s, etc.).
+
+        Returns:
+            Seconds to sleep before the next retry.
+        """
+        retry_after_raw = ""
+        if headers is not None:
+            try:
+                retry_after_raw = headers.get("Retry-After", "") or ""
+            except Exception:
+                retry_after_raw = ""
+
+        if retry_after_raw:
+            try:
+                ra = float(retry_after_raw)
+                # ROB-16: cap honored Retry-After — never sleep more than
+                # _BACKOFF_CAP, even if the server says "Retry-After: 3600".
+                return min(max(ra, 1.0), self._BACKOFF_CAP)
+            except (ValueError, TypeError):
+                pass  # malformed Retry-After — fall through to backoff
+
+        base = self._BACKOFF_BASE * (2**attempt)
+        backoff = min(base, self._BACKOFF_CAP)
+        # Full jitter: add 0–20% on top of the computed base. This
+        # de-correlates concurrent retries from the same client (e.g.
+        # multi-agent orchestrator retrying 4 backends in parallel after
+        # a network blip) so they don't all hammer the same server at
+        # the same instant.
+        backoff += random.uniform(0, backoff * 0.2)
+        return min(max(backoff, 1.0), self._BACKOFF_CAP)
+
+    def _is_retryable_http_status(self, status_code: int) -> bool:
+        """429 (rate limit) + 5xx (server errors) are retryable.
+
+        Per the convention established across Mistral, OpenRouter,
+        Pollinations, and OrcaRouter: 429 is always retryable (rate
+        limit, may clear), 500/502/503/504 are retryable (transient
+        server-side), 4xx (except 429) are not retryable (client error
+        — the request is malformed or unauthorized, retrying won't
+        help). 400-with-context-length-recovery is a special case
+        handled separately by ``_handle_context_length_400``.
+        """
+        return status_code == 429 or status_code in (500, 502, 503, 504)
+
+    def _compute_network_backoff(self, attempt: int) -> float:
+        """Compute exponential backoff for URLError (network-level) retries.
+
+        Distinct from ``_compute_retry_after`` because URLErrors carry
+        no headers — there's no Retry-After to honor. Just the
+        exponential-backoff-with-jitter path. Same clamping rules.
+
+        Args:
+            attempt: Zero-indexed attempt number.
+
+        Returns:
+            Seconds to sleep before the next retry.
+        """
+        base = self._BACKOFF_BASE * (2**attempt)
+        backoff = min(base, self._BACKOFF_CAP)
+        backoff += random.uniform(0, backoff * 0.2)
+        return min(max(backoff, 1.0), self._BACKOFF_CAP)
 
     # ─────────────────────────────────────────────────────────────────────
     # Shared implementations

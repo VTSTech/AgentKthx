@@ -76,11 +76,10 @@ from __future__ import annotations
 
 import json
 import os
-import random
 import time
 import urllib.error
 import urllib.request
-from typing import Generator
+from typing import Any, Generator
 
 from agentkthx import model_cache
 from agentkthx.backends.base import BackendConfig
@@ -938,6 +937,40 @@ class MistralBackend(CloudBackend):
         return self._make_api_request(body, stream=False)
 
     # ───────────────────────────────────────────────────────────────────
+    # R07.24 (MAINT-22): streaming-path body shaping — overrides the
+    # base class's default _build_stream_body (which delegates to
+    # _build_openai_body(stream=True)) so the streaming path uses the
+    # Mistral-specific body builder. Before R07.24, the streaming path
+    # bypassed _build_mistral_body — so random_seed, safe_prompt,
+    # prompt_cache_key, tool_choice="required"→"any" mapping, and
+    # OpenAI-only kwarg stripping were silently dropped on streaming calls.
+    # ───────────────────────────────────────────────────────────────────
+
+    def _build_stream_body(self, **kwargs: Any) -> dict:
+        """Route the streaming body construction through ``_build_mistral_body``.
+
+        R07.24 (MAINT-22): the base class's ``generate_completions_stream``
+        calls this hook instead of ``_build_openai_body(stream=True)``.
+        Routing through ``_build_mistral_body(stream=True)`` ensures the
+        streaming path applies all Mistral-specific body shaping:
+        ``seed``→``random_seed`` aliasing, ``safe_prompt`` injection,
+        ``prompt_cache_key`` from session_id, ``tool_choice="required"→"any"``
+        mapping, OpenAI-only kwarg stripping. Before R07.24, a streaming
+        call with ``seed=42`` ignored the seed; a streaming call with
+        ``MISTRAL_SAFE_PROMPT=true`` didn't inject the safety prompt; a
+        streaming call after R07.18's ``session_id`` kwarg didn't get the
+        prompt-cache-key. The non-streaming path was correct; the
+        streaming path was wrong. Now both paths use the same body.
+
+        Args: same kwargs as ``_build_openai_body`` (model, messages,
+            tools, temperature, max_tokens, top_p, stop, etc.) — forwarded
+            verbatim. ``stream=True`` is set inside ``_build_mistral_body``
+            (it accepts a stream kwarg and sets stream_options.include_usage
+            when stream=True per PERF-02).
+        """
+        return self._build_mistral_body(stream=True, **kwargs)
+
+    # ───────────────────────────────────────────────────────────────────
     # Streaming — SSE with data: [DONE] terminator + 429/5xx retry
     # ───────────────────────────────────────────────────────────────────
     # _iter_sse_lines — abstract hook required by OpenAICompatibleBackend
@@ -976,20 +1009,20 @@ class MistralBackend(CloudBackend):
             overridden at class level to match the
             ``maximum context length (is|of) N tokens`` wording)
           - 429 / 5xx retry honoring ``Retry-After`` (mirrors the
-            non-streaming path in ``_make_api_request``)
+            non-streaming path in ``_make_api_request``; both use the
+            R07.24 ``_compute_retry_after`` + ``_is_retryable_http_status``
+            helpers from CloudBackend — MAINT-23/ROB-29 closure)
           - ROB-06 deterministic response close on generator abandonment
 
-        Note: the base class's ``generate_completions_stream`` builds the
-        body via ``_build_openai_body`` (which sets ``stream_options.
-        include_usage: true`` when ``stream=True``). The Mistral-specific
-        body shaping (``random_seed``, ``safe_prompt``, ``prompt_cache_key``,
-        OpenAI-only kwarg stripping) is therefore NOT applied on the
-        streaming path — only on the non-streaming path via
-        ``_build_mistral_body``. This is a known limitation flagged for a
-        future release; the streaming path still works, it just doesn't
-        send the Mistral-specific knobs. To wire them in, override
-        ``generate_completions_stream`` to use ``_build_mistral_body``
-        instead of ``_build_openai_body``.
+        R07.24 (MAINT-22): the base class's ``generate_completions_stream``
+        now routes body construction through the ``_build_stream_body``
+        hook (overridden above to call ``_build_mistral_body(stream=True)``),
+        so the streaming path applies ALL Mistral-specific body shaping
+        (random_seed, safe_prompt, prompt_cache_key, tool_choice mapping,
+        OpenAI-only kwarg stripping) — same as the non-streaming path.
+        Before R07.24, the streaming path silently dropped these knobs;
+        the body this method receives is now identical to what
+        ``_make_api_request`` would build for a non-streaming call.
         """
         max_retries = self._max_retries()
         last_error_msg = ""
@@ -1039,23 +1072,11 @@ class MistralBackend(CloudBackend):
 
                 last_error_msg = err_msg
 
-                # Retryable: 429 + 5xx. Honor Retry-After when present,
-                # otherwise exponential backoff with full jitter (mirrors
-                # the non-streaming path).
-                retryable = status_code == 429 or status_code in (500, 502, 503, 504)
-                if retryable and attempt < max_retries:
-                    retry_after_raw = e.headers.get("Retry-After", "")
-                    retry_after: float | None = None
-                    if retry_after_raw:
-                        try:
-                            retry_after = float(retry_after_raw)
-                        except (ValueError, TypeError):
-                            retry_after = None
-                    if retry_after is None:
-                        base = self._BACKOFF_BASE * (2**attempt)
-                        retry_after = min(base, self._BACKOFF_CAP)
-                        retry_after += random.uniform(0, retry_after * 0.2)
-                    retry_after = min(max(retry_after, 1.0), self._BACKOFF_CAP)
+                # Retryable: 429 + 5xx. R07.24 (MAINT-23/ROB-29): delegate
+                # the retryable-classification + Retry-After + backoff
+                # calculation to the shared CloudBackend helpers.
+                if self._is_retryable_http_status(status_code) and attempt < max_retries:
+                    retry_after = self._compute_retry_after(e.headers, attempt)
 
                     if os.environ.get("AGENTKTHX_DEBUG") or attempt < 2:
                         print(
@@ -1075,11 +1096,11 @@ class MistralBackend(CloudBackend):
                 raise RuntimeError(f"Mistral API error {status_code}: {err_msg}") from e
 
             except urllib.error.URLError as e:
-                # Network-level error — retry once with backoff, then surface
+                # Network-level error — retry once with backoff, then surface.
+                # R07.24 (MAINT-23/ROB-29): delegate backoff to the shared
+                # _compute_network_backoff helper on CloudBackend.
                 if attempt < max_retries:
-                    backoff = self._BACKOFF_BASE * (2**attempt)
-                    backoff = min(backoff, self._BACKOFF_CAP)
-                    backoff += random.uniform(0, backoff * 0.2)
+                    backoff = self._compute_network_backoff(attempt)
                     if os.environ.get("AGENTKTHX_DEBUG"):
                         print(
                             f"  [Mistral-Stream] connection error ({e.reason}), "
@@ -1223,25 +1244,13 @@ class MistralBackend(CloudBackend):
 
                 # Retryable: 429 (rate limit) and 502/503/504 (transient
                 # server errors). 500 is also retryable per Mistral docs.
-                retryable = status_code == 429 or status_code in (500, 502, 503, 504)
-
-                if retryable and attempt < max_retries:
-                    # Honor Retry-After when parseable; otherwise
-                    # exponential backoff with full jitter.
-                    retry_after_raw = e.headers.get("Retry-After", "")
-                    retry_after: float | None = None
-                    if retry_after_raw:
-                        try:
-                            retry_after = float(retry_after_raw)
-                        except (ValueError, TypeError):
-                            retry_after = None
-
-                    if retry_after is None:
-                        base = self._BACKOFF_BASE * (2**attempt)
-                        retry_after = min(base, self._BACKOFF_CAP)
-                        retry_after += random.uniform(0, retry_after * 0.2)
-
-                    retry_after = min(max(retry_after, 1.0), self._BACKOFF_CAP)
+                # R07.24 (MAINT-23/ROB-29): delegate to the shared
+                # _is_retryable_http_status helper on CloudBackend.
+                if self._is_retryable_http_status(status_code) and attempt < max_retries:
+                    # R07.24 (MAINT-23/ROB-29): delegate Retry-After +
+                    # backoff calculation to the shared
+                    # _compute_retry_after helper on CloudBackend.
+                    retry_after = self._compute_retry_after(e.headers, attempt)
 
                     if os.environ.get("AGENTKTHX_DEBUG") or attempt < 2:
                         # Always surface the first 2 retries — the user
@@ -1279,10 +1288,10 @@ class MistralBackend(CloudBackend):
             except urllib.error.URLError as e:
                 # Network-level error — retry once with backoff, then
                 # surface as RuntimeError so the agent loop sees it.
+                # R07.24 (MAINT-23/ROB-29): delegate backoff to the
+                # shared _compute_network_backoff helper on CloudBackend.
                 if attempt < max_retries:
-                    backoff = self._BACKOFF_BASE * (2**attempt)
-                    backoff = min(backoff, self._BACKOFF_CAP)
-                    backoff += random.uniform(0, backoff * 0.2)
+                    backoff = self._compute_network_backoff(attempt)
                     if os.environ.get("AGENTKTHX_DEBUG"):
                         print(
                             f"  [Mistral] connection error ({e.reason}), "

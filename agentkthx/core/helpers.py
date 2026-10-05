@@ -252,13 +252,26 @@ def normalize_args(
                         target_pname = canonical
                         break
 
-        # Strategy 5: Prefix/substring matching
-        if target_param is None:
-            for param in expected_params:
-                if param in key_lower or key_lower.startswith(param):
-                    target_param = param
-                    target_pname = param
-                    break
+        # R07.24 (MAINT-03): Strategy 5 (prefix/substring matching) REMOVED.
+        # The original strategy matched any key whose lower-cased form was a
+        # prefix of OR substring of any expected param — so {"e": "..."} matched
+        # "expression" (e is a substring), {"pat": "/x"} matched "path", {"v": 1}
+        # matched "value", etc. This was dangerously permissive: a model that
+        # hallucinates a single-letter arg name (common for small models) would
+        # silently succeed instead of failing with a clear "unknown argument"
+        # message, and the value would land in whatever param happened to
+        # contain that letter. The fix: drop strategy 5 entirely. Models that
+        # need permissive arg matching should rely on the explicit alias tables
+        # (TOOL_ARG_ALIASES / CONTEXTUAL_ALIASES / ARG_ALIASES) — those are
+        # curated per-tool and reviewed. Prefix/substring matching was a
+        # catch-all that papered over real model errors.
+        #
+        # Operators who relied on strategy 5 can restore it per-tool by adding
+        # explicit entries to TOOL_ARG_ALIASES in core/prompts.py — that's the
+        # intended extension point. There is no env-var escape hatch; the
+        # finding's recommendation was to drop the strategy outright, and
+        # adding a `AGENTKTHX_PERMISSIVE_ARG_MATCH=1` flag would re-introduce
+        # the same risk under a different name.
 
         if target_pname is None:
             target_pname = key

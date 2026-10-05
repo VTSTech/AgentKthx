@@ -36,7 +36,7 @@ from .transport import StdioTransport
 _MCP_PROTOCOL_VERSION = "2025-06-18"
 
 _CLIENT_NAME = "agentkthx"
-_CLIENT_VERSION = "0.7.22"  # mirror __init__ package version
+_CLIENT_VERSION = "0.7.24"  # mirror __init__ package version
 
 
 class MCPClientError(RuntimeError):

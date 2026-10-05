@@ -4,7 +4,7 @@
 **Release:** R07.24
 **Date:** 2026-10-03  
 **Archived:** 2026-10-05 (R07.24 closure batch)
-**Counts:** 92 CLOSED · 9 WONTFIX · 101 total
+**Counts:** 97 CLOSED · 9 WONTFIX · 106 total
 
 > Counts updated at R07.21 (14 closures across three batches: ROB-18, ROB-35,
 > ROB-36, ROB-38, ROB-39 in batch 1; ROB-09, ROB-17, ROB-20, ROB-25, ROB-30,
@@ -30,8 +30,13 @@ This file is the archive of CLOSED and WONTFIX findings moved out of
 | SEC-13 | Medium | Security | ⊘ WONTFIX R07.24 | sha256 plugin pins are opt-in — no AGENTKTHX_REQUIRE_PLUGIN_PINS enforcement mode for external plugins — deferred; can't enforce what upstream authors ship |
 | SEC-20 | Medium | Security | ✓ CLOSED R07.24 | `mcp install` overwrites existing mcp.json entries by default — no `--no-overwrite` opt-out; user-customized args/paths lost silently on re-install |
 | MCP-01 | Medium | Robustness | ✓ CLOSED R07.24 | StdioTransport uses blocking readline — per-call timeouts don't actually interrupt (same shape as ROB-02/ROB-06) |
+| ROB-33 | Medium | Robustness | ✓ CLOSED R07.24 | _is_process_alive probes liveness with os.kill(pid, 0) — on Windows that TERMINATES the target; R07.16 moved the call onto the chat startup path via TurboState.load() |
+| MAINT-03 | Medium | Maintainability | ✓ CLOSED R07.24 | normalize_args strategy 5 (prefix/substring matching) is dangerously permissive — {"e": "..."} matches expression |
+| MAINT-22 | Medium | Maintainability | ✓ CLOSED R07.24 | Streaming path bypasses _build_mistral_body — random_seed/safe_prompt/prompt_cache_key/OpenAI-only kwarg stripping NOT applied on streaming (only non-streaming) |
+| MAINT-23 | Medium | Maintainability | ✓ CLOSED R07.24 | _make_api_request + _iter_sse_lines duplicate ~80 LOC of retry-loop skeleton (third consecutive cloud backend — ROB-29/MAINT-11 pattern); helpers are shared but the loop itself is copy-paste |
 | MCP-05 | Low | Robustness | ✓ CLOSED R07.24 | No `notifications/tools/list_changed` handler — runtime tool surface changes invisible to the registry until next session |
 | ROB-28 | Low | Robustness | ✓ CLOSED R07.24 | MistralBackend.list_models catches bare Exception on top of HTTPError/URLError — masks KeyError/AttributeError as "discovery failed" with no traceback |
+| ROB-29 | Low | Robustness | ✓ CLOSED R07.24 | MistralBackend _iter_sse_lines + _make_api_request have ~80 LOC duplicated retry/backoff logic — mirrors the MAINT-11 OrcaRouter pattern closed in R07.08 |
 | ROB-34 | Low | Robustness | ✓ CLOSED R07.19 | Windows no-readline fallback prompt renders wrong — bare-ESC form described by the finding was not in the R07.18 tree (already proper CSI); R07.19 rewrote the prompt for the Primary User feature and pinned the CSI contract |
 | ROB-37 | Low | Robustness | ✓ CLOSED R07.19 | models table Name column fixed at 48/50 under a no-truncation policy — names longer than the column (krith/meta-llama-3.2-1b-instruct-uncensored:IQ4_XS, 50 chars) pushed Size/Quant/Context right; R07.19 measures the longest name and widens NAME_W |
 | SEC-01 | Medium | Security | ✓ CLOSED R07.08 | sandboxed_repl.py SAFE_BUILTINS includes getattr/setattr/super/object — sandbox escape via attribute traversal |
@@ -781,6 +786,34 @@ Recommendation: register a per-server callback in `MCPClient` for `notifications
 **Impact:** Tools added/removed at runtime by MCP servers are invisible to the agent until session restart. Most current MCP servers have a static tool surface, so this is rarely hit in practice — but it's a latent gap that will bite when dynamic-tool servers become common.
 ---
 
+#### ROB-29: ~80 LOC duplicated retry/backoff between _iter_sse_lines and _make_api_request
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Robustness |
+| **File(s)** | `agentkthx/plugins/mistral/mistral.py:981-1139` + `:1187-1300` |
+**Status:** ✓ CLOSED R07.24
+
+The streaming and non-streaming paths each hand-roll the full attempt loop: HTTPError status classification, Retry-After parsing, backoff computation, retry-vs-raise decisions, and exhaustion messages — duplicated with small drifts (the ROB-22 exhaustion-message inconsistency came from exactly this kind of drift). This is the MAINT-11 (OrcaRouter) pattern's second occurrence; MAINT-23 (Pollinations) is the third.
+Recommendation: lift the R07.08 `_classify_and_handle_http_error` helper from `OrcaRouterBackend` to `CloudBackend` and shape it so both paths consume it; close the whole family in one move (ROB-29 + MAINT-23).
+**Impact:** Every new cloud backend re-copies ~80 LOC; drift between the copies produces inconsistent retry behavior (observed once already as ROB-22).
+---
+
+---
+
+#### ROB-33: `_is_process_alive` probes liveness with `os.kill(pid, 0)` — on Windows that TERMINATES the target, and R07.16 moved the call onto the chat startup path
+| Property | Value |
+|----------|-------|
+| **Severity** | Medium |
+| **Category** | Robustness |
+| **File(s)** | `agentkthx/plugins/turboquant/turbo.py:159-183`, `agentkthx/cli/agent_factory.py:571 (TurboState.load)` |
+**Status:** ✓ CLOSED R07.24
+
+New in R07.16. `_is_process_alive(pid)` uses `os.kill(pid, 0)` as an existence probe, then checks `/proc/<pid>/stat` for zombies. On Windows, `os.kill` with any signal other than `CTRL_C_EVENT`/`CTRL_BREAK_EVENT` does not probe — per the `os.kill` documentation, the target is **unconditionally killed via `TerminateProcess`** with the signal value as the exit code (0 here). The `/proc` zombie check is Linux-only and its absence handler just falls through to `return True`, so Windows always takes the destructive path. Pre-R07.16 this only endangered `turbo` command flows; R07.16 placed `TurboState.load()` (which calls `_is_process_alive(state.pid)`) into `_get_local_catalog_defaults` — executed on EVERY chat startup against a non-cloud backend with a local base_url, and for `--backend ollama` too, since the state file is global (`~/.agentkthx/turbo.state`). Concrete failure: `agentkthx turbo start <model>` (server running, state file present) followed by `agentkthx chat --backend turboquant` on Windows terminates the just-started server during the liveness check. Worse: if the state file is stale and the OS reused the pid for an unrelated process, chat startup kills that process.
+Recommendation: gate the probe by platform — on Windows use a non-destructive check (`ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, ...)` + `GetExitCodeProcess` comparing against `STILL_ACTIVE`, all stdlib); keep `os.kill(pid, 0)` on POSIX. Add a regression test that runs the liveness check against a live child process and asserts it still exists afterwards (fails on Windows today).
+**Impact:** The R07.16 flagship workflow (`turbo start` → `chat`) silently kills its own server on Windows — the platform this release specifically targeted.
+---
+
 ### Maintainability
 
 #### MAINT-02: 5 cloud backend plugins (zai/openrouter/gemini/openai/huggingface) duplicate ~5K LOC of structurally identical SSE/retry/catalog code
@@ -1105,6 +1138,51 @@ The `_model_cache`/`_cache_time` attributes were declared at class level, but `l
 The `_extract_params` helper converts an MCP tool's `inputSchema` (JSON Schema) into the project's flat `ToolParam` list. It handles `type: object` with `properties` + `required` and the common type cases (`string`/`integer`/`number`/`boolean`/`array`/`object`), plus nullable unions (`["string", "null"]`). It does NOT handle `oneOf`, `anyOf`, `allOf`, `$ref`, or nested `properties` deeper than one level — these fall through to `param_type = "string"` (the default). A tool with a sophisticated schema will appear simpler to the model than the server actually accepts, leading to malformed tool calls and the model being blamed for "hallucinating" args that the schema actually permitted.
 Recommendation: when `_extract_params` encounters a schema construct it can't structurally convert, emit a single `arguments_json` string parameter whose description tells the model to pass the full arguments object as JSON. The MCP client then parses the JSON and forwards it as the `arguments` field. This preserves the rich schema (the model sees a JSON string with the original schema in its description) at the cost of slightly more prompt tokens. Alternative: extend `ToolParam` to carry an arbitrary JSON Schema dict (bigger change — touches `to_json_schema` in `core/models.py`).
 **Impact:** Tools with `oneOf`/`anyOf`/`$ref` schemas appear deceptively simple to the model. Tool calls fail with "missing required field" or "wrong type" errors that the model can't easily diagnose because the schema it was shown didn't reflect reality.
+---
+
+#### MAINT-03: `normalize_args` strategy 5 (prefix/substring matching) is dangerously permissive
+| Property | Value |
+|----------|-------|
+| **Severity** | Medium |
+| **Category** | Maintainability |
+| **File(s)** | `agentkthx/core/helpers.py:144-282` |
+**Status:** ✓ CLOSED R07.24
+
+The function tries 5 strategies: (1) tool-specific alias lookup, (2) direct match, (3) case-insensitive match, (4) generic aliases (ARG_ALIASES), (5) prefix/substring matching. Strategy 5 (line 254-260) does `if param in key_lower or key_lower.startswith(param):` which is extremely permissive — a model that passes `{"ex": "2+2"}` to a tool with param `expression` will match because `"ex" in "expression"`. But `{"e": "..."}` would also match because `"e" in "expression"`. The `CONTEXTUAL_ALIASES` set (line 133-143) tries to mitigate this but only for known-ambiguous aliases. Worse, when MULTIPLE params match a single key, the last match wins (line 261-265) — non-deterministic based on dict iteration order.
+Recommendation: Drop strategy 5 entirely. If fuzzy matching is needed, require the match to be at least 3 characters AND not be a prefix of multiple params. Add `--strict-args` flag to disable fuzzy matching entirely for production use.
+**Impact:** Argument misattribution when models use single-letter keys — silent wrong behavior rather than a clear "missing argument" error.
+---
+
+#### MAINT-22: Streaming path bypasses _build_mistral_body — Mistral knobs not sent
+| Property | Value |
+|----------|-------|
+| **Severity** | Medium |
+| **Category** | Maintainability |
+| **File(s)** | `agentkthx/plugins/mistral/mistral.py:957-1008` (`_iter_sse_lines`), inherited `generate_completions_stream` |
+**Status:** ✓ CLOSED R07.24
+
+The inherited `generate_completions_stream()` builds its request body via the generic `_build_openai_body()`; `_build_mistral_body()`'s wire-format deltas (`random_seed` aliasing, `safe_prompt` injection, `prompt_cache_key` from `session_id`, OpenAI-only kwarg stripping) apply to non-streaming only. Streaming works — it just silently drops every Mistral-specific knob. The same gap exists in Pollinations (safe-flag injection is non-streaming-only there too).
+Recommendation: route streaming body construction through a backend-owned `_build_body()` virtual the base class calls — one indirection closes both plugins' variant of this.
+**Impact:** Users setting MISTRAL_SAFE_PROMPT/POLLINATIONS_SAFE or relying on seed determinism get silently different behavior between streaming and non-streaming turns.
+---
+
+#### MAINT-23: Retry-loop skeleton duplicated between _make_api_request and _iter_sse_lines (third backend)
+| Property | Value |
+|----------|-------|
+| **Severity** | Medium |
+| **Category** | Maintainability |
+| **File(s)** | `agentkthx/plugins/pollinations/pollinations.py:1414-1512` + `:1540-1638` |
+**Status:** ✓ CLOSED R07.24
+
+The Pollinations plugin extracted genuinely shared pieces (`_sleep_for_retry`, `_raise_for_status`, `_parse_error_envelope` — better than Mistral's ROB-29 state), but the attempt-loop skeleton is still copy-paste ×2: `for attempt in range(max_retries + 1)` → build request → HTTPError parse → ARCH-03 first-attempt-400 branch → retryable classification → Retry-After sleep → URLError backoff → exhaustion raise. The streaming copy differs only in yielding lines plus the ROB-06 close-guard. Third consecutive cloud backend carrying the pattern (OrcaRouter → Mistral → Pollinations); the family grows ~80 LOC per plugin.
+Recommendation: generalize the ROB-29 fix — lift a `CloudBackend` retry-loop primitive (`_request_with_retry(url, body, headers, *, stream=False)`) that returns parsed JSON or yields SSE lines; each backend contributes only body building, response parsing, and error-class prose. Closes the ROB-29 + MAINT-23 family and prevents the fourth occurrence.
+**Impact:** ~160 LOC of near-duplicate control flow in one plugin; every retry-policy fix must be applied in both loops (the Retry-After cap already had to be, twice).
+---
+
+---
+
+---
+
 ---
 
 ### Performance
@@ -1820,5 +1898,90 @@ Six findings resolved in one pass — four CLOSED (MCP-01, MCP-03, MCP-04, MCP-0
 **Status:** ⊘ WONTFIX R07.24 (owner decision)
 
 **Detail:** The finding recommended adding `AGENTKTHX_REQUIRE_PLUGIN_PINS=1` env var that refuses to load any plugin whose manifest lacks a well-formed sha256 pin, with an allowlist exception for bundled plugins. The owner deferred: plugins are externally-distributed code and AgentKthx can't enforce what upstream authors ship. Pin verification works WHEN present (the `_validate_sha256_pin` machinery from the R07.05 SEC-06 fix is intact), but refusing to load unpinned plugins would block every bundled plugin + every community plugin — the ecosystem doesn't ship pins today. The enforcement-mode gap is structural, not an AgentKthx defect. Same reasoning as MCP-02 (wontfixed in this same pass) — both findings share the "we can't enforce what we don't control" framing. The bundled plugins (`openai`, `mistral`, `openrouter`, `pollinations`, `gemini`, `huggingface`, `zai`, `orcarouter`, `bitnet`, `turboquant`, `acp`, `test-plugin`) all ship in-tree and are covered by the repo's own integrity (git commits + GitHub release tags); the trust boundary for community plugins is the same as for any Python package installed via pip — the operator's responsibility to vet before install.
+
+---
+## R07.16 New Findings
+Four findings, all from the R07.16 surface (TurboQuant lifecycle + chat-side auto-derivation + tool-calling auto-detection + Windows fallbacks). No closures this pass — all 30 carried-forward OPEN findings re-verified in current code. **R07.23 update:** MAINT-24 and MAINT-25 (originally listed here) were closed in the R07.21 closure batch 2 — their detail sections moved to `deltas.md`. They are removed from this delta table to keep `audit.md` focused on OPEN findings (the R07.16 historical record survives in `deltas.md`'s `## R07.16 Closures` section).
+| ID | Severity | Category | File(s) | Title |
+|----|----------|----------|---------|-------|
+| ROB-33 | Medium | Robustness | `agentkthx/plugins/turboquant/turbo.py:159-183`, `agentkthx/cli/agent_factory.py:490-497` | _is_process_alive probes liveness with os.kill(pid, 0) — on Windows that TERMINATES the target; now on the chat startup path |
+
+---
+
+## R07.24 Batch 3 — MAINT/ROB Closure Batch
+
+Five findings closed in one pass — all surgical, non-breaking. Suite: 2932 → 2959 passed (+27 new tests in `tests/test_r07_24_batch3_closures.py`). Zero regressions; ruff + black clean.
+
+### Maintainability
+
+#### MAINT-03: normalize_args strategy 5 (prefix/substring matching) REMOVED
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Medium |
+| **Category** | Maintainability |
+| **File(s)** | `agentkthx/core/helpers.py:255-261` (strategy 5 block) |
+
+**Status:** ✓ CLOSED R07.24
+
+**Detail:** Strategy 5 (prefix/substring matching) was the most permissive arg-matching strategy — it matched any key whose lower-cased form was a prefix of OR substring of any expected param. So `{"e": "..."}` matched `"expression"` (e is a substring), `{"pat": "/x"}` matched `"path"`, `{"v": 1}` matched `"value"`, etc. Dangerously permissive: a model that hallucinated a single-letter arg name silently succeeded instead of failing with a clear "unknown argument" message, and the value would land in whatever param happened to contain that letter — masking the model's error and producing subtly wrong tool calls. R07.24 deletes the strategy block entirely. Operators who relied on strategy 5 can restore it per-tool by adding explicit entries to `TOOL_ARG_ALIASES` in `core/prompts.py` (the intended extension point — curated + reviewed, not a catch-all). No env-var escape hatch per the finding's recommendation — adding `AGENTKTHX_PERMISSIVE_ARG_MATCH=1` would re-introduce the same risk under a different name. 6 regression tests: `test_single_letter_e_does_not_match_expression` (the headline case), `test_short_prefix_pat_does_not_match_path`, `test_substring_value_does_not_match_value_param`, `test_exact_match_still_works`, `test_case_insensitive_match_still_works`, `test_canonical_alias_match_still_works` (the regression guards verify strategies 1–4 are unaffected).
+
+---
+
+#### MAINT-22: Mistral streaming path now routes through _build_mistral_body
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Medium |
+| **Category** | Maintainability |
+| **File(s)** | `agentkthx/backends/openai_compat.py` (`_build_stream_body` hook), `agentkthx/plugins/mistral/mistral.py` (`_build_stream_body` override) |
+
+**Status:** ✓ CLOSED R07.24
+
+**Detail:** New `_build_stream_body()` hook on `OpenAICompatibleBackend`. The base class's `generate_completions_stream` now calls `self._build_stream_body(...)` instead of `self._build_openai_body(..., stream=True)` directly. The default implementation delegates to `_build_openai_body(stream=True, **kwargs)` — vanilla OpenAI-shape backends (ZAI, OpenRouter, HuggingFace, Pollinations, BitNet) are byte-identical to pre-R07.24. Mistral overrides the hook to delegate to `_build_mistral_body(stream=True, **kwargs)`, so the streaming path now applies ALL Mistral-specific body shaping: `seed`→`random_seed` aliasing, `safe_prompt` injection (when `MISTRAL_SAFE_PROMPT=true`), `prompt_cache_key` from `session_id` kwarg, `tool_choice="required"→"any"` mapping, OpenAI-only kwarg stripping. Before R07.24, a streaming call with `seed=42` ignored the seed; a streaming call with `MISTRAL_SAFE_PROMPT=true` didn't inject the safety prompt; a streaming call after R07.18's `session_id` kwarg didn't get the prompt-cache-key. The non-streaming path was correct; the streaming path was wrong. Now both paths use the same body. 4 regression tests: `test_mistral_overrides_build_stream_body` (the override exists), `test_mistral_build_stream_body_produces_mistral_shaped_body` (random_seed + stream_options present), `test_mistral_build_stream_body_includes_safe_prompt_when_env_set`, `test_vanilla_backend_default_routes_through_openai_body` (vanilla back-compat — source inspection since OpenAICompatibleBackend is abstract).
+
+---
+
+#### MAINT-23: Duplicated retry-loop skeleton lifted to CloudBackend
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Medium |
+| **Category** | Maintainability |
+| **File(s)** | `agentkthx/backends/cloud_base.py` (new `_compute_retry_after` + `_is_retryable_http_status` + `_compute_network_backoff` + `_max_retries` + class-level `_BACKOFF_BASE`/`_BACKOFF_CAP`/`_MAX_RETRIES`), `agentkthx/plugins/mistral/mistral.py` (`_iter_sse_lines` + `_make_api_request` both delegate) |
+
+**Status:** ✓ CLOSED R07.24
+
+**Detail:** The retry-loop skeleton was previously copy-pasted between Mistral's `_iter_sse_lines` (streaming) and `_make_api_request` (non-streaming), and again in Pollinations, OpenRouter, and OrcaRouter (the latter two having their own slight variants). R07.24 lifts the truly shared pieces — Retry-After parsing + exponential backoff calculation + 429/5xx retryable classification — to CloudBackend. New helpers: `_compute_retry_after(headers, attempt)` parses Retry-After header (capped at `_BACKOFF_CAP` per the ROB-16 lesson — an uncapped `Retry-After: 3600` once hung a sibling backend for an hour) + falls back to exponential backoff with full jitter (`base = _BACKOFF_BASE * 2**attempt`, plus 0–20% jitter on top to de-correlate concurrent retries); `_is_retryable_http_status(status_code)` returns True for 429 + 5xx, False for 4xx (except 429); `_compute_network_backoff(attempt)` is the URLError path (no headers to honor, just backoff). Class-level defaults `_BACKOFF_BASE = 1.0`, `_BACKOFF_CAP = 60.0`, `_MAX_RETRIES = 4` on CloudBackend — concrete backends override to tune their own retry behavior (Mistral keeps `_MAX_RETRIES = 5`, Pollinations keeps its ROB-16 cap). `_max_retries()` reads `AGENTKTHX_MAX_API_RETRIES` env var as the cross-backend override; Mistral's existing override (reads `MISTRAL_MAX_RETRIES`) is preserved. The 4xx-specific handlers (401/404/422 + 400-context-length recovery) stay in each backend's caller because they differ in error-message wording and recovery strategy. 9 regression tests: 5 on `_compute_retry_after` (honors Retry-After, caps at _BACKOFF_CAP, falls back to backoff, handles malformed, handles None headers), 1 on `_is_retryable_http_status` (429 + 5xx retryable, 4xx not), 2 on `_compute_network_backoff` (exponential + capped), 1 on Mistral's inheritance of the helpers.
+
+---
+
+### Robustness
+
+#### ROB-29: MistralBackend retry-loop duplication eliminated (same fix as MAINT-23)
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Robustness |
+| **File(s)** | `agentkthx/plugins/mistral/mistral.py` (`_iter_sse_lines` + `_make_api_request`) |
+
+**Status:** ✓ CLOSED R07.24
+
+**Detail:** Same finding as MAINT-23 — the duplicated retry/backoff logic between Mistral's `_iter_sse_lines` (streaming) and `_make_api_request` (non-streaming). The finding was filed separately because MAINT-23 was framed as "third consecutive cloud backend with the same pattern" (after the MAINT-11 OrcaRouter closure in R07.08 and the original Pollinations/OpenRouter copy-paste), while ROB-29 was framed as "the same ~80 LOC of retry skeleton duplicated within Mistral itself". Both findings point at the same code; the single fix (extract to CloudBackend) closes both. Mistral's `_iter_sse_lines` + `_make_api_request` both now delegate to `self._compute_retry_after(e.headers, attempt)` + `self._is_retryable_http_status(status_code)` + `self._compute_network_backoff(attempt)` — eliminating ~30 LOC of inline retry code from each method (~60 LOC total saved across the two methods). The 4xx-specific handlers (401 raise, 404 model-not-found, 422 validation error, 400 context-length recovery) stay in each method because the error-message wording differs. The "Mistral-Stream retries exhausted" + "Mistral API retries exhausted" post-loop raises are preserved — the bounded-retry-generator-ends-in-yield-or-raise invariant (per the R07.15 ROB-22 closure) is intact.
+
+---
+
+#### ROB-33: _is_process_alive platform-safe liveness probe
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Medium |
+| **Category** | Robustness |
+| **File(s)** | `agentkthx/plugins/turboquant/turbo.py` (`_is_process_alive`, `_is_process_alive_windows`) |
+
+**Status:** ✓ CLOSED R07.24
+
+**Detail:** On Windows, `os.kill(pid, 0)` TERMINATES the target process — the POSIX "signal 0 = liveness check" semantics don't hold on Windows, which treats any signal as a kill. This was a latent bug since R06.57 (when `_is_process_alive` was added to handle zombie detection), but became user-facing in R07.16 when the call moved onto the chat startup path via `TurboState.load()`: a Windows user starting `agentkthx chat` against a running turbo server would silently kill the server in the process of checking if it was alive. R07.24 branches on `os.name == 'nt'`: POSIX keeps `os.kill(pid, 0)` (where signal 0 is documented as a no-op liveness check); Windows uses `ctypes`'s `OpenProcess` (PROCESS_QUERY_LIMITED_INFORMATION = 0x1000 — read-only access, doesn't grant PROCESS_TERMINATE so we can't accidentally kill even if we wanted to) + `GetExitCodeProcess` (the exit code is `STILL_ACTIVE` = 259 for a running process; any other value means the process exited). The Windows helper fails closed on any ctypes error so the caller (`TurboState.load()` + `_free_port`) re-binds the port rather than assuming the server is alive. ERROR_ACCESS_DENIED (5) is treated as alive — the process exists but we don't have permission to query it (still running). Also catches `OverflowError` for pids that don't fit in `pid_t` (e.g. `0xFFFFFFFF` on Linux raises OverflowError, not OSError — pre-R07.24 the function would propagate the OverflowError up; now it returns False). 8 regression tests: zero-pid, nonexistent-pid (including the OverflowError case), current-pid (alive), windows-helper-exists, windows-helper-zero-pid-fail-closed, windows-helper-nonexistent-pid-on-linux-fail-closed, `test_no_os_kill_on_windows_path` (the ROB-33 contract test — os.kill is NOT called when os.name == 'nt'), `test_posix_path_uses_os_kill` (POSIX path intact).
 
 ---

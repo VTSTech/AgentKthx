@@ -53,7 +53,7 @@ from __future__ import annotations
 import json
 import os
 import time
-from typing import Generator, Iterable
+from typing import Any, Generator, Iterable
 
 from ..core.models import Tool
 from ..core.types import ApiMode, ThinkingSupport
@@ -671,6 +671,39 @@ class OpenAICompatibleBackend(BaseBackend):
     # Streaming (PERF-01)
     # ─────────────────────────────────────────────────────────────────────
 
+    def _build_stream_body(self, **kwargs: Any) -> dict:
+        """R07.24 (MAINT-22): Hook for streaming-path body construction.
+
+        The base ``generate_completions_stream`` calls this instead of
+        ``_build_openai_body(stream=True)`` directly, so backends with
+        provider-specific body shaping can apply the same shaping on the
+        streaming path as on the non-streaming path. Before R07.24, the
+        streaming path bypassed Mistral's ``_build_mistral_body`` — so
+        ``random_seed``, ``safe_prompt``, ``prompt_cache_key``, the
+        ``tool_choice="required"→"any"`` mapping, and the OpenAI-only
+        kwarg stripping were all silently dropped on streaming calls.
+        Operators got deterministic results from non-streaming calls but
+        non-deterministic results from streaming (different seed handling,
+        different safe_prompt posture) — the kind of subtle drift that
+        costs hours to diagnose.
+
+        The default implementation delegates to ``_build_openai_body`` with
+        ``stream=True``, so vanilla OpenAI-shape backends (ZAI, OpenRouter,
+        HuggingFace, Pollinations, BitNet) are byte-identical to the
+        pre-R07.24 behavior. Mistral overrides this to delegate to
+        ``_build_mistral_body(stream=True)``; other backends with future
+        provider-specific shaping should follow the same pattern.
+
+        Args: same kwargs as ``_build_openai_body`` (model, messages,
+            tools, temperature, max_tokens, top_p, stop, presence_penalty,
+            frequency_penalty, response_format, reasoning_effort, **kwargs).
+            ``stream=True`` is added by this default impl — override
+            implementations should ensure they set ``stream=True`` in the
+            body too (and ``stream_options.include_usage: true`` per
+            PERF-02 if they want the final usage chunk).
+        """
+        return self._build_openai_body(stream=True, **kwargs)
+
     def generate_completions_stream(
         self,
         model: str,
@@ -728,13 +761,19 @@ class OpenAICompatibleBackend(BaseBackend):
             max_tokens = context_safe
 
         # Build body with stream=True so stream_options.include_usage is sent
-        body = self._build_openai_body(
+        # R07.24 (MAINT-22): route through the _build_stream_body hook so
+        # backends with provider-specific body shaping (Mistral's
+        # random_seed / safe_prompt / prompt_cache_key / OpenAI-only-kwarg
+        # stripping) apply on the streaming path too, not just non-streaming.
+        # The default implementation delegates to _build_openai_body(stream=True)
+        # so vanilla OpenAI-shape backends (ZAI, OpenRouter, HuggingFace,
+        # Pollinations, BitNet) are unchanged.
+        body = self._build_stream_body(
             model=model,
             messages=messages,
             tools=tools,
             temperature=temperature,
             max_tokens=max_tokens,
-            stream=True,
             top_p=top_p,
             stop=stop,
             presence_penalty=presence_penalty,
