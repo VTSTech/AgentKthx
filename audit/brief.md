@@ -1,7 +1,7 @@
 # Codebase Intelligence Brief: AgentKthx
 
-> Generated: 2026-10-02 | Auditor: Super-Z (GLM) via `codebase-audit` v0.2.0 | Commit: `98ee377` (R07.20 dev — fc479aa #13 fix + version bump; PyPI 0.7.19 latest published)
-> Full regeneration — supersedes the R07.16 brief in its entirety, refreshed at the R07.20 re-audit. R07.19-era sections were re-verified against the current tree (suite 2608 passed / 16 skipped); register: 114 findings — 37 OPEN (in `audit/audit.md`) + 77 archived (70 CLOSED / 7 WONTFIX in `audit/deltas.md`, 68%). Dashboard: `python3 audit/generate_audit_dash.py --audit audit/audit.md --deltas audit/deltas.md --brief audit/brief.md --output dashboard.html`.
+> Generated: 2026-10-06 | Auditor: Super-Z (GLM) via `codebase-audit` v0.2.0 | Commit: `1d7f1ee` (R07.23 — `mcp search` + `mcp install` + memory first-user preservation + FREE_ONLY picker parity; PyPI 0.7.22 latest published per the changelog header)
+> R07.23 re-audit (Mode 2b). All 26 carried-forward OPEN findings re-verified via `verify_open_findings.py` (21 STILL_OPEN_LIKELY, 2 PATTERN_GONE false positives, 2 FILE_EXISTS_NO_PATTERN, 1 UNKNOWN); MCP-01..05 retroactively added to Findings Summary (filed in R07.22 but missing from the table — a reconcile-drift bug corrected this pass); 3 new findings filed from the R07.23 surface (SEC-20 `mcp install` silent-overwrite, ROB-41 `registry.search_all` swallows failures, TEST-11 mocked HTTP layer for `mcp search`). Suite: 2,899 passed / 16 skipped in ~19s; register: 125 findings — 34 OPEN (in `audit/audit.md`) + 91 archived (84 CLOSED / 7 WONTFIX in `audit/deltas.md`, ~73%). Dashboard: `python3 audit/generate_audit_dash.py --audit audit/audit.md --deltas audit/deltas.md --brief audit/brief.md --output dashboard.html`.
 
 ---
 
@@ -12,8 +12,8 @@
 | **Purpose** | A minimal, hackable, stdlib-only agentic framework + CLI for autonomous LLM agents with local and cloud backends, tool calling, streaming, plugins, souls, and skills |
 | **Tech Stack** | Python >= 3.12, **zero runtime dependencies** (`dependencies = []` — stdlib `urllib`/`json`/`sqlite3`/`ast`/`subprocess`/`socket`/`ipaddress`/`threading`/`weakref` only); dev: pytest/black/ruff |
 | **Entry Point** | Console script `agentkthx` → `agentkthx.cli:main` → `cli/main.py:main()` → `cli/parser.py` dispatch → `cli/commands/<cmd>.py` |
-| **Build/Run** | `pip install agentkthx` (PyPI 0.7.19 latest; this tree is 0.7.20-dev) or `pip install -e .`; `agentkthx chat`, `agentkthx turbo start <model>`, `agentkthx models`, `agentkthx souls`, `agentkthx version`, ... (90+ CLI flags across 16 subcommands) |
-| **Test Command** | `python -m pytest tests/ -q` → **2608 passed / 16 skipped in ~13s**; CI matrix Python 3.12/3.13 in `.github/workflows/ci.yml` + parallel coverage job + **required `lint` job** (`ruff check` + `black --check`, pinned versions) |
+| **Build/Run** | `pip install agentkthx` (PyPI 0.7.22 latest; this tree is 0.7.23-dev) or `pip install -e .`; `agentkthx chat`, `agentkthx turbo start <model>`, `agentkthx models`, `agentkthx souls`, `agentkthx mcp <init|list|probe|search|install>`, `agentkthx version`, ... (95+ CLI flags across 17 subcommands) |
+| **Test Command** | `python -m pytest tests/ -q` → **2,899 passed / 16 skipped in ~19s**; CI matrix Python 3.12/3.13 in `.github/workflows/ci.yml` + parallel coverage job + **required `lint` job** (`ruff check` + `black --check`, pinned versions) |
 
 ---
 
@@ -101,10 +101,15 @@ agentkthx/tools/              → builtins.py (shell timeout clamp; _SSRFSafeRed
 agentkthx/update_check.py     → Live PyPI + GitHub check on EVERY CLI invocation (intentional, ROB-05 WONTFIX;
                                 opt out AGENTKTHX_NO_UPDATE_CHECK=1)
 agentkthx/config.py           → Env-var-derived singletons; TURBOQUANT_BASE_URL primary (LLAMA_SERVER_BASE_URL fallback)
-audit/                        → brief + audit.md (37 OPEN) + deltas.md (77 archived) + split/verify/dash tooling
-docs/                         → ARCH.md, USAGE.md, PLUGIN_SPEC.md(+v0.2), CHANGELOG.md (R07.19 + R07.20 sections),
+agentkthx/mcp/                → NEW R07.22: MCP client package over stdio JSON-RPC 2.0 — config.py + transport.py +
+                                client.py + manager.py + (R07.23) registry.py + cache.py; zero new runtime deps
+                                (stdlib subprocess + json + urllib.request only). MCP-01..05 filed in R07.22.
+                                R07.23: live `mcp search` + `mcp install` replaced the deleted offline catalog.
+audit/                        → brief + audit.md (34 OPEN) + deltas.md (91 archived) + split/verify/dash tooling
+docs/                         → ARCH.md, USAGE.md, PLUGIN_SPEC.md(+v0.2), CHANGELOG.md (R07.23 + R07.22 sections),
+                                SECURITY.md + CONTRIBUTING.md (R07.22 — trust artifacts), mcp/ROADMAP.md (Phase 1-5 plan)
                                 TESTS.md, docs/api/*_API_TECHNICAL_REFERENCE.md (8 backends)
-tests/                        → 84 files, ~37,147 LOC, 2608 tests — all mocked unit tests, no integration tier (TEST-01);
+tests/                        → 93 files, ~41,806 LOC, 2,899 tests — all mocked unit tests, no integration tier (TEST-01);
                                 R07.19 regression files: test_r07_19_primary_user_env.py (42), test_r07_19_models_table_width.py
                                 (8), test_r07_19_tool_examples.py (17), test_r07_19_soul_rename.py (11),
                                 test_r07_19_soul_commands.py (68), test_r07_19_help_sort.py (59),
@@ -158,6 +163,8 @@ The 10 most important files. Touch these for almost any meaningful change.
 | `agentkthx/plugins/pollinations/pollinations.py` | The only keyless backend. Open cluster: ROB-31 (entitlement-blind fallback ranking), ROB-30 (`_fetch_model_cards` bare `except Exception`), MAINT-23 (retry-loop dup ×2), FEAT-08 (free-TIER boundary unreachable), TEST-10 (no live-shape contract test). Zero-cost models are currency-only pricing dicts. |
 | `scripts/diagnose_ollama.sh` (NEW R07.18, 839 LOC) | Standalone Ollama model health checker: single model or `--all`, JSON output, `--max-size` OOM guard + `--force` bypass; detects fp16 silent expansion (file_size << peak_RSS), context overrides, GGUF metadata lying about quant, load failures/OOM kills, tok/s + load time. Exit codes 0/1/2/3 = healthy/warning/broken/usage. `set -u`, no `set -e` (intentional — continues past per-model failures). |
 | `scripts/probe_llama_server_tools.py` (R07.16) | Stdlib-only diagnostic hitting a running llama-server with 7 request shapes; bypasses AgentKthx's chat path so errors shown are the server's. Auto-reads `~/.agentkthx/turbo.state`. |
+| `agentkthx/mcp/registry.py` (NEW R07.23, ~290 LOC) | Stdlib-only live search across npm + GitHub: `npm_search`, `npm_package_info`, `github_search`, `search_all`, `derive_short_name`, `build_config_snippet`, `MCPRegistryError`. All network calls use `urllib.request` with a 10s timeout; `search_all` swallows per-source failures (graceful degradation — **ROB-41**: all-source-down returns `[]` indistinguishable from 0-result success). Anonymous GitHub works at 10 req/min; `AGENTKTHX_GITHUB_TOKEN`/`GITHUB_TOKEN`/`GH_TOKEN` env vars raise to 5000/min. | New file. The `search_all` swallow-failures contract is a deliberate UX choice (one source down should not break the search) but the all-source-down case needs a network-error hint in plain mode (the `--json` payload already has an `errors` field; the plain-mode path doesn't consume it). |
+| `agentkthx/mcp/cache.py` (NEW R07.23, ~150 LOC) | JSON-backed TTL cache at `~/.agentkthx/mcp_cache.json` (mode 0o600). `get_cached(key)`/`set_cached(key, value, ttl=600)`/`clear_cache()`. Atomic writes via tmp+rename. Configurable via `AGENTKTHX_MCP_CACHE_TTL` env var (seconds; `0` disables). Cache key format: `"search:<source>:<query>:<limit>"`. | New file. Lazy eviction (expired entries skipped on read, overwritten on next write). File access is NOT locked — two concurrent `mcp search` calls could race on write (worst case: lost cache update, NOT corruption — atomic rename prevents file-level damage). |
 
 ---
 
@@ -354,15 +361,14 @@ Key coupling points:
 
 ## What's Missing / Incomplete
 
-1. **37 OPEN findings** in `audit/audit.md` (full detail + priority matrix there): Security 2 (SEC-09 ACP Basic-Auth-over-HTTP default, SEC-13 no plugin-pin enforcement mode) · Robustness 17 (incl. ROB-33 Windows process-kill, ROB-35 SharedConfig sentinel drop + ROB-36 token-size OverflowError, ROB-31 Pollinations entitlement mismatch, ROB-02 orchestrator thread join, ROB-06 Windows conn release, ROB-15/17/18 memory-store gaps, ROB-20/25 API asymmetries, ROB-09 symlink validate_path, ROB-28/29/30 catalog catch-alls + retry dup, ROB-38 misleading empty-answer boilerplate + ROB-39 OpenRouter non-chat NATIVE — both new at the R07.20 re-audit) · Maintainability 6 (MAINT-01 1,733-line cmd_chat, MAINT-03 fuzzy args, MAINT-22 streaming body bypass, MAINT-23 retry skeleton, MAINT-24 docstring contract, MAINT-25 no opt-out) · New Features 5 (FEAT-03 tool output schema, FEAT-05 plugin sandbox, FEAT-06 streaming arg deltas, FEAT-07 conversation export, FEAT-08 free-TIER mode) · Testing 7 (TEST-01 integration tier, TEST-03/04/05/07/09/10).
-2. **No integration tests** — all 2608 tests are mocked unit tests (TEST-01); coverage baseline 42.7% (R07.01), CLI layer well below.
+1. **34 OPEN findings** in `audit/audit.md` (full detail + priority matrix there): Security 3 (SEC-09 ACP Basic-Auth-over-HTTP default, SEC-13 no plugin-pin enforcement mode, **SEC-20** `mcp install` silent-overwrite — new R07.23) · Robustness 12 (incl. ROB-33 Windows process-kill, ROB-31 Pollinations entitlement mismatch, ROB-02 orchestrator thread join, ROB-06 Windows conn release, ROB-15 memory-store double-lock, ROB-28/29 Mistral catalog catch-alls + retry dup, **ROB-41** `registry.search_all` swallows failures — new R07.23, MCP-01/MCP-05 blocking-readline + list_changed) · Maintainability 6 (MAINT-01 1,733-line cmd_chat, MAINT-03 fuzzy args, MAINT-22 streaming body bypass, MAINT-23 retry skeleton, MAINT-27 `/sh` inline branch, MCP-03 schema flattening) · New Features 5 (FEAT-03 tool output schema, FEAT-05 plugin sandbox, FEAT-06 streaming arg deltas, FEAT-07 conversation export, FEAT-08 free-TIER mode) · Testing 6 (TEST-01 integration tier, TEST-03/04/05/07/09/10, **TEST-11** mocked HTTP layer for `mcp search` — new R07.23) · Performance 1 (MCP-04 eager MCP startup) · Architecture 1 (MCP-02 — no MCP server sha256 pin, SEC-13 analogue).
+2. **No integration tests** — all 2,899 tests are mocked unit tests (TEST-01); coverage baseline 42.7% (R07.01), CLI layer well below. TEST-09/10/11 are the same shape recurring (live-shape contract test gap).
 3. **No mypy** — no `[tool.mypy]`; mixins' host contracts are unverifiable by tooling.
-4. **No `CONTRIBUTING.md` / `SECURITY.md`**.
-5. **`schemas/v0.2/plugin.schema.json` declared but not validated** — ad-hoc dict checks in `_parse_manifest`.
-6. **No conversation export/import** (FEAT-07); no tool output JSON Schema validation (FEAT-03); no streaming `function_call_arguments.delta` (FEAT-06).
-7. **`agentkthx/examples/`** are demo scripts, not doctests; they do NOT use `shared_args`/`SharedConfig` (despite its docstring claim) — `SharedConfig` currently has zero in-tree consumers, which is the only reason ROB-35 is Low.
-8. **`patches/` not integrated into the build.**
-9. **77 findings archived** in `audit/deltas.md` (70 CLOSED across R07.00–R07.19 + 7 WONTFIX with owner rationale). R07.16/R07.17/R07.18 closed none; R07.19 closed ROB-34 (verification evidence) + ROB-37 (opened-and-closed same release). The register's near-term tier (ROB-33, ROB-31, ROB-02, ROB-06, ROB-15, SEC-09, SEC-13, MAINT-03, MAINT-22, MAINT-23, MAINT-01, TEST-01, TEST-03) shipped unchanged through all four releases. `generate_audit_dash.py` merges both files for the full register.
+4. **`schemas/v0.2/plugin.schema.json` declared but not validated** — ad-hoc dict checks in `_parse_manifest`. (R07.22 shipped `SECURITY.md` + `CONTRIBUTING.md`, closing the trust-artifacts gap.)
+5. **No conversation export/import** (FEAT-07); no tool output JSON Schema validation (FEAT-03); no streaming `function_call_arguments.delta` (FEAT-06).
+6. **`agentkthx/examples/`** are demo scripts, not doctests; they do NOT use `shared_args`/`SharedConfig` (despite its docstring claim).
+7. **`patches/` not integrated into the build.**
+8. **91 findings archived** in `audit/deltas.md` (84 CLOSED across R07.00–R07.21 + 7 WONTFIX with owner rationale). R07.22 added MCP-01..05 (filed but missing from Findings Summary — reconcile drift corrected at R07.23 re-audit). R07.23 added SEC-20, ROB-41, TEST-11. The register's near-term tier (ROB-33, ROB-31, ROB-02, ROB-06, ROB-15, SEC-09, SEC-13, **SEC-20**, MAINT-03, MAINT-22, MAINT-23, MAINT-01, TEST-01, TEST-03, MCP-01, MCP-02) shipped unchanged through R07.22 → R07.23. `generate_audit_dash.py` merges both files for the full register.
 
 ---
 
@@ -380,8 +386,8 @@ Key coupling points:
    - `MemoryConfig.max_tokens=0` default — token tier is opt-in
 4. **Follow Patterns** — hybrid native/ReAct tool calling via `_use_native_tools`; `num_predict = ctx // 32`; `sanitize_tool_output` on every tool result; per-release regression-test files (e.g. `tests/test_r07_18_repeat_penalty.py`).
 5. **Blast radius**: `core/helpers.py` → 18+ modules · `backends/cloud_base.py` → 8 cloud plugins · `cli/agent_factory.py` → every backend launch · `plugins/_loader.py` → every backend load · `shared_args.py` → every CLI surface.
-6. **Run tests before committing**: `python -m pytest tests/ -q` (~13s, 2608 tests). Lint is a REQUIRED CI check: `ruff check agentkthx/ tests/ && black --check agentkthx/ tests/`.
-7. **Read the register before adding work**: `audit/audit.md` (37 OPEN, ID-indexed, priority matrix) + `audit/deltas.md` (77 archived with closure prose). Re-audit workflow, split tooling, and the dashboard parser contract are specified in `agentkthx/skills/codebase-audit/SKILL.md`.
+6. **Run tests before committing**: `python -m pytest tests/ -q` (~19s, 2,899 tests). Lint is a REQUIRED CI check: `ruff check agentkthx/ tests/ && black --check agentkthx/ tests/`.
+7. **Read the register before adding work**: `audit/audit.md` (34 OPEN, ID-indexed, priority matrix) + `audit/deltas.md` (91 archived with closure prose). Re-audit workflow, split tooling, and the dashboard parser contract are specified in `agentkthx/skills/codebase-audit/SKILL.md`.
 
-Do NOT start by reading every file. Use this brief as your map and read only what you need for your specific task. The `core/` package is the engine — most changes start there; R07.19-era work concentrates in `cli/commands/chat.py` + `cli/picker.py` + `cli/commands/models.py` + `core/environment.py` + `core/tool_cache.py` + `backends/ollama.py`/`openai_compat.py` + `plugins/zai/zai.py`.
+Do NOT start by reading every file. Use this brief as your map and read only what you need for your specific task. The `core/` package is the engine — most changes start there; R07.19-era work concentrates in `cli/commands/chat.py` + `cli/picker.py` + `cli/commands/models.py` + `core/environment.py` + `core/tool_cache.py` + `backends/ollama.py`/`openai_compat.py` + `plugins/zai/zai.py`; R07.22 added `agentkthx/mcp/` (MCP client package); R07.23 expanded `mcp` to 5 actions (`list`/`init`/`probe`/`search`/`install`) + `registry.py` + `cache.py` + memory first-user preservation fix + FREE_ONLY picker parity fix.
 
