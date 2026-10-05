@@ -357,12 +357,38 @@ class Memory:
             systems = [m for m in self._messages if m.role == "system"]
             non_system = [m for m in self._messages if m.role != "system"]
 
+            # R07.23: preserve the first user message. OpenAI + ZAI require
+            # the first non-system message to be role=user; an
+            # assistant(message with tool_calls) as the first non-system
+            # message is invalid and triggers HTTP 400 "messages parameter
+            # is illegal" (ZAI code 1214). The previous pairing-safe head
+            # trim only dropped leading tool results — it missed the case
+            # where the sliding window drops the original user prompt and
+            # leaves an assistant(tool_calls) exposed at the head. We now
+            # pin the first user message before trimming and re-prepend it
+            # after, so the API sequence always starts with system → user.
+            first_user = None
+            if non_system and non_system[0].role == "user":
+                first_user = non_system[0]
+                non_system = non_system[1:]
+
             excess = len(non_system) - keep_count
             if excess > 0:
                 non_system = non_system[excess:]
 
+            # If we pinned the first user, account for it in the budget:
+            # re-prepend it even if it pushes us 1 over keep_count. The
+            # alternative (dropping it to stay at keep_count) recreates the
+            # bug — a 1-message overshoot is always preferable to an
+            # illegal API sequence.
+            if first_user is not None:
+                non_system = [first_user] + non_system
+
             # Pairing-safe head trim: a kept window must not START with a
             # tool result (its call is gone) — drop leading tool results.
+            # Also handle the edge case where the first_user was prepended
+            # but the NEXT message is an orphaned tool result (its
+            # announcing assistant was dropped by the slide).
             while non_system and non_system[0].role == "tool":
                 non_system.pop(0)
 
@@ -421,10 +447,22 @@ class Memory:
                 # the truncation (cosmetic — the tier has already committed).
                 acc = target
 
+        # R07.23: same first-user preservation as the count tier above.
+        # The token-tier slide can also drop the original user prompt and
+        # leave an assistant(tool_calls) exposed at the head → ZAI 1214.
+        # Pin the first user message before the slide, re-prepend after.
+        first_user = None
+        if kept and kept[0].role == "user":
+            first_user = kept[0]
+            kept = kept[1:]
+
         # Pairing-safe head trim, same rule as the count tier: a kept
         # window must not START with a tool result whose call is gone.
         while kept and kept[0].role == "tool":
             kept.pop(0)
+
+        if first_user is not None:
+            kept = [first_user] + kept
 
         self._messages = systems + kept
 
