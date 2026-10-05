@@ -19,9 +19,9 @@
     {
       "name": "memory",
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-memory"],
+      "args": ["-y", "@modelcontextprotocol/server-memory", "--storage-path", "/home/REPLACE_ME/.agentkthx/memory.json"],
       "enabled": true,
-      "comment": "Persistent knowledge graph (entities + relations). Add `--storage-path', '<path>'` to args to persist across restarts (default: in-memory)."
+      "comment": "Persistent knowledge graph (entities + relations). Storage path defaults to ~/.agentkthx/memory.json so the graph survives restarts."
     },
     {
       "name": "audit",

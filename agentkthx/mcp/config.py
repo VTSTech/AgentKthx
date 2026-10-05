@@ -284,6 +284,7 @@ def _build_example_config(home: str) -> str:
     import json as _json
 
     workspace = f"{home}/workspace"
+    memory_path = f"{home}/.agentkthx/memory.json"
 
     config = {
         "version": "0.1",
@@ -309,12 +310,17 @@ def _build_example_config(home: str) -> str:
             {
                 "name": "memory",
                 "command": "npx",
-                "args": ["-y", "@modelcontextprotocol/server-memory"],
+                "args": [
+                    "-y",
+                    "@modelcontextprotocol/server-memory",
+                    "--storage-path",
+                    memory_path,
+                ],
                 "enabled": True,
                 "comment": (
                     "Persistent knowledge graph (entities + relations). "
-                    "Add `--storage-path', '<path>'` to args to persist "
-                    "across restarts (default: in-memory)."
+                    "Storage path defaults to ~/.agentkthx/memory.json so "
+                    "the graph survives restarts."
                 ),
             },
             {
