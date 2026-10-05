@@ -27,6 +27,12 @@ def _print_session_header(agent: Agent, args: argparse.Namespace, config, label:
     if agent.num_ctx:
         ctx_display = f"{agent.num_ctx // 1024}K" if agent.num_ctx >= 1024 else str(agent.num_ctx)
         print(f"{dim('Context:')} {yellow(ctx_display)}")
+    # R07.23: surface max_steps in the header so operators can verify
+    # --max-steps was applied (not just the default 25). The footer's
+    # "N steps" count is completed iterations, not the limit — without
+    # this line, a fatal API error on step 25 looks identical to hitting
+    # the default 25-step ceiling.
+    print(f"{dim('Max Steps:')} {yellow(str(agent.max_steps))}")
     if timeout:
         print(f"{dim('Timeout:')} {yellow(str(timeout) + 's')}")
     acp = getattr(args, "_acp", None)

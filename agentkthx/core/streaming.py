@@ -483,6 +483,35 @@ class StreamingMixin:
                             print(describe_terminal(e, self.max_api_retries, _api_wait_total))
                         elif not _transient:
                             print(f"  [Resilience] Fatal API error — " f"not retrying: {e}")
+                        # R07.23: on a fatal API error, dump the messages
+                        # array structure (role distribution + total chars)
+                        # so operators can diagnose "messages parameter is
+                        # illegal" errors (ZAI 1214, OpenRouter 400) without
+                        # needing --debug. This is the streaming path's
+                        # equivalent of the non-streaming path's error
+                        # surface. Gated to --debug to avoid noise on
+                        # auth/quota errors where the messages array is
+                        # irrelevant.
+                        if self.debug:
+                            _msgs = self.memory.get_messages()
+                            _roles: dict[str, int] = {}
+                            _total_chars = 0
+                            for _m in _msgs:
+                                _r = _m.get("role", "?")
+                                _roles[_r] = _roles.get(_r, 0) + 1
+                                _c = len(_m.get("content", "") or "")
+                                _tc = _m.get("tool_calls")
+                                if _tc:
+                                    import json as _json
+
+                                    _c += len(_json.dumps(_tc, default=str))
+                                _total_chars += _c
+                            _role_str = ", ".join(f"{_r}={_n}" for _r, _n in sorted(_roles.items()))
+                            print(
+                                f"  [Stream] Messages at failure: "
+                                f"{len(_msgs)} msgs ({_role_str}), "
+                                f"~{_total_chars} chars (~{_total_chars // 4} tokens)"
+                            )
                         if self.debug:
                             print(f"  [Stream] ERROR: {e}")
                         # Emit failure event
