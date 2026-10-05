@@ -264,10 +264,16 @@ class TestMemoryPruning:
         for i in range(51):
             m.add("user", f"msg {i}")
         msgs = m.get_messages()
-        # Prune slides to 40 non-system at add #50; the 51st add lands in the
-        # reclaimed headroom before the next prune → system + 41.
-        assert len(msgs) == 42
+        # R07.23: the first user message is now always preserved (pins
+        # before the slide, re-prepended after) to prevent the first
+        # non-system message from being an assistant(tool_calls) which
+        # ZAI rejects with code 1214. So: system + first_user + 40 slid = 42,
+        # then the 51st add lands in reclaimed headroom = 43.
+        assert len(msgs) == 43
         assert msgs[0]["role"] == "system"
+        # First user message is preserved
+        assert msgs[1]["role"] == "user"
+        assert msgs[1]["content"] == "msg 0"
         # Newest message retained
         assert msgs[-1]["content"] == "msg 50"
 
@@ -277,7 +283,14 @@ class TestMemoryPruning:
             m.add("user", f"msg {i}")
         msgs = m.get_messages()
         assert msgs[-1]["content"] == "msg 19"
-        assert len(msgs) == 8  # keep_count = 8
+        # R07.23: keep_count = 8, but the first user message is pinned and
+        # re-prepended after the slide → 8 slid + 1 pinned = 9 after prune.
+        # The 20th add (msg 19) lands in reclaimed headroom without
+        # re-triggering prune (9 not > 10) → 10 total.
+        assert len(msgs) == 10
+        # First user message is preserved
+        assert msgs[0]["role"] == "user"
+        assert msgs[0]["content"] == "msg 0"
 
     def test_no_orphan_tool_results_at_window_head(self):
         m = Memory(MemoryConfig(max_messages=10, summarization_threshold=0.8))
@@ -288,6 +301,51 @@ class TestMemoryPruning:
         msgs = m.get_messages()
         # The window must not START with a tool result whose call fell out
         assert msgs[0]["role"] != "tool"
+
+    def test_prune_preserves_first_user_message(self):
+        """R07.23 regression: pruning must not drop the original user prompt.
+
+        Before the fix, the count-tier slide could drop the first user
+        message and leave an assistant(tool_calls) as the first non-system
+        message. ZAI (and OpenAI) require the first non-system message to
+        be role=user — an assistant message with tool_calls at the head
+        triggers HTTP 400 code 1214 "messages parameter is illegal".
+
+        This test reproduces the exact scenario: 25 native tool-call rounds
+        on a default MemoryConfig (max_messages=50), which pushes the
+        message count past the pruning threshold.
+        """
+        m = Memory(MemoryConfig())  # defaults: max_messages=50, threshold=0.8
+        m.add("system", "You are AGI AgentKthx with access to tools.")
+        m.add("user", "Smoke test the suite for me")
+        # 25 native tool-call rounds → 1 system + 1 user + 25 assistant + 25 tool = 52
+        for i in range(25):
+            call_id = f"call_{i:012x}"
+            m.add_tool_call(
+                "assistant",
+                f"\nQuery {chr(ord('a') + i)}:\n",
+                [native_call(call_id, "function.list", {"query": chr(ord("a") + i)})],
+            )
+            m.add_tool_result(call_id, "function.list", "<tool_output>ok</tool_output>")
+        msgs = m.get_messages()
+        # The first non-system message MUST be the original user prompt
+        first_non_system = next((m for m in msgs if m["role"] != "system"), None)
+        assert first_non_system is not None, "no non-system messages"
+        assert first_non_system["role"] == "user", (
+            f"first non-system message is {first_non_system['role']}, not user "
+            f"— ZAI will reject with code 1214"
+        )
+        assert first_non_system["content"] == "Smoke test the suite for me"
+        # No assistant message with tool_calls should appear before the first user
+        seen_user = False
+        for msg in msgs:
+            if msg["role"] == "user":
+                seen_user = True
+            elif msg["role"] == "assistant" and msg.get("tool_calls"):
+                assert seen_user, (
+                    "assistant(tool_calls) appeared before any user message "
+                    "— illegal API sequence"
+                )
 
     def test_prune_keeps_tool_pairs_intact(self):
         m = Memory(MemoryConfig(max_messages=12, summarization_threshold=0.8))
