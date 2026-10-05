@@ -81,7 +81,8 @@ AgentKthx implements and complies with several open specifications and standards
 | **Soul Spec** | v0.5 | 100% | ClawSouls specification for persona packages (soul.json manifests, SOUL.md/IDENTITY.md/STYLE.md files, progressive disclosure levels 1-3, calibration examples, embodied agent support) | [https://github.com/clawsouls/soulspec](https://github.com/clawsouls/soulspec) |
 | **ACP** | v1.0.6 | Full (mandatory requirements, hints, orphan handling, nudge support, batch ops, shutdown, A2A, JSON-RPC 2.0, primary agent nudge delivery) | Agent Control Panel specification for monitoring, activity logging (READ, WRITE, EDIT, BASH, SEARCH, API, A2A), STOP flag handling, agent-to-agent communication, and health tracking | [VTSTech/ACP-Agent-Control-Panel](https://github.com/VTSTech/ACP-Agent-Control-Panel) |
 | **AgentSkills** | — | 100% | Skill packaging specification defining SKILL.md with YAML frontmatter (name, description, license, compatibility, allowed-tools), scripts/references/assets directories, SPDX license validation, and environment compatibility checking | [https://agentskills.io/](https://agentskills.io/) |
-| **JSON-RPC 2.0** | 2.0 | Full | Remote procedure call protocol used for A2A (Agent-to-Agent) messaging between agents and the ACP server | [https://www.jsonrpc.org/specification](https://www.jsonrpc.org/specification) |
+| **JSON-RPC 2.0** | 2.0 | Full | Remote procedure call protocol used for A2A (Agent-to-Agent) messaging between agents and the ACP server, AND for the MCP (Model Context Protocol) stdio transport (R07.22+) | [https://www.jsonrpc.org/specification](https://www.jsonrpc.org/specification) |
+| **Model Context Protocol (MCP)** | 2025-06-18 | Full (client mode, stdio transport) | Open protocol for connecting AI assistants to external tools and data sources. AgentKthx implements MCP **client mode** over stdio JSON-RPC 2.0 (R07.22+): `initialize` handshake, `tools/list` + `tools/call` dispatch, `notifications/tools/list_changed` handler (R07.24). MCP servers' tools are bridged into the agent's `ToolRegistry` with `<server>__<tool>` namespacing, and all tool output flows through `sanitize_tool_output` (8 KB truncation + secret redaction + ANSI strip). The `agentkthx mcp` subcommand (R07.22: `init`/`list`/`probe`; R07.23: `search`/`install`/`uninstall`) provides terminal-only server discovery + config management. | [https://modelcontextprotocol.io/](https://modelcontextprotocol.io/) |
 | **Server-Sent Events (SSE)** | — | Full | Streaming protocol for real-time delivery of OpenResponses lifecycle events (response.queued, response.in_progress, response.output_item.added, response.output_text.delta, etc.) | [W3C Specification](https://html.spec.whatwg.org/multipage/server-sent-events.html) |
 | **SPDX License Identifiers** | 3.x | Subset | Standardized license identifier format used for skill license validation. AgentKthx validates skill licenses against a curated set of common SPDX identifiers (MIT, Apache-2.0, GPL-3.0, BSD-3-Clause, etc.) including WITH exception support (e.g., "Apache-2.0 WITH LLVM-exception") | [https://spdx.org/licenses/](https://spdx.org/licenses/) |
 | **IANA Time Zone Database** | — | Used | Standardized timezone identifiers (e.g., "America/New_York", "Europe/London", "UTC") used by the `get_time` tool via Python's `zoneinfo` module | [IANA Time Zone Database](https://www.iana.org/time-zones) |
@@ -231,6 +232,14 @@ The ZAI backend communicates through two endpoints:
 - **`/api/paas/v4/chat/completions`** — OpenAI Chat-Completions compatible endpoint with Bearer token authentication. Supports native tool calling, streaming (SSE), and the full OpenAI parameter set. Used exclusively by AgentKthx's ZAI backend (no native/openre mode — always Chat-Completions).
 - **`/api/paas/v4/models`** — Model discovery endpoint. Returns available models dynamically. AgentKthx merges API results with a static catalog to include flash variants and other models not returned by the endpoint.
 
+### npm Registry API (R07.23)
+
+The `agentkthx mcp search` and `agentkthx mcp install` commands use the **npm registry search API** at `https://registry.npmjs.org/-/v1/search` for live MCP server discovery. The search hits the npm registry, filters to packages whose name or description mentions MCP, and returns normalized result dicts. `agentkthx mcp install <name>` also hits `https://registry.npmjs.org/<package>` for full package metadata (version verification before writing to `mcp.json`). All network calls use stdlib `urllib.request` with a 10-second timeout. Results are cached for 10 minutes at `~/.agentkthx/mcp_cache.json` (configurable via `AGENTKTHX_MCP_CACHE_TTL`).
+
+### GitHub REST API (R07.23)
+
+The `agentkthx mcp search` command also queries the **GitHub Search API** at `https://api.github.com/search/repositories` to catch MCP servers published as GitHub repos but not on npm (e.g. `oraios/serena`, `github/github-mcp-server`). Anonymous requests are rate-limited at 10 per minute; setting `AGENTKTHX_GITHUB_TOKEN` (or `GITHUB_TOKEN` / `GH_TOKEN`) raises the limit to 5000 per hour. Failures from either npm or GitHub are swallowed (graceful degradation — if npm is down, GitHub results still return). The `search_all_with_errors` function (R07.24, ROB-41) returns per-source failure reasons so callers can distinguish "0 results" from "network error".
+
 ---
 
 ## Benchmarks & Evaluation Frameworks
@@ -249,7 +258,7 @@ AgentKthx's test suite draws on and adapts questions from established evaluation
 
 | Tool | Purpose | Link |
 |------|---------|------|
-| **pytest** | Unit testing framework (`tests/` directory with 800+ tests covering skills, security, builtins, spec compliance, and agent behavior) | [https://pytest.org](https://pytest.org) |
+| **pytest** | Unit testing framework (`tests/` directory with 2,959 tests + 20 live-gated covering skills, security, builtins, spec compliance, MCP, streaming, and agent behavior; R07.24: 60+ tests added across three closure batches) | [https://pytest.org](https://pytest.org) |
 | **black** | Opinionated Python code formatter (line-length: 100, target: Python 3.9-3.12) | [https://github.com/psf/black](https://github.com/psf/black) |
 | **ruff** | Fast Python linter (rules: E, F, W, I) | [https://github.com/astral-sh/ruff](https://github.com/astral-sh/ruff) |
 | **setuptools** | Build system and package distribution | [https://setuptools.pypa.io](https://setuptools.pypa.io) |
@@ -272,9 +281,10 @@ AgentKthx proudly uses **zero external dependencies** at runtime. The entire fra
 
 ---
 
-*Last updated: 2026-09-25 (AgentKthx R06.57)*
+*Last updated: 2026-10-06 (AgentKthx R07.24)*
 
 *Development history section added: 2026-03-30*
 *TurboQuant backend, Ollama registry, and tool support data updated: 2026-04-04*
 *ZAI backend, GLM model family, and API documentation added: 2026-04-15*
+*MCP client package (R07.22), mcp search/install (R07.23), audit closure super-batch (R07.24) added: 2026-10-06*
 *OpenRouter + Gemini backends, is_cloud attribute, shared context-length recovery, FIX-01 pip dev release detection, TurboQuant port cleanup + zombie detection, head_dim check removal added: 2026-09-25 (R06.57)*

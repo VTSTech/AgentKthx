@@ -2,9 +2,9 @@
 
 AgentKthx is a modular agent framework designed for local LLMs with tool-calling capabilities. It implements the OpenResponses specification for multi-provider, interoperable LLM interfaces.
 
-**Specification Compliance**: 100% (R03.5+) -- R04.x, R05.x, R06.0–R07.15
+**Specification Compliance**: 100% (R03.5+) -- R04.x, R05.x, R06.0–R07.24
 
-**Version**: R07.15 (0.7.15)
+**Version**: R07.24 (0.7.24)
 - OpenResponses API: 100%
 - Chat Completions API: 100%
 - Soul Spec v0.5: 100%
@@ -23,7 +23,9 @@ agentkthx/
 │   ├── tool_cache.py         # Persistent tool support detection cache (R03.6)
 │   ├── helpers.py            # Utilities (fuzzy match, security) plus the argument
 │   │                         # normalizer: normalize_args, fix_calculator_args,
-│   │                         # synthesize_missing_args (was core/args_normal.py)
+│   │                         # synthesize_missing_args (was core/args_normal.py).
+│   │                         # R07.24 (MAINT-03): strategy 5 (prefix/substring
+│   │                         # matching) REMOVED — per-tool alias tables only.
 │   ├── model_family_config.py # Family-specific behavior (start/stop tokens, temperatures,
 │   │                         # max tokens, tool formats; FAMILY_CONFIGS)
 │   ├── prompts.py            # Tool argument aliases (TOOL_ARG_ALIASES), platform constants,
@@ -44,12 +46,21 @@ agentkthx/
 │   │                         # + _process_tool_result, parameterized by the
 │   │                         # LoopCallbacks dataclass (Phase 5, MAINT-04)
 │   ├── streaming.py          # StreamingMixin — SSE machinery: run_stream(),
-│   │                         # _generate_stream_chunks(), _generate_stream() (Phase 6)
+│   │                         # _generate_stream_chunks(), _generate_stream() (Phase 6).
+│   │                         # R07.23: --debug messages-array dump on fatal API
+│   │                         # error (diagnoses ZAI 1214 / OpenRouter 400).
+│   │                         # R07.24 (MAINT-22): _build_stream_body hook routes
+│   │                         # Mistral streaming through _build_mistral_body.
 │   ├── compaction.py         # CompactionMixin — context compaction + running-
 │   │                         # token snapshots (Phase 7)
-│   └── tool_execution.py     # ToolExecutionMixin — _execute_tool(): registry
-│                             # lookup, confirmation gate, argument
-│                             # normalization, execution, error formatting (Phase 10)
+│   ├── tool_execution.py     # ToolExecutionMixin — _execute_tool(): registry
+│   │                         # lookup, confirmation gate, argument
+│   │                         # normalization, execution, error formatting (Phase 10).
+│   │                         # R07.24 (MCP-05): ToolRegistry.unregister_tool added.
+│   └── environment.py        # R07.19: stdlib-only host probe (OS family/version,
+│                             # distro, kernel, arch) → `# Host Environment` system-
+│                             # prompt section; returns "" on ANY failure.
+│                             # AGENTKTHX_NO_ENV_PROBE=1 opts out.
 │
 ├── tools/
 │   ├── registry.py           # Tool registry with decorator-based registration
@@ -121,7 +132,10 @@ agentkthx/
 │   │   └── pollinations.py   # PollinationsBackend: free-tier chat models
 │   ├── turboquant/           # TurboQuant server management plugin
 │   │   ├── plugin.json       # Manifest (type: feature, provides: turbo CLI command)
-│   │   └── turbo.py           # Server lifecycle, Ollama model registry, GGUF parsing
+│   │   └── turbo.py           # Server lifecycle, Ollama model registry, GGUF parsing.
+│   │                         # R07.24 (ROB-33): _is_process_alive platform-safe —
+│   │                         # Windows uses ctypes OpenProcess+GetExitCodeProcess (not
+│   │                         # os.kill(pid,0) which TERMINATES the target on Windows).
 │   └── test-plugin/          # Plugin system validation plugin
 │       ├── plugin.json       # Manifest (type: feature, provides: test-backend, plugin-test)
 │       ├── __init__.py       # register()/unregister() entrypoints
@@ -192,19 +206,66 @@ agentkthx/
 │   │                         # monkeypatching `agentkthx.cli.X` keep working
 │   ├── __main__.py           # `python -m agentkthx.cli` shim
 │   ├── parser.py             # create_parser() — argparse construction
-│   ├── agent_factory.py      # _build_agent, _init_acp, skill-prompt loading
+│   │                         # R07.19: SortedHelpFormatter for alphabetical -h
+│   ├── agent_factory.py      # _build_agent, _init_acp, skill-prompt loading.
+│   │                         # R07.22: _wire_mcp() — MCP client + tool bridge
+│   │                         # BEFORE Agent.__init__ (prompt must see MCP tools).
+│   │                         # R07.18: _detect_weight_quant, _get_catalog_defaults.
 │   ├── banner.py             # ASCII banner + update-check notice
-│   ├── headers.py            # Session/run header + summary printers
-│   ├── footer.py             # Persistent 2-line status footer (R05.4)
+│   ├── headers.py            # Session/run header + summary printers.
+│   │                         # R07.23: Max Steps line (verifies --max-steps applied).
+│   ├── footer.py             # Persistent 2-line status footer (R05.4).
+│   │                         # R07.17/18: fmt_token_size (128K/1M), 🧊 quant segment,
+│   │                         # 🔧 batch segment, ⚡ per-response TPS.
+│   ├── picker.py             # R07.19: ArrowMenu — arrow-key model picker.
+│   │                         # termios cbreak POSIX / msvcrt Windows / numbered fallback.
+│   │                         # Pure strings + state mutation — stdlib-only, testable.
 │   ├── utils.py              # Model resolution, step printing, tool cache
 │   ├── main.py               # main() — dispatch + plugin wiring
-│   └── commands/             # One module per subcommand (14 modules):
+│   └── commands/             # One module per subcommand (17 modules):
 │                             # run, chat, agent, models, test, config, turbo,
-│                             # soul, skills, sessions, plugins, modelfile,
-│                             # tools, version — plus `update`, dispatched via
-│                             # cmd_update() in version.py (no separate module)
+│                             # soul, souls, skills, sessions, plugins, modelfile,
+│                             # tools, mcp, version — plus `update`, dispatched via
+│                             # cmd_update() in version.py (no separate module).
+│                             # R07.19: souls + soul (mid-session switching).
+│                             # R07.22: mcp (init/list/probe).
+│                             # R07.23: mcp gains search + install + uninstall.
+├── mcp/                      # MCP (Model Context Protocol) client package (R07.22+).
+│   ├── __init__.py           # Package exports: MCPClient, MCPManager, MCPServerConfig,
+│   │                         # load_mcp_config, write_example_config, StdioTransport,
+│   │                         # registry functions (npm_search, search_all_with_errors, etc.)
+│   ├── config.py             # MCPServerConfig dataclass + load_mcp_config() +
+│   │                         # write_example_config(). Validates: server names (alnum/-/_),
+│   │                         # command (absolute or shutil.which-resolvable, no shell),
+│   │                         # shell=False + close_fds=True on spawn. Permission check
+│   │                         # warns on group/world-writable config files.
+│   ├── transport.py          # StdioTransport — JSON-RPC 2.0 over stdio pipes.
+│   │                         # Lazy spawn (subprocess starts on first request).
+│   │                         # R07.24 (MCP-01): thread+queue pattern — daemon thread
+│   │                         # does blocking readline(), main thread queue.get(timeout).
+│   │                         # Transport marked "poisoned" on timeout; is_poisoned property.
+│   │                         # R07.24 (MCP-05): set_notification_callback hook.
+│   ├── client.py             # MCPClient — wraps StdioTransport, speaks MCP protocol:
+│   │                         # initialize (protocolVersion 2025-06-18) + tools/list +
+│   │                         # tools/call. R07.24 (MCP-05): set_notification_handler +
+│   │                         # handle_notification trampoline for list_changed.
+│   ├── manager.py            # MCPManager — multi-server orchestrator + tool bridge.
+│   │                         # Namespaced tool names: <server>__<tool> (no collision).
+│   │                         # R07.24 (MCP-04): connect_all(lazy=True) + warmup_server().
+│   │                         # R07.24 (MCP-05): _refresh_tools_for_server diff +
+│   │                         # on_tools_changed callback + unregister_tool shim.
+│   │                         # R07.24 (MCP-03): _extract_params arguments_json fallback.
+│   ├── registry.py           # R07.23: Live npm + GitHub search (stdlib urllib only).
+│   │                         # npm_search, npm_package_info, github_search,
+│   │                         # search_all, search_all_with_errors (R07.24 ROB-41),
+│   │                         # derive_short_name, build_config_snippet.
+│   ├── cache.py              # R07.23: JSON-backed TTL cache at ~/.agentkthx/mcp_cache.json.
+│   │                         # get_cached/set_cached/clear_cache. AGENTKTHX_MCP_CACHE_TTL.
+│   └── mcp.example.json     # R07.23: example config (git entry removed — package 404'd).
 ├── model_discovery.py        # Ollama model listing and selection
-├── shared_args.py            # Shared CLI argument definitions + SharedConfig dataclass (R04.2)
+├── shared_args.py            # Shared CLI argument definitions + SharedConfig dataclass (R04.2).
+│                             # R07.17/18: --num-batch, --repeat-penalty, --repeat-last-n.
+│                             # R07.22: --mcp [SERVER...] + --mcp-config PATH.
 ├── update_check.py           # Startup + post-run update check (PyPI + GitHub main)
 │
 ├── docs/                     # Documentation
@@ -214,13 +275,22 @@ agentkthx/
 │   ├── 05_06_CHANGELOG.md    # Historical changelog (R05–R06)
 │   ├── CREDITS.md            # Credits, acknowledgments, and development history
 │   ├── PLUGIN_SPEC.md        # Plugin system specification (R05.0)
+│   ├── PLUGIN_SPEC_v0.2.md   # Plugin spec v0.2 (R06.5+)
+│   ├── USAGE.md              # User guide (R07.19+; R07.21: /sh slash command)
+│   ├── SECURITY.md           # Vulnerability reporting policy (R07.22)
+│   ├── CONTRIBUTING.md       # Project ethos + contribution guide (R07.22)
 │   ├── TESTS.md              # Benchmark results and testing guide
 │   ├── JEV_API_MODE.md       # JEV (System-One) API mode reference
 │   ├── api/                  # API Technical References (one per provider)
 │   │   ├── ZAI_API_TECHNICAL_REFERENCE.md  # ZAI API reference
 │   │   ├── OPENROUTER_API_TECHNICAL_REFERENCE.md  # OpenRouter API reference
 │   │   ├── GEMINI_API_TECHNICAL_REFERENCE.md  # Gemini API reference (R06.56)
-│   │   └── (plus Hugging Face, OpenAI, Mistral, Pollinations, OrcaRouter)
+│   │   ├── HUGGINGFACE_API_TECHNICAL_REFERENCE.md  # HF Inference Router (R07.01)
+│   │   ├── OPENAI_API_TECHNICAL_REFERENCE.md  # OpenAI platform (R07.01)
+│   │   ├── MISTRAL_API_TECHNICAL_REFERENCE.md  # Mistral La Plateforme (R07.09)
+│   │   ├── POLLINATIONS_API_TECHNICAL_REFERENCE.md  # Pollinations (R07.11)
+│   │   └── ORCAROUTER_API_TECHNICAL_REFERENCE.md  # OrcaRouter (R07.05)
+│   ├── mcp/ROADMAP.md       # MCP integration roadmap: Phase 1–5 plan (R07.22)
 │   └── R07.00-MODULARIZATION-PLAN.md     # Modularization plan (executed in R07.00)
 │
 ├── audit/                    # Audit materials (R06.41)
@@ -594,6 +664,22 @@ Backend resolution in `get_backend(name)`:
 3. Raise ValueError if not found
 ```
 
+### CloudBackend Shared Infrastructure (R07.24)
+
+All cloud-hosted OpenAI-compatible backends (ZAI, OpenRouter, Gemini, HuggingFace, OpenAI, OrcaRouter, Mistral, Pollinations) inherit from `CloudBackend(OpenAICompatibleBackend)` in `backends/cloud_base.py`. R07.24 (MAINT-23/ROB-29) lifted the duplicated retry-loop skeleton from per-backend copy-paste to shared helpers on `CloudBackend`:
+
+- **`_compute_retry_after(headers, attempt)`** — parses `Retry-After` header (capped at `_BACKOFF_CAP` per the ROB-16 lesson — an uncapped `Retry-After: 3600` once hung a sibling backend for an hour) + falls back to exponential backoff with full jitter (`base = _BACKOFF_BASE * 2**attempt`, plus 0–20% jitter to de-correlate concurrent retries).
+- **`_is_retryable_http_status(status_code)`** — returns True for 429 (rate limit) + 5xx (server errors); False for 4xx (except 429).
+- **`_compute_network_backoff(attempt)`** — URLError path (no headers to honor, just backoff).
+- **`_max_retries()`** — reads `AGENTKTHX_MAX_API_RETRIES` env var (cross-backend override); concrete backends override to read their own env var (e.g. Mistral reads `MISTRAL_MAX_RETRIES`).
+- Class-level defaults: `_BACKOFF_BASE = 1.0`, `_BACKOFF_CAP = 60.0`, `_MAX_RETRIES = 4`. Concrete backends override to tune their own retry behavior.
+
+The 4xx-specific handlers (401 auth, 404 model-not-found, 422 validation, 400-context-length recovery) stay in each backend's caller because they differ in error-message wording and recovery strategy.
+
+### Streaming-Path Body Shaping (R07.24, MAINT-22)
+
+`OpenAICompatibleBackend.generate_completions_stream()` calls `self._build_stream_body(...)` instead of `self._build_openai_body(..., stream=True)` directly. The default `_build_stream_body` delegates to `_build_openai_body(stream=True)` — vanilla OpenAI-shape backends (ZAI, OpenRouter, HuggingFace, Pollinations, BitNet) are byte-identical to pre-R07.24. Mistral overrides `_build_stream_body` to delegate to `_build_mistral_body(stream=True)`, so the streaming path now applies ALL Mistral-specific body shaping (random_seed, safe_prompt, prompt_cache_key, tool_choice="required"→"any" mapping, OpenAI-only kwarg stripping). Before R07.24, a streaming call with `seed=42` silently ignored the seed — the non-streaming path was correct, the streaming path was wrong.
+
 ### Backend Registry
 
 The `--backend` flag selects which backend to use:
@@ -768,6 +854,70 @@ HF_FREE_ONLY=1 agentkthx models --backend hf
 unset HF_FREE_ONLY
 agentkthx models --backend hf   # warning fires once, 3-model whitelist auto-enforced
 ```
+
+---
+
+## MCP Client (`mcp/`) (R07.22+)
+
+AgentKthx implements a **Model Context Protocol (MCP) client** over stdio JSON-RPC 2.0. Agents can consume tools from external MCP servers (filesystem, sequential-thinking, sqlite, memory, serena, brave-search, ...) alongside built-ins, with their tools bridged into the existing `ToolRegistry`. Zero runtime dependencies added — the implementation uses stdlib `subprocess` + `json` + `urllib.request` only, in keeping with the project's `dependencies = []` invariant.
+
+### Architecture
+
+```
+agentkthx chat --mcp filesystem sequential-thinking
+         │
+         ▼
+    _wire_mcp() in cli/agent_factory.py   ← runs BEFORE Agent.__init__
+         │                                    (system prompt must see MCP tools)
+         ▼
+    MCPManager(configs)
+         │
+         ├─ connect_all(skip_failures=True, verbose=True)
+         │    ├─ MCPClient(filesystem_cfg).connect()      ← initialize + tools/list
+         │    ├─ MCPClient(sequential-thinking_cfg).connect()
+         │    └─ register tool defs in _tools dict
+         │
+         ├─ register_into(agent.tools)                    ← bridge shim Tools
+         │    └─ <server>__<tool> namespace (no collision)
+         │
+         └─ stashed on agent._mcp_manager                  ← close_all() at session exit
+```
+
+### StdioTransport (`mcp/transport.py`)
+
+Wraps one subprocess; newline-delimited JSON-RPC 2.0 over stdin/stdout; stderr captured to a 64-line ring buffer for diagnostics. Lazy spawn (subprocess starts on first request, not at transport construction). `close()` sends MCP `shutdown` + `exit` notifications, then `terminate` + `kill` if the process hasn't exited within 2s. Per-transport `threading.Lock` serializes concurrent calls to the same server (JSON-RPC over a single stdio pair is inherently serial); parallel tool calls across servers use multiple transports.
+
+**R07.24 (MCP-01):** `_read_response` uses a **thread+queue pattern** — a daemon thread does the blocking `readline()` and pushes the result to a `queue.Queue`; the main thread does `queue.get(timeout=remaining)`. Per-call timeouts now actually interrupt (previously, a hung MCP server would block the calling thread for the full `timeout_seconds` window with no escape). On timeout, the transport is marked **poisoned** — subsequent calls raise immediately with a "close() and reconnect to recover" message. The `is_poisoned` property is exposed for diagnostics. Bonus: Ctrl+C interruptibility on POSIX (the main thread no longer holds the GIL inside `readline()`).
+
+### MCPClient (`mcp/client.py`)
+
+Wraps a `StdioTransport` and speaks the MCP protocol: `initialize` (sends `protocolVersion: 2025-06-18` + `clientInfo: agentkthx/<version>`), `notifications/initialized`, `tools/list`, `tools/call`. Server-reported `serverInfo` + `capabilities` exposed via read-only properties. Tool *execution* errors (e.g. file-not-found) are returned as `{"isError": true, ...}` for the model to react to — only protocol/transport errors raise.
+
+**R07.24 (MCP-05):** `set_notification_handler(method, callback)` + `handle_notification(msg)` trampoline. The client installs the trampoline on its transport during `connect()` BEFORE sending `initialize` (so early notifications aren't missed). `initialize` now advertises `listChanged: True` in the client capabilities (was already there pre-R07.24 but now actually wired). Handler exceptions are swallowed + logged so a buggy handler doesn't kill the transport.
+
+### MCPManager (`mcp/manager.py`)
+
+Orchestrates multiple `MCPClient` instances and bridges their tools into a target `ToolRegistry`. Tool name namespacing: `<server>__<tool>` (the `__` separator cannot appear in either MCP field, eliminating collision risk). Each MCP tool becomes a shim `Tool` whose handler forwards the call to the right `MCPClient`, then pipes the result through `sanitize_tool_output` exactly like built-in tools (8 KB truncation + secret redaction + ANSI strip — the defense-in-depth posture does not weaken because a tool came from a subprocess).
+
+**R07.24 (MCP-04) — Lazy mode:** `connect_all(lazy=True)` records configs without spawning any subprocesses. New `warmup_server('<name>')` method spawns + enumerates + registers tools into the live `_target_registry` (stashed by `register_into()`). `_invoke` auto-warms on first dispatch to a lazy server's namespace. Trade-off: prompt-time tool surface is empty for lazy servers — operators who want lazy startup AND prompt-time tool surface should `warmup_server("<name>")` BEFORE `Agent.__init__` builds the prompt. Default behavior (lazy=False) is unchanged — eager spawn + full tool surface.
+
+**R07.24 (MCP-05) — Runtime tool surface changes:** `_install_list_changed_handler(client, name)` wires the per-server `notifications/tools/list_changed` callback to `_refresh_tools_for_server(name)` — re-queries `tools/list`, diffs against the cached surface, adds newly-discovered shim Tools to the live `_target_registry`, removes vanished ones via `ToolRegistry.unregister_tool(name)` (NEW method added in R07.24), then fires the user-registered `on_tools_changed(callback)` with `(server_name, added, removed)`.
+
+**R07.24 (MCP-03) — Complex JSON Schema fallback:** `_extract_params` converts an MCP tool's `inputSchema` (JSON Schema) into the project's flat `ToolParam` list. When the schema contains constructs we can't structurally flatten — `oneOf`, `anyOf`, `allOf`, `$ref`, `$dynamicRef`, or nested `properties` deeper than one level — the whole tool falls back to a single `arguments_json` string parameter whose description embeds the original schema as JSON. `_invoke` parses the JSON string + forwards the parsed dict as the MCP `arguments` field; malformed JSON returns a clean error string to the model rather than raising. Verified against the real `@modelcontextprotocol/server-memory` knowledge-graph schema in production (R07.24 smoke test).
+
+### Registry + Cache (`mcp/registry.py` + `mcp/cache.py`) (R07.23)
+
+R07.23 expanded the `mcp` subcommand from three actions to five — `list`, `init`, `probe`, **`search`**, **`install`** — and removed the deprecated `@modelcontextprotocol/server-git` entry from `mcp init`'s example config (the package was deleted from npm, 404 as of 2026-10-04). The new `registry.py` implements stdlib-only live search across npm + GitHub: `npm_search` hits `registry.npmjs.org/-/v1/search`, `github_search` hits `api.github.com/search/repositories` (anonymous at 10 req/min; `AGENTKTHX_GITHUB_TOKEN`/`GITHUB_TOKEN`/`GH_TOKEN` raises to 5000/min). Failures from either source are swallowed (graceful degradation — if npm is down, GitHub results still return). `cache.py` provides a JSON-backed TTL cache at `~/.agentkthx/mcp_cache.json` (mode 0o600, atomic writes via tmp+rename, 10-minute default TTL configurable via `AGENTKTHX_MCP_CACHE_TTL`). `search_all_with_errors` (R07.24, ROB-41) returns a `(results, errors)` tuple so callers can distinguish "0 results from a successful search" from "0 results because all sources failed".
+
+### CLI integration
+
+- `agentkthx mcp init` — writes `~/.agentkthx/mcp.json` with home-dir substitution + creates `~/projects/` + `~/repo/`. Refuses to overwrite without `--force`. `chmod 0o600` on the written file.
+- `agentkthx mcp list` — shows configured servers with enabled/disabled markers, command preview, and timeout.
+- `agentkthx mcp probe <name>` — connects to one server, runs `initialize` + `tools/list`, prints the tool surface. Optional `--call TOOL JSON_ARGS` round-trips a real `tools/call`.
+- `agentkthx mcp search [query]` (R07.23) — live npm + GitHub search, 10m cache. `--source npm|github|all`, `--limit N`, `--refresh`, `--json`.
+- `agentkthx mcp install <name>` (R07.23) — fetches live metadata + writes to `~/.agentkthx/mcp.json`. `--as`, `--command`, `--args`, `--dry-run`, `--json`, `--config`, `--no-overwrite` (R07.24 SEC-20).
+- `agentkthx mcp uninstall <name>` (R07.23) — remove a server entry from mcp.json.
+- `--mcp [SERVER ...]` / `--mcp-config PATH` flags on `chat`/`run`/`agent`.
 
 ---
 
@@ -1893,6 +2043,16 @@ Final Answer: 1024
 | `TURBOQUANT_CTX` | `8192` | TurboQuant context window size |
 | `AGENTKTHX_RETRY_ON_ERROR` | `true` | Enable retry context injection (env var) |
 | `AGENTKTHX_MAX_TOOL_RETRIES` | `2` | Maximum retries per tool failure (env var) |
+| `AGENTKTHX_NO_UPDATE_CHECK` | (unset) | Skip the 3-request PyPI + GitHub startup check |
+| `AGENTKTHX_NO_ENV_PROBE` | (unset) | Skip the `# Host Environment` system-prompt section (R07.19) |
+| `AGENTKTHX_USER` | (unset) | Override the "Primary User" name in chat (R07.19) |
+| `AGENTKTHX_PARALLEL_TOOLS` | `1` | Enable parallel independent tool-call batches (FEAT-02). `0` = sequential |
+| `AGENTKTHX_MAX_API_RETRIES` | `4` | Cross-backend retry budget override (R07.24, MAINT-23). Per-backend env vars (e.g. `MISTRAL_MAX_RETRIES`) take precedence |
+| `AGENTKTHX_GITHUB_TOKEN` | (unset) | GitHub auth token for `mcp search` (R07.23). Raises anonymous 10 req/min → 5000 req/h. Also reads `GITHUB_TOKEN` / `GH_TOKEN` |
+| `AGENTKTHX_MCP_CACHE_TTL` | `600` | TTL in seconds for the mcp search cache at `~/.agentkthx/mcp_cache.json` (R07.23). `0` disables caching |
+| `AGENTKTHX_LIVE_TESTS` | (unset) | Opt-in for live-gated contract tests in `tests/test_mcp_live_contract.py` (R07.24, TEST-11). Hits real `registry.npmjs.org` + `api.github.com` |
+| `--mcp [SERVER ...]` | (unset) | Enable MCP servers for the session (R07.22). Bare `--mcp` enables all; `--mcp fs git` enables only the named subset |
+| `--mcp-config PATH` | `~/.agentkthx/mcp.json` | Override the MCP config file path (R07.22) |
 
 ### Model-Specific Configs
 
