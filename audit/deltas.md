@@ -1,10 +1,10 @@
 # Audit Deltas — Closed & Wontfix Archive
 
 **Project:** AgentKthx  
-**Release:** R07.21  
+**Release:** R07.24
 **Date:** 2026-10-03  
-**Archived:** 2026-10-03 (R07.21 closure batch — ROB-18, ROB-35, ROB-36, ROB-38, ROB-39)  
-**Counts:** 84 CLOSED · 7 WONTFIX · 91 total
+**Archived:** 2026-10-05 (R07.24 closure batch)
+**Counts:** 88 CLOSED · 7 WONTFIX · 95 total
 
 > Counts updated at R07.21 (14 closures across three batches: ROB-18, ROB-35,
 > ROB-36, ROB-38, ROB-39 in batch 1; ROB-09, ROB-17, ROB-20, ROB-25, ROB-30,
@@ -26,6 +26,8 @@ This file is the archive of CLOSED and WONTFIX findings moved out of
 | SEC-02 | **High** | Security | ✓ CLOSED R07.04 | ast.literal_eval fallback for Python-dict tool arguments enables type-confusion bypass |
 | MAINT-14 | **High** | Maintainability | ✓ CLOSED R07.07 | The headline fix. The \bTrue\b / \bFalse\b / \bNone\b regex substitutions in core/tool_parse.py:243-256 (R07.05 SEC-02 c |
 | ROB-32 | **High** | Robustness | ✓ CLOSED R07.14 | _build_agent passes force_react which Agent no longer accepts — every agentkthx chat/agent invocation raises TypeError post-ARCH-05 (latent since R03.3) |
+| SEC-20 | Medium | Security | ✓ CLOSED R07.24 | `mcp install` overwrites existing mcp.json entries by default — no `--no-overwrite` opt-out; user-customized args/paths lost silently on re-install |
+| ROB-28 | Low | Robustness | ✓ CLOSED R07.24 | MistralBackend.list_models catches bare Exception on top of HTTPError/URLError — masks KeyError/AttributeError as "discovery failed" with no traceback |
 | ROB-34 | Low | Robustness | ✓ CLOSED R07.19 | Windows no-readline fallback prompt renders wrong — bare-ESC form described by the finding was not in the R07.18 tree (already proper CSI); R07.19 rewrote the prompt for the Primary User feature and pinned the CSI contract |
 | ROB-37 | Low | Robustness | ✓ CLOSED R07.19 | models table Name column fixed at 48/50 under a no-truncation policy — names longer than the column (krith/meta-llama-3.2-1b-instruct-uncensored:IQ4_XS, 50 chars) pushed Size/Quant/Context right; R07.19 measures the longest name and widens NAME_W |
 | SEC-01 | Medium | Security | ✓ CLOSED R07.08 | sandboxed_repl.py SAFE_BUILTINS includes getattr/setattr/super/object — sandbox escape via attribute traversal |
@@ -74,6 +76,7 @@ This file is the archive of CLOSED and WONTFIX findings moved out of
 | ROB-24 | Low | Robustness | ✓ CLOSED R07.12 | get_model_info returns default 128K entry for ANY model string — placeholders now marked catalog_status unknown |
 | ROB-27 | Low | Robustness | ✓ CLOSED R07.12 | _SSRFSafeRedirectHandler DNS lookup happens outside the request timeout — 5s bounded resolution, fail-closed sentinel |
 | ROB-26 | Low | Robustness | ✓ CLOSED R07.07 | sanitize_tool_output REDACT-then-TRUNCATE ordering — secrets past 8KB cutoff not redacted (dup of SEC-12) |
+| ROB-41 | Low | Robustness | ✓ CLOSED R07.24 | `registry.search_all` swallows failures from both npm and GitHub — returns `[]` indistinguishable from a successful 0-result search; plain-mode prints `No results found` instead of a network-error hint |
 | MAINT-06 | Low | Maintainability | ✓ CLOSED R07.05 | core/model_config.py is a 30-line deprecated module — no removal date set |
 | MAINT-07 | Low | Maintainability | ✓ CLOSED R07.15 | model_family_config.detect_family uses prefix matching with overlapping families — fragile for new Qwen variants |
 | MAINT-09 | Low | Maintainability | ✓ CLOSED R07.07 | extract_calc_expression has 12+ overlapping regex patterns — unpredictable which matches |
@@ -114,6 +117,7 @@ This file is the archive of CLOSED and WONTFIX findings moved out of
 | MAINT-25 | Low | Maintainability | ✓ CLOSED R07.21 | Local-backend tool-support auto-detection had no opt-out; --force-react was store_true (couldn't accept =False); now tri-state (on/off/auto) with bare-flag backwards compat — 'off' forces native tools |
 | MAINT-26 | Low | Maintainability | ✓ CLOSED R07.21 | OpenRouter App Attribution was missing X-OpenRouter-Categories + X-OpenRouter-Title headers; R07.21 added them (hardcoded cli-agent). The directory description/main_url/slug fields have NO documented mechanism to set them (no header, no API endpoint, no dashboard) — the gap is structural on OpenRouter's side, not an AgentKthx defect. Code + tests + doc work is complete. |
 | ROB-40 | Medium | Robustness | ✓ CLOSED R07.21 | Gemini thinking models require thought_signature on tool-call results — agent dropped it, causing HTTP 400 "Function call is missing a thought_signature" on the second turn; now captured in _parse_openai_response and re-attached via Message.to_dict() as extra_content.google.thought_signature |
+| TEST-11 | Low | Testing | ✓ CLOSED R07.24 | `tests/test_mcp_cli.py` mocks `agentkthx.mcp.registry._http_get_json` — same shape as TEST-09/TEST-10; live npm/GitHub response-shape contract test would catch a `package.name` → `package.id` rename before users do |
 
 ---
 
@@ -357,6 +361,21 @@ This file is the archive of CLOSED and WONTFIX findings moved out of
 
 **Detail:** `_raise_for_status` interpolates `err_msg` (parsed from the provider's error envelope) into all six error-class messages; `_parse_pollinations_response` raises `RuntimeError(f"Provider error: {err_msg}...")` on HTTP-200 error wrappers. The aggravation noted at filing — `community/*` cards are user-published routers, so the upstream producing the error prose is arbitrary user infrastructure — is real but is dominated by the same response-channel argument the owner applied to SEC-18: a user chatting with a community model has already opted into arbitrary text from that upstream as the model's responses. The one path where community upstream text could be consumed WITHOUT opting in — `healthy_fallbacks()` redirecting onto a paid_only community model under ANON_CATALOG — is tracked as ROB-31 (entitlement scoping, still OPEN), which is the robustness lens the owner judges correct for it. WONTFIX follows SEC-18's decision; the shared-sanitizer consolidation is retired.
 
+---
+
+#### SEC-20: `mcp install` overwrites existing mcp.json entries by default — no `--no-overwrite` opt-out
+| Property | Value |
+|----------|-------|
+| **Severity** | Medium |
+| **Category** | Security |
+| **File(s)** | `agentkthx/cli/commands/mcp.py` (`_mcp_install`, ~150 LOC) |
+**Status:** ✓ CLOSED R07.24
+
+The R07.23 `_mcp_install` handler resolves a server via npm search or full package name, fetches metadata, derives a short name, and writes the resulting entry directly to `~/.agentkthx/mcp.json`. The changelog notes "overwrites existing entries with the same name by default (per maintainer spec)" — but this is a footgun when the operator has customized an entry (e.g., added `--read-only` to the filesystem server's args, swapped `npx` for `bunx`, or pinned a specific version). A subsequent `mcp install filesystem` to refresh the version silently discards those customizations. The `--dry-run` and `--json` flags exist for previewing the snippet without writing, but neither warns the operator that an existing entry will be clobbered. Combined with the MCP-02 gap (no sha256 pin enforcement), a tampered `mcp.json` could be re-installed over a known-good config without operator awareness. The CLI does emit `Overwriting existing entry for '<name>'` to stderr — but in a long shell session with multiple installs, that one-line message is easy to miss.
+Recommendation: add a `--no-overwrite` flag (inverse of `mcp init --force`) that fails with `rc=5` if the entry exists; in interactive mode (TTY), prompt for confirmation before overwriting. The `--dry-run` output should also explicitly note `WOULD OVERWRITE` when the target entry exists. Document the overwrite semantics in `--help` so operators know the default behavior before they invoke the command. Long-term: support versioned pins (MCP-02) so re-install becomes "update to the pinned version" rather than "replace the entry wholesale".
+**Impact:** Operator-customized MCP server entries (args, command, paths) are silently lost on re-install — the kind of bug that surfaces as "why did my filesystem server suddenly have write access again?" weeks later.
+
+**FIXED (R07.24):** Added `--no-overwrite` argparse flag on the `mcp install` subparser (inverse of `mcp init --force`). When set, `_mcp_install` short-circuits before writing with `rc=5` (distinct from `rc=4` = unreadable config and `rc=3` = package not found, so scripts can branch on the collision case specifically). Pre-flight collision detection refactored to a shared `_find_existing(servers)` helper used by both the dry-run branch and the write branch. `--dry-run` now explicitly prints `WOULD OVERWRITE existing entry for '<name>' in <path>` (with a hint to use `--no-overwrite` on the real install) when the target exists, or `Would add new entry for '<name>' to <path>` when it doesn't. 4 regression tests in `tests/test_mcp_cli.py::TestMcpInstall`: dry-run-warns-would-overwrite, no-overwrite-refuses-on-collision (rc=5 + mcp.json untouched verbatim), no-overwrite-allows-when-no-collision, no-overwrite-flag-wired. Suite 2899 → 2912 passed.
 ---
 
 ### Robustness
@@ -672,6 +691,36 @@ Recommendation: read `self.debug` directly and let a missing attribute raise.
 
 **Detail:** R07.18 widened the local Name column 36→48 (cloud: 50) but kept a deliberate no-truncation policy — the user must be able to copy the full model name into `-m`, and `pad_colored` pads short names but does not truncate long ones. The two decisions collide the moment a real name exceeds the fixed width: the row renders past its slot and every later column (Size/Quant/Context/openre/openai/Family) shifts right for that row, breaking the grid. User-report trigger: `krith/meta-llama-3.2-1b-instruct-uncensored:IQ4_XS` — 50 chars, 2 over the local floor — visible in the user's paste, where the krith row's `0.70 GB IQ1_M` sits 2 characters right of its neighbours. Fixed by measuring instead of guessing: `longest_name = max(len(str(m.get("name", ""))) for m in models)`, `NAME_W = max(48 local / 50 cloud, longest_name)`, computed BEFORE the header/separator render so header, separator and every data row share one width (both layout branches grow: local separator 76 + NAME_W, cloud 43 + NAME_W). The floors stay unchanged, so short listings render byte-identical to R07.18. `tests/test_r07_19_models_table_width.py` (8 tests) drives the real `cmd_models` over stub backends and pins the grid offsets (Size/Quant/Context identical across mixed short/long rows), the widening formulas on both branches, the R07.18 floors on short listings, the no-truncation contract, and the premise (the reported name really exceeds the old fixed 48).
 
+---
+
+#### ROB-28: MistralBackend.list_models catch-all Exception masks real bugs
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Robustness |
+| **File(s)** | `agentkthx/plugins/mistral/mistral.py:500-505` |
+**Status:** ✓ CLOSED R07.24
+
+`list_models()` wraps catalog fetch + parse in `except Exception` on top of the specific `HTTPError`/`URLError` handlers, returning the static catalog with only a debug-mode print. A `KeyError`/`AttributeError` introduced by a gateway schema change (or by future code edits) is indistinguishable from "network down" — no traceback, no telemetry, silent degradation to the static list.
+Recommendation: catch only `(urllib.error.HTTPError, urllib.error.URLError, json.JSONDecodeError, ValueError)` at the boundary; let unexpected exceptions crash loudly (the agent loop's resilience layer already handles backend exceptions).
+**Impact:** Catalog-shape regressions look like outages; users browse a stale static list with no signal that live discovery is broken.
+
+**FIXED (R07.24):** Catch narrowed to `except (urllib.error.HTTPError, urllib.error.URLError, json.JSONDecodeError)` (the three legitimate discovery-failure modes — 4xx/5xx, network/timeout, malformed JSON). The debug-mode print now includes the exception type (`type(e).__name__`) so a 503 service-unavailable is distinguishable from a JSON decode error at a glance. Programming errors (KeyError/AttributeError/TypeError from a malformed response shape, or from a future parser edit) now propagate as real bugs with full tracebacks instead of being silently swallowed as "discovery failed". 5 regression tests in `tests/test_mistral_backend.py::TestListModelsCatchNarrowing` pin both the caught-and-degrades cases (HTTPError, URLError, JSONDecodeError → cache fallback) AND the now-propagates cases (KeyError, AttributeError → real traceback). Suite 2899 → 2912 passed.
+---
+
+#### ROB-41: `registry.search_all` swallows failures from both npm and GitHub — 0 results indistinguishable from network failure
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Robustness |
+| **File(s)** | `agentkthx/mcp/registry.py` (`search_all` + `npm_search` + `github_search`) |
+**Status:** ✓ CLOSED R07.24
+
+`search_all` calls `npm_search` + `github_search` in sequence (not parallel — the changelog's "searches npm + GitHub in parallel" is aspirational; the actual implementation is sequential), dedupes results by package identifier, and returns the combined list. Per the changelog, "failures from either source are swallowed (graceful degradation — if npm is down, GitHub results still return)." This is the right call for partial failures (one source down, the other up). The problem is the all-sources-down case: if BOTH npm and GitHub fail (offline, DNS broken, both APIs rate-limiting, corporate firewall blocking both), `search_all` returns `[]` with NO exception, NO error code, NO signal to the caller that the cause was network rather than "no results matched your query". The `--json` payload's `errors` field already exists per the changelog — but plain-mode `mcp search <query>` prints `No results found for '<query>'` instead of `Network error — try --refresh, check your connection, or set AGENTKTHX_GITHUB_TOKEN to raise the GitHub rate limit`. A user troubleshooting an MCP install gets the misleading "no results" message and may conclude the registry has no servers matching `filesystem` when the real problem is they're behind a proxy that blocks `registry.npmjs.org`.
+Recommendation: `search_all` should track per-source failure modes and return a tuple `(results, errors)` where `errors` is the list of `(source, exception)` pairs. The CLI handler then branches: if `results` is non-empty, print results; if `results` is empty AND `errors` is non-empty, print a network-error hint with the per-source failure reason; if `results` is empty AND `errors` is empty, print "no results matched". The `--json` payload already has the `errors` field — the plain-mode path just needs to consume it. Bonus: add a `--verbose` flag that prints per-source timing + status even on success, useful for diagnosing intermittent slowness.
+**Impact:** A user behind a restrictive firewall or with a down DNS resolver sees "No results found" for every `mcp search` query and may conclude the MCP ecosystem has no servers, when the real problem is local network egress. The `--json` payload's `errors` field makes this diagnosable but plain-mode usage (the common case) is misleading.
+
+**FIXED (R07.24):** Split `registry.search_all` into `search_all_with_errors` (returns `(results, errors)` tuple where `errors` is a list of `(source, message)` pairs) + a back-compat `search_all` thin wrapper that drops the errors. The CLI handler's plain-mode empty-results branch now distinguishes the two cases: if `errors` is non-empty, leads with `✗ Network error searching for '<query>':` + the per-source failure reasons + actionable hints (`agentkthx mcp search --refresh`, network/proxy/DNS check, `AGENTKTHX_GITHUB_TOKEN` for higher GitHub rate limits); if `errors` is empty, keeps the existing `No MCP servers found for '<query>'` + `Try a broader query` framing. The `--json` payload shape is unchanged (already had the `errors` field per the R07.23 contract). 5 regression tests in `tests/test_mcp_cli.py::TestSearchAllWithErrors` (both-sources-succeed, both-sources-fail-with-per-source-reasons, partial-failure, back-compat-wrapper-drops-errors); existing `test_search_handles_network_error_gracefully` updated to assert the new (correct) message shape — `Network error` + `simulated failure` + `--refresh` present, `No MCP servers found` absent when errors are present. Suite 2899 → 2912 passed.
 ---
 
 ### Maintainability
@@ -1269,6 +1318,21 @@ Recommendation: Make the test deterministic by asserting the specific expected b
 
 ---
 
+#### TEST-11: `mcp search`/`install` tests mock the HTTP layer — live npm/GitHub response-shape contract test gap (TEST-09 family)
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Testing |
+| **File(s)** | `tests/test_mcp_cli.py` (`TestMcpSearch`, `TestMcpInstall`) |
+**Status:** ✓ CLOSED R07.24
+
+The R07.23 changelog describes 17 new tests: `TestMcpSearch` (8 tests, all mock `agentkthx.mcp.registry._http_get_json`) + `TestMcpInstall` (9 tests covering short-name install, full npm package name, missing-mcp.json creation, existing-entry overwrite, `--dry-run`, `--json`, GitHub repo with `--command`/`--args`, 404 rc=3, `--as` override). All 17 tests mock the HTTP layer via `_http_get_json` patching — no real network call is made. This is the correct approach for CI (fast, deterministic, no external dependencies). But it means the live npm + GitHub response shapes are never exercised in the suite — same pattern as TEST-09 (R07.09 streaming bug: the suite asserted the method existed but didn't exercise the call-through, so the bug shipped green) and TEST-10 (Pollinations v0.1.2: fixtures encoded a price-0 shape that never occurs live while the entire 83-test suite stayed green). If npm changes their search API response shape (e.g., renames `package.name` to `package.id`, or moves `flags.unmaintained` into a top-level `unmaintained: true`), the suite stays green while `mcp search` breaks in production — the user's first signal would be "No results found" (which already overlaps with ROB-41's plain-mode failure mode, compounding the diagnosis problem).
+Recommendation: a live-gated contract test (skips without `AGENTKTHX_LIVE_TESTS=1` env var): run one real `npm_search("filesystem")` call and assert the result dict has the documented fields (`name`, `package`, `version`, `description`, `source`, `is_official`, `homepage`, `install_hint`, `stars`, `license`, `search_score`); cache the response as a fixture on first success so subsequent runs can compare against a known-good baseline. Same for `github_search("serena")` (asserts `name`, `full_name`, `description`, `stargazers_count`, `license`). One parameterized test, two sources, runs in CI only when the secret is configured, fails the moment either API renames a field. Cost: ~30 lines, ~2s added to suite runtime when live tests are enabled, zero cost when disabled.
+**Impact:** npm/GitHub API response-shape drift is invisible to the suite — a `package.name` → `package.id` rename ships green and breaks `mcp search`/`install` in production, with the user's first signal being a misleading "No results found" (compounds with ROB-41).
+
+**FIXED (R07.24):** Added `tests/test_mcp_live_contract.py` — 4 live-gated contract tests that skip unless `AGENTKTHX_LIVE_TESTS=1` is set in the env. The tests make ONE real network call per source (npm `registry.npmjs.org/-/v1/search` + `registry.npmjs.org/<name>` + GitHub `api.github.com/search/repositories`) and assert the documented field set per result dict (the keys declared in the `npm_search`/`github_search`/`search_all_with_errors` docstrings). Skips cleanly on network unreachable / 429 rate-limit (with a `set AGENTKTHX_GITHUB_TOKEN` hint for the GitHub case). Verified live against real `registry.npmjs.org` + `api.github.com` — all 4 pass in ~1.7s when enabled; all 4 skip cleanly when the env var is unset (default CI run). Suite 2899 → 2912 passed / 16 → 20 skipped (+4 live-gated).
+---
+
 ## R07.13 ARCH Closure Batch
 
 All 5 OPEN Architecture findings closed in a single pass. Suite: 1849 → 1882 passed (+33 tests in `tests/test_r07_13_arch_closures.py`), zero regressions.
@@ -1491,3 +1555,79 @@ All 5 OPEN Architecture findings closed in a single pass. Suite: 1849 → 1882 p
 > **R07.19 delta #8 (2026-10-03, follow-up commit #7 — arrow-key model picker + optional `--model` + `agentkthx souls`):** No register entry — feature work, not a defect finding. User request: add a `souls` subcommand, replace the chat `/models` list with an interactive arrow-navigable model switch, and make `-m/--model` optional on chat by invoking that switcher at startup when omitted. (1) New `agentkthx/cli/picker.py` — `ArrowMenu`, a pure-stdlib arrow-key single-select menu (termios + cbreak on POSIX with ISIG preserved so Ctrl+C maps to cancel instead of killing the REPL, msvcrt on Windows, numbered-input fallback on non-TTY stdin); rendering is a pure string and navigation is plain state mutation, so the core is unit-tested without a terminal; the frame redraws in place (cursor-up + clear-line) and is wiped on exit; the viewport is clamped to the terminal height for the chat scroll region. (2) `/models` in chat now opens the picker over the (still filterable) model list and switches via the same `apply_model_switch()` path as `/model <name>` (ROB-14 re-derive semantics preserved; picking the current model is a no-op; piped stdin keeps the plain listing); outcome printing factored into the shared `_report_model_switch()` helper. (3) `agentkthx chat` without `-m/--model` (TTY, no ACP session, no `AGENTKTHX_MODEL` override) runs the picker BEFORE `_build_agent` — cloud backends probed in OPENAI mode, local in OPENRE, mirroring `agentkthx models`; failures/empty/cancel degrade to the classic default-model resolution (bitnet discovery → `config.default_model`); `run`/`agent`/`test` unchanged by design. (4) New `agentkthx souls` subcommand (`agentkthx/cli/commands/souls.py`, registered between `soul` and `test`) — lists the bundled souls with the constructor-default marked via `AgentSetupMixin.__init__` signature introspection (drift-proof), and `souls <name>` prints a manifest-level detail view with fuzzy-match on unknown names. **96 new tests in `tests/test_r07_19_model_picker.py`** (+2 auto-expanded dynamic help-sort walk instances for the new subparser); the MAINT-18 source pin in `test_r07_12_quick_wins.py` moved with the shared reporter. Suite 2416 → **2514 passed, 16 skipped, 0 failures**. Register unchanged: 112 findings — **35 OPEN / 70 CLOSED / 7 WONTFIX (77 archived, 69%)**.
 
 > **R07.20 delta (2026-10-02, R07.20 opens — fc479aa + 98ee377):** No register entries. The post-release smoke test (467-model OpenRouter scan + OrcaRouter + chat sessions) found one real defect: the cloud thinking heuristics matched the FULL slug including the vendor prefix, so `thinkingmachines/inkling` ×4 flagged YES off the ORG name (follow-up #13 — `_name_matches_thinking` now cuts at the last `/`; the dead `/` alternative in the o-series pattern removed; every true positive preserved against the full smoke listing). The user recommitted the fix to GitHub as `fc479aa` (R07.20) and the version bump + CHANGELOG re-housing landed locally as `98ee377` (`scripts/bump-version.sh R07.20`; the #13 changelog entry moved out of R07.19 into a new R07.20 section; R07.19 section restored byte-identical to the published state). **+10 pins in `TestCloudThinkingHeuristic`.** Suite 2598 → 2608. Register unchanged until this re-audit.
+## R07.23 New Findings
+Three findings, all from the R07.23 surface (`mcp search` + `mcp install` + the new `registry.py` + `cache.py` modules + `mcp install` overwrite semantics). No closures this pass — all 31 carried-forward OPEN findings (26 from R07.21 + 5 MCP from R07.22) re-verified in current code; line refs for ROB-06 updated.
+| ID | Severity | Category | File(s) | Title |
+|----|----------|----------|---------|-------|
+| SEC-20 | Medium | Security | `agentkthx/cli/commands/mcp.py` (`_mcp_install`, ~150 LOC) | `mcp install` overwrites existing mcp.json entries by default — no `--no-overwrite` opt-out |
+| ROB-41 | Low | Robustness | `agentkthx/mcp/registry.py` (`search_all`) | `search_all` swallows failures from both npm and GitHub — returns `[]` indistinguishable from a successful 0-result search |
+| TEST-11 | Low | Testing | `tests/test_mcp_cli.py` (`TestMcpSearch`, `TestMcpInstall`) | `mcp search`/`install` tests mock `_http_get_json` — live npm/GitHub response-shape contract test gap (TEST-09 family) |
+---
+
+---
+
+## R07.24 Audit Closure Batch
+
+4 OPEN findings closed in a single surgical pass — all non-breaking fixes with clear patterns. Suite: 2899 → 2912 passed (+13 active) / 16 → 20 skipped (+4 live-gated), zero regressions. Lint clean (ruff + black).
+
+### Security
+
+#### SEC-20: `mcp install --no-overwrite` flag refuses to clobber an existing mcp.json entry
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Medium |
+| **Category** | Security |
+| **File(s)** | `agentkthx/cli/commands/mcp.py` (`_mcp_install`), `agentkthx/cli/parser.py` (mcp_install subparser) |
+
+**Status:** ✓ CLOSED R07.24
+
+**Detail:** Added `--no-overwrite` argparse flag on the `mcp install` subparser (inverse of `mcp init --force`). When set, `_mcp_install` short-circuits before writing with `rc=5` (distinct from `rc=4` = unreadable config, `rc=3` = package not found, `rc=2` = network error — so scripts can branch on the collision case specifically). Pre-flight collision detection refactored to a shared `_find_existing(servers)` helper used by both the dry-run branch and the write branch — previously the dry-run branch couldn't see whether it would overwrite because the existence check happened only after the dry-run early-return. `--dry-run` now explicitly prints `WOULD OVERWRITE existing entry for '<name>' in <path>` (with a hint to use `--no-overwrite` on the real install) when the target exists, or `Would add new entry for '<name>' to <path>` when it doesn't. The default behavior (no flag) is unchanged — operators who relied on the overwrite-as-default contract are unaffected. 4 regression tests in `tests/test_mcp_cli.py::TestMcpInstall`: dry-run-warns-would-overwrite (asserts both the `WOULD OVERWRITE` marker AND that mcp.json is untouched verbatim), no-overwrite-refuses-on-collision (rc=5 + mcp.json byte-identical to the pre-call state), no-overwrite-allows-when-no-collision (regression guard — the flag is opt-in, not a refuse-always), no-overwrite-flag-wired (argparse contract pin). The "maintainer spec calls this intentional" framing in the original finding was correct for the default behavior — the fix preserves the default and adds the opt-out, rather than changing the default to refuse.
+
+---
+
+### Robustness
+
+#### ROB-41: `registry.search_all_with_errors` + plain-mode network-error hint in `mcp search`
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Robustness |
+| **File(s)** | `agentkthx/mcp/registry.py` (`search_all`, `search_all_with_errors`), `agentkthx/cli/commands/mcp.py` (`_mcp_search`), `agentkthx/mcp/__init__.py` (exports) |
+
+**Status:** ✓ CLOSED R07.24
+
+**Detail:** Split `registry.search_all` into `search_all_with_errors` (returns `(results, errors)` tuple where `errors` is a list of `(source, message)` pairs — the per-source failure reason is preserved instead of being swallowed) + a back-compat `search_all` thin wrapper that drops the errors tuple (existing callers see no API change; `__all__` exports both). The CLI handler's plain-mode empty-results branch now branches on `errors`: if non-empty, leads with `✗ Network error searching for '<query>':` + the per-source failure reasons + actionable hints (`agentkthx mcp search --refresh` to bypass cache + retry, network/proxy/DNS check, `export AGENTKTHX_GITHUB_TOKEN=ghp_...` for higher GitHub rate limits); if empty, keeps the existing `No MCP servers found for '<query>'` + `Try a broader query` framing (correct for a genuine 0-result search). The `--json` payload shape is unchanged — it already had the `errors` field per the R07.23 contract; the plain-mode path just started consuming it. 5 regression tests in `tests/test_mcp_cli.py::TestSearchAllWithErrors`: both-sources-succeed (npm + github both return results, errors == []), both-sources-fail-with-per-source-reasons (errors list preserves `(source, msg)` tuples so a caller can branch on which source failed), partial-failure (npm succeeds + github fails → partial results + 1 error entry), back-compat-wrapper-drops-errors (`search_all` legacy returns just a list, silently swallows). Existing `test_search_handles_network_error_gracefully` updated to assert the new (correct) message shape — `Network error` + `simulated failure` + `--refresh` present, `No MCP servers found` absent when errors are present (the old assertion was wrong post-fix; it was asserting the misleading message that ROB-41 was filed to fix).
+
+---
+
+#### ROB-28: MistralBackend.list_models catch narrowed — programming errors now propagate
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Robustness |
+| **File(s)** | `agentkthx/plugins/mistral/mistral.py:499-514` (`list_models`) |
+
+**Status:** ✓ CLOSED R07.24
+
+**Detail:** Catch narrowed from bare `except Exception` to `except (urllib.error.HTTPError, urllib.error.URLError, json.JSONDecodeError)` — the three legitimate discovery-failure modes (4xx/5xx from the API, network/timeout/DNS from urlopen, malformed JSON from a 5xx HTML error page or proxy). The debug-mode print now includes the exception type (`type(e).__name__: {e}`) so a 503 service-unavailable is distinguishable from a JSON decode error at a glance in the debug log. Programming errors (KeyError/AttributeError/TypeError from a malformed response shape, or from a future parser edit) now propagate as real bugs with full tracebacks instead of being silently swallowed as "discovery failed" — the agent loop's resilience layer handles backend exceptions, so a propagated parser bug surfaces immediately rather than degrading to the static catalog with no signal that live discovery is broken. 5 regression tests in `tests/test_mistral_backend.py::TestListModelsCatchNarrowing`: HTTPError-caught-and-degrades, URLError-caught-and-degrades, JSONDecodeError-caught-and-degrades (the three legitimate failure modes), KeyError-propagates-as-real-bug, AttributeError-propagates-as-real-bug (the two programming-error cases that the original `except Exception` masked).
+
+---
+
+### Testing
+
+#### TEST-11: Live-gated contract test for `mcp search`/`install` response shape
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Testing |
+| **File(s)** | `tests/test_mcp_live_contract.py` (NEW, 4 tests) |
+
+**Status:** ✓ CLOSED R07.24
+
+**Detail:** Added `tests/test_mcp_live_contract.py` — 4 live-gated contract tests that skip unless `AGENTKTHX_LIVE_TESTS=1` is set in the env. The tests make ONE real network call per source: `test_live_npm_search_returns_documented_fields` hits `registry.npmjs.org/-/v1/search?text=filesystem&size=5` and asserts every result dict has the 11 documented fields (`name`, `package`, `version`, `description`, `source`, `is_official`, `homepage`, `install_hint`, `stars`, `license`, `search_score`); `test_live_npm_package_info_returns_metadata_dict` hits `registry.npmjs.org/@modelcontextprotocol/server-filesystem` (the default install target for `mcp install filesystem`) and asserts the `package` + `version` keys survive (would fail loudly if the package is unpublished from npm); `test_live_search_all_with_errors_returns_tuple` exercises the R07.24 `search_all_with_errors` contract against real npm + GitHub (both sources succeed → no errors, results non-empty); `test_live_github_search_returns_documented_fields` hits `api.github.com/search/repositories?q=serena` and asserts the documented field set (with the source marker `source == "github"` pinned). All 4 tests skip cleanly on network-unreachable (`URLError`/`socket.timeout`/`ConnectionError`) and on 429 rate-limit (with a `set AGENTKTHX_GITHUB_TOKEN` hint for the GitHub case). Verified live against real `registry.npmjs.org` + `api.github.com` — all 4 pass in ~1.7s when enabled; all 4 skip cleanly when the env var is unset (default CI run, zero suite cost). Closes the TEST-09 family gap: a future npm rename of `package.name` → `package.id` will ship green-on-mocked-suite (the existing `tests/test_mcp_cli.py::TestMcpSearch` tests mock `_http_get_json` with the new field name baked into the fake) but red-on-live-contract (the live test calls real `npm_search` and asserts the documented field set against the actual response shape).
+
+---

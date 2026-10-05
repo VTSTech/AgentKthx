@@ -68,6 +68,7 @@ from .registry import (
     npm_package_info,
     npm_search,
     search_all,
+    search_all_with_errors,
 )
 from .transport import MCPTransportError, StdioTransport
 
@@ -91,6 +92,7 @@ __all__ = [
     "npm_package_info",
     "github_search",
     "search_all",
+    "search_all_with_errors",
     "derive_short_name",
     "build_config_snippet",
     # Cache (R07.23)

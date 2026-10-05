@@ -352,16 +352,33 @@ def _mcp_search(args: argparse.Namespace) -> int:
         return 0
 
     if not results:
-        print(yellow(f"  No MCP servers found for {query!r}."))
+        # R07.24 (ROB-41): distinguish "0 results from a successful search"
+        # from "0 results because the source failed". The "Try a broader
+        # query" hint is misleading when the real cause is network egress —
+        # the user's query was fine, the registry was unreachable.
         if errors:
-            print()
-            print(red("  Errors:"))
+            print(red(f"  \u2717 Network error searching for {query!r}:"))
             for e in errors:
                 print(red(f"    {e}"))
-        print()
-        print(
-            dim("  Try a broader query, or run `agentkthx mcp search mcp` to list popular servers.")
-        )
+            print()
+            print(
+                dim("  Try: ")
+                + cyan("agentkthx mcp search --refresh ")
+                + dim("(bypass cache, retry)")
+            )
+            print(dim("       check your network connection / proxy / DNS"))
+            print(
+                dim("       for higher GitHub rate limits: ")
+                + cyan("export AGENTKTHX_GITHUB_TOKEN=ghp_...")
+            )
+        else:
+            print(yellow(f"  No MCP servers found for {query!r}."))
+            print()
+            print(
+                dim("  Try a broader query, or run ")
+                + cyan("agentkthx mcp search mcp")
+                + dim(" to list popular servers.")
+            )
         return 0
 
     print(
@@ -566,26 +583,25 @@ def _mcp_install(args: argparse.Namespace) -> int:
         print(json.dumps(snippet, indent=2, ensure_ascii=False))
         return 0
 
-    if dry_run:
-        print(bold(f"\n\u269b\ufe0f  Dry run: snippet for {cyan(snippet['name'])}"))
-        print(dim("\u2500" * 74))
-        print(json.dumps(snippet, indent=2, ensure_ascii=False))
-        print(dim("\u2500" * 74))
-        print(dim(f"  Would write to: {cfg_path}"))
-        print(dim(f"  To install for real: {cyan('agentkthx mcp install ' + name)}"))
-        _check_launch_command(snippet["command"], as_json=as_json)
-        return 0
-
-    # Pre-flight: check if the launch command is on $PATH. Warn (don't fail)
-    # if it's missing — the user may install it later, or override with --command.
-    _check_launch_command(snippet["command"], as_json=as_json)
-
-    # Write to mcp.json \u2014 overwrite any existing entry with the same name
+    # R07.24 (SEC-20): detect existing-entry status up-front so both the
+    # dry-run branch and the write branch can use it. Returns (exists, idx)
+    # where idx is the position in `servers` if found, else -1.
     import json as _json
     import os
     from pathlib import Path
 
     cfg_file = Path(cfg_path)
+    short_name = snippet["name"]
+    no_overwrite = getattr(args, "no_overwrite", False)
+
+    def _find_existing(servers_list: list) -> int:
+        for i, s in enumerate(servers_list):
+            if isinstance(s, dict) and s.get("name") == short_name:
+                return i
+        return -1
+
+    # Load existing config (if any) to detect collisions
+    data: dict
     if cfg_file.exists():
         try:
             with open(cfg_file, "r", encoding="utf-8") as f:
@@ -603,16 +619,55 @@ def _mcp_install(args: argparse.Namespace) -> int:
     if not isinstance(servers, list):
         print(f"{red('Error:')} {cfg_file} 'servers' is not an array")
         return 4
+    existing_idx = _find_existing(servers)
+    would_overwrite = existing_idx >= 0
+
+    if dry_run:
+        print(bold(f"\n\u269b\ufe0f  Dry run: snippet for {cyan(short_name)}"))
+        print(dim("\u2500" * 74))
+        print(json.dumps(snippet, indent=2, ensure_ascii=False))
+        print(dim("\u2500" * 74))
+        if would_overwrite:
+            print(
+                yellow(
+                    f"  \u26a0  WOULD OVERWRITE existing entry for {cyan(short_name)} in {cfg_path}"
+                )
+            )
+            print(dim("     Use --no-overwrite to make the real install refuse on collision."))
+        else:
+            print(dim(f"  Would add new entry for {cyan(short_name)} to {cfg_path}"))
+        print(dim(f"  To install for real: {cyan('agentkthx mcp install ' + name)}"))
+        _check_launch_command(snippet["command"], as_json=as_json)
+        return 0
+
+    # R07.24 (SEC-20): --no-overwrite refuses to clobber an existing entry.
+    # Fails with rc=5 (distinct from rc=4 = unreadable config, rc=3 = package
+    # not found) so scripts can branch on the collision case specifically.
+    if no_overwrite and would_overwrite:
+        print(
+            red(
+                f"\u2717 Refusing to overwrite existing entry for {cyan(short_name)} "
+                f"in {cfg_path} (--no-overwrite is set)"
+            )
+        )
+        print(dim("     Remove --no-overwrite to allow the clobber, or uninstall first:"))
+        print(dim(f"       {cyan('agentkthx mcp uninstall ' + short_name)}"))
+        return 5
+
+    # Pre-flight: check if the launch command is on $PATH. Warn (don't fail)
+    # if it's missing — the user may install it later, or override with --command.
+    _check_launch_command(snippet["command"], as_json=as_json)
+
+    # Write to mcp.json \u2014 overwrite any existing entry with the same name
+    # (unless --no-overwrite is set, in which case we'd have returned above)
+
+    # servers + existing_idx were computed above (R07.24 refactor)
 
     # Find + replace existing entry with the same name (overwrite by default)
-    short_name = snippet["name"]
-    replaced = False
-    for i, s in enumerate(servers):
-        if isinstance(s, dict) and s.get("name") == short_name:
-            servers[i] = snippet
-            replaced = True
-            break
-    if not replaced:
+    replaced = would_overwrite
+    if would_overwrite:
+        servers[existing_idx] = snippet
+    else:
         servers.append(snippet)
     data["servers"] = servers
 

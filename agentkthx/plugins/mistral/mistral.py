@@ -498,9 +498,21 @@ class MistralBackend(CloudBackend):
 
         try:
             live = self._fetch_live_models()
-        except Exception as e:
+        except (urllib.error.HTTPError, urllib.error.URLError, json.JSONDecodeError) as e:
+            # R07.24 (ROB-28): narrowed from bare `except Exception`.
+            # Catches the three legitimate discovery-failure modes:
+            #   - HTTPError: API returned 4xx/5xx (auth, rate limit, server)
+            #   - URLError: network unreachable / DNS / socket.timeout
+            #   - JSONDecodeError: response body wasn't valid JSON (5xx HTML
+            #     error page from a misconfigured proxy, gateway timeout)
+            # Programming errors (KeyError/AttributeError from a malformed
+            # response shape, TypeError from a None where a dict was
+            # expected) now propagate as real bugs with tracebacks instead
+            # of being masked as "discovery failed".
             if os.environ.get("AGENTKTHX_DEBUG"):
-                print(f"  [Mistral] Model discovery failed ({e}), using cached/seed catalog")
+                print(
+                    f"  [Mistral] Model discovery failed ({type(e).__name__}: {e}), using cached/seed catalog"
+                )
             live = None
 
         if live is None:

@@ -381,19 +381,45 @@ def search_all(
 
     Failures from either source are swallowed \u2014 the other source's
     results are still returned. If both fail, returns an empty list.
+
+    .. note::
+        R07.24 (ROB-41): callers that need to distinguish "0 results
+        from a successful search" from "0 results because all sources
+        failed" should use :func:`search_all_with_errors` instead.
+        This wrapper preserves the original contract for back-compat.
+    """
+    results, _errors = search_all_with_errors(query, size=size, timeout=timeout)
+    return results
+
+
+def search_all_with_errors(
+    query: str, *, size: int = 25, timeout: int = DEFAULT_TIMEOUT
+) -> tuple[list[dict[str, Any]], list[tuple[str, str]]]:
+    """Search npm + GitHub, returning ``(results, errors)`` (R07.24, ROB-41).
+
+    Unlike :func:`search_all`, this preserves per-source failure reasons so
+    callers can distinguish a successful 0-result search from a network
+    failure on every source. ``errors`` is a list of ``(source, message)``
+    tuples \u2014 e.g. ``[("npm", "timeout fetching ..."), ("github", "HTTP 403 ...")]``.
+
+    If ``results`` is empty AND ``errors`` is non-empty, the user-facing
+    message should lead with a network-error hint, not "no results matched".
+    If ``results`` is empty AND ``errors`` is empty, the search genuinely
+    returned 0 matches and "no results" is the correct framing.
     """
     npm_results: list[dict[str, Any]] = []
     github_results: list[dict[str, Any]] = []
+    errors: list[tuple[str, str]] = []
 
     try:
         npm_results = npm_search(query, size=size, timeout=timeout)
-    except MCPRegistryError:
-        pass  # degrade gracefully
+    except MCPRegistryError as e:
+        errors.append(("npm", str(e)))
 
     try:
         github_results = github_search(query, size=size, timeout=timeout)
-    except MCPRegistryError:
-        pass  # degrade gracefully
+    except MCPRegistryError as e:
+        errors.append(("github", str(e)))
 
     # Dedupe by package identifier (npm name or github:owner/repo)
     seen: set[str] = set()
@@ -407,7 +433,7 @@ def search_all(
 
     # Sort: official first, then by search_score descending
     merged.sort(key=lambda r: (not r.get("is_official", False), -r.get("search_score", 0)))
-    return merged
+    return merged, errors
 
 
 __all__ = [
@@ -417,6 +443,7 @@ __all__ = [
     "npm_package_info",
     "github_search",
     "search_all",
+    "search_all_with_errors",
     "derive_short_name",
     "build_config_snippet",
 ]

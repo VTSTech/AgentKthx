@@ -1089,6 +1089,125 @@ class TestLiveAPI:
 
 
 # ---------------------------------------------------------------------------
+# ROB-28 (R07.24): list_models catch-narrowing regression tests
+# ---------------------------------------------------------------------------
+
+
+class TestListModelsCatchNarrowing:
+    """``list_models`` should only catch legitimate discovery-failure exceptions.
+
+    ROB-28: the original `except Exception` masked KeyError/AttributeError
+    (programming errors in the response parser) as "discovery failed" with
+    no traceback. R07.24 narrows to (HTTPError, URLError, JSONDecodeError)
+    — the three legitimate failure modes — and lets programming errors
+    propagate so they surface as real bugs.
+    """
+
+    def test_http_error_caught_and_degrades_to_cache(self, monkeypatch):
+        """A 4xx/5xx response degrades to cached/seed catalog (existing behavior)."""
+        import urllib.error
+
+        from agentkthx.plugins.mistral.mistral import MistralBackend
+
+        backend = MistralBackend.__new__(MistralBackend)
+        # Skip __init__ — we're only testing list_models() behavior
+
+        # Wire minimum attributes list_models() touches
+        backend._model_cache = None
+        backend.MODEL_CACHE_KEY = "test_mistral_rob28"
+        monkeypatch.setattr(
+            MistralBackend,
+            "_fetch_live_models",
+            lambda self: (_ for _ in ()).throw(
+                urllib.error.HTTPError(
+                    url="https://api.mistral.ai/v1/models",
+                    code=503,
+                    msg="Service Unavailable",
+                    hdrs=None,
+                    fp=None,
+                )
+            ),
+        )
+        # Should NOT raise — should degrade to cache/seed catalog
+        result = backend.list_models()
+        assert isinstance(result, list)
+        assert len(result) > 0  # seed catalog has the canonical models
+
+    def test_url_error_caught_and_degrades_to_cache(self, monkeypatch):
+        """A network failure (URLError) degrades to cached/seed catalog."""
+        import urllib.error
+
+        from agentkthx.plugins.mistral.mistral import MistralBackend
+
+        backend = MistralBackend.__new__(MistralBackend)
+        backend._model_cache = None
+        backend.MODEL_CACHE_KEY = "test_mistral_rob28"
+        monkeypatch.setattr(
+            MistralBackend,
+            "_fetch_live_models",
+            lambda self: (_ for _ in ()).throw(urllib.error.URLError("DNS lookup failed")),
+        )
+        result = backend.list_models()
+        assert isinstance(result, list)
+        assert len(result) > 0
+
+    def test_json_decode_error_caught_and_degrades_to_cache(self, monkeypatch):
+        """Malformed JSON response degrades to cached/seed catalog."""
+        import json
+
+        from agentkthx.plugins.mistral.mistral import MistralBackend
+
+        backend = MistralBackend.__new__(MistralBackend)
+        backend._model_cache = None
+        backend.MODEL_CACHE_KEY = "test_mistral_rob28"
+        monkeypatch.setattr(
+            MistralBackend,
+            "_fetch_live_models",
+            lambda self: (_ for _ in ()).throw(
+                json.JSONDecodeError("malformed", "<html>500 error page</html>", 0)
+            ),
+        )
+        result = backend.list_models()
+        assert isinstance(result, list)
+        assert len(result) > 0
+
+    def test_key_error_propagates_as_real_bug(self, monkeypatch):
+        """ROB-28 contract: programming errors (KeyError/AttributeError) propagate.
+
+        Previously masked as "discovery failed" with no traceback — now
+        they surface so the parser bug gets fixed instead of hidden.
+        """
+        from agentkthx.plugins.mistral.mistral import MistralBackend
+
+        backend = MistralBackend.__new__(MistralBackend)
+        backend._model_cache = None
+        backend.MODEL_CACHE_KEY = "test_mistral_rob28"
+
+        def raise_key_error(self):
+            raise KeyError("malformed response shape — parser bug")
+
+        monkeypatch.setattr(MistralBackend, "_fetch_live_models", raise_key_error)
+        # No longer caught — surfaces as a real bug
+        with pytest.raises(KeyError, match="malformed response shape"):
+            backend.list_models()
+
+    def test_attribute_error_propagates_as_real_bug(self, monkeypatch):
+        """ROB-28 contract: AttributeError (parser bug) propagates."""
+        from agentkthx.plugins.mistral.mistral import MistralBackend
+
+        backend = MistralBackend.__new__(MistralBackend)
+        backend._model_cache = None
+        backend.MODEL_CACHE_KEY = "test_mistral_rob28"
+
+        def raise_attr_error(self):
+            raise AttributeError("'NoneType' object has no attribute 'get'")
+
+        monkeypatch.setattr(MistralBackend, "_fetch_live_models", raise_attr_error)
+        with pytest.raises(AttributeError, match="NoneType"):
+            backend.list_models()
+
+
+# ---------------------------------------------------------------------------
 # Entrypoint
 # ---------------------------------------------------------------------------
 

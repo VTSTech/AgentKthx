@@ -301,6 +301,17 @@ def create_parser() -> argparse.ArgumentParser:
         default=None,
         help="Path to the mcp.json file (default: ~/.agentkthx/mcp.json).",
     )
+    # R07.24 (SEC-20): --no-overwrite refuses to clobber an existing entry.
+    # Inverse of `mcp init --force`. Fails with rc=5 if an entry with the
+    # same short name already exists in mcp.json. Pairs with --dry-run to
+    # preview without writing.
+    mcp_install.add_argument(
+        "--no-overwrite",
+        action="store_true",
+        help="Refuse to overwrite an existing mcp.json entry with the same name "
+        "(exit code 5 if it exists). Default is to overwrite — use this flag "
+        "when re-installing after manual edits to mcp.json to avoid losing them.",
+    )
     # R07.23: `mcp uninstall <name>` — remove a server entry from mcp.json.
     # Pairs with `mcp install` so users don't have to edit mcp.json by hand
     # when an install doesn't work out (e.g. Java-only repos that can't be

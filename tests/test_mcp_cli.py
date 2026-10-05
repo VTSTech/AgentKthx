@@ -482,7 +482,13 @@ class TestMcpSearch:
         assert "No MCP servers found" in captured.out
 
     def test_search_handles_network_error_gracefully(self, capsys, tmp_path, monkeypatch):
-        """If npm fails, search should print an error, not crash."""
+        """If npm fails, search should print a Network-error hint (R07.24, ROB-41).
+
+        Previously printed "No MCP servers found" + the error in red, which was
+        misleading — the user's query was fine, the registry was unreachable.
+        Now leads with "Network error" + actionable hints (--refresh, check
+        connection, AGENTKTHX_GITHUB_TOKEN).
+        """
         cache_file = tmp_path / "mcp_cache.json"
         monkeypatch.setattr("agentkthx.mcp.cache.cache_path", lambda: cache_file)
 
@@ -496,7 +502,12 @@ class TestMcpSearch:
             rc = cmd_mcp(args)
         assert rc == 0  # graceful — returns 0 with empty results
         captured = capsys.readouterr()
-        assert "No MCP servers found" in captured.out
+        # R07.24 (ROB-41): lead with the network-error framing, not "No MCP servers found"
+        assert "Network error" in captured.out
+        assert "simulated failure" in captured.out  # the actual error reason surfaces
+        assert "--refresh" in captured.out  # actionable hint
+        # The misleading "No MCP servers found" message must NOT appear when errors present
+        assert "No MCP servers found" not in captured.out
 
 
 # ----------------------------- mcp install (R07.23) -----------------------------
@@ -639,6 +650,128 @@ class TestMcpInstall:
         captured = capsys.readouterr()
         assert "Dry run" in captured.out
         assert "filesystem" in captured.out
+
+    # ------------------------- R07.24 SEC-20 -------------------------
+
+    def test_install_dry_run_warns_would_overwrite(self, capsys, tmp_path, monkeypatch):
+        """`--dry-run` against an existing entry prints `WOULD OVERWRITE` (SEC-20)."""
+        cfg_file = tmp_path / "mcp.json"
+        cfg_file.write_text(
+            json.dumps(
+                {
+                    "version": "0.1",
+                    "servers": [
+                        {
+                            "name": "filesystem",
+                            "command": "old-cmd",
+                            "args": ["old"],
+                            "enabled": True,
+                        },
+                    ],
+                }
+            )
+        )
+        monkeypatch.setattr("agentkthx.mcp.default_config_path", lambda: cfg_file)
+
+        def fake_http(url, *, headers=None, timeout=10):
+            if "/-/v1/search" in url:
+                return _fake_npm_search_response("filesystem")
+            return _fake_npm_package_info("@modelcontextprotocol/server-filesystem")
+
+        with patch("agentkthx.mcp.registry._http_get_json", side_effect=fake_http):
+            args = create_parser().parse_args(
+                ["mcp", "install", "filesystem", "--dry-run", "--config", str(cfg_file)]
+            )
+            rc = cmd_mcp(args)
+        assert rc == 0
+        # mcp.json untouched on dry-run
+        with open(cfg_file) as f:
+            data = json.load(f)
+        assert data["servers"][0]["command"] == "old-cmd"
+        captured = capsys.readouterr()
+        assert "WOULD OVERWRITE" in captured.out
+        assert "--no-overwrite" in captured.out
+
+    def test_install_no_overwrite_refuses_on_collision(self, capsys, tmp_path, monkeypatch):
+        """`--no-overwrite` against an existing entry fails with rc=5 (SEC-20)."""
+        cfg_file = tmp_path / "mcp.json"
+        original = {
+            "version": "0.1",
+            "servers": [
+                {
+                    "name": "filesystem",
+                    "command": "old-cmd",
+                    "args": ["old"],
+                    "enabled": True,
+                },
+            ],
+        }
+        cfg_file.write_text(json.dumps(original))
+        monkeypatch.setattr("agentkthx.mcp.default_config_path", lambda: cfg_file)
+
+        def fake_http(url, *, headers=None, timeout=10):
+            if "/-/v1/search" in url:
+                return _fake_npm_search_response("filesystem")
+            return _fake_npm_package_info("@modelcontextprotocol/server-filesystem")
+
+        with patch("agentkthx.mcp.registry._http_get_json", side_effect=fake_http):
+            args = create_parser().parse_args(
+                [
+                    "mcp",
+                    "install",
+                    "filesystem",
+                    "--no-overwrite",
+                    "--config",
+                    str(cfg_file),
+                ]
+            )
+            rc = cmd_mcp(args)
+        assert rc == 5  # distinct from rc=4 (unreadable) and rc=3 (not found)
+        # mcp.json untouched
+        with open(cfg_file) as f:
+            data = json.load(f)
+        assert data == original  # the old entry is preserved verbatim
+        captured = capsys.readouterr()
+        assert "Refusing to overwrite" in captured.out
+        assert "mcp uninstall filesystem" in captured.out
+
+    def test_install_no_overwrite_allows_when_no_collision(self, capsys, tmp_path, monkeypatch):
+        """`--no-overwrite` with no existing entry installs normally (SEC-20 regression guard)."""
+        cfg_file = tmp_path / "mcp.json"  # does not exist
+        monkeypatch.setattr("agentkthx.mcp.default_config_path", lambda: cfg_file)
+
+        def fake_http(url, *, headers=None, timeout=10):
+            if "/-/v1/search" in url:
+                return _fake_npm_search_response("filesystem")
+            return _fake_npm_package_info("@modelcontextprotocol/server-filesystem")
+
+        with patch("agentkthx.mcp.registry._http_get_json", side_effect=fake_http):
+            args = create_parser().parse_args(
+                [
+                    "mcp",
+                    "install",
+                    "filesystem",
+                    "--no-overwrite",
+                    "--config",
+                    str(cfg_file),
+                ]
+            )
+            rc = cmd_mcp(args)
+        assert rc == 0  # no collision → install proceeds
+        with open(cfg_file) as f:
+            data = json.load(f)
+        assert len(data["servers"]) == 1
+        captured = capsys.readouterr()
+        assert "Installed" in captured.out
+
+    def test_install_no_overwrite_flag_exists(self):
+        """`--no-overwrite` is wired on the install subparser (SEC-20 contract)."""
+        parser = create_parser()
+        args = parser.parse_args(["mcp", "install", "filesystem", "--no-overwrite"])
+        assert args.no_overwrite is True
+        # default (flag not passed) is False
+        args_default = parser.parse_args(["mcp", "install", "filesystem"])
+        assert args_default.no_overwrite is False
 
     def test_install_json_emits_snippet(self, capsys, tmp_path, monkeypatch):
         """`--json` emits the snippet as JSON, doesn't touch mcp.json."""
@@ -1108,6 +1241,105 @@ class TestWireMcpNoOp:
         assert isinstance(manager._bridged_registry, ToolRegistry)
         # The caller (agent_factory._build_agent) reads this to pass to Agent.__init__
         # so the system prompt builder sees has_tools=True
+
+
+# ----------------------------- registry helpers (R07.24) -----------------------------
+
+
+class TestSearchAllWithErrors:
+    """``search_all_with_errors`` (R07.24, ROB-41) — returns ``(results, errors)``.
+
+    Distinguishes "0 results from a successful search" from "0 results because
+    all sources failed". The original ``search_all`` is a thin wrapper that
+    drops the errors tuple — back-compat preserved.
+    """
+
+    def test_search_all_with_errors_returns_both_npm_and_github_hits(self, monkeypatch):
+        from agentkthx.mcp.registry import search_all_with_errors
+
+        def fake_http(url, *, headers=None, timeout=10):
+            if "registry.npmjs.org" in url:
+                return _fake_npm_search_response("filesystem")
+            if "api.github.com" in url:
+                return {
+                    "total_count": 1,
+                    "items": [
+                        {
+                            "name": "serena",
+                            "full_name": "oraios/serena",
+                            "description": "LSP-based MCP server",
+                            "stargazers_count": 500,
+                            "license": {"spdx_id": "MIT"},
+                            "html_url": "https://github.com/oraios/serena",
+                        }
+                    ],
+                }
+            raise AssertionError(f"unexpected URL: {url}")
+
+        with patch("agentkthx.mcp.registry._http_get_json", side_effect=fake_http):
+            results, errors = search_all_with_errors("filesystem")
+        assert errors == []  # both sources succeeded
+        assert len(results) >= 2  # at least one npm + one github
+        sources = {r.get("source") for r in results}
+        assert "npm" in sources
+        assert "github" in sources
+
+    def test_search_all_with_errors_captures_per_source_failure(self, monkeypatch):
+        """When both npm + GitHub fail, errors list preserves per-source reasons."""
+        from agentkthx.mcp.registry import MCPRegistryError, search_all_with_errors
+
+        def fake_http(url, *, headers=None, timeout=10):
+            if "registry.npmjs.org" in url:
+                raise MCPRegistryError("npm timeout")
+            if "api.github.com" in url:
+                raise MCPRegistryError("github 403")
+            raise AssertionError(f"unexpected URL: {url}")
+
+        with patch("agentkthx.mcp.registry._http_get_json", side_effect=fake_http):
+            results, errors = search_all_with_errors("filesystem")
+        assert results == []  # no results because both failed
+        assert len(errors) == 2
+        sources = {src for src, _ in errors}
+        assert sources == {"npm", "github"}
+        # Per-source messages preserved (this is the ROB-41 contract — a caller
+        # can branch on the source that failed)
+        msgs = " ".join(msg for _, msg in errors)
+        assert "npm timeout" in msgs
+        assert "github 403" in msgs
+
+    def test_search_all_with_errors_partial_failure(self, monkeypatch):
+        """One source fails, the other succeeds — partial results + the failure recorded."""
+        from agentkthx.mcp.registry import MCPRegistryError, search_all_with_errors
+
+        def fake_http(url, *, headers=None, timeout=10):
+            if "registry.npmjs.org" in url:
+                return _fake_npm_search_response("filesystem")
+            if "api.github.com" in url:
+                raise MCPRegistryError("github down")
+            raise AssertionError(f"unexpected URL: {url}")
+
+        with patch("agentkthx.mcp.registry._http_get_json", side_effect=fake_http):
+            results, errors = search_all_with_errors("filesystem")
+        # npm results survive
+        assert len(results) >= 1
+        assert all(r.get("source") == "npm" for r in results)
+        # GitHub failure recorded
+        assert len(errors) == 1
+        assert errors[0][0] == "github"
+        assert "github down" in errors[0][1]
+
+    def test_search_all_drops_errors_for_back_compat(self, monkeypatch):
+        """``search_all`` (legacy) returns just results — back-compat preserved."""
+        from agentkthx.mcp.registry import MCPRegistryError, search_all
+
+        def fake_http(url, *, headers=None, timeout=10):
+            raise MCPRegistryError("simulated failure")
+
+        with patch("agentkthx.mcp.registry._http_get_json", side_effect=fake_http):
+            results = search_all("filesystem")
+        # legacy returns a list, not a tuple — and silently swallows the failure
+        assert results == []
+        assert isinstance(results, list)
 
 
 if __name__ == "__main__":
