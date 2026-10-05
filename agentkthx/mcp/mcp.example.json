@@ -4,7 +4,7 @@
     {
       "name": "filesystem",
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/REPLACE_ME/projects"],
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/REPLACE_ME/workspace"],
       "enabled": true,
       "timeout_seconds": 30,
       "comment": "Sandboxed file read/write — verified working 2026-10-04"
@@ -26,7 +26,7 @@
     {
       "name": "audit",
       "command": "python3",
-      "args": ["-m", "agentkthx.skills.codebase_audit.mcp_server", "--repo", "/home/REPLACE_ME/repo"],
+      "args": ["-m", "agentkthx.skills.codebase_audit.mcp_server", "--repo", "/home/REPLACE_ME/workspace"],
       "enabled": false,
       "comment": "Phase 2 — kthx-audit MCP server. See docs/mcp/ROADMAP.md. Disabled until implemented."
     }

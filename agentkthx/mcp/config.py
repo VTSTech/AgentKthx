@@ -19,7 +19,7 @@ one MCP server:
           "name": "filesystem",
           "command": "npx",
           "args": ["-y", "@modelcontextprotocol/server-filesystem",
-                   "/home/user/projects"],
+                   "/home/user/workspace"],
           "env": {"NODE_NO_WARNINGS": "1"},
           "enabled": true,
           "timeout_seconds": 30
@@ -28,14 +28,14 @@ one MCP server:
           "name": "git",
           "command": "npx",
           "args": ["-y", "@modelcontextprotocol/server-git",
-                   "/home/user/projects"],
+                   "/home/user/workspace"],
           "enabled": true
         },
         {
           "name": "audit",
           "command": "python3",
           "args": ["-m", "agentkthx.skills.codebase_audit.mcp_server",
-                   "--repo", "/home/user/repo"],
+                   "--repo", "/home/user/workspace"],
           "enabled": false,
           "comment": "Phase 2 — not yet implemented"
         }
@@ -236,10 +236,10 @@ def write_example_config(path: str | os.PathLike | None = None) -> Path:
 
     The generated config has the user's actual home directory substituted
     into all path arguments (no ``REPLACE_ME`` placeholder) so it works out
-    of the box. The two directories the example references — ``~/projects``
-    (for the filesystem server) and ``~/repo`` (for the audit server) —
-    are created if they don't already exist, so a fresh ``mcp init``
-    followed by ``mcp probe filesystem`` succeeds without manual setup.
+    of the box. The single directory the example references — ``~/workspace``
+    (used by both the filesystem server and the audit server) — is created
+    if it doesn't already exist, so a fresh ``mcp init`` followed by
+    ``mcp probe filesystem`` succeeds without manual setup.
     """
     target = Path(path) if path else default_config_path()
     if target.exists():
@@ -251,19 +251,17 @@ def write_example_config(path: str | os.PathLike | None = None) -> Path:
     # both accept forward slashes on Windows, which avoids the JSON
     # backslash-escaping headache.
     home = str(Path.home()).replace("\\", "/")
-    projects_dir = Path.home() / "projects"
-    repo_dir = Path.home() / "repo"
+    workspace_dir = Path.home() / "workspace"
 
-    # Best-effort: create the directories the filesystem MCP server needs
+    # Best-effort: create the directory the filesystem MCP server needs
     # to start cleanly. If creation fails (read-only home, permissions),
-    # the config still references them — the user will get a clear error
+    # the config still references it — the user will get a clear error
     # from the MCP server when they probe, which is more actionable than
     # refusing to write the config.
-    for d in (projects_dir, repo_dir):
-        try:
-            d.mkdir(parents=True, exist_ok=True)
-        except OSError:
-            pass  # config still useful even if dir creation fails
+    try:
+        workspace_dir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass  # config still useful even if dir creation fails
 
     content = _build_example_config(home)
     target.write_text(content, encoding="utf-8")
@@ -285,8 +283,7 @@ def _build_example_config(home: str) -> str:
     # unicode home dir names, etc.). preserve_indentation via indent=2.
     import json as _json
 
-    projects = f"{home}/projects"
-    repo = f"{home}/repo"
+    workspace = f"{home}/workspace"
 
     config = {
         "version": "0.1",
@@ -297,7 +294,7 @@ def _build_example_config(home: str) -> str:
                 "args": [
                     "-y",
                     "@modelcontextprotocol/server-filesystem",
-                    projects,
+                    workspace,
                 ],
                 "enabled": True,
                 "timeout_seconds": 30,
@@ -316,7 +313,7 @@ def _build_example_config(home: str) -> str:
                     "-m",
                     "agentkthx.skills.codebase_audit.mcp_server",
                     "--repo",
-                    repo,
+                    workspace,
                 ],
                 "enabled": False,
                 "comment": ("Phase 2 — kthx-audit MCP server " "(see docs/mcp/ROADMAP.md)"),

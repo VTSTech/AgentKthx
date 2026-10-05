@@ -173,9 +173,8 @@ def test_write_example_config_substitutes_home_dir(tmp_path, monkeypatch):
     assert "REPLACE_ME" not in raw
     # The actual home path should be in the filesystem args
     assert str(fake_home) in raw
-    # The two referenced directories should have been created
-    assert (fake_home / "projects").is_dir()
-    assert (fake_home / "repo").is_dir()
+    # The single referenced directory should have been created
+    assert (fake_home / "workspace").is_dir()
 
     # The config should load successfully with the substituted paths
     configs = load_mcp_config(target)
