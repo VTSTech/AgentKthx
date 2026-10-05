@@ -5,7 +5,7 @@ All notable changes to AgentKthx will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [R07.24] - 2026-10-06
+## [R07.24] - 2026-10-05 5:43:52 PM
 
 **Audit closure super-batch: 13 OPEN findings closed + 2 WONTFIX across three batches in one release.** R07.24 is the largest single-release audit closure pass since R07.21 batch 2 — ten findings closed (SEC-20, ROB-28, ROB-41, TEST-11, MCP-01, MCP-03, MCP-04, MCP-05, MAINT-03, MAINT-22, MAINT-23, ROB-29, ROB-33) plus two WONTFIX (MCP-02, SEC-13 — deferred, out-of-scope). Suite: 2899 → 2959 passed (+60 active) / 16 → 20 skipped (+4 live-gated). Zero regressions; ruff + black clean across all 234 files. Register: 125 findings — 19 OPEN / 97 CLOSED / 9 WONTFIX (106 archived, ~85%).
 
@@ -71,7 +71,7 @@ The release is split into three batches for changelog clarity, but shipped as a 
 
 ---
 
-## [R07.23] - 2026-10-04
+## [R07.23] - 2026-10-05 1:14:13 AM
 
 **`agentkthx mcp search` + `mcp install` + removal of deprecated `git` server.** R07.23 expands the `mcp` subcommand from three actions to five — `list`, `init`, `probe`, **`search`**, **`install`** — and removes the deprecated `@modelcontextprotocol/server-git` entry from `mcp init`'s example config. Two new `agentkthx/mcp/` modules (`registry.py` + `cache.py`) implement a live, stdlib-only search across npm + GitHub, with a 10-minute TTL cache so repeat calls don't re-hit the network.
 
@@ -185,7 +185,7 @@ Four follow-up commits during R07.23-dev, all surfaced by a maintainer MCP smoke
 
 
 
-## [R07.22] - 2026-10-04
+## [R07.22] - 2026-10-03 10:00:57 PM
 
 **MCP (Model Context Protocol) client support — Phase 1 complete.** R07.22 lands stdio MCP client mode, the largest new feature surface since the R07.19 capabilities-first tool-support chain. Agents can now consume tools from external MCP servers (filesystem, sequential-thinking, sqlite, memory, git, serena, brave-search, ...) via stdio JSON-RPC 2.0, with their tools bridged into the existing `ToolRegistry` alongside built-ins. Zero runtime dependencies added — the implementation uses stdlib `subprocess` + `json` only, in keeping with the project's `dependencies = []` invariant.
 
