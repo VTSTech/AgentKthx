@@ -20,8 +20,8 @@
       "name": "memory",
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-memory"],
-      "enabled": false,
-      "comment": "Persistent knowledge graph (JSON file). Enable if you want long-term agent memory."
+      "enabled": true,
+      "comment": "Persistent knowledge graph (entities + relations). Add `--storage-path', '<path>'` to args to persist across restarts (default: in-memory)."
     },
     {
       "name": "audit",

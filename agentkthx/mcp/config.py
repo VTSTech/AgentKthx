@@ -307,6 +307,17 @@ def _build_example_config(home: str) -> str:
                 "comment": "Chain-of-thought scratchpad — verified on npm 2026-10-04",
             },
             {
+                "name": "memory",
+                "command": "npx",
+                "args": ["-y", "@modelcontextprotocol/server-memory"],
+                "enabled": True,
+                "comment": (
+                    "Persistent knowledge graph (entities + relations). "
+                    "Add `--storage-path', '<path>'` to args to persist "
+                    "across restarts (default: in-memory)."
+                ),
+            },
+            {
                 "name": "audit",
                 "command": "python3",
                 "args": [

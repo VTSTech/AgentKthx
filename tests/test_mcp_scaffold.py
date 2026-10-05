@@ -132,17 +132,18 @@ def test_write_example_config_round_trips(tmp_path):
     result_path = write_example_config(target)
     assert result_path == target
     configs = load_mcp_config(target)
-    # The embedded _EXAMPLE_CONFIG (config.py) has 2 enabled servers
-    # (filesystem + sequential-thinking) and 1 disabled (audit — Phase 2
-    # placeholder). R07.23 (2026-10-04): the deprecated 'git' entry was
-    # removed entirely from the embedded example — operators discover
-    # replacements via `agentkthx mcp search git`. The repo's
-    # mcp.example.json has additional entries (memory) but
-    # write_example_config() uses the embedded constant.
-    assert len(configs) >= 2  # filesystem + sequential-thinking
+    # The embedded _EXAMPLE_CONFIG (config.py) has 3 enabled servers
+    # (filesystem + sequential-thinking + memory) and 1 disabled (audit —
+    # Phase 2 placeholder). R07.23 (2026-10-04): the deprecated 'git' entry
+    # was removed entirely from the embedded example — operators discover
+    # replacements via `agentkthx mcp search git`. R07.23-dev: memory was
+    # promoted to enabled-by-default after the user smoke test confirmed
+    # 9 tools bridge cleanly.
+    assert len(configs) >= 3  # filesystem + sequential-thinking + memory
     names = {c.name for c in configs}
     assert "filesystem" in names
     assert "sequential-thinking" in names
+    assert "memory" in names
     # git should NOT appear in the generated config at all (R07.23 removed it)
     # load_mcp_config filters disabled entries, so we re-read the raw file
     # to confirm the entry is gone entirely, not just disabled.
