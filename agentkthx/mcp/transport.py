@@ -27,12 +27,27 @@ other tools on that server.
 If you need parallel tool calls across servers, use multiple
 :class:`StdioTransport` instances (one per server) — :class:`MCPManager`
 does this automatically.
+
+R07.24 (MCP-01): per-call timeouts actually interrupt now
+---------------------------------------------------------
+The original ``_read_response`` called ``self._proc.stdout.readline()``
+directly, which is a blocking stdlib call with no timeout parameter. The
+per-call ``timeout`` was honored only via the loop's deadline check,
+which never got a chance to fire if the subprocess produced no output.
+R07.24 replaced this with a thread+queue pattern: a daemon thread does
+the blocking ``readline()`` and pushes the result to a
+:class:`queue.Queue`; the main thread does ``queue.get(timeout=remaining)``.
+On timeout, the transport is marked as **poisoned** (subsequent calls
+raise immediately) and the daemon thread dies naturally when the subprocess
+closes. Bonus: this also fixes Ctrl+C interruptibility on POSIX — the
+main thread no longer holds the GIL inside ``readline()``.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import queue
 import subprocess
 import threading
 import time
@@ -62,6 +77,33 @@ class StdioTransport:
         self._stderr_thread: threading.Thread | None = None
         self._next_id = 1
         self._closed = False
+        # R07.24 (MCP-01): poisoned transports raise immediately on the
+        # next call. Set when a per-call timeout fires during a blocking
+        # readline() — the subprocess is in an unknown state and the
+        # daemon reader thread is likely stuck. Recovery: close() and
+        # create a new StdioTransport instance.
+        self._poisoned = False
+        # R07.24 (MCP-05): optional callback invoked when the transport
+        # reads a JSON-RPC notification (a message with no ``id`` field).
+        # The callback receives the parsed message dict. Set by the
+        # owning MCPClient via set_notification_callback(). If None,
+        # notifications are logged to the stderr ring buffer (the
+        # original R07.22 behavior).
+        self._notification_callback: "callable | None" = None
+
+    def set_notification_callback(self, callback: "callable | None") -> None:
+        """R07.24 (MCP-05): register a callback for JSON-RPC notifications.
+
+        When the transport reads a message with no ``id`` field (a
+        notification per JSON-RPC 2.0), the callback is invoked with the
+        parsed message dict. Pass ``None`` to revert to the default
+        behavior (log to stderr ring buffer).
+
+        The callback runs in the transport's reader-thread context —
+        keep it fast and non-blocking. The owning MCPClient installs
+        a trampoline that routes to per-method handlers it manages.
+        """
+        self._notification_callback = callback
 
     # ---- lifecycle ----
 
@@ -221,24 +263,73 @@ class StdioTransport:
             raise MCPTransportError(f"MCP server '{self._config.name}': write failed: {e}") from e
 
     def _read_response(self, expected_id: int, timeout: float) -> Any:
+        """Read one JSON-RPC response, with per-call timeout that actually interrupts.
+
+        R07.24 (MCP-01): replaced the naive ``self._proc.stdout.readline()``
+        loop with a thread+queue pattern. The blocking ``readline()`` runs on
+        a daemon thread; the main thread does ``queue.get(timeout=remaining)``.
+        On timeout, the transport is poisoned (subsequent calls raise
+        immediately — the subprocess is in an unknown state and the daemon
+        thread is likely stuck waiting for output that will never come).
+
+        Notifications (no ``id`` field) are still tolerated and logged to
+        the stderr ring buffer — this is also where MCP-05's
+        ``notifications/tools/list_changed`` notification would land if a
+        server pushed one mid-call. The MCP-05 handler in
+        :class:`MCPClient` re-queries ``tools/list`` when it sees that
+        notification; this transport only routes.
+        """
         if self._proc is None or self._proc.stdout is None:
             raise MCPTransportError(f"MCP server '{self._config.name}': subprocess not running")
+
+        if self._poisoned:
+            raise MCPTransportError(
+                f"MCP server '{self._config.name}': transport poisoned after a previous "
+                f"timeout — close() and create a new instance to reconnect"
+            )
 
         deadline = time.monotonic() + timeout
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
+                # Mark poisoned — the daemon thread is likely still stuck
+                # in readline(); future calls on this transport would hang.
+                self._poisoned = True
                 raise MCPTransportError(
                     f"MCP server '{self._config.name}': timeout waiting for "
-                    f"response to id={expected_id}"
+                    f"response to id={expected_id} (transport poisoned — "
+                    f"close() and reconnect to recover)"
                 )
 
-            # We can't trivially timeout on a blocking readline; use a
-            # separate thread + queue in production. For the scaffold, we
-            # rely on the subprocess producing output within the timeout.
-            # This is a known limitation — see TODO below.
-            line = self._proc.stdout.readline()
-            if not line:
+            # Thread+queue pattern: the daemon thread does the blocking
+            # readline(); the main thread blocks on queue.get(timeout=…)
+            # which DOES honor its deadline. On Empty, we loop + re-check
+            # the deadline (handles partial-line servers that emit empty
+            # lines between real responses).
+            line_q: queue.Queue[str | None] = queue.Queue()
+            reader = threading.Thread(
+                target=self._blocking_readline,
+                args=(line_q,),
+                name=f"mcp-read-{self._config.name}-{expected_id}",
+                daemon=True,
+            )
+            reader.start()
+            try:
+                line = line_q.get(timeout=remaining)
+            except queue.Empty:
+                # The daemon thread is still alive in readline() — it will
+                # die naturally when the subprocess closes (close_fds=True
+                # ensures the pipe is closed even if the main thread exits).
+                # Mark poisoned so the next call fails fast.
+                self._poisoned = True
+                raise MCPTransportError(
+                    f"MCP server '{self._config.name}': timeout waiting for "
+                    f"response to id={expected_id} (transport poisoned — "
+                    f"close() and reconnect to recover)"
+                )
+
+            if line is None:
+                # The subprocess closed stdout (EOF) — no more output coming.
                 raise MCPTransportError(
                     f"MCP server '{self._config.name}': subprocess closed "
                     f"stdout while waiting for id={expected_id}"
@@ -260,9 +351,21 @@ class StdioTransport:
                 self._stderr_ring.append(f"BAD-MSG: {line[:200]}")
                 continue
 
-            # Skip notifications (no id) — we don't expect any but tolerate
+            # Route notifications (no id) — R07.24 (MCP-05): if a callback
+            # is registered, route to it (typically the owning MCPClient's
+            # handle_notification trampoline, which dispatches to per-method
+            # handlers like notifications/tools/list_changed). Otherwise log
+            # to the stderr ring buffer (the original R07.22 behavior).
             if "id" not in msg:
-                self._stderr_ring.append(f"NOTIFICATION: {line[:200]}")
+                if self._notification_callback is not None:
+                    try:
+                        self._notification_callback(msg)
+                    except Exception:
+                        # Buggy callback — log + continue. The transport
+                        # must not die from a handler bug.
+                        self._stderr_ring.append(f"HANDLER-ERR: {line[:200]}")
+                else:
+                    self._stderr_ring.append(f"NOTIFICATION: {line[:200]}")
                 continue
 
             if msg["id"] != expected_id:
@@ -278,6 +381,29 @@ class StdioTransport:
                 )
 
             return msg.get("result")
+
+    def _blocking_readline(self, out_q: queue.Queue[str | None]) -> None:
+        """Daemon-thread target: do one blocking ``readline()`` on stdout.
+
+        Pushes the line (str) on success, or None if stdout hit EOF (the
+        subprocess closed). Never raises — exceptions are swallowed and
+        reported as None so the main thread's queue.get() deadline fires
+        rather than the daemon thread crashing silently.
+
+        This is the function that previously ran inline in the main thread.
+        Moving it to a daemon thread is what makes per-call timeouts
+        actually interrupt — :meth:`queue.Queue.get` honors its timeout
+        parameter, ``readline()`` does not.
+        """
+        try:
+            assert self._proc is not None and self._proc.stdout is not None
+            line = self._proc.stdout.readline()
+            out_q.put(line if line else None)
+        except Exception:
+            # Any IO error reading from a dead/EOF'd subprocess — surface
+            # as None so the main thread's "subprocess closed stdout" branch
+            # fires with the right diagnostic message.
+            out_q.put(None)
 
     def _drain_stderr(self) -> None:
         if self._proc is None or self._proc.stderr is None:
@@ -299,15 +425,23 @@ class StdioTransport:
     def is_alive(self) -> bool:
         return self._proc is not None and self._proc.poll() is None
 
+    @property
+    def is_poisoned(self) -> bool:
+        """R07.24 (MCP-01): True if a per-call timeout fired and the transport
+        is in an unknown state. Subsequent :meth:`request` calls raise
+        immediately. Recovery: :meth:`close` and create a new instance.
+        """
+        return self._poisoned
+
     def __del__(self) -> None:
         try:
             self.close()
         except Exception:
             pass
 
-    # TODO(v0.2): Replace the blocking readline() in _read_response with a
-    # thread+queue pattern so that per-call timeouts actually work. Today,
-    # a hung MCP server will block the calling thread for the full timeout
-    # window *and* cannot be interrupted by Ctrl+C cleanly. This is the
-    # same shape as ROB-06 (streaming generator close on Windows) —
-    # document as MCP-01 in the audit register when this lands.
+    # R07.24 (MCP-01): the thread+queue pattern above replaces the original
+    # blocking readline() loop. Per-call timeouts now actually interrupt —
+    # a hung MCP server raises MCPTransportError within `timeout` seconds
+    # rather than blocking the calling thread indefinitely. The transport
+    # is poisoned on timeout so the next call fails fast; recovery requires
+    # close() + new instance.

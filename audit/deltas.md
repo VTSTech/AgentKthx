@@ -4,7 +4,7 @@
 **Release:** R07.24
 **Date:** 2026-10-03  
 **Archived:** 2026-10-05 (R07.24 closure batch)
-**Counts:** 88 CLOSED · 7 WONTFIX · 95 total
+**Counts:** 92 CLOSED · 9 WONTFIX · 101 total
 
 > Counts updated at R07.21 (14 closures across three batches: ROB-18, ROB-35,
 > ROB-36, ROB-38, ROB-39 in batch 1; ROB-09, ROB-17, ROB-20, ROB-25, ROB-30,
@@ -26,7 +26,11 @@ This file is the archive of CLOSED and WONTFIX findings moved out of
 | SEC-02 | **High** | Security | ✓ CLOSED R07.04 | ast.literal_eval fallback for Python-dict tool arguments enables type-confusion bypass |
 | MAINT-14 | **High** | Maintainability | ✓ CLOSED R07.07 | The headline fix. The \bTrue\b / \bFalse\b / \bNone\b regex substitutions in core/tool_parse.py:243-256 (R07.05 SEC-02 c |
 | ROB-32 | **High** | Robustness | ✓ CLOSED R07.14 | _build_agent passes force_react which Agent no longer accepts — every agentkthx chat/agent invocation raises TypeError post-ARCH-05 (latent since R03.3) |
+| MCP-02 | Medium | Security | ⊘ WONTFIX R07.24 | MCP server configs have no sha256 pin equivalent (SEC-13 analogue) — deferred; AgentKthx doesn't control MCP spec, can't enforce pinning on externally-published servers |
+| SEC-13 | Medium | Security | ⊘ WONTFIX R07.24 | sha256 plugin pins are opt-in — no AGENTKTHX_REQUIRE_PLUGIN_PINS enforcement mode for external plugins — deferred; can't enforce what upstream authors ship |
 | SEC-20 | Medium | Security | ✓ CLOSED R07.24 | `mcp install` overwrites existing mcp.json entries by default — no `--no-overwrite` opt-out; user-customized args/paths lost silently on re-install |
+| MCP-01 | Medium | Robustness | ✓ CLOSED R07.24 | StdioTransport uses blocking readline — per-call timeouts don't actually interrupt (same shape as ROB-02/ROB-06) |
+| MCP-05 | Low | Robustness | ✓ CLOSED R07.24 | No `notifications/tools/list_changed` handler — runtime tool surface changes invisible to the registry until next session |
 | ROB-28 | Low | Robustness | ✓ CLOSED R07.24 | MistralBackend.list_models catches bare Exception on top of HTTPError/URLError — masks KeyError/AttributeError as "discovery failed" with no traceback |
 | ROB-34 | Low | Robustness | ✓ CLOSED R07.19 | Windows no-readline fallback prompt renders wrong — bare-ESC form described by the finding was not in the R07.18 tree (already proper CSI); R07.19 rewrote the prompt for the Primary User feature and pinned the CSI contract |
 | ROB-37 | Low | Robustness | ✓ CLOSED R07.19 | models table Name column fixed at 48/50 under a no-truncation policy — names longer than the column (krith/meta-llama-3.2-1b-instruct-uncensored:IQ4_XS, 50 chars) pushed Size/Quant/Context right; R07.19 measures the longest name and widens NAME_W |
@@ -89,6 +93,8 @@ This file is the archive of CLOSED and WONTFIX findings moved out of
 | MAINT-18 | Low | Maintainability | ✓ CLOSED R07.12 (intra) | apply_model_switch return dict — verify caller actually consumes it (currently consumed by chat.py:1007 for delta-printing) |
 | MAINT-19 | Low | Maintainability | ✓ CLOSED R07.15 | list_models cache is per-instance — class-level cache would dedupe across instances |
 | MAINT-20 | Low | Maintainability | ✓ CLOSED R07.07 | get_model_info sets free_tier twice for catalog hits (parent + override) — redundant |
+| MCP-03 | Low | Maintainability | ✓ CLOSED R07.24 | Complex JSON Schema constructs (oneOf/anyOf/$ref) flatten to default `string` in inputSchema conversion |
+| MCP-04 | Low | Performance | ✓ CLOSED R07.24 | Eager server startup adds 1-3s latency to every `--mcp` session even when no MCP tools are called |
 | PERF-03 | Low | Performance | ✓ CLOSED R07.15 | web_search uses regex to parse DuckDuckGo HTML — fragile, slow, falls back to second fetch on failure |
 | PERF-04 | Low | Performance | ✓ CLOSED R07.14 | discover(force=True) re-scans all plugin roots — no mtime check |
 | PERF-05 | Low | Performance | ✓ CLOSED R07.12 (intra) | ToolParser.parse runs all 3 parsing strategies even if first succeeds — may produce duplicate tool calls |
@@ -376,6 +382,32 @@ Recommendation: add a `--no-overwrite` flag (inverse of `mcp init --force`) that
 **Impact:** Operator-customized MCP server entries (args, command, paths) are silently lost on re-install — the kind of bug that surfaces as "why did my filesystem server suddenly have write access again?" weeks later.
 
 **FIXED (R07.24):** Added `--no-overwrite` argparse flag on the `mcp install` subparser (inverse of `mcp init --force`). When set, `_mcp_install` short-circuits before writing with `rc=5` (distinct from `rc=4` = unreadable config and `rc=3` = package not found, so scripts can branch on the collision case specifically). Pre-flight collision detection refactored to a shared `_find_existing(servers)` helper used by both the dry-run branch and the write branch. `--dry-run` now explicitly prints `WOULD OVERWRITE existing entry for '<name>' in <path>` (with a hint to use `--no-overwrite` on the real install) when the target exists, or `Would add new entry for '<name>' to <path>` when it doesn't. 4 regression tests in `tests/test_mcp_cli.py::TestMcpInstall`: dry-run-warns-would-overwrite, no-overwrite-refuses-on-collision (rc=5 + mcp.json untouched verbatim), no-overwrite-allows-when-no-collision, no-overwrite-flag-wired. Suite 2899 → 2912 passed.
+---
+
+#### MCP-02: MCP server configs have no sha256 pin equivalent (SEC-13 analogue)
+| Property | Value |
+|----------|-------|
+| **Severity** | Medium |
+| **Category** | Security (MCP) |
+| **File(s)** | `agentkthx/mcp/config.py:88-110` (`MCPServerConfig.resolve_command`) |
+**Status:** ⊘ WONTFIX R07.24
+
+An MCP server entry declares `command` (string) + `args` (list). The launcher resolves `command` via `shutil.which` or treats it as an absolute path, then spawns it with `subprocess.Popen(shell=False)`. There is no sha256 pin on the binary itself — an attacker who can write `~/.agentkthx/mcp.json` (or any path the operator passes via `--mcp-config`) can substitute any binary for a declared server name. The config file permission check warns on group/world-writable (line 156-167) but does not fail, and on containers running as root with default umask the warning is the only signal. This is the direct analogue of SEC-13 for plugins, with the same opt-in trust posture.
+Recommendation: add an optional `sha256` field to `MCPServerConfig` (string, hex). When present, `resolve_command` hashes the resolved binary and refuses to launch on mismatch (fail-closed, same as `_validate_sha256_pin` for plugins). Add `AGENTKTHX_REQUIRE_MCP_PINS=1` env var that refuses to load any MCP server entry without a pin. Document both in `docs/mcp/ROADMAP.md` and in `SECURITY.md`. Future: consider a `paths` allowlist field that restricts where binaries can be resolved from.
+**Impact:** The MCP trust boundary is advisory — same as SEC-13 for plugins. A tampered `mcp.json` substitutes arbitrary code under a trusted server name with no signal to the operator beyond a file-permission warning that's easy to miss.
+---
+
+#### SEC-13: sha256 plugin pins are opt-in — no enforcement mode for external plugins
+| Property | Value |
+|----------|-------|
+| **Severity** | Medium |
+| **Category** | Security |
+| **File(s)** | `agentkthx/plugins/_loader.py:130,251,286` |
+**Status:** ⊘ WONTFIX R07.24
+
+Re-verified in current code (detail section authored during the R07.16 re-audit — this was previously a summary-only row). The R07.05 SEC-06 fix gave manifests an *optional* integrity pin: `_MANIFEST_KNOWN_KEYS` accepts `"sha256"` (line 81/103), the manifest schema declares `sha256: str | dict[str, str] | None = None` (line 251), and `_validate_sha256_pin` (lines 286-300) rejects malformed pins ("must be exactly 64 hex chars"). But a manifest with NO pin loads silently — there is no `AGENTKTHX_REQUIRE_PLUGIN_PINS` enforcement variable anywhere in the codebase (grep-verified), no config field, and no policy hook. A user installing a third-party plugin gets integrity verification only if the plugin author chose to ship a pin; an attacker-supplied (or supply-chain-tampered) manifest simply omits the field and skips the check entirely.
+Recommendation: add `AGENTKTHX_REQUIRE_PLUGIN_PINS=1` (env or config field) that refuses to load any plugin whose manifest lacks a well-formed sha256 pin, with an allowlist exception for the bundled plugins (which ship in-tree and are covered by the repo's own integrity). Document the flag in the PLUGIN_SPEC and in `plugin.schema.json`.
+**Impact:** The plugin trust boundary becomes enforceable instead of advisory — users gain an actual guarantee mode, not just a mechanism the author may or may not use.
 ---
 
 ### Robustness
@@ -723,6 +755,32 @@ Recommendation: `search_all` should track per-source failure modes and return a 
 **FIXED (R07.24):** Split `registry.search_all` into `search_all_with_errors` (returns `(results, errors)` tuple where `errors` is a list of `(source, message)` pairs) + a back-compat `search_all` thin wrapper that drops the errors. The CLI handler's plain-mode empty-results branch now distinguishes the two cases: if `errors` is non-empty, leads with `✗ Network error searching for '<query>':` + the per-source failure reasons + actionable hints (`agentkthx mcp search --refresh`, network/proxy/DNS check, `AGENTKTHX_GITHUB_TOKEN` for higher GitHub rate limits); if `errors` is empty, keeps the existing `No MCP servers found for '<query>'` + `Try a broader query` framing. The `--json` payload shape is unchanged (already had the `errors` field per the R07.23 contract). 5 regression tests in `tests/test_mcp_cli.py::TestSearchAllWithErrors` (both-sources-succeed, both-sources-fail-with-per-source-reasons, partial-failure, back-compat-wrapper-drops-errors); existing `test_search_handles_network_error_gracefully` updated to assert the new (correct) message shape — `Network error` + `simulated failure` + `--refresh` present, `No MCP servers found` absent when errors are present. Suite 2899 → 2912 passed.
 ---
 
+#### MCP-01: StdioTransport uses blocking readline — per-call timeouts don't actually interrupt
+| Property | Value |
+|----------|-------|
+| **Severity** | Medium |
+| **Category** | Robustness (MCP) |
+| **File(s)** | `agentkthx/mcp/transport.py:170-205` (`_read_response`) |
+**Status:** ✓ CLOSED R07.24
+
+The scaffold's `_read_response` calls `self._proc.stdout.readline()` with no timeout. The `timeout` parameter is honored only via the loop's deadline check, but a hung MCP server that produces no output blocks the calling thread on `readline()` indefinitely — the deadline check never gets a chance to fire. Same shape as ROB-06 (Windows conn release) and ROB-02 (orchestrator thread join): a blocking stdlib I/O call with no cancellation path. In practice this means a misbehaving MCP server can freeze the agent's main thread for the full `timeout_seconds` window, and Ctrl+C is unreliable because the signal won't interrupt the readline on all platforms.
+Recommendation: thread+queue pattern — spawn a daemon thread that does the blocking `readline()` and pushes the result to a `queue.Queue`; the main thread does `queue.get(timeout=remaining)`. On timeout, mark the transport as poisoned (subsequent calls raise immediately) and let the daemon thread die naturally on subprocess close. This is the same pattern `subprocess.communicate` uses internally. Bonus: also fixes Ctrl+C interruptibility.
+**Impact:** A hung MCP server freezes the agent's main thread for up to `timeout_seconds` (default 30s) with no clean escape. Multi-server setups where one server hangs block all tool calls to other servers (because each transport serializes its own calls, but the manager's `connect_all` calls each server sequentially).
+---
+
+#### MCP-05: No `notifications/tools/list_changed` handling — runtime tool surface changes invisible to the registry
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Robustness (MCP) |
+| **File(s)** | `agentkthx/mcp/client.py` (no handler for the notification) |
+**Status:** ✓ CLOSED R07.24
+
+The MCP protocol allows a server to push `notifications/tools/list_changed` when its tool surface changes at runtime (e.g., a filesystem MCP server that adds/removes tools based on which directories are accessible). The scaffold's `MCPClient` does not register a handler for this notification — `StdioTransport._read_response` skips any message without an `id` field (line 242-244), so the notification is silently dropped. The agent's `ToolRegistry` therefore shows the tool surface as it was at `connect_all` time; tools added or removed at runtime are invisible until the next `connect_all` (typically the next session).
+Recommendation: register a per-server callback in `MCPClient` for `notifications/tools/list_changed`. When fired, the client re-queries `tools/list`, diffs against the previous list, and notifies the `MCPManager` to add/remove the shim Tools in the agent's `ToolRegistry`. The manager needs an `unregister_tool(name)` method on `ToolRegistry` (currently has `register_tool` only). Trade-off: tool removal mid-session is a slight surprise to the model if it just picked a tool that's now gone — wrap the removal in a small grace period (1 turn) and emit a system message.
+**Impact:** Tools added/removed at runtime by MCP servers are invisible to the agent until session restart. Most current MCP servers have a static tool surface, so this is rarely hit in practice — but it's a latent gap that will bite when dynamic-tool servers become common.
+---
+
 ### Maintainability
 
 #### MAINT-02: 5 cloud backend plugins (zai/openrouter/gemini/openai/huggingface) duplicate ~5K LOC of structurally identical SSE/retry/catalog code
@@ -1036,6 +1094,19 @@ The `_model_cache`/`_cache_time` attributes were declared at class level, but `l
 
 ---
 
+#### MCP-03: Complex JSON Schema constructs flatten to default `string` in inputSchema conversion
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Maintainability (MCP) |
+| **File(s)** | `agentkthx/mcp/manager.py:191-225` (`_extract_params`) |
+**Status:** ✓ CLOSED R07.24
+
+The `_extract_params` helper converts an MCP tool's `inputSchema` (JSON Schema) into the project's flat `ToolParam` list. It handles `type: object` with `properties` + `required` and the common type cases (`string`/`integer`/`number`/`boolean`/`array`/`object`), plus nullable unions (`["string", "null"]`). It does NOT handle `oneOf`, `anyOf`, `allOf`, `$ref`, or nested `properties` deeper than one level — these fall through to `param_type = "string"` (the default). A tool with a sophisticated schema will appear simpler to the model than the server actually accepts, leading to malformed tool calls and the model being blamed for "hallucinating" args that the schema actually permitted.
+Recommendation: when `_extract_params` encounters a schema construct it can't structurally convert, emit a single `arguments_json` string parameter whose description tells the model to pass the full arguments object as JSON. The MCP client then parses the JSON and forwards it as the `arguments` field. This preserves the rich schema (the model sees a JSON string with the original schema in its description) at the cost of slightly more prompt tokens. Alternative: extend `ToolParam` to carry an arbitrary JSON Schema dict (bigger change — touches `to_json_schema` in `core/models.py`).
+**Impact:** Tools with `oneOf`/`anyOf`/`$ref` schemas appear deceptively simple to the model. Tool calls fail with "missing required field" or "wrong type" errors that the model can't easily diagnose because the schema it was shown didn't reflect reality.
+---
+
 ### Performance
 
 #### PERF-07: web_search has no result cache — same query re-fetches
@@ -1206,6 +1277,19 @@ Recommendation: Rewrite the parsing with stdlib `html.parser` (attribute-order/w
 
 ---
 
+---
+
+#### MCP-04: Eager server startup adds latency to every `--mcp` session even when no MCP tools are called
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Performance (MCP) |
+| **File(s)** | `agentkthx/cli/agent_factory.py:513-514` (`MCPManager.connect_all`) |
+**Status:** ✓ CLOSED R07.24
+
+The scaffold's `connect_all` is eager — every configured server is spawned at agent construction, the `initialize` handshake runs, and `tools/list` is queried for every server, all before the agent's first turn. For a user with 4–5 MCP servers configured (filesystem + git + memory + serena + audit), this adds ~1–3 seconds to `agentkthx chat` startup. If the user's session ends up not calling any MCP tools (e.g., they just ask the model a coding question and the agent uses built-in `shell`/`read_file`), the startup cost was wasted.
+Recommendation: lazy mode — `MCPManager.connect_all` records the configured servers but does not spawn them; a server is spawned on first tool call to that server's namespace. The agent's tool registry still shows all the namespaced tool names (queried lazily via a separate `tools/list` on first access), so the model can pick the tool; the actual subprocess spawn happens when the tool is dispatched. Trade-off: the first tool call to a server pays the spawn + handshake latency (~200–500ms), which the model can't predict. Mitigation: warm-up the most-likely servers (filesystem, git) eagerly and the rest lazily.
+**Impact:** Every `--mcp` session pays ~1–3s of startup latency for servers that may never be used. Not a correctness bug but a UX regression vs. the non-MCP path.
 ---
 
 ### New Features
@@ -1629,5 +1713,112 @@ Three findings, all from the R07.23 surface (`mcp search` + `mcp install` + the 
 **Status:** ✓ CLOSED R07.24
 
 **Detail:** Added `tests/test_mcp_live_contract.py` — 4 live-gated contract tests that skip unless `AGENTKTHX_LIVE_TESTS=1` is set in the env. The tests make ONE real network call per source: `test_live_npm_search_returns_documented_fields` hits `registry.npmjs.org/-/v1/search?text=filesystem&size=5` and asserts every result dict has the 11 documented fields (`name`, `package`, `version`, `description`, `source`, `is_official`, `homepage`, `install_hint`, `stars`, `license`, `search_score`); `test_live_npm_package_info_returns_metadata_dict` hits `registry.npmjs.org/@modelcontextprotocol/server-filesystem` (the default install target for `mcp install filesystem`) and asserts the `package` + `version` keys survive (would fail loudly if the package is unpublished from npm); `test_live_search_all_with_errors_returns_tuple` exercises the R07.24 `search_all_with_errors` contract against real npm + GitHub (both sources succeed → no errors, results non-empty); `test_live_github_search_returns_documented_fields` hits `api.github.com/search/repositories?q=serena` and asserts the documented field set (with the source marker `source == "github"` pinned). All 4 tests skip cleanly on network-unreachable (`URLError`/`socket.timeout`/`ConnectionError`) and on 429 rate-limit (with a `set AGENTKTHX_GITHUB_TOKEN` hint for the GitHub case). Verified live against real `registry.npmjs.org` + `api.github.com` — all 4 pass in ~1.7s when enabled; all 4 skip cleanly when the env var is unset (default CI run, zero suite cost). Closes the TEST-09 family gap: a future npm rename of `package.name` → `package.id` will ship green-on-mocked-suite (the existing `tests/test_mcp_cli.py::TestMcpSearch` tests mock `_http_get_json` with the new field name baked into the fake) but red-on-live-contract (the live test calls real `npm_search` and asserts the documented field set against the actual response shape).
+
+---
+## R07.22 New Findings
+Five findings, all from the R07.22 MCP client surface (`agentkthx/mcp/` package + `agentkthx mcp` subcommand + `_wire_mcp()` in `agent_factory.py`). No closures this pass — all 26 carried-forward OPEN findings re-verified in current code. The 5 MCP findings were placed in the Detailed Findings section but absent from the Findings Summary table — a reconcile-drift bug corrected at the R07.23 re-audit (the prose header count moved from `26 OPEN` → `31 OPEN` to match the parsed table, then to `34 OPEN` after the R07.23 additions).
+| ID | Severity | Category | File(s) | Title |
+|----|----------|----------|---------|-------|
+| MCP-01 | Medium | Robustness | `agentkthx/mcp/transport.py:170-205` (`_read_response`) | StdioTransport uses blocking `readline()` — per-call timeouts don't actually interrupt |
+| MCP-02 | Medium | Security | `agentkthx/mcp/config.py:88-110` (`MCPServerConfig.resolve_command`) | MCP server configs have no sha256 pin equivalent (SEC-13 analogue) |
+| MCP-03 | Low | Maintainability | `agentkthx/mcp/manager.py:191-225` (`_extract_params`) | Complex JSON Schema constructs flatten to default `string` in inputSchema conversion |
+| MCP-04 | Low | Performance | `agentkthx/cli/agent_factory.py:513-514` (`MCPManager.connect_all`) | Eager server startup adds latency to every `--mcp` session even when no MCP tools are called |
+| MCP-05 | Low | Robustness | `agentkthx/mcp/client.py` (no handler for the notification) | No `notifications/tools/list_changed` handling — runtime tool surface changes invisible to the registry |
+
+---
+
+## R07.24 MCP Closure Batch
+
+Six findings resolved in one pass — four CLOSED (MCP-01, MCP-03, MCP-04, MCP-05) + two WONTFIX (MCP-02, SEC-13). All surgical, non-breaking. Suite: 2912 → 2932 passed (+20 new tests in `tests/test_mcp_scaffold.py`). Zero regressions; ruff + black clean.
+
+### Robustness
+
+#### MCP-01: StdioTransport thread+queue pattern — per-call timeouts actually interrupt
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Medium |
+| **Category** | Robustness |
+| **File(s)** | `agentkthx/mcp/transport.py` (`_read_response`, `_blocking_readline`, `is_poisoned`) |
+
+**Status:** ✓ CLOSED R07.24
+
+**Detail:** Replaced the naive `self._proc.stdout.readline()` loop with a thread+queue pattern. A daemon thread (`_blocking_readline`) does the blocking `readline()` and pushes the line (or None on EOF) to a `queue.Queue`; the main thread does `queue.get(timeout=remaining)`, which actually honors its deadline (unlike `readline()`). On timeout, the transport is marked **poisoned** (`self._poisoned = True`) — subsequent calls raise immediately with a clear "transport poisoned — close() and reconnect to recover" message. The `is_poisoned` property is exposed for diagnostics. Notifications (no `id` field) now route to a registered callback if set (MCP-05's handler), or fall back to the stderr ring buffer (the original R07.22 behavior). Bonus: this also fixes Ctrl+C interruptibility on POSIX — the main thread no longer holds the GIL inside `readline()`, so SIGINT fires cleanly. The TODO comment at the bottom of `transport.py` was replaced with a closing note documenting the fix. Same shape as the R07.24 ROB-06 line-ref update (which fixed the verifier false-positive on the streaming-generator close-guard).
+
+---
+
+#### MCP-05: notifications/tools/list_changed handler — runtime tool surface changes visible
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Robustness |
+| **File(s)** | `agentkthx/mcp/client.py` (`set_notification_handler`, `handle_notification`), `agentkthx/mcp/transport.py` (`set_notification_callback`), `agentkthx/mcp/manager.py` (`_install_list_changed_handler`, `_refresh_tools_for_server`, `on_tools_changed`, `unregister_tool`), `agentkthx/tools/registry.py` (`unregister_tool`) |
+
+**Status:** ✓ CLOSED R07.24
+
+**Detail:** Added three layers of notification routing. (1) `StdioTransport.set_notification_callback(callback)` — transport-level hook fired when a JSON-RPC message with no `id` field is read. (2) `MCPClient.set_notification_handler(method, handler)` + `handle_notification(msg)` — per-method dispatch table; the client installs a trampoline on its transport during `connect()` (BEFORE sending `initialize`, so early notifications aren't missed). `initialize` now advertises `listChanged: True` in the client capabilities (was already there but now actually wired). Handler exceptions are swallowed + logged so a buggy handler doesn't kill the transport. (3) `MCPManager._install_list_changed_handler(client, name)` wires the per-server `notifications/tools/list_changed` callback to `_refresh_tools_for_server(name)` — which re-queries `tools/list`, diffs against the cached surface (set difference on tool names), adds newly-discovered shim Tools to the live `_target_registry` (stashed by `register_into()`), removes vanished ones via `ToolRegistry.unregister_tool(name)` (NEW method — wasn't on the registry before R07.24), then fires the user-registered `on_tools_changed(callback)` with `(server_name, added, removed)`. The callback fires AFTER the live registry is updated so the callback can react to the live state. `_refresh_tools_for_server` is a no-op on transient `tools/list` failures (returns `([], [])`) — a transient network blip doesn't break the agent loop. The handler is defensively installed via `getattr` so test fakes / mock clients that don't implement `set_notification_handler` are silently skipped (preserves R07.22 behavior). 6 regression tests: handler round-trip, unknown-method returns False, buggy handler swallowed, ToolRegistry.unregister_tool round-trip + idempotence, `_refresh_tools_for_server` diff with live registry update, `on_tools_changed` callback fires with correct (added, removed) shape.
+
+---
+
+### Maintainability
+
+#### MCP-03: _extract_params arguments_json fallback for oneOf/anyOf/$ref/nested
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Maintainability |
+| **File(s)** | `agentkthx/mcp/manager.py` (`_extract_params`, `_schema_has_complex_constructs`, `_build_arguments_json_fallback`, `_invoke`) |
+
+**Status:** ✓ CLOSED R07.24
+
+**Detail:** Added a conservative complex-construct detector (`_schema_has_complex_constructs`) that returns True if ANY property uses `oneOf`/`anyOf`/`allOf`/`$ref`/`$dynamicRef`, OR has nested `properties` deeper than one level (object-with-properties, or array-of-objects-with-items.properties). When detected, `_extract_params` falls back to `_build_arguments_json_fallback` — emits a single `arguments_json` string parameter whose description embeds the original schema as JSON so the model can reason about the expected shape. `_invoke` was extended to unwrap `arguments_json`: if the args dict has exactly one key `arguments_json`, parse the string as JSON and forward the parsed dict as the MCP `arguments` field. Malformed JSON returns a clean error string to the model (not a raise — the agent loop treats raised exceptions as tool-execution failures). Tolerant of frameworks that pre-parse the JSON for us (forwards as-is if the value is already a dict). The conservative "whole-tool fallback" choice (vs per-property) was deliberate: mixed per-field params + a single arguments_json string is hard for the model to reason about, and matches the original finding's recommendation. 8 regression tests: oneOf fallback, anyOf fallback, $ref fallback, nested-object fallback, array-of-objects fallback, simple-array does NOT fallback (regression guard), $dynamicRef fallback, _invoke unwrap with valid + invalid JSON.
+
+---
+
+### Performance
+
+#### MCP-04: Lazy MCP server startup — connect_all(lazy=True) + warmup_server() + auto-warm in _invoke
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Performance |
+| **File(s)** | `agentkthx/mcp/manager.py` (`connect_all(lazy=...)`, `warmup_server`, `_invoke`, `register_into`, `close_all`) |
+
+**Status:** ✓ CLOSED R07.24
+
+**Detail:** Added `lazy: bool = False` parameter to `connect_all`. When True, all configs are recorded in `_lazy_configs` without spawning any subprocesses — `connect_all` returns `[]` immediately (no failures possible since no spawns attempted). New `warmup_server(name)` method moves a server from `_lazy_configs` to `_clients`: spawns the subprocess, sends `initialize`, queries `tools/list`, registers shim Tools in `_tools` AND in the live `_target_registry` (stashed by `register_into()` so post-prompt-build warmup still surfaces tools to the next prompt rebuild). Idempotent — a no-op if already connected. `_invoke` checks `if server_name in self._lazy_configs` and auto-warms on first dispatch; warmup failure returns a clean error string to the model rather than raising. Trade-off (documented in the finding): the agent's system prompt will NOT include MCP tools for lazy servers — the model can't pick them until they're warmed up. Operators who want lazy startup AND prompt-time tool surface should call `warmup_server("<name>")` for each server BEFORE `Agent.__init__` builds the prompt. Default behavior (lazy=False) is unchanged — eager spawn + full tool surface. The `register_into` method now stashes `_target_registry` even when no tools are registered yet (the lazy case), so warmup_server can populate it later. 6 regression tests: connect_all(lazy=True) doesn't spawn, warmup_server spawns + enumerates, warmup is idempotent, unknown name raises, _invoke auto-warms on first call.
+
+---
+
+### Security (WONTFIX)
+
+#### MCP-02: MCP server sha256 pin equivalent — DEFERRED (out of scope)
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Medium |
+| **Category** | Security |
+| **File(s)** | `agentkthx/mcp/config.py` (`MCPServerConfig`) |
+
+**Status:** ⊘ WONTFIX R07.24 (owner decision)
+
+**Detail:** The finding recommended adding an optional `sha256` field to `MCPServerConfig` and an `AGENTKTHX_REQUIRE_MCP_PINS=1` enforcement mode, mirroring SEC-13's plugin-pin pattern. The owner deferred: AgentKthx doesn't control the MCP spec, and the MCP spec doesn't define a pin field for server configs. Adding one would require every MCP server author to publish a sha256 alongside their `mcp.json` entry — which they have no incentive to do (the spec doesn't ask for it, and the upstream npm package already has its own integrity mechanism via npm's tarball checksums). The trust boundary is advisory by design, same posture as the MCP spec itself; an operator who wants pin enforcement can manually hash the binary (`sha256sum $(which npx)`) and check it before launch — AgentKthx can't make that ergonomic without spec support. Documented in `docs/mcp/ROADMAP.md` as a deferred Phase 4+ item (would require MCP spec coordination with modelcontextprotocol/* maintainers). The bundled default config (`mcp init`) only enables `filesystem` + `sequential-thinking` — both official `@modelcontextprotocol/server-*` packages — so the practical attack surface is bounded. SEC-13 (the plugin analogue) is wontfixed in this same pass with the same reasoning.
+
+---
+
+#### SEC-13: Plugin sha256 pin enforcement — DEFERRED (out of scope)
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Medium |
+| **Category** | Security |
+| **File(s)** | `agentkthx/plugins/_loader.py` |
+
+**Status:** ⊘ WONTFIX R07.24 (owner decision)
+
+**Detail:** The finding recommended adding `AGENTKTHX_REQUIRE_PLUGIN_PINS=1` env var that refuses to load any plugin whose manifest lacks a well-formed sha256 pin, with an allowlist exception for bundled plugins. The owner deferred: plugins are externally-distributed code and AgentKthx can't enforce what upstream authors ship. Pin verification works WHEN present (the `_validate_sha256_pin` machinery from the R07.05 SEC-06 fix is intact), but refusing to load unpinned plugins would block every bundled plugin + every community plugin — the ecosystem doesn't ship pins today. The enforcement-mode gap is structural, not an AgentKthx defect. Same reasoning as MCP-02 (wontfixed in this same pass) — both findings share the "we can't enforce what we don't control" framing. The bundled plugins (`openai`, `mistral`, `openrouter`, `pollinations`, `gemini`, `huggingface`, `zai`, `orcarouter`, `bitnet`, `turboquant`, `acp`, `test-plugin`) all ship in-tree and are covered by the repo's own integrity (git commits + GitHub release tags); the trust boundary for community plugins is the same as for any Python package installed via pip — the operator's responsibility to vet before install.
 
 ---

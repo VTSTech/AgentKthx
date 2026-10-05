@@ -12,14 +12,21 @@ Methods
 * :meth:`MCPClient.close` — shut down the transport
 
 The client is **stateless between calls** aside from the underlying
-transport and the server's declared capabilities. We do not cache the
-tool list because MCP servers can change their tool surface at runtime
-(the protocol supports ``notifications/tools/list_changed``).
+transport and the server's declared capabilities.
+
+R07.24 (MCP-05): the client now supports registering per-method
+notification handlers via :meth:`set_notification_handler`. When the
+transport reads a notification (a JSON-RPC message with no ``id``
+field), the client routes it to the registered handler if one exists;
+otherwise the notification is logged to the stderr ring buffer (the
+original R07.22 behavior). The manager wires
+``notifications/tools/list_changed`` to its
+:meth:`MCPManager._refresh_tools_for_server` method on connect.
 """
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
 from .config import MCPServerConfig
 from .transport import StdioTransport
@@ -50,6 +57,64 @@ class MCPClient:
         self._initialized = False
         self._server_caps: dict[str, Any] = {}
         self._server_info: dict[str, Any] = {}
+        # R07.24 (MCP-05): per-method notification handlers.
+        # Keyed by JSON-RPC method name (e.g. "notifications/tools/list_changed").
+        # The handler receives the full message dict (params + method).
+        self._notification_handlers: dict[str, Callable[[dict], None]] = {}
+
+    def set_notification_handler(self, method: str, handler: Callable[[dict], None] | None) -> None:
+        """R07.24 (MCP-05): register a callback for a JSON-RPC notification method.
+
+        When the transport reads a notification (a message with no ``id``
+        field), the client routes it to the registered handler if one
+        exists for that method. Pass ``handler=None`` to remove a
+        previously-registered handler.
+
+        The handler is called from the transport's reader thread context
+        — keep it fast and non-blocking. If it raises, the exception is
+        swallowed (logged to the stderr ring) so a buggy handler doesn't
+        kill the transport.
+
+        The standard MCP notification we care about is
+        ``notifications/tools/list_changed`` — the manager wires this to
+        :meth:`MCPManager._refresh_tools_for_server`.
+        """
+        if handler is None:
+            self._notification_handlers.pop(method, None)
+        else:
+            self._notification_handlers[method] = handler
+
+    def handle_notification(self, msg: dict) -> bool:
+        """R07.24 (MCP-05): route a notification to its registered handler.
+
+        Called by the transport when it reads a notification (no ``id``
+        field). Returns True if a handler was registered for the method
+        and ran (or raised); False if no handler was registered (the
+        transport logs the notification to the stderr ring buffer in
+        that case, preserving the R07.22 behavior).
+
+        Handlers run in the caller's context (the transport's reader
+        thread for inline notifications, the main thread for
+        inter-call notifications drained via :meth:`drain_notifications`).
+        Exceptions are swallowed so a buggy handler doesn't kill the
+        transport.
+        """
+        method = msg.get("method", "")
+        handler = self._notification_handlers.get(method)
+        if handler is None:
+            return False
+        try:
+            handler(msg)
+        except Exception:
+            # Buggy handler — log + continue. The transport must not die.
+            import sys
+
+            print(
+                f"[MCP] notification handler for {method!r} raised; "
+                f"swallowing (handler bug, not a transport fault)",
+                file=sys.stderr,
+            )
+        return True
 
     # ---- lifecycle ----
 
@@ -58,12 +123,27 @@ class MCPClient:
 
         Idempotent — calling twice is a no-op after the first success.
 
+        R07.24 (MCP-05): also installs a notification trampoline on the
+        underlying transport so JSON-RPC notifications (e.g.
+        ``notifications/tools/list_changed``) get routed to per-method
+        handlers registered via :meth:`set_notification_handler`. Before
+        R07.24, notifications were silently logged to the stderr ring
+        buffer; now they fire the registered handler (if any).
+
         Raises:
             MCPClientError: On protocol mismatch or failed handshake.
             MCPTransportError: On subprocess / IO failure.
         """
         if self._initialized:
             return
+
+        # R07.24 (MCP-05): wire the transport's notification callback to
+        # our trampoline BEFORE sending initialize — servers may push
+        # ``notifications/initialized`` ack (no, we send that), but more
+        # importantly, some servers push ``notifications/tools/list_changed``
+        # immediately after init if their tool surface is dynamic. Wiring
+        # before init guarantees we don't miss early notifications.
+        self._transport.set_notification_callback(self.handle_notification)
 
         result = self._transport.request(
             "initialize",
@@ -74,7 +154,9 @@ class MCPClient:
                     "version": _CLIENT_VERSION,
                 },
                 "capabilities": {
-                    # We support nothing beyond the base protocol for v0.1
+                    # We support nothing beyond the base protocol for v0.1.
+                    # R07.24 (MCP-05): listChanged=True tells the server
+                    # we want notifications/tools/list_changed pushes.
                     "tools": {"listChanged": True},
                 },
             },

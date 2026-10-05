@@ -77,6 +77,23 @@ class ToolRegistry:
         """Register a Tool object directly."""
         self._tools[tool.name] = tool
 
+    def unregister_tool(self, name: str) -> bool:
+        """R07.24 (MCP-05): remove a tool by name.
+
+        Used by :meth:`MCPManager._refresh_tools_for_server` when a
+        server pushes ``notifications/tools/list_changed`` and a tool
+        has been removed from the live surface. Also useful for slash
+        commands that disable a tool mid-session (e.g. ``/tools disable
+        <name>`` — not yet implemented, but the API is here).
+
+        Returns:
+            True if the tool was found and removed, False if not present.
+        """
+        if name in self._tools:
+            del self._tools[name]
+            return True
+        return False
+
     def get(self, name: str) -> Tool | None:
         """Get a tool by name."""
         return self._tools.get(name)

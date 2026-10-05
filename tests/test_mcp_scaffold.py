@@ -247,6 +247,178 @@ def test_extract_params_empty_schema():
     assert _extract_params(None) == []  # type: ignore[arg-type]
 
 
+# ----------------------------- MCP-03 (R07.24): arguments_json fallback -----------------------------
+
+
+def test_extract_params_oneof_falls_back_to_arguments_json():
+    """R07.24 (MCP-03): a schema with oneOf falls back to a single arguments_json param."""
+    from agentkthx.mcp.manager import _build_arguments_json_fallback, _schema_has_complex_constructs
+
+    schema = {
+        "type": "object",
+        "properties": {
+            "kind": {"oneOf": [{"type": "string"}, {"type": "null"}]},
+        },
+    }
+    # Detector should flag the schema as complex
+    assert _schema_has_complex_constructs(schema) is True
+    # Fallback emits a single arguments_json param with the schema embedded
+    params = _build_arguments_json_fallback(schema)
+    assert len(params) == 1
+    assert params[0].name == "arguments_json"
+    assert params[0].type == "string"
+    assert params[0].required is True
+    # Description should embed the original schema as JSON
+    assert "oneOf" in params[0].description
+    assert "Original inputSchema" in params[0].description
+
+
+def test_extract_params_anyof_at_property_level_falls_back():
+    """A property using anyOf triggers the whole-tool fallback (conservative)."""
+    schema = {
+        "type": "object",
+        "properties": {
+            "filter": {"anyOf": [{"type": "string"}, {"type": "integer"}]},
+            "limit": {"type": "integer"},
+        },
+    }
+    params = _extract_params(schema)
+    # Conservative: ANY complex construct → whole-tool fallback
+    assert len(params) == 1
+    assert params[0].name == "arguments_json"
+
+
+def test_extract_params_ref_falls_back():
+    """A $ref triggers the fallback."""
+    schema = {
+        "type": "object",
+        "properties": {
+            "user": {"$ref": "#/definitions/User"},
+        },
+    }
+    params = _extract_params(schema)
+    assert len(params) == 1
+    assert params[0].name == "arguments_json"
+
+
+def test_extract_params_nested_object_properties_falls_back():
+    """A property with type=object + nested properties triggers the fallback."""
+    schema = {
+        "type": "object",
+        "properties": {
+            "options": {
+                "type": "object",
+                "properties": {"verbose": {"type": "boolean"}, "depth": {"type": "integer"}},
+            },
+        },
+    }
+    params = _extract_params(schema)
+    assert len(params) == 1
+    assert params[0].name == "arguments_json"
+
+
+def test_extract_params_array_of_objects_falls_back():
+    """An array of objects (items.type=object + items.properties) triggers the fallback."""
+    schema = {
+        "type": "object",
+        "properties": {
+            "items": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {"name": {"type": "string"}, "value": {"type": "integer"}},
+                },
+            },
+        },
+    }
+    params = _extract_params(schema)
+    assert len(params) == 1
+    assert params[0].name == "arguments_json"
+
+
+def test_extract_params_simple_array_does_not_fall_back():
+    """Regression guard: an array of primitives stays a normal param."""
+    schema = {
+        "type": "object",
+        "properties": {
+            "tags": {"type": "array", "items": {"type": "string"}},
+        },
+    }
+    params = _extract_params(schema)
+    assert len(params) == 1
+    assert params[0].name == "tags"
+    assert params[0].type == "array"
+
+
+def test_extract_params_dynamic_ref_falls_back():
+    """$dynamicRef (JSON Schema 2020-12) triggers the fallback."""
+    schema = {
+        "type": "object",
+        "properties": {
+            "thing": {"$dynamicRef": "#meta"},
+        },
+    }
+    params = _extract_params(schema)
+    assert len(params) == 1
+    assert params[0].name == "arguments_json"
+
+
+def test_invoke_unwraps_arguments_json_string(monkeypatch):
+    """R07.24 (MCP-03): _invoke parses arguments_json string and forwards as dict."""
+    from agentkthx.mcp.config import MCPServerConfig
+    from agentkthx.mcp.manager import MCPManager
+
+    cfg = MCPServerConfig(name="test", command="python3")
+    mgr = MCPManager([cfg])
+
+    # Mock client — captures the forwarded args
+    captured_args: dict = {}
+
+    class FakeClient:
+        def __init__(self, cfg):
+            pass
+
+        def call_tool(self, name, args):
+            captured_args["name"] = name
+            captured_args["args"] = args
+            return {"content": [{"type": "text", "text": "ok"}]}
+
+    # Inject our fake client directly (skipping connect/warmup)
+    mgr._clients["test"] = FakeClient(cfg)
+    mgr._connected = True
+
+    # Simulate a model call where arguments_json is a JSON string
+    args = {"arguments_json": '{"path": "/tmp", "mode": "r"}'}
+    result = mgr._invoke("test", "read_file", "test__read_file", args)
+    assert "ok" in result
+    assert captured_args["name"] == "read_file"
+    assert captured_args["args"] == {"path": "/tmp", "mode": "r"}
+
+
+def test_invoke_returns_clean_error_on_invalid_arguments_json():
+    """R07.24 (MCP-03): malformed arguments_json returns a clean error string, not a raise."""
+    from agentkthx.mcp.config import MCPServerConfig
+    from agentkthx.mcp.manager import MCPManager
+
+    cfg = MCPServerConfig(name="test", command="python3")
+    mgr = MCPManager([cfg])
+
+    class FakeClient:
+        def __init__(self, cfg):
+            pass
+
+        def call_tool(self, name, args):
+            raise AssertionError("should not be called — JSON parse fails first")
+
+    mgr._clients["test"] = FakeClient(cfg)
+    mgr._connected = True
+
+    args = {"arguments_json": "{not valid json"}
+    result = mgr._invoke("test", "read_file", "test__read_file", args)
+    assert "MCP error" in result
+    assert "not valid JSON" in result
+
+
 # ----------------------------- result flattening -----------------------------
 
 
@@ -365,8 +537,8 @@ def test_connect_all_verbose_prints_progress(capsys, monkeypatch):
     assert failures == []
 
     captured = capsys.readouterr()
-    # Header should list both servers
-    assert "[MCP] probing 2 server(s): alpha, beta" in captured.err
+    # Header should list both servers (R07.24: now includes [eager] mode suffix)
+    assert "[MCP] probing 2 server(s) [eager]: alpha, beta" in captured.err
     # Per-server "connecting" line
     assert "[MCP]   alpha: connecting..." in captured.err
     assert "[MCP]   beta: connecting..." in captured.err
@@ -396,7 +568,7 @@ def test_connect_all_verbose_prints_failures(capsys, monkeypatch):
     assert failures[0][0] == "broken"
 
     captured = capsys.readouterr()
-    assert "[MCP] probing 1 server(s): broken" in captured.err
+    assert "[MCP] probing 1 server(s) [eager]: broken" in captured.err
     assert "[MCP]   broken: connecting..." in captured.err
     assert "[MCP]   broken: failed (simulated connect failure); skipped" in captured.err
 
@@ -424,6 +596,310 @@ def test_connect_all_silent_by_default(capsys, monkeypatch):
     mgr.connect_all()  # verbose defaults to False
     captured = capsys.readouterr()
     assert captured.err == ""
+
+
+# ----------------------------- MCP-04 (R07.24): lazy mode + warmup_server -----------------------------
+
+
+def test_connect_all_lazy_does_not_spawn_any_servers():
+    """R07.24 (MCP-04): connect_all(lazy=True) records configs without spawning."""
+    cfg_a = MCPServerConfig(name="alpha", command="python3")
+    cfg_b = MCPServerConfig(name="beta", command="python3")
+    mgr = MCPManager([cfg_a, cfg_b])
+
+    # Mock MCPClient to track if it was instantiated — should NOT be
+    # when lazy=True.
+    instantiation_count = [0]
+
+    class FakeClient:
+        def __init__(self, cfg):
+            instantiation_count[0] += 1
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr("agentkthx.mcp.manager.MCPClient", FakeClient)
+    try:
+        failures = mgr.connect_all(lazy=True)
+    finally:
+        monkeypatch.undo()
+
+    assert failures == []  # no failures because no spawns attempted
+    assert instantiation_count[0] == 0  # no MCPClient instances created
+    # All configs recorded as deferred
+    assert set(mgr._lazy_configs.keys()) == {"alpha", "beta"}
+    # No clients, no tools
+    assert mgr._clients == {}
+    assert mgr._tools == {}
+
+
+def test_warmup_server_spawns_and_enumerates(monkeypatch):
+    """R07.24 (MCP-04): warmup_server('<name>') spawns + registers tools on demand."""
+    cfg = MCPServerConfig(name="alpha", command="python3")
+    mgr = MCPManager([cfg])
+    mgr.connect_all(lazy=True)  # defer
+
+    class FakeClient:
+        def __init__(self, cfg):
+            self.cfg = cfg
+
+        def connect(self):
+            pass
+
+        def list_tools(self):
+            return [{"name": "alpha_tool", "description": "test"}]
+
+        def close(self, timeout=2.0):
+            pass
+
+        @property
+        def is_alive(self):
+            return True
+
+        @property
+        def server_info(self):
+            return {"name": "fake", "version": "1.0"}
+
+        @property
+        def server_capabilities(self):
+            return {}
+
+        @property
+        def stderr_tail(self):
+            return []
+
+    monkeypatch.setattr("agentkthx.mcp.manager.MCPClient", FakeClient)
+
+    tool_count = mgr.warmup_server("alpha")
+    assert tool_count == 1
+    # Server moved from lazy to connected
+    assert "alpha" not in mgr._lazy_configs
+    assert "alpha" in mgr._clients
+    # Tool registered in manager's _tools dict
+    assert any(ns == "alpha__alpha_tool" for ns in mgr._tools.keys())
+
+
+def test_warmup_server_is_idempotent():
+    """warmup_server() on an already-connected server is a no-op."""
+    cfg = MCPServerConfig(name="alpha", command="python3")
+    mgr = MCPManager([cfg])
+    mgr._clients["alpha"] = object()  # mark as connected
+    mgr._tools["alpha__tool"] = ("alpha", "tool", {"name": "tool"})
+    mgr._connected = True
+
+    # Should NOT raise — just return the existing count
+    count = mgr.warmup_server("alpha")
+    assert count == 1
+
+
+def test_warmup_server_unknown_name_raises():
+    """warmup_server('<unknown>') raises MCPManagerError."""
+    from agentkthx.mcp.manager import MCPManagerError
+
+    mgr = MCPManager([])
+    with pytest.raises(MCPManagerError, match="not configured"):
+        mgr.warmup_server("nonexistent")
+
+
+def test_invoke_lazy_warms_on_first_call(monkeypatch):
+    """R07.24 (MCP-04): _invoke on a lazy server triggers warmup automatically."""
+    cfg = MCPServerConfig(name="alpha", command="python3")
+    mgr = MCPManager([cfg])
+    mgr.connect_all(lazy=True)
+
+    class FakeClient:
+        def __init__(self, cfg):
+            pass
+
+        def connect(self):
+            pass
+
+        def list_tools(self):
+            return [{"name": "alpha_tool"}]
+
+        def call_tool(self, name, args):
+            return {"content": [{"type": "text", "text": "ok"}]}
+
+        def close(self, timeout=2.0):
+            pass
+
+        @property
+        def is_alive(self):
+            return True
+
+        @property
+        def server_info(self):
+            return {}
+
+        @property
+        def server_capabilities(self):
+            return {}
+
+        @property
+        def stderr_tail(self):
+            return []
+
+    monkeypatch.setattr("agentkthx.mcp.manager.MCPClient", FakeClient)
+
+    # _invoke should trigger warmup_server("alpha") implicitly
+    result = mgr._invoke("alpha", "alpha_tool", "alpha__alpha_tool", {})
+    assert "ok" in result
+    # Server warmed up after the call
+    assert "alpha" in mgr._clients
+    assert "alpha" not in mgr._lazy_configs
+
+
+# ----------------------------- MCP-05 (R07.24): notifications/tools/list_changed -----------------------------
+
+
+def test_mcpclient_set_notification_handler_round_trip():
+    """R07.24 (MCP-05): set_notification_handler + handle_notification round-trip."""
+    from agentkthx.mcp.client import MCPClient
+    from agentkthx.mcp.config import MCPServerConfig
+
+    cfg = MCPServerConfig(name="test", command="python3")
+    client = MCPClient(cfg)
+
+    fired = []
+
+    def handler(msg):
+        fired.append(msg)
+
+    client.set_notification_handler("notifications/tools/list_changed", handler)
+    # Route a notification
+    client.handle_notification({"method": "notifications/tools/list_changed", "params": {}})
+    assert len(fired) == 1
+    assert fired[0]["method"] == "notifications/tools/list_changed"
+
+    # Pass None to remove
+    client.set_notification_handler("notifications/tools/list_changed", None)
+    client.handle_notification({"method": "notifications/tools/list_changed", "params": {}})
+    assert len(fired) == 1  # no new invocation
+
+
+def test_mcpclient_handle_notification_unknown_method_returns_false():
+    """R07.24 (MCP-05): an unregistered method returns False (transport falls back to logging)."""
+    from agentkthx.mcp.client import MCPClient
+    from agentkthx.mcp.config import MCPServerConfig
+
+    cfg = MCPServerConfig(name="test", command="python3")
+    client = MCPClient(cfg)
+    # No handler registered for "some/random/notification"
+    assert client.handle_notification({"method": "some/random/notification"}) is False
+
+
+def test_mcpclient_handler_exception_is_swallowed():
+    """R07.24 (MCP-05): a buggy handler doesn't kill the transport (returns True)."""
+    from agentkthx.mcp.client import MCPClient
+    from agentkthx.mcp.config import MCPServerConfig
+
+    cfg = MCPServerConfig(name="test", command="python3")
+    client = MCPClient(cfg)
+
+    def buggy_handler(_msg):
+        raise RuntimeError("handler bug")
+
+    client.set_notification_handler("notifications/tools/list_changed", buggy_handler)
+    # Should not raise — swallow + return True (handler was registered)
+    result = client.handle_notification({"method": "notifications/tools/list_changed"})
+    assert result is True
+
+
+def test_toolregistry_unregister_tool_round_trip():
+    """R07.24 (MCP-05): ToolRegistry.unregister_tool removes by name."""
+    from agentkthx.core.models import Tool, ToolParam
+    from agentkthx.tools.registry import ToolRegistry
+
+    reg = ToolRegistry()
+    tool = Tool(
+        name="mytool",
+        description="test",
+        params=[ToolParam(name="x", type="string")],
+        handler=lambda **kw: "ok",
+    )
+    reg.register_tool(tool)
+    assert "mytool" in reg
+    assert reg.unregister_tool("mytool") is True
+    assert "mytool" not in reg
+    # Idempotent — returns False if not present
+    assert reg.unregister_tool("mytool") is False
+
+
+def test_mcpmanager_refresh_tools_for_server_diffs_and_updates_registry():
+    """R07.24 (MCP-05): _refresh_tools_for_server diffs live vs cache + updates live registry."""
+    from agentkthx.core.models import Tool
+    from agentkthx.mcp.config import MCPServerConfig
+    from agentkthx.mcp.manager import MCPManager
+    from agentkthx.tools.registry import ToolRegistry
+
+    cfg = MCPServerConfig(name="alpha", command="python3")
+    mgr = MCPManager([cfg])
+
+    # Initial surface: tools A and B
+    mgr._clients["alpha"] = None  # placeholder — we'll mock list_tools below
+    mgr._tools["alpha__A"] = ("alpha", "A", {"name": "A"})
+    mgr._tools["alpha__B"] = ("alpha", "B", {"name": "B"})
+    mgr._connected = True
+
+    # Live registry with A and B registered
+    reg = ToolRegistry()
+    mgr._target_registry = reg
+    for ns in ("alpha__A", "alpha__B"):
+        reg.register_tool(Tool(name=ns, description="", params=[], handler=lambda **kw: ""))
+
+    # Mock the client to return a NEW surface: A and C (B removed, C added)
+    class FakeClient:
+        def list_tools(self):
+            return [{"name": "A"}, {"name": "C"}]
+
+    mgr._clients["alpha"] = FakeClient()
+
+    added, removed = mgr._refresh_tools_for_server("alpha")
+
+    # Diff: A kept, B removed, C added
+    assert len(added) == 1 and added[0]["name"] == "C"
+    assert len(removed) == 1 and removed[0]["name"] == "B"
+
+    # Live registry updated: B removed, C added
+    assert "alpha__A" in reg
+    assert "alpha__B" not in reg
+    assert "alpha__C" in reg
+
+    # Manager's _tools dict updated too
+    assert "alpha__B" not in mgr._tools
+    assert "alpha__C" in mgr._tools
+
+
+def test_mcpmanager_on_tools_changed_callback_fires():
+    """R07.24 (MCP-05): the user-registered callback fires on diff."""
+    from agentkthx.mcp.config import MCPServerConfig
+    from agentkthx.mcp.manager import MCPManager
+    from agentkthx.tools.registry import ToolRegistry
+
+    cfg = MCPServerConfig(name="alpha", command="python3")
+    mgr = MCPManager([cfg])
+    mgr._clients["alpha"] = None
+    mgr._tools["alpha__A"] = ("alpha", "A", {"name": "A"})
+    mgr._connected = True
+    mgr._target_registry = ToolRegistry()
+
+    callback_fired = []
+
+    def cb(server, added, removed):
+        callback_fired.append((server, [a["name"] for a in added], [r["name"] for r in removed]))
+
+    mgr.on_tools_changed(cb)
+
+    class FakeClient:
+        def list_tools(self):
+            return [{"name": "A"}, {"name": "B"}]  # B added, nothing removed
+
+    mgr._clients["alpha"] = FakeClient()
+    mgr._refresh_tools_for_server("alpha")
+
+    assert len(callback_fired) == 1
+    server, added, removed = callback_fired[0]
+    assert server == "alpha"
+    assert added == ["B"]
+    assert removed == []
 
 
 if __name__ == "__main__":
