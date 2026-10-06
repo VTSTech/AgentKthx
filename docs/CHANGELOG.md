@@ -5,6 +5,98 @@ All notable changes to AgentKthx will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [R07.25] - 2026-10-06 05:27:09 PM
+
+**Two-batch closure pass + backend support tiers introduced.** R07.25 ships 5 closures (4 CLOSED + 1 WONTFIX) across two batches, plus a new `docs/SUPPORT.md` policy that splits the cloud backends into Fully Supported (ZAI, OpenRouter, HuggingFace, Gemini, Mistral) and Limited Support (Pollinations, OrcaRouter, OpenAI) tiers based on maintainer testing coverage. The `audit/generate_audit_dash.py` dashboard generator also gained an MCP category bucket + a hero resolution-rate % (was closure-rate %). Suite: 2959 → 2966 passed (+7 net across the two batches) / 20 skipped. Zero regressions; ruff + black clean. Register: 125 findings — 14 OPEN / 101 CLOSED / 10 WONTFIX (111 archived, ~89%). Closure rate 81% / resolution rate 89%.
+
+The release is split into two batches for changelog clarity, but shipped as a single tagged release. The audit register (`audit/audit.md` + `audit/deltas.md`) tracks each finding's closure prose separately.
+
+### Batch 1 — SEC-09 WONTFIX + TEST-09 CLOSED (2 findings resolved)
+
+- **SEC-09** (Medium, WONTFIX) — ACP credentials sent as Basic Auth over HTTP by default. Owner decision: ACP is a monitoring-only protocol with no ability to prompt or run commands; the `http://localhost:8766` default is a PLACEHOLDER parameter so a fresh checkout works against a local ACP instance, NOT a recommendation to deploy ACP on remote HTTP. Users deploying ACP across machines are expected to put it behind HTTPS themselves — same operator-side trust boundary as MCP-02/SEC-13 R07.24 WONTFIX. A runtime warning would block the documented localhost-development path under the default placeholder URL, which is a UX regression for the most common deployment shape. **Security category now 100% resolved**: 15 CLOSED + 5 WONTFIX, 0 OPEN.
+- **TEST-09** (Low, CLOSED) — new `scripts/smoke_test_r07_25.sh` extends the R07.21 smoke-test script family with a 4th streaming-path step per backend. The script is a superset of `smoke_test_r07_21.sh` — runs the existing three steps (model listing, `--think`, `--tools shell --no-stream`) per backend AND adds a 4th step that re-runs the `--tools shell` invocation WITHOUT `--no-stream`, forcing the streaming path (`generate_completions_stream` → `_iter_sse_lines` → SSE chunk parse → tool-call extraction) with a 180s timeout (vs 120s non-streaming). The smoke marker (`smoke-test-marker-$$`) is the SAME for both paths, so a streaming-only regression (the R07.09 `_iter_sse_lines` `NotImplementedError` shape) shows up as a streaming-step fail + non-streaming-step pass — exactly the bug shape the original 64-test suite missed. Per owner policy the smoke-test script + the dashboard generator are run manually before GitHub/CI — no pytest regression file ships alongside either; the contract is the script's `--help` block + the inline contract (SAME marker, both paths, `run_tool_step` helper). The R07.21 script is kept for back-compat; R07.25 supersedes it for any future streaming-adjacent change.
+
+### Batch 2 — ROB-02 / ROB-06 / ROB-15 closures (3 closed)
+
+- **ROB-02** (Medium, CLOSED) — orchestrator parallel mode now uses `FIRST_COMPLETED` + `executor.shutdown(wait=False, cancel_futures=True)` (Python 3.9+) + a cooperative `threading.Event` stashed on each agent's `_cancel_event` attribute so backends that poll between SSE chunks can abort cleanly. The old `ALL_COMPLETED` + `future.cancel()` combo only prevented not-yet-started futures from starting — already-running workers kept the pool alive past the timeout, holding HTTP connections + consuming tokens for minutes. The new path wakes the moment ANY future returns (or the timeout fires), signals cooperative cancellation, then `cancel_futures=True` cancels the not-yet-started queue. Already-running workers can't be killed (Python threads can't be killed) but they'll see the cancel_event soon and abort, OR finish on their own — `executor.shutdown(wait=False)` releases the pool without blocking on them. Workers that haven't finished when results are collected now show up as `[Timeout after Ns]` (was unreachable pre-ROB-02). ~70 LOC in `agentkthx/orchestrator.py`; 3 regression tests in `tests/test_r07_25_batch2_closures.py`.
+- **ROB-06** (Medium, CLOSED) — new `CloudBackend._close_http_response(response)` static helper does `fp.close()` + `release_conn()` + `close()` in sequence, all best-effort with `getattr` guards so missing attributes on older Python / alternate response shapes don't raise. Each of the 8 cloud backends' `_iter_sse_lines` finally block now uses the helper via `getattr(self, "_close_http_response", None)` so the helper degrades gracefully even if the backend's MRO doesn't include `CloudBackend` (e.g. OpenAI which extends `OpenAICompatibleBackend`). The `streaming.py` KeyboardInterrupt handler comment was upgraded to document the two-pass close contract (`stream_gen.close()` triggers the backend's `GeneratorExit` cleanup which calls the helper). On POSIX the helper is a no-op (`response.close()` already releases the socket); on Windows it's the difference between a deterministic close + a GC-dependent close that can exhaust the connection pool on long Ctrl+C-heavy sessions. ~80 LOC across `agentkthx/backends/cloud_base.py` + 8 plugin files; 7 regression tests including source-inspection pins that every cloud backend uses the helper.
+- **ROB-15** (Medium, CLOSED) — new `@contextmanager _transaction()` on `PersistentMemory` wraps `_write_message` + `_touch_session` in a single `self._write_lock` acquisition (RLock per ROB-18 R07.21 CLOSED, so reentrant-safe for nested transactions) + a single idempotent commit at context-exit. Pre-ROB-15 `add()` did two lock acquisitions + two commits per message, with an interleaving window where another thread's `add()` could commit between the message-write and the session-touch. Now both writes are atomic from the perspective of other writers. `add_tool_call` + `add_tool_result` got the same wrap. Pairs naturally with ROB-18 (RLock) — completes the transaction wrap the audit's original recommendation noted ("the lock must become reentrant first, or the helpers need lock/no-lock variants"). ~50 LOC in `agentkthx/core/persistent_memory.py`; 5 regression tests including a reentrant-safe nested-transaction test + an atomic-persistence test that reads the DB directly to verify both rows are present after a single `add()`.
+
+### Backend support tiers introduced (R07.25)
+
+AgentKthx ships 8 cloud backends plus TurboQuant (local llama.cpp), Ollama, and BitNet. As of R07.25, the cloud backends are split into two support tiers based on **owner testing coverage** — not on code quality, completeness, or feature surface. The maintainer (VTSTech) personally tests every backend before a release; for an extended period, three backends (Pollinations, OrcaRouter, OpenAI) have been impossible to test end-to-end because their API keys are beyond their limits / out of quota. Rather than ship those backends with the implicit "fully tested" promise the other backends carry, this release makes the distinction explicit.
+
+**Fully Supported** (maintainer-tested before every release; bug reports prioritized):
+
+- **ZAI** — Z.ai (GLM models)
+- **OpenRouter** — openrouter.ai aggregator (500+ models)
+- **HuggingFace** — huggingface.co inference endpoints
+- **Gemini** — Google AI Studio (Gemini + Gemma)
+- **Mistral** — mistral.ai (La Plateforme)
+
+Plus the local backends (TurboQuant, Ollama, BitNet) — always Fully Supported (no external API key needed).
+
+**Limited Support** (code-quality identical — same `CloudBackend` base, same retry-loop helpers, same SSE pattern — but the maintainer's API key access has been unavailable for an extended period, so bug reports against them can't be reproduced by the maintainer):
+
+- **Pollinations** — API key beyond limits; maintainer can't test the keyed path. The keyless path works (it's the only keyless backend) but the keyed entitlement-aware fallback filter (ROB-31, still OPEN) is untested.
+- **OrcaRouter** — API key beyond limits; maintainer can't test the streaming or non-streaming paths. The backend shares the same code path as OpenRouter (its sibling) so it's *likely* functional.
+- **OpenAI** — maintainer has no active OpenAI account. OpenAI has no free tier (the `--free` listing returns 0 models — known + documented in the smoke test).
+
+See `docs/SUPPORT.md` for the full policy + what "Limited Support" means in practice. Promoting a Limited Support backend to Fully Supported requires the maintainer regaining working API key access AND running the smoke test end-to-end successfully.
+
+### Audit dashboard enhancements
+
+- `audit/generate_audit_dash.py` — added the **MCP category** as an 8th bucket. Pre-R07.25, MCP-prefixed findings (MCP-01 through MCP-05, all closed/wontfixed in R07.24) were classified under their original cross-cutting categories (Security/Robustness/Maintainability/Performance) — they're now forced into the "MCP" bucket via a new `PREFIX_CATEGORY_OVERRIDE = {"MCP": "MCP"}` map so they group together on the dashboard. The override is applied at all 3 parsing sites (Findings Summary table, Rxx.xx delta tables, cat_map fallback) so MCP-prefixed IDs always land in the MCP bucket regardless of what their deltas.md table cell says. The `MCP` color in JS `CAT_META` is `#fb923c` (orange-400 — visually distinct from the 7 existing category colors).
+- The hero section now shows the **resolution rate** (closed + wontfix / total) instead of the closure rate (closed / total). The closure rate (78% at R07.24) is still surfaced in the section desc + the Closure stat card so both views remain available — the hero just leads with the more meaningful "this is fully resolved" number. Resolution rate at R07.25: **89%** (111 of 125 = 98 closed + 10 wontfix + 1 deferred *-carried over from R07.24*). The `resolutionPct` field is also surfaced in the JSON envelope endpoints (`api/findings/{findings,open,closed,wontfix}.json`) alongside the legacy `closurePct`.
+- WONTFIX count is now dynamic in the section desc (was hardcoded "1 intentional WONTFIX" pre-R07.25).
+- Stats grid CSS changed from `repeat(4,1fr)` to `repeat(auto-fit,minmax(11rem,1fr))` so the 5th stat card (Closure) wraps cleanly on any viewport — future-proof for more cards.
+
+### Audit
+
+- 5 findings resolved in R07.25 across two batches (batch 1: 1 WONTFIX + 1 CLOSED; batch 2: 3 CLOSED). Plus 1 WONTFIX carried over from the audit dashboard R07.24 closure-rate update (the +5 tests for MCP/closure-rate were deleted per owner policy that the dashboard generator runs manually).
+- Register: 125 findings — 14 OPEN / 101 CLOSED / 10 WONTFIX (111 archived, ~89%). Up from R07.24's 19 OPEN / 97 CLOSED / 9 WONTFIX (106 archived, ~85%).
+- **Security category now 100% resolved**: 15 CLOSED + 5 WONTFIX, 0 OPEN.
+- **Robustness category**: 1 OPEN (just ROB-31, the Limited-Support Pollinations entitlement-aware fallback — fix may require user testing), 39 CLOSED, 1 WONTFIX.
+- The near-term tier (ROB-31, MAINT-01 1,733-line `cmd_chat` extraction, MAINT-27 `/sh` inline branch, TEST-01 integration test tier, TEST-03 FakeStreamingBackend) shipped unchanged through R07.22 → R07.25. These are the highest-leverage remaining closures.
+
+### Files touched
+
+- `agentkthx/__init__.py` — version bumped to `0.7.25`.
+- `pyproject.toml` — `version = "0.7.25"`.
+- `README.md` — header `# ⚛️ AgentKthx R07.25` + new **Backend support tiers** Features bullet (R07.25) referencing `docs/SUPPORT.md`.
+- `agentkthx/mcp/client.py` — `_CLIENT_VERSION` bumped to `0.7.25` (sent in MCP `initialize` handshake).
+- `agentkthx/orchestrator.py` — ROB-02 `_run_parallel` rewrite (FIRST_COMPLETED + cancel_futures + cooperative `threading.Event` + `_cancel_event` stash + `[Timeout after Ns]` result branch).
+- `agentkthx/backends/cloud_base.py` — ROB-06 `_close_http_response` static helper (~55 LOC).
+- `agentkthx/core/streaming.py` — ROB-06 KeyboardInterrupt handler comment upgraded to document the two-pass close contract.
+- `agentkthx/core/persistent_memory.py` — ROB-15 `@contextmanager _transaction()` + `add`/`add_tool_call`/`add_tool_result` wraps; `from contextlib import contextmanager` import added.
+- `agentkthx/plugins/zai/zai.py` — ROB-06 `_iter_sse_lines` finally block uses `_close_http_response` helper.
+- `agentkthx/plugins/openrouter/openrouter.py` — ROB-06 same fix.
+- `agentkthx/plugins/gemini/gemini.py` — ROB-06 same fix.
+- `agentkthx/plugins/huggingface/huggingface.py` — ROB-06 same fix.
+- `agentkthx/plugins/mistral/mistral.py` — ROB-06 same fix.
+- `agentkthx/plugins/pollinations/pollinations.py` — ROB-06 same fix.
+- `agentkthx/plugins/orcarouter/orcarouter.py` — ROB-06 same fix.
+- `agentkthx/plugins/openai/openai.py` — ROB-06 same fix.
+- `audit/generate_audit_dash.py` — MCP category added (8th bucket) via `PREFIX_CATEGORY_OVERRIDE`; hero closure % swapped for resolution %; WONTFIX count dynamic in section desc; CSS stats grid auto-fit; `__RESOLUTION_PCT__` token + `resolution_pct` field in `_endpoint_envelope` + `_summary_payload` (legacy `closureRate` alias preserved).
+- `audit/audit.md` — header counts updated (17→14 OPEN, 98→101 CLOSED, R07.24→R07.25 commit, 2951→2966 tests); R07.25 batch 1 + batch 2 delta blocks added; SEC-09 + TEST-09 + ROB-02 + ROB-06 + ROB-15 removed from Findings Summary + Detailed Findings; Priority Matrix updated (removed the 3 ROB closures from Near term, added support-tier note to ROB-31); closure-history footer extended with R07.25 batches 1+2 + support-tier policy.
+- `audit/deltas.md` — header counts updated (98→101 CLOSED, 108→111 archived, R07.24→R07.25); 5 new rows in Findings Summary (Archived) table (SEC-09 WONTFIX, TEST-09 CLOSED, ROB-02/06/15 CLOSED); new "## R07.25 Audit Closures — SEC-09 WONTFIX + TEST-09 CLOSED" section + "## R07.25 Batch 2 — ROB Closures + Support Tiers" section with full detail prose for each closure.
+- `audit/brief.md` — header counts updated (17→14 OPEN, 108→111 archived, 2951→2966 tests, ~86%→~89%); R07.25 batch 2 mentioned in the "What's Missing / Incomplete" item 1 + closing paragraph; support-tier policy mentioned in Quick Start item 7.
+- `docs/SUPPORT.md` — NEW file (117 LOC) documenting Fully Supported vs Limited Support backends + the policy + the changelog.
+- `scripts/smoke_test_r07_25.sh` — NEW file (~480 LOC, executable). Superset of `smoke_test_r07_21.sh` adding a 4th streaming-path step per backend; `--skip "<names>"` arg replaces the legacy `SKIP` env var; `--backend` + `--debug` + `--no-stream-only` debug escape hatch; `default_model_for_backend()` helper hardcodes `openrouter/free` and `orcarouter/free` for those two aggregators (skips the slow `first_free_model` listing + awk parsing fragility for the 6 other backends); empty-envvar guard in `has_key()` (latent bash bug that the original R07.21 script also has — fixed here, R07.21 script left as-is for back-compat).
+- `tests/test_r07_25_batch2_closures.py` — NEW file (~430 LOC, 15 tests) pinning the ROB-02/06/15 closure contracts.
+- `tests/test_generate_audit_dash.py` — DELETED per owner policy (dashboard generator runs manually before GitHub/CI; no pytest regression file ships alongside).
+- `tests/test_smoke_test_r07_25.py` — DELETED per owner policy (smoke tests run manually before GitHub/CI; no pytest regression file ships alongside).
+
+### Process — R07.25 release hygiene
+
+- `scripts/bump-version.sh R07.25` applied: bumped 4 sites across 3 files (`pyproject.toml`, `agentkthx/__init__.py` header + `__version__` line, `README.md` header). `agentkthx/mcp/client.py:_CLIENT_VERSION` also bumped to `0.7.25` (sent in MCP `initialize` handshake) — done manually since `bump-version.sh` only handles the 4 main sites.
+- `R07.24 (0.7.24)` → `R07.25 (0.7.25)`.
+- Suite: 2959 (R07.24 end-state per the audit) → 2966 passed (+7 active across both batches) / 20 skipped. Zero regressions; ruff clean (8 I001 import-sorting + F401 unused-import errors in `tests/test_r07_25_batch2_closures.py` fixed via `ruff check --fix`).
+- Audit reconcile: `matches: True` — 125 findings, 14 OPEN / 101 CLOSED / 10 WONTFIX (111 archived, ~89%). Closure rate 81%, resolution rate 89%.
+- The `audit/generate_audit_dash.py` dashboard generator + the `scripts/smoke_test_r07_25.sh` smoke test are run **manually** before GitHub/CI per owner policy — no pytest regression files ship alongside either. The contract for the dashboard generator is the CLI surface (`--audit`/`--brief`/`--deltas`/`--output`/`--no-endpoints`) + the JSON-endpoint layout; the contract for the smoke test is the script's `--help` block + the inline contract (SAME marker for both streaming + non-streaming paths, `run_tool_step` helper).
+
+---
+
 ## [R07.24] - 2026-10-05 5:43:52 PM
 
 **Audit closure super-batch: 13 OPEN findings closed + 2 WONTFIX across three batches in one release.** R07.24 is the largest single-release audit closure pass since R07.21 batch 2 — ten findings closed (SEC-20, ROB-28, ROB-41, TEST-11, MCP-01, MCP-03, MCP-04, MCP-05, MAINT-03, MAINT-22, MAINT-23, ROB-29, ROB-33) plus two WONTFIX (MCP-02, SEC-13 — deferred, out-of-scope). Suite: 2899 → 2959 passed (+60 active) / 16 → 20 skipped (+4 live-gated). Zero regressions; ruff + black clean across all 234 files. Register: 125 findings — 19 OPEN / 97 CLOSED / 9 WONTFIX (106 archived, ~85%).

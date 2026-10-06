@@ -25,17 +25,11 @@ batch 2:
 
 from __future__ import annotations
 
-import io
-import os
-import threading
 import time
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import MagicMock
 
 from agentkthx.core.persistent_memory import PersistentMemory
-from agentkthx.orchestrator import Orchestrator, AgentCard
-
+from agentkthx.orchestrator import AgentCard, Orchestrator
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ROB-02: orchestrator parallel mode — FIRST_COMPLETED + cancel_futures + Event
@@ -271,14 +265,15 @@ def test_rob06_cloud_backends_use_close_helper_in_iter_sse_lines():
     exercise without a real HTTP server.
     """
     import inspect
-    from agentkthx.plugins.zai.zai import ZaiBackend
-    from agentkthx.plugins.openrouter.openrouter import OpenRouterBackend
+
     from agentkthx.plugins.gemini.gemini import GeminiBackend
     from agentkthx.plugins.huggingface.huggingface import HuggingFaceBackend
     from agentkthx.plugins.mistral.mistral import MistralBackend
-    from agentkthx.plugins.pollinations.pollinations import PollinationsBackend
-    from agentkthx.plugins.orcarouter.orcarouter import OrcaRouterBackend
     from agentkthx.plugins.openai.openai import OpenAIBackend
+    from agentkthx.plugins.openrouter.openrouter import OpenRouterBackend
+    from agentkthx.plugins.orcarouter.orcarouter import OrcaRouterBackend
+    from agentkthx.plugins.pollinations.pollinations import PollinationsBackend
+    from agentkthx.plugins.zai.zai import ZaiBackend
 
     for cls in (
         ZaiBackend, OpenRouterBackend, GeminiBackend, HuggingFaceBackend,
