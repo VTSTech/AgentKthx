@@ -79,7 +79,7 @@ def parse_findings_summary(md: str):
         if len(parts) < 5:
             continue
         fid = parts[0]
-        if not re.match(r"^(SEC|ROB|MAINT|PERF|FEAT|ARCH|TEST)-\d+$", fid):
+        if not re.match(r"\b(?:SEC|ROB|MAINT|PERF|FEAT|ARCH|TEST|MCP)-\d+\b", fid):
             continue
         rows.append({
             "id": fid,
@@ -97,7 +97,7 @@ def parse_detailed_findings(md: str):
     # Match sections like: #### SEC-09: title ... (until next #### or ### or EOF)
     # Property table row: | **File(s)** | `path1:line`, `path2` |
     pattern = re.compile(
-        r"^####\s+((?:SEC|ROB|MAINT|PERF|FEAT|ARCH|TEST)-\d+):\s*(.+)$",
+        r"^####\s+((?:SEC|ROB|MAINT|PERF|FEAT|ARCH|MCP|TEST)-\d+):\s*(.+)$",
         re.MULTILINE,
     )
     matches = list(pattern.finditer(md))
@@ -122,7 +122,7 @@ def parse_detailed_findings(md: str):
 
 def parse_deltas_ids(md: str):
     """Return set of IDs that appear in deltas.md (these are CLOSED/WONTFIX)."""
-    return set(re.findall(r"\b(SEC|ROB|MAINT|PERF|FEAT|ARCH|TEST)-\d+\b", md))
+    return set(re.findall(r"\b(SEC|ROB|MAINT|PERF|FEAT|ARCH|MCP|TEST)-\d+\b", md))
 
 
 # ---------------------------------------------------------------- verify
