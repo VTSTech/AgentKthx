@@ -63,10 +63,11 @@ def test_rob02_parallel_mode_uses_first_completed_and_cancel_futures():
     would be flaky on slow CI). We assert the code path exists.
     """
     import inspect
+
     src = inspect.getsource(Orchestrator._run_parallel)
-    assert "FIRST_COMPLETED" in src, (
-        "_run_parallel must use FIRST_COMPLETED (was the pre-ROB-02 wait predicate)"
-    )
+    assert (
+        "FIRST_COMPLETED" in src
+    ), "_run_parallel must use FIRST_COMPLETED (was the pre-ROB-02 wait predicate)"
     assert "cancel_futures=True" in src, (
         "_run_parallel must call executor.shutdown(wait=False, cancel_futures=True) "
         "(Python 3.9+ — cancels not-yet-started futures)"
@@ -76,7 +77,8 @@ def test_rob02_parallel_mode_uses_first_completed_and_cancel_futures():
     # by checking the wait-call line directly (not the whole function
     # body — the docstring mentions ALL_COMPLETED as historical context).
     wait_lines = [
-        line for line in src.splitlines()
+        line
+        for line in src.splitlines()
         if "concurrent.futures.wait(" in line or "return_when=" in line
     ]
     wait_text = " ".join(wait_lines)
@@ -88,12 +90,12 @@ def test_rob02_parallel_mode_uses_first_completed_and_cancel_futures():
         "the actual concurrent.futures.wait() call must NOT use "
         "return_when=concurrent.futures.ALL_COMPLETED (pre-ROB-02)"
     )
-    assert "threading.Event" in src, (
-        "_run_parallel must create a threading.Event for cooperative cancellation"
-    )
-    assert "cancel_event.set()" in src, (
-        "_run_parallel must set the cancel_event after FIRST_COMPLETED wakes"
-    )
+    assert (
+        "threading.Event" in src
+    ), "_run_parallel must create a threading.Event for cooperative cancellation"
+    assert (
+        "cancel_event.set()" in src
+    ), "_run_parallel must set the cancel_event after FIRST_COMPLETED wakes"
 
 
 def test_rob02_parallel_mode_stashes_cancel_event_on_agents():
@@ -101,15 +103,19 @@ def test_rob02_parallel_mode_stashes_cancel_event_on_agents():
     each agent's ``_cancel_event`` attribute so backends that poll
     between SSE chunks can check it. Best-effort: agents that don't
     accept the attribute (no setter) are silently skipped."""
+
     # Build two minimal fake agent objects (real classes so setattr works).
     class _Agent:
         def __init__(self, name):
             self.name = name
+
         def run(self, task):
             return type("R", (), {"final_answer": f"{self.name}-ans"})()
 
     agents = [_Agent("a"), _Agent("b")]
-    cards = [AgentCard(name=a.name, description="", capabilities=[], tools=[], agent=a) for a in agents]
+    cards = [
+        AgentCard(name=a.name, description="", capabilities=[], tools=[], agent=a) for a in agents
+    ]
     orch = Orchestrator(mode="parallel", timeout=5.0)
     for c in cards:
         orch.register(c)
@@ -135,9 +141,11 @@ def test_rob02_parallel_mode_collects_timeout_results():
     fast_agent.run.return_value = type("R", (), {"final_answer": "fast"})()
 
     slow_agent = MagicMock()
+
     def slow_run(task):
         time.sleep(2.0)  # longer than the timeout
         return type("R", (), {"final_answer": "slow"})()
+
     slow_agent.run.side_effect = slow_run
 
     cards = [
@@ -170,13 +178,14 @@ def test_rob06_close_http_response_helper_exists_on_cloud_backend():
     static method so all cloud backends can call it from their
     ``_iter_sse_lines`` finally blocks."""
     from agentkthx.backends.cloud_base import CloudBackend
-    assert hasattr(CloudBackend, "_close_http_response"), (
-        "CloudBackend must expose _close_http_response (the ROB-06 deterministic close helper)"
-    )
+
+    assert hasattr(
+        CloudBackend, "_close_http_response"
+    ), "CloudBackend must expose _close_http_response (the ROB-06 deterministic close helper)"
     # It must be callable.
-    assert callable(CloudBackend._close_http_response), (
-        "CloudBackend._close_http_response must be callable"
-    )
+    assert callable(
+        CloudBackend._close_http_response
+    ), "CloudBackend._close_http_response must be callable"
 
 
 def test_rob06_close_http_response_calls_fp_close_release_conn_and_close():
@@ -236,6 +245,7 @@ def test_rob06_close_http_response_handles_missing_release_conn():
 def test_rob06_close_http_response_handles_none():
     """ROB-06: passing ``None`` must be a no-op (no AttributeError)."""
     from agentkthx.backends.cloud_base import CloudBackend
+
     # Must not raise.
     CloudBackend._close_http_response(None)
 
@@ -276,8 +286,14 @@ def test_rob06_cloud_backends_use_close_helper_in_iter_sse_lines():
     from agentkthx.plugins.zai.zai import ZaiBackend
 
     for cls in (
-        ZaiBackend, OpenRouterBackend, GeminiBackend, HuggingFaceBackend,
-        MistralBackend, PollinationsBackend, OrcaRouterBackend, OpenAIBackend,
+        ZaiBackend,
+        OpenRouterBackend,
+        GeminiBackend,
+        HuggingFaceBackend,
+        MistralBackend,
+        PollinationsBackend,
+        OrcaRouterBackend,
+        OpenAIBackend,
     ):
         src = inspect.getsource(cls._iter_sse_lines)
         assert "_close_http_response" in src, (
@@ -294,9 +310,9 @@ def test_rob06_cloud_backends_use_close_helper_in_iter_sse_lines():
 def test_rob15_transaction_context_manager_exists():
     """ROB-15: ``PersistentMemory._transaction`` must exist as a
     context manager (the single-lock + single-commit wrapper)."""
-    assert hasattr(PersistentMemory, "_transaction"), (
-        "PersistentMemory must expose _transaction (ROB-06 single-transaction context manager)"
-    )
+    assert hasattr(
+        PersistentMemory, "_transaction"
+    ), "PersistentMemory must expose _transaction (ROB-06 single-transaction context manager)"
 
 
 def test_rob15_transaction_acquires_write_lock_once_per_add(tmp_path):
@@ -323,6 +339,7 @@ def test_rob15_transaction_acquires_write_lock_once_per_add(tmp_path):
     class CountingRLock:
         def __init__(self, inner):
             self._inner = inner
+
         def acquire(self, *a, **kw):
             # Count only the outermost acquisition (block_on_behavior=1).
             # RLock's acquisition count is tracked internally; we can't
@@ -333,11 +350,14 @@ def test_rob15_transaction_acquires_write_lock_once_per_add(tmp_path):
             # being no-op re-acquires on the same RLock).
             acquire_count[0] += 1
             return self._inner.acquire(*a, **kw)
+
         def release(self):
             return self._inner.release()
+
         def __enter__(self):
             self.acquire()
             return self
+
         def __exit__(self, *a):
             self.release()
 
@@ -363,6 +383,7 @@ def test_rob15_transaction_used_by_add_add_tool_call_add_tool_result():
     wrap their two writes in ``self._transaction()`` so they share
     one lock acquisition + one commit (was two of each pre-ROB-15)."""
     import inspect
+
     for method_name in ("add", "add_tool_call", "add_tool_result"):
         src = inspect.getsource(getattr(PersistentMemory, method_name))
         assert "with self._transaction():" in src, (
@@ -401,6 +422,7 @@ def test_rob15_add_persists_message_and_session_atomically(tmp_path):
 
     # Read the DB directly — both rows must be present.
     import sqlite3
+
     conn = sqlite3.connect(db_path)
     try:
         msg_count = conn.execute(

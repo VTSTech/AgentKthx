@@ -670,10 +670,10 @@ footer{margin-top:auto;border-top:1px solid var(--border);background:oklch(.215 
     </div>
     <div class="chart-card">
       <h3>By category</h3>
-      <p class="sub">Closed vs open per category · click a bar to filter</p>
+      <p class="sub">Resolved vs open per category · click a bar to filter</p>
       <div class="chart-box" id="bar-box"></div>
       <div class="legend">
-        <div class="legend-item"><span class="legend-sw" style="background:var(--primary)"></span> Closed</div>
+        <div class="legend-item"><span class="legend-sw" style="background:var(--primary)"></span> Resolved</div>
         <div class="legend-item"><span class="legend-sw" style="background:var(--amber)"></span> Open</div>
       </div>
     </div>
@@ -743,7 +743,7 @@ const CAT_META = {Security:{short:"SEC",color:"#f87171"},Robustness:{short:"ROB"
 const STATUS_META = {CLOSED:{label:"Closed",color:"var(--primary)"},OPEN:{label:"Open",color:"var(--amber)"},WONTFIX:{label:"Won't fix",color:"var(--zinc)"}};
 const CATS = Object.keys(CAT_META);
 const state = {q:"",cat:"All",status:"All",sev:"All"};
-function computeStats(){const s={total:FINDINGS.length,byStatus:{CLOSED:0,OPEN:0,WONTFIX:0},bySev:{High:0,Medium:0,Low:0},byCat:{},closurePct:0,resolutionPct:0};for(const f of FINDINGS){s.byStatus[f.status]++;s.bySev[f.severity]=(s.bySev[f.severity]||0)+1;s.byCat[f.category]=s.byCat[f.category]||{total:0,closed:0,open:0};s.byCat[f.category].total++;if(f.status==="CLOSED")s.byCat[f.category].closed++;else s.byCat[f.category].open++;}s.closurePct=s.total?Math.round(s.byStatus.CLOSED/s.total*100):0;s.resolutionPct=s.total?Math.round((s.byStatus.CLOSED+s.byStatus.WONTFIX)/s.total*100):0;return s;}
+function computeStats(){const s={total:FINDINGS.length,byStatus:{CLOSED:0,OPEN:0,WONTFIX:0},bySev:{High:0,Medium:0,Low:0},byCat:{},closurePct:0,resolutionPct:0};for(const f of FINDINGS){s.byStatus[f.status]++;s.bySev[f.severity]=(s.bySev[f.severity]||0)+1;s.byCat[f.category]=s.byCat[f.category]||{total:0,closed:0,open:0};s.byCat[f.category].total++;if(f.status==="CLOSED"||f.status==="WONTFIX")s.byCat[f.category].closed++;else s.byCat[f.category].open++;}s.closurePct=s.total?Math.round(s.byStatus.CLOSED/s.total*100):0;s.resolutionPct=s.total?Math.round((s.byStatus.CLOSED+s.byStatus.WONTFIX)/s.total*100):0;return s;}
 const stats=computeStats();
 document.getElementById("yr").textContent=new Date().getFullYear();
 function statCard(l,v,h,c){return '<div class="stat '+c+'"><div class="stat-val">'+v+'</div><div class="stat-lbl">'+l+'</div><div class="stat-hint">'+h+'</div></div>';}
