@@ -841,3 +841,81 @@ description and its default.
 | `--max-retries N` | Maximum retries per tool call failure (default: 2) |
 | `--security max\|off` | Security mode: `max` (default, all checks) or `off` (disable all checks) |
 
+
+---
+
+## MCP (Model Context Protocol)
+
+R07.22 adds stdio MCP client support — connect to external MCP servers
+and their tools are bridged into the agent's registry with `<server>__<tool>`
+namespacing. Zero runtime dependencies (stdlib `subprocess` + `json` only),
+all MCP tool output flows through the same `sanitize_tool_output` security
+boundary as built-in tools.
+
+```bash
+# 1. Write a ready-to-use config (uses your actual home dir, creates ~/projects/)
+agentkthx mcp init
+
+# 2. Probe a server end-to-end (initialize → tools/list → optional tool call)
+agentkthx mcp probe filesystem
+agentkthx mcp probe filesystem --call read_text_file '{"path": "/tmp/test.txt"}'
+
+# 3. List configured servers
+agentkthx mcp list
+
+# 4. Enable MCP in a chat session (bare --mcp = all enabled servers)
+agentkthx chat --mcp
+# Or enable a subset:
+agentkthx chat --mcp filesystem sequential-thinking
+
+# 5. Use MCP tools from any agent command (run/agent also supported)
+agentkthx run "list the files in ~/projects" --mcp filesystem
+```
+
+The example config ships with `filesystem` and `sequential-thinking`
+enabled by default (both verified on npm 2026-10-04). The deprecated
+`@modelcontextprotocol/server-git` (removed from npm — 404) is no longer
+shipped in the example config. See
+[docs/mcp/ROADMAP.md](mcp/ROADMAP.md) for the full MCP plan
+(Phase 2: `kthx-audit` MCP server; Phase 3: generic `agentkthx mcp serve`).
+
+### Discovering + installing MCP servers
+
+To discover and install additional MCP servers without leaving the terminal:
+
+```bash
+# Live search npm (10-minute cache; no network on repeat calls)
+agentkthx mcp search                 # default query: "mcp"
+agentkthx mcp search filesystem      # search by keyword
+agentkthx mcp search --refresh       # bypass cache, force fresh fetch
+agentkthx mcp search --json          # machine-readable JSON
+
+# Install a server directly to ~/.agentkthx/mcp.json (always live)
+agentkthx mcp install @modelcontextprotocol/server-filesystem       # npm @scope/package
+agentkthx mcp install github:LaurieWired/GhidraMCP                  # GitHub explicit (manual verification required)
+agentkthx mcp install LaurieWired/GhidraMCP                         # GitHub shorthand
+agentkthx mcp install filesystem                                    # bare name → npm search (ambiguous; see warning)
+
+# Install options
+agentkthx mcp install github:oraios/serena --command uvx --args='--from git+https://github.com/oraios/serena serena start-mcp-server'
+agentkthx mcp install @modelcontextprotocol/server-filesystem --dry-run  # print snippet, don't write
+agentkthx mcp install @modelcontextprotocol/server-filesystem --json     # emit snippet as JSON
+agentkthx mcp install @modelcontextprotocol/server-filesystem --as myfs  # rename the server
+
+# Remove a server that didn't work out (e.g. Java-only repos that can't be launched as stdio)
+agentkthx mcp uninstall GhidraMCP
+```
+
+`mcp search` hits `registry.npmjs.org` and caches results for 10 minutes in
+`~/.agentkthx/mcp_cache.json`. GitHub search was removed (too many non-stdio
+results — Java/Go/Rust repos, Ghidra/IDA extensions, browser plugins that
+look like MCP servers but can't be launched as subprocesses). GitHub installs
+still work via `mcp install github:owner/repo` when the operator has manually
+verified the repo is stdio-capable.
+
+`mcp install` accepts three name formats to avoid the collision problem (many MCP servers share project names like "ghidra", "git", "memory"):
+
+- **`@scope/package`** → npm install. Fetches live metadata from `registry.npmjs.org` to verify the package exists and get the current version.
+- **`github:owner/repo`** → GitHub install. Builds a `uvx --from git+https://github.com/owner/repo` snippet. No npm hit. **Manual verification required** — many GitHub repos are not stdio-launchable (Java, Go, Ghidra extensions, etc.).
+- **`owner/repo`** → GitHub shorthand (same as `github:owner/repo`). No `@` prefix, has a `/`, no spaces.
+- **`bare-name`** → npm search, preferring `@modelcontextprotocol/*` packages. Prints a warning suggesting the full form for unambiguous installs.

@@ -1,3 +1,88 @@
+# Tests & Examples
+
+AgentKthx includes a comprehensive suite of tests for validating agent
+capabilities across reasoning, knowledge, and tool usage. This document
+covers the example scripts, the test categories, benchmark results,
+and the per-test deep-dive results for the bundled `agentkthx test NN`
+suite.
+
+For the regression test suite (`pytest tests/`), see the
+[Development section of the README](../README.md#development).
+
+---
+
+## Examples
+
+```bash
+# Basic agent test (no tools)
+python -m agentkthx.examples.00_basic_agent
+
+# Quick 5-question diagnostic
+python -m agentkthx.examples.01_quick_diagnostic
+
+# Tool usage tests (calculator, shell, datetime, file, python_repl)
+python -m agentkthx.examples.02_tool_test
+
+# Logic and reasoning tests (BBH-style)
+python -m agentkthx.examples.03_reasoning_test
+
+# GSM8K math benchmark (50 questions)
+python -m agentkthx.examples.04_gsm8k_benchmark
+
+# Common sense reasoning (BIG-bench)
+python -m agentkthx.examples.05_common_sense
+
+# Causal reasoning (BIG-bench)
+python -m agentkthx.examples.06_causal_reasoning
+
+# Logical deduction (BIG-bench)
+python -m agentkthx.examples.07_logical_deduction
+
+# Reading comprehension
+python -m agentkthx.examples.08_reading_comprehension
+
+# General knowledge (BIG-bench)
+python -m agentkthx.examples.09_general_knowledge
+
+# Implicit reasoning
+python -m agentkthx.examples.10_implicit_reasoning
+
+# Analogical reasoning
+python -m agentkthx.examples.11_analogical_reasoning
+```
+
+### Test Categories
+
+| Test | Questions | Focus |
+|------|-----------|-------|
+| Basic Agent | 1 | Single prompt, no tools |
+| Quick Diagnostic | 5 | Calculator tool, multi-step reasoning |
+| Tool Test | 10 | Calculator, shell, datetime, file, python_repl tools |
+| Reasoning Test | 14 | Logic, deduction, patterns, spatial |
+| GSM8K Benchmark | 50 | Math word problems |
+| Common Sense | 25 | Physical properties, everyday reasoning |
+| Causal Reasoning | 25 | Cause and effect relationships |
+| Logical Deduction | 25 | Formal logic puzzles |
+| Reading Comprehension | 25 | Passage-based Q&A |
+| General Knowledge | 25 | Science, history, geography |
+| Implicit Reasoning | 25 | Unstated assumptions and inference |
+| Analogical Reasoning | 25 | Pattern matching and analogies |
+
+### Benchmark Results (Quick Diagnostic)
+
+| Model | Score | Time | Tool Support |
+|-------|-------|------|-------------|
+| functiongemma:270m | 5/5 (100%) | ~20s | native |
+| granite4:350m | 5/5 (100%) | ~50s | native |
+| qwen2.5:0.5b | 5/5 (100%) | 38s | native |
+| qwen2.5-coder:0.5b | 5/5 (100%) | 93s | native |
+| qwen3:0.6b | 5/5 (100%) | 70s | react |
+| deepseek-r1:1.5b | 5/5 (100%) | ~305s | native |
+
+All tested models achieve 100% on the Quick Diagnostic. Native models are ~2x faster than ReAct models due to direct API tool calling.
+
+---
+
 # ⚛️ AgentKthx R04.5
 
 ## Test 01 Quick Diagnostic (5 Questions)
