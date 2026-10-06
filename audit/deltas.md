@@ -1999,7 +1999,7 @@ Five findings closed in one pass — all surgical, non-breaking. Suite: 2932 →
 
 ## R07.25 Audit Closures — SEC-09 WONTFIX + TEST-09 CLOSED
 
-Two findings resolved in one pass — one WONTFIX (SEC-09) and one CLOSED (TEST-09). Both surgical, non-breaking. Suite: 2959 → 2964 passed (+5 in `tests/test_generate_audit_dash.py` for the R07.24 dashboard MCP/closure-rate update; the new smoke test script is invoked manually before GitHub/CI per owner policy — no pytest regression file ships alongside). Zero regressions; ruff + black clean.
+Two findings resolved in one pass — one WONTFIX (SEC-09) and one CLOSED (TEST-09). Both surgical, non-breaking. Suite: 2959 → 2951 passed (-8 net: -13 from `tests/test_generate_audit_dash.py` removed per owner policy [the dashboard generator runs manually before GitHub/CI, no pytest regression file ships alongside], +8 from `tests/test_smoke_test_r07_25.py` added then -8 removed per owner policy [the smoke test runs manually before GitHub/CI]). Zero regressions; ruff + black clean.
 
 ### Security
 
