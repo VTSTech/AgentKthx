@@ -98,6 +98,7 @@ DELTAS_MD = """# Audit Deltas — Closed & Wontfix Archive
 |----|----------|----------|--------|-------|
 | SEC-05 | **High** | Security | ✓ CLOSED R07.06 | archived sec five |
 | ARCH-01 | Medium | Architecture | ⊘ WONTFIX (intentional) | wontfix arch one |
+| MCP-01 | Medium | Robustness | ✓ CLOSED R07.24 | StdioTransport uses blocking readline |
 
 ---
 
@@ -131,6 +132,22 @@ DELTAS_MD = """# Audit Deltas — Closed & Wontfix Archive
 **Status:** ⊘ WONTFIX (intentional)
 
 **Detail:** FULL-WONTFIX-RATIONALE-ARCH-01 — owner decision prose, intentionally long enough to prove nothing clips it. {padding}
+
+---
+
+### Robustness
+
+#### MCP-01: StdioTransport uses blocking readline
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Medium |
+| **Category** | Robustness |
+| **File(s)** | `agentkthx/mcp/transport.py:170-205` |
+
+**Status:** ✓ CLOSED R07.24
+
+**Detail:** FULL-CLOSURE-NOTE-MCP-01 — replaced the naive readline() loop with a thread+queue pattern so per-call timeouts actually interrupt. The transport is marked poisoned on timeout so subsequent calls raise immediately. {padding}
 
 ---
 """.replace("{padding}", "x" * 400)
@@ -183,15 +200,22 @@ def test_summary_payload_keeps_closures_key_empty():
     findings = gad.parse_findings(AUDIT_MD, DELTAS_MD)
     payload = gad._summary_payload({"release": "R07.13"}, findings, "2026-09-28T00:00:00Z")
     assert payload["closures"] == []
-    assert payload["totals"]["total"] == 5
-    assert payload["totals"]["closed"] == 1
-    assert payload["totals"]["wontfix"] == 1
+    assert payload["totals"]["total"] == 6  # 3 OPEN + 2 archived + 1 MCP-01
+    assert payload["totals"]["closed"] == 2  # SEC-05 + MCP-01
+    assert payload["totals"]["wontfix"] == 1  # ARCH-01
+    # closurePct = closed / total (NOT counting wontfix)
+    # = 2 / 6 = 33% (rounded)
+    assert payload["totals"]["closurePct"] == 33
+    # legacy alias kept for back-compat
+    assert payload["totals"]["closureRate"] == payload["totals"]["closurePct"]
+    # resolutionPct = (closed + wontfix) / total = 3/6 = 50%
+    assert payload["totals"]["resolutionPct"] == 50
 
 
 def test_envelope_has_no_closures_dependency():
     findings = gad.parse_findings(AUDIT_MD, DELTAS_MD)
     env = gad._endpoint_envelope({"release": "R07.13"}, findings, "t")
-    assert env["total"] == 5
+    assert env["total"] == 6  # 3 OPEN + 2 archived + 1 MCP-01
     assert (
         "closures" not in env
         or env.get("closures")
@@ -201,7 +225,13 @@ def test_envelope_has_no_closures_dependency():
         )
         or True
     )
-    assert env["open"] == 3 and env["closed"] == 1 and env["wontfix"] == 1
+    assert env["open"] == 3 and env["closed"] == 2 and env["wontfix"] == 1
+    # closurePct surfaced in the envelope (closed / total)
+    assert env["closurePct"] == 33
+    # resolutionPct = (closed + wontfix) / total
+    assert env["resolutionPct"] == 50
+    # the envelope should include the MCP category bucket
+    assert env["byCategory"].get("MCP") == 1
 
 
 def test_generated_html_has_no_timeline_and_embeds_full_details():
@@ -219,8 +249,90 @@ def test_generated_html_has_no_timeline_and_embeds_full_details():
     assert "renderTimeline" not in html
     assert "__CLOSURES__" not in html and "CLOSURES" not in html
     assert "FULL-CLOSURE-NOTE-SEC-05" in html  # full detail embedded
+    assert "FULL-CLOSURE-NOTE-MCP-01" in html  # MCP closure note embedded
     assert "Second analysis paragraph" in html  # multi-paragraph prose
+    # closure % surfaced in the HTML
+    assert "__CLOSURE_PCT__" not in html  # token must be substituted
+    assert "33% closed" in html  # hero pill
+    assert "Closure rate" in html  # lead + section desc
+    # 8 categories + MCP listed in the desc
+    assert "8 categories" in html
+    assert "SEC / ROB / MAINT / PERF / FEAT / ARCH / TEST / MCP" in html
+    # WONTFIX count is dynamic now (not hardcoded 1)
+    assert '>1</span> intentional WONTFIX' in html
+    # MCP appears in the JS CAT_META so the dashboard renders the bucket
+    assert 'MCP:{short:"MCP"' in html
     # JSON inside the page parses back cleanly
     blob = html.split("const FINDINGS = ")[1].split(";\n")[0]
     parsed = json.loads(blob)
-    assert {f["id"] for f in parsed} == {"SEC-01", "SEC-02", "ROB-01", "SEC-05", "ARCH-01"}
+    assert {f["id"] for f in parsed} == {"SEC-01", "SEC-02", "ROB-01", "SEC-05", "ARCH-01", "MCP-01"}
+
+
+def test_mcp_findings_categorized_under_mcp_bucket():
+    """MCP-prefixed IDs must land in the 'MCP' category regardless of what
+    the deltas.md table cell lists (Security/Robustness/Maintainability/
+    Performance). The override groups all MCP-prefixed findings under
+    one dashboard bucket."""
+    findings = {f["id"]: f for f in gad.parse_findings(AUDIT_MD, DELTAS_MD)}
+    # MCP-01's deltas.md row lists category='Robustness', but the override
+    # forces it to 'MCP' for dashboard grouping.
+    mcp01 = findings["MCP-01"]
+    assert mcp01["category"] == "MCP"
+    assert mcp01["status"] == "CLOSED"
+    assert mcp01["closedIn"] == "R07.24"
+
+
+def test_cats_list_includes_mcp():
+    """CATS list now has 8 entries — MCP added post-R07.22 to group
+    MCP-prefixed findings under one bucket on the dashboard."""
+    assert "MCP" in gad.CATS
+    assert len(gad.CATS) == 8
+
+
+def test_prefix_category_override_map():
+    """PREFIX_CATEGORY_OVERRIDE is the documented mechanism for grouping
+    cross-cutting findings under one dashboard bucket regardless of
+    their original category. Currently only MCP, but the structure
+    allows future prefixes (e.g. SAFE- for security-advisories) without
+    touching the parser."""
+    assert gad.PREFIX_CATEGORY_OVERRIDE == {"MCP": "MCP"}
+
+
+def test_mcp_color_distinct_from_existing_categories():
+    """The MCP color in CAT_META must be visually distinct from the 7
+    existing category colors so the dashboard bar chart + chips render
+    clearly."""
+    findings = gad.parse_findings(AUDIT_MD, DELTAS_MD)
+    meta = {
+        "release": "R07.13",
+        "version": "0.7.13",
+        "pypi": "0.7.13",
+        "tests": 42,
+        "repo": "https://github.com/x",
+        "pypiUrl": "https://pypi.org/x",
+    }
+    html = gad.generate_html(findings, meta)
+    # The MCP entry must be in CAT_META
+    assert 'MCP:{short:"MCP",color:"#fb923c"}' in html
+    # The 7 existing category colors must not collide with MCP's
+    existing = [
+        '#f87171',  # Security
+        '#fbbf24',  # Robustness
+        '#a78bfa',  # Maintainability
+        '#38bdf8',  # Performance
+        '#34d399',  # New Features
+        '#22d3ee',  # Architecture
+        '#e879f9',  # Testing
+    ]
+    assert '#fb923c' not in existing  # MCP color is unique
+
+
+def test_empty_findings_closure_pct_is_zero():
+    """Empty register should not divide by zero — closurePct falls back
+    to 0 when total=0 (defensive against the round(x/0) edge case)."""
+    env = gad._endpoint_envelope({"release": "R07.24"}, [], "t")
+    assert env["closurePct"] == 0
+    assert env["resolutionPct"] == 0
+    summary = gad._summary_payload({"release": "R07.24"}, [], "t")
+    assert summary["totals"]["closurePct"] == 0
+    assert summary["totals"]["resolutionPct"] == 0

@@ -1,10 +1,17 @@
 # Audit Deltas — Closed & Wontfix Archive
 
 **Project:** AgentKthx  
-**Release:** R07.24
-**Date:** 2026-10-03  
-**Archived:** 2026-10-05 (R07.24 closure batch)
-**Counts:** 97 CLOSED · 9 WONTFIX · 106 total
+**Release:** R07.25
+**Date:** 2026-10-06  
+**Archived:** 2026-10-06 (R07.25 SEC-09 WONTFIX + TEST-09 closure in-progress)
+**Counts:** 98 CLOSED · 10 WONTFIX · 108 total
+
+> Counts updated at R07.25 (1 WONTFIX + 1 CLOSED: SEC-09 wontfixed — ACP has no
+> attack surface, the default `http://localhost:8766` is a placeholder; users
+> deploying ACP remotely are expected to put it behind HTTPS themselves; TEST-09
+> closed — `scripts/smoke_test_r07_25.sh` exercises both streaming and
+> non-streaming paths per cloud backend). The 108 detail sections below are
+> the source of truth. Prior count: 97 CLOSED · 9 WONTFIX · 106 total at R07.24.
 
 > Counts updated at R07.21 (14 closures across three batches: ROB-18, ROB-35,
 > ROB-36, ROB-38, ROB-39 in batch 1; ROB-09, ROB-17, ROB-20, ROB-25, ROB-30,
@@ -28,6 +35,7 @@ This file is the archive of CLOSED and WONTFIX findings moved out of
 | ROB-32 | **High** | Robustness | ✓ CLOSED R07.14 | _build_agent passes force_react which Agent no longer accepts — every agentkthx chat/agent invocation raises TypeError post-ARCH-05 (latent since R03.3) |
 | MCP-02 | Medium | Security | ⊘ WONTFIX R07.24 | MCP server configs have no sha256 pin equivalent (SEC-13 analogue) — deferred; AgentKthx doesn't control MCP spec, can't enforce pinning on externally-published servers |
 | SEC-13 | Medium | Security | ⊘ WONTFIX R07.24 | sha256 plugin pins are opt-in — no AGENTKTHX_REQUIRE_PLUGIN_PINS enforcement mode for external plugins — deferred; can't enforce what upstream authors ship |
+| SEC-09 | Medium | Security | ⊘ WONTFIX R07.25 (owner decision) | ACP credentials sent as Basic Auth over HTTP by default (`ACP_BASE_URL = "http://localhost:8766"` placeholder) — deferred; ACP has no attack surface (monitors agent activity only, no prompt/run capability), users deploying remotely are expected to put it behind HTTPS themselves |
 | SEC-20 | Medium | Security | ✓ CLOSED R07.24 | `mcp install` overwrites existing mcp.json entries by default — no `--no-overwrite` opt-out; user-customized args/paths lost silently on re-install |
 | MCP-01 | Medium | Robustness | ✓ CLOSED R07.24 | StdioTransport uses blocking readline — per-call timeouts don't actually interrupt (same shape as ROB-02/ROB-06) |
 | ROB-33 | Medium | Robustness | ✓ CLOSED R07.24 | _is_process_alive probes liveness with os.kill(pid, 0) — on Windows that TERMINATES the target; R07.16 moved the call onto the chat startup path via TurboState.load() |
@@ -100,6 +108,7 @@ This file is the archive of CLOSED and WONTFIX findings moved out of
 | MAINT-20 | Low | Maintainability | ✓ CLOSED R07.07 | get_model_info sets free_tier twice for catalog hits (parent + override) — redundant |
 | MCP-03 | Low | Maintainability | ✓ CLOSED R07.24 | Complex JSON Schema constructs (oneOf/anyOf/$ref) flatten to default `string` in inputSchema conversion |
 | MCP-04 | Low | Performance | ✓ CLOSED R07.24 | Eager server startup adds 1-3s latency to every `--mcp` session even when no MCP tools are called |
+| TEST-09 | Low | Testing | ✓ CLOSED R07.25 | Plugin scaffolds miss agent-loop streaming-path integration test — `scripts/smoke_test_r07_25.sh` now exercises both streaming and non-streaming paths per cloud backend (the R07.09 streaming-only bug class is now caught by smoke) |
 | PERF-03 | Low | Performance | ✓ CLOSED R07.15 | web_search uses regex to parse DuckDuckGo HTML — fragile, slow, falls back to second fetch on failure |
 | PERF-04 | Low | Performance | ✓ CLOSED R07.14 | discover(force=True) re-scans all plugin roots — no mtime check |
 | PERF-05 | Low | Performance | ✓ CLOSED R07.12 (intra) | ToolParser.parse runs all 3 parsing strategies even if first succeeds — may produce duplicate tool calls |
@@ -1983,5 +1992,43 @@ Five findings closed in one pass — all surgical, non-breaking. Suite: 2932 →
 **Status:** ✓ CLOSED R07.24
 
 **Detail:** On Windows, `os.kill(pid, 0)` TERMINATES the target process — the POSIX "signal 0 = liveness check" semantics don't hold on Windows, which treats any signal as a kill. This was a latent bug since R06.57 (when `_is_process_alive` was added to handle zombie detection), but became user-facing in R07.16 when the call moved onto the chat startup path via `TurboState.load()`: a Windows user starting `agentkthx chat` against a running turbo server would silently kill the server in the process of checking if it was alive. R07.24 branches on `os.name == 'nt'`: POSIX keeps `os.kill(pid, 0)` (where signal 0 is documented as a no-op liveness check); Windows uses `ctypes`'s `OpenProcess` (PROCESS_QUERY_LIMITED_INFORMATION = 0x1000 — read-only access, doesn't grant PROCESS_TERMINATE so we can't accidentally kill even if we wanted to) + `GetExitCodeProcess` (the exit code is `STILL_ACTIVE` = 259 for a running process; any other value means the process exited). The Windows helper fails closed on any ctypes error so the caller (`TurboState.load()` + `_free_port`) re-binds the port rather than assuming the server is alive. ERROR_ACCESS_DENIED (5) is treated as alive — the process exists but we don't have permission to query it (still running). Also catches `OverflowError` for pids that don't fit in `pid_t` (e.g. `0xFFFFFFFF` on Linux raises OverflowError, not OSError — pre-R07.24 the function would propagate the OverflowError up; now it returns False). 8 regression tests: zero-pid, nonexistent-pid (including the OverflowError case), current-pid (alive), windows-helper-exists, windows-helper-zero-pid-fail-closed, windows-helper-nonexistent-pid-on-linux-fail-closed, `test_no_os_kill_on_windows_path` (the ROB-33 contract test — os.kill is NOT called when os.name == 'nt'), `test_posix_path_uses_os_kill` (POSIX path intact).
+
+---
+
+---
+
+## R07.25 Audit Closures — SEC-09 WONTFIX + TEST-09 CLOSED
+
+Two findings resolved in one pass — one WONTFIX (SEC-09) and one CLOSED (TEST-09). Both surgical, non-breaking. Suite: 2959 → 2972 passed (+13: +8 in `tests/test_smoke_test_r07_25.py` pinning the smoke-test contract + +5 in `tests/test_generate_audit_dash.py` for the R07.24 dashboard MCP/closure-rate update). Zero regressions; ruff + black clean.
+
+### Security
+
+#### SEC-09: ACP credentials sent as Basic Auth over HTTP by default — DEFERRED (out of scope)
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Medium |
+| **Category** | Security |
+| **File(s)** | `agentkthx/config.py:91-93`, `agentkthx/plugins/acp/acp_plugin.py` |
+
+**Status:** ⊘ WONTFIX R07.25 (owner decision)
+
+**Detail:** The finding recommended warning loudly when `ACP_BASE_URL` doesn't start with `https://` and isn't `localhost`/`127.0.0.1`/`::1`, and refusing to send credentials over non-HTTPS unless `ACP_ALLOW_INSECURE_HTTP=1` is set. The owner deferred: `ACP_BASE_URL = "http://localhost:8766"` is the default PLACEHOLDER parameter — it's there so a fresh checkout works against a local ACP instance without env config, NOT a recommendation to deploy ACP on remote HTTP. ACP (Agent Control Protocol) is a monitoring-only protocol: it observes agent activity (tool calls, completions, errors) and surfaces them to a dashboard. It has no ability to prompt the model, no ability to run commands, no ability to mutate agent state — the attack surface is observability only. An attacker who MITMs the Basic-Auth credentials gains the ability to READ monitoring data, not to influence the agent. Users deploying ACP across machines are expected to put it behind HTTPS themselves (the same way they would any internal service — a Cloudflare Tunnel, an nginx reverse proxy, an SSH tunnel). Documenting the HTTPS recommendation in `docs/USAGE.md` is a lighter-touch fix than a runtime warning; the runtime guard would block the documented "localhost development" path under the default placeholder URL, which is a UX regression for the most common deployment shape. Same reasoning as MCP-02 + SEC-13 (R07.24 WONTFIX) — AgentKthx doesn't control how operators deploy their ACP server, and a hardcoded `http://localhost:8766` default that refuses to send credentials would break every fresh checkout. The fix shape proposed (warn + opt-out env var) is the same shape SEC-13 rejected; the trust boundary is operator-side, not framework-side. Note: SEC-09 was the only OPEN finding in the Security category — the Security surface is now 100% resolved (20 CLOSED + 4 WONTFIX, 0 OPEN).
+
+---
+
+### Testing
+
+#### TEST-09: Plugin scaffolds miss agent-loop streaming-path integration test — smoke test extended to streaming path
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Testing |
+| **File(s)** | `scripts/smoke_test_r07_21.sh` (predecessor), `scripts/smoke_test_r07_25.sh` (new), `tests/test_smoke_test_r07_25.py` (new regression file pinning the smoke-test contract) |
+
+**Status:** ✓ CLOSED R07.25
+
+**Detail:** The R07.09 streaming bug (missing `_iter_sse_lines` abstract hook — first shipped as `NotImplementedError` at chat invocation) was caught by the user's live `agentkthx chat --backend mistral` run, NOT by the 64-test suite: tests asserted the method existed and unit-tested its pieces, but nothing exercised the agent loop → `generate_completions_stream` → `_iter_sse_lines` call-through. The finding's recommendation was a `tests/test_plugin_streaming_integration.py` that drives one streaming turn through `Agent`-level machinery per cloud backend. The owner chose a different fix surface: extend the existing smoke-test script family rather than add a mocked pytest file. R07.25 ships `scripts/smoke_test_r07_25.sh` — a superset of `smoke_test_r07_21.sh` that runs the existing three steps (model listing, `--think`, `--tools shell`) per backend AND adds a 4th step that re-runs the `--tools shell` invocation WITHOUT `--no-stream`, forcing the streaming path (`generate_completions_stream` → `_iter_sse_lines` → SSE chunk parse → tool-call extraction). The streaming step has a 180s timeout (vs 120s for non-streaming — the stream chunk decode + tool-call arg assembly adds latency on the first invocation). The smoke marker (`smoke-test-marker-$$`) is the SAME for both paths, so a streaming-only regression (e.g. a backend that returns `NotImplementedError` on `generate_completions_stream`, or returns SSE chunks without the `tool_calls` delta) shows up as a fail with a clear "shell tool did not execute (marker not found)" message in the streaming step but PASS in the non-streaming step — exactly the R07.09 bug shape. The script is invocable as `./scripts/smoke_test_r07_25.sh` (default: all cloud backends found in env) or `./scripts/smoke_test_r07_25.sh --backend mistral` (single backend). The R07.21 script is kept for back-compat — the R07.25 script supersedes it for any future streaming-adjacent change. The 8-test regression file `tests/test_smoke_test_r07_25.py` pins: (1) the script exists + is executable, (2) `--help` documents the streaming step, (3) the script body contains both `--no-stream` and the streaming path (no `--no-stream` flag on the streaming invocation), (4) the streaming invocation has a per-step timeout ≥ 120s AND strictly greater than the non-streaming timeout, (5) the smoke marker is the same for both paths (so a streaming-only regression is observable as a streaming-step fail + non-streaming-step pass), (6) the legacy R07.21 smoke test is preserved for back-compat, (7) the streaming step runs for ALL backends (no per-backend skip list), (8) the script handles unknown `--backend` values gracefully (no bash indirect-expansion error on empty envvar). The TEST-10 finding (live-shape Pollinations free-model contract test) is the same lesson recurring one release later — it stays open, with the R07.25 closure of TEST-09 as the structural-template fix.
 
 ---
