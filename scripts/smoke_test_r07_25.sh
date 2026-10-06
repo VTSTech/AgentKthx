@@ -35,7 +35,7 @@
 # Usage:
 #   ./scripts/smoke_test_r07_25.sh
 #   AGENTKTHX_DEBUG=1 ./scripts/smoke_test_r07_25.sh   # verbose
-#   SKIP=backends_to_skip ./scripts/smoke_test_r07_25.sh
+#   ./scripts/smoke_test_r07_25.sh --skip "openai mistral"   # skip backends
 #   ./scripts/smoke_test_r07_25.sh --backend mistral   # one backend only
 #   ./scripts/smoke_test_r07_25.sh --no-stream-only    # skip step 4 (debug)
 #
@@ -46,17 +46,13 @@
 set -u
 
 # ─── config ──────────────────────────────────────────────────────────────
-# Backends to test, in order. Skip any by setting SKIP="openai mistral"
+# Backends to test, in order. Skip any by passing --skip "openai mistral"
+# (the SKIP env var is no longer supported — use --skip).
 DEFAULT_BACKENDS="zai openrouter orcarouter gemini huggingface openai mistral pollinations"
-SKIP="${SKIP:-}"
+# SKIP + BACKENDS are populated by the arg parser below (deferred so --skip
+# can override before the filter loop runs).
+SKIP=""
 BACKENDS=""
-for b in $DEFAULT_BACKENDS; do
-  case " $SKIP " in
-    *" $b "*) echo "SKIP: $b (in SKIP list)" ;;
-    *) BACKENDS="$BACKENDS $b" ;;
-  esac
-done
-BACKENDS="${BACKENDS# }"
 
 # Per-step timeouts (seconds). The streaming step has a longer timeout
 # because the stream chunk decode + tool-call arg assembly adds latency
@@ -137,6 +133,20 @@ free_only_var() {
     openai)      echo "OPENAI_FREE_ONLY" ;;
     mistral)     echo "MISTRAL_FREE_ONLY" ;;
     pollinations) echo "POLLINATIONS_FREE_ONLY" ;;
+    *)           echo "" ;;
+  esac
+}
+
+# Hardcoded model names per backend. Some aggregators ship a special
+# "free-tier" model identifier that routes to a free model automatically —
+# using it skips the slow `agentkthx models` listing + the first_free_model
+# parsing fragility. Returns the model name (e.g. "openrouter/free") or
+# empty string if the backend should fall back to first_free_model().
+default_model_for_backend() {
+  local backend="$1"
+  case "$backend" in
+    openrouter)  echo "openrouter/free" ;;
+    orcarouter)  echo "orcarouter/free" ;;
     *)           echo "" ;;
   esac
 }
@@ -278,8 +288,16 @@ test_backend() {
   fi
 
   # ─── pick a model for the run tests ──────────────────────────────────
+  # Some backends (openrouter, orcarouter) ship a special free-tier model
+  # identifier that routes to a free model automatically — preferred over
+  # first_free_model() because it skips the slow listing + the parsing
+  # fragility. Falls back to first_free_model() for backends without a
+  # hardcoded default.
   local model
-  model=$(first_free_model "$backend")
+  model=$(default_model_for_backend "$backend")
+  if [[ -z "$model" ]]; then
+    model=$(first_free_model "$backend")
+  fi
   if [[ -z "$model" ]]; then
     skip "$backend — no free model available for run tests"
     return
@@ -381,10 +399,11 @@ test_backend() {
 }
 
 # ─── parse args ─────────────────────────────────────────────────────────
-# --backend X     test only one backend (overrides SKIP + DEFAULT_BACKENDS)
-# --debug         show ALL output (no head/tail truncation, full agentkthx stderr)
+# --backend X       test only one backend (overrides --skip + DEFAULT_BACKENDS)
+# --skip "a b c"    space-separated list of backends to skip (no env-var equiv)
+# --debug           show ALL output (no head/tail truncation, full agentkthx stderr)
 # --no-stream-only  skip step 4 (the streaming step) — debug escape hatch
-# --help / -h     usage
+# --help / -h       usage
 ONLY_BACKEND=""
 DEBUG=0
 NO_STREAM_ONLY=0
@@ -392,6 +411,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --backend|-b)
       ONLY_BACKEND="$2"
+      shift 2
+      ;;
+    --skip)
+      SKIP="$2"
       shift 2
       ;;
     --debug)
@@ -403,16 +426,16 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --help|-h)
-      echo "Usage: $0 [--backend <name>] [--debug] [--no-stream-only] [SKIP=backends_to_skip]"
+      echo "Usage: $0 [--backend <name>] [--skip \"<names>\"] [--debug] [--no-stream-only]"
       echo ""
       echo "Options:"
       echo "  --backend <name>      Test only one backend (zai, openrouter, gemini, etc.)"
+      echo "  --skip \"<names>\"      Space-separated list of backends to skip (e.g. --skip \"openai mistral\")"
       echo "  --debug               Show ALL output (no head/tail truncation, full agentkthx stderr)"
       echo "  --no-stream-only      Skip step 4 (the streaming step) — debug escape hatch"
       echo "  --help                This help message"
       echo ""
       echo "Environment:"
-      echo "  SKIP=backends_to_skip     Space-separated list of backends to skip"
       echo "  AGENTKTHX_DEBUG=1         Verbose mode (same as --debug)"
       echo "  NONSTREAM_TIMEOUT=120     Per-step timeout for non-streaming invocations"
       echo "  STREAM_TIMEOUT=180        Per-step timeout for the streaming invocation"
@@ -422,6 +445,10 @@ while [[ $# -gt 0 ]]; do
       echo "  2. agentkthx run --backend <X> --think --no-stream \"count to 5\"   (thinking)"
       echo "  3. agentkthx run --backend <X> --tools shell --no-stream \"echo MARKER\"   (NON-STREAMING path)"
       echo "  4. agentkthx run --backend <X> --tools shell \"echo MARKER\"   (STREAMING path — closes TEST-09)"
+      echo ""
+      echo "Backends with hardcoded free-tier model names (skip first_free_model):"
+      echo "  openrouter  →  openrouter/free"
+      echo "  orcarouter  →  orcarouter/free"
       echo ""
       echo "Without --backend, tests all cloud backends found in env."
       exit 0
@@ -433,9 +460,19 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Build BACKENDS list from DEFAULT_BACKENDS, filtered by --skip.
+# (--backend overrides everything: BACKENDS becomes just that one name.)
 if [[ -n "$ONLY_BACKEND" ]]; then
   BACKENDS="$ONLY_BACKEND"
   SKIP=""
+else
+  for b in $DEFAULT_BACKENDS; do
+    case " $SKIP " in
+      *" $b "*) echo "SKIP: $b (in --skip list)" ;;
+      *) BACKENDS="$BACKENDS $b" ;;
+    esac
+  done
+  BACKENDS="${BACKENDS# }"
 fi
 [[ "${AGENTKTHX_DEBUG:-0}" == "1" ]] && DEBUG=1
 
@@ -455,7 +492,7 @@ show_output() {
 # ─── main ───────────────────────────────────────────────────────────────
 echo "${C_CYAN}⚖ AgentKthx R07.25 Smoke Test (streaming + non-streaming)${C_RESET}"
 echo "${C_DIM}  Backends: $BACKENDS${C_RESET}"
-echo "${C_DIM}  SKIP: ${SKIP:-<none>}${C_RESET}"
+[[ -n "$SKIP" ]] && echo "${C_DIM}  Skip:    $SKIP${C_RESET}"
 echo "${C_DIM}  Marker: $SMOKE_MARKER (same for non-streaming + streaming steps)${C_RESET}"
 echo "${C_DIM}  Timeouts: ${NONSTREAM_TIMEOUT}s (non-streaming) / ${STREAM_TIMEOUT}s (streaming)${C_RESET}"
 [[ $NO_STREAM_ONLY -eq 1 ]] && echo "${C_YELLOW}  NOTE: --no-stream-only set, step 4 (streaming) will be skipped${C_RESET}"
