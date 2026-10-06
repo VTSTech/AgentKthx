@@ -35,6 +35,16 @@ Usage:
     python3 generate_audit_dash.py --no-endpoints
 
 Stdlib only. Python 3.8+.
+
+Pre-R07.04 caveat: Audit ID prefixes were reused across register generations
+(SEC-01 in the pre-R07.04 `agentnova/` single-file era is a different finding
+from SEC-01 in the post-R07.04 split-register era). Since R07.04 deltas.md
+holds the closure history with stable IDs — every CLOSED/WONTFIX finding has
+a permanent ID and a closure release, so historical counts are reconstructable.
+The `MCP` category was added post-R07.22 to group MCP-prefixed findings
+under one bucket (their original categories spanned Security/Robustness/
+Maintainability/Performance; for dashboard grouping they are now forced
+to "MCP" regardless of the deltas.md table cell).
 """
 
 import argparse
@@ -152,8 +162,19 @@ def parse_meta(audit_md, brief_md):
 
 # ─── parsing: findings ─────────────────────────────────────────────────────
 
+# 8 categories — MCP added R07.24 to group MCP-prefixed findings under one
+# bucket regardless of their original cross-cutting category (Security,
+# Robustness, Maintainability, Performance). The override is applied
+# downstream in `_parse_findings_from_md` (see MCP_PREFIX override).
 CATS = ["Security", "Robustness", "Maintainability", "Performance",
-        "New Features", "Architecture", "Testing"]
+        "New Features", "Architecture", "Testing", "MCP"]
+
+# ID-prefix → category override. Findings whose ID starts with one of these
+# prefixes are forced into the named category regardless of what the
+# markdown table cell says. Keeps MCP-prefixed findings grouped under the
+# "MCP" bucket on the dashboard even when deltas.md lists them under
+# Security/Robustness/Maintainability/Performance.
+PREFIX_CATEGORY_OVERRIDE = {"MCP": "MCP"}
 
 def strip_md(s):
     """Strip markdown formatting from inline text."""
@@ -245,6 +266,11 @@ def _parse_findings_from_md(md_text):
         sev = strip_md(sev)
         cat = strip_md(cat)
         title = strip_md(title)
+        # Apply prefix-based category override (MCP-* → "MCP") so
+        # cross-cutting findings group under one dashboard bucket.
+        prefix = fid.split("-", 1)[0]
+        if prefix in PREFIX_CATEGORY_OVERRIDE:
+            cat = PREFIX_CATEGORY_OVERRIDE[prefix]
         if cat not in CATS:
             continue
         status, closed_in = parse_status_cell(status_cell)
@@ -287,8 +313,11 @@ def _parse_findings_from_md(md_text):
         sev = strip_md(sev)
         cat = strip_md(cat)
         title = strip_md(title)
-        if cat not in CATS:
-            continue
+        # Apply prefix-based category override (MCP-* → "MCP") so
+        # cross-cutting findings group under one dashboard bucket.
+        prefix = fid.split("-", 1)[0]
+        if prefix in PREFIX_CATEGORY_OVERRIDE:
+            cat = PREFIX_CATEGORY_OVERRIDE[prefix]
         file_val = strip_md(file_cell) if file_cell else None
         if fid not in findings:
             findings[fid] = {
@@ -421,11 +450,18 @@ def _parse_findings_from_md(md_text):
             f["detail"] = f["title"]
         if not f["category"]:
             # try to infer from ID prefix
-            prefix = f["id"].split("-")[0]
+            prefix = f["id"].split("-", 1)[0]
             cat_map = {"SEC": "Security", "ROB": "Robustness", "MAINT": "Maintainability",
                        "PERF": "Performance", "FEAT": "New Features",
-                       "ARCH": "Architecture", "TEST": "Testing"}
+                       "ARCH": "Architecture", "TEST": "Testing", "MCP": "MCP"}
             f["category"] = cat_map.get(prefix, "Maintainability")
+        else:
+            # Even when the category was set from the table cell, apply the
+            # prefix override so MCP-prefixed findings always land in the
+            # "MCP" bucket regardless of what the table said.
+            prefix = f["id"].split("-", 1)[0]
+            if prefix in PREFIX_CATEGORY_OVERRIDE:
+                f["category"] = PREFIX_CATEGORY_OVERRIDE[prefix]
 
     return findings
 
@@ -437,7 +473,7 @@ HTML_TEMPLATE = r'''<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AgentKthx — Audit Dashboard</title>
-<meta name="description" content="AgentKthx __RELEASE__ audit register — __TOTAL__ findings across 7 categories, tracked release-over-release.">
+<meta name="description" content="AgentKthx __RELEASE__ audit register — __TOTAL__ findings across 8 categories, tracked release-over-release. Closure rate __CLOSURE_PCT__%.">
 <style>
 :root{--radius:.75rem;--bg:oklch(.165 .012 165);--fg:oklch(.965 .006 155);--card:oklch(.215 .014 165);--muted:oklch(.25 .012 165);--muted-fg:oklch(.72 .015 160);--border:oklch(1 0 0 / 9%);--primary:oklch(.8 .16 158);--primary-fg:oklch(.18 .04 165);--accent:oklch(.3 .05 162);--emerald:oklch(.8 .16 158);--amber:oklch(.769 .188 70.08);--rose:oklch(.645 .246 16.439);--sky:oklch(.696 .17 200);--violet:oklch(.627 .265 303.9);--fuchsia:oklch(.7 .22 320);--cyan:oklch(.7 .15 200);--zinc:oklch(.6 .01 260)}
 *{box-sizing:border-box;margin:0;padding:0}
@@ -493,7 +529,7 @@ h2{font-size:1.875rem;font-weight:700;letter-spacing:-.02em}
 .desc{margin-top:1rem;max-width:48rem;font-size:1rem;color:var(--muted-fg);line-height:1.6}
 @media(min-width:640px){.desc{font-size:1.125rem}}
 .stats{display:grid;grid-template-columns:repeat(2,1fr);gap:.75rem;margin-bottom:2rem}
-@media(min-width:1024px){.stats{grid-template-columns:repeat(4,1fr)}}
+@media(min-width:1024px){.stats{grid-template-columns:repeat(auto-fit,minmax(11rem,1fr))}}
 .stat{border:1px solid var(--border);background:oklch(.215 .014 165 / .4);border-radius:var(--radius);padding:1.25rem}
 .stat-val{font-size:1.875rem;font-weight:700;font-variant-numeric:tabular-nums}
 @media(min-width:640px){.stat-val{font-size:2.25rem}}
@@ -503,6 +539,7 @@ h2{font-size:1.875rem;font-weight:700;letter-spacing:-.02em}
 .stat.emerald{border-color:oklch(.769 .188 70.08 / .3);color:oklch(.769 .188 70.08)}
 .stat.amber{border-color:oklch(.769 .188 70.08 / .3);color:oklch(.769 .188 70.08)}
 .stat.zinc{border-color:oklch(.6 .01 260 / .3);color:oklch(.6 .01 260)}
+.stat.cyan{border-color:oklch(.7 .15 200 / .3);color:oklch(.7 .15 200)}
 .charts{display:grid;grid-template-columns:1fr;gap:1rem;margin-bottom:2.5rem}
 @media(min-width:1024px){.charts{grid-template-columns:2fr 3fr}}
 .chart-card{border:1px solid var(--border);background:oklch(.215 .014 165 / .4);border-radius:var(--radius);padding:1.25rem}
@@ -608,12 +645,13 @@ footer{margin-top:auto;border-top:1px solid var(--border);background:oklch(.215 
     <div>
       <div class="eyebrow"><span class="dot"></span> internal audit bench · Alpha</div>
       <h1>⚛️ <span class="grad">AgentKthx</span> <span class="muted" style="font-weight:400">audit dashboard</span></h1>
-      <p class="lead">Live audit register for the __RELEASE__ working tree — <b id="hd-total">__TOTAL__</b> findings across 7 categories, tracked release-over-release. Filter, search, and inspect the register below.</p>
+      <p class="lead">Live audit register for the __RELEASE__ working tree — <b id="hd-total">__TOTAL__</b> findings across 8 categories, tracked release-over-release. Closure rate <b id="hd-closure">__CLOSURE_PCT__%</b>. Filter, search, and inspect the register below.</p>
     </div>
     <div class="pills">
       <span class="pill"><span class="ic">⎇</span> __RELEASE__</span>
       <span class="pill"><span class="ic">✓</span> __TESTS__ tests</span>
       <span class="pill"><span class="ic">⊘</span> __TOTAL__ findings</span>
+      <span class="pill"><span class="ic">%</span> __CLOSURE_PCT__% closed</span>
     </div>
   </div>
 </header>
@@ -621,7 +659,7 @@ footer{margin-top:auto;border-top:1px solid var(--border);background:oklch(.215 
 <section id="audit" class="wrap">
   <div class="eyebrow-s">Audit dashboard</div>
   <h2><span class="grad" id="hd-total2">__TOTAL__</span> findings, tracked release-over-release</h2>
-  <p class="desc">Every finding has a stable ID (SEC / ROB / MAINT / PERF / FEAT / ARCH / TEST), a severity, and a status. <span id="hd-closed">__CLOSED__</span> closed across the tracked releases, 1 intentional WONTFIX. Filter, search, and inspect the register below.</p>
+  <p class="desc">Every finding has a stable ID (SEC / ROB / MAINT / PERF / FEAT / ARCH / TEST / MCP), a severity, and a status. <span id="hd-closed">__CLOSED__</span> closed across the tracked releases, <span id="hd-wontfix">__WONTFIX__</span> intentional WONTFIX. Closure rate <b id="hd-closure2">__CLOSURE_PCT__%</b>. Filter, search, and inspect the register below.</p>
   <div class="stats" id="stats"></div>
   <div class="charts">
     <div class="chart-card">
@@ -701,15 +739,15 @@ footer{margin-top:auto;border-top:1px solid var(--border);background:oklch(.215 
 </button>
 <script>
 const FINDINGS = __FINDINGS__;
-const CAT_META = {Security:{short:"SEC",color:"#f87171"},Robustness:{short:"ROB",color:"#fbbf24"},Maintainability:{short:"MAINT",color:"#a78bfa"},Performance:{short:"PERF",color:"#38bdf8"},"New Features":{short:"FEAT",color:"#34d399"},Architecture:{short:"ARCH",color:"#22d3ee"},Testing:{short:"TEST",color:"#e879f9"}};
+const CAT_META = {Security:{short:"SEC",color:"#f87171"},Robustness:{short:"ROB",color:"#fbbf24"},Maintainability:{short:"MAINT",color:"#a78bfa"},Performance:{short:"PERF",color:"#38bdf8"},"New Features":{short:"FEAT",color:"#34d399"},Architecture:{short:"ARCH",color:"#22d3ee"},Testing:{short:"TEST",color:"#e879f9"},MCP:{short:"MCP",color:"#fb923c"}};
 const STATUS_META = {CLOSED:{label:"Closed",color:"var(--primary)"},OPEN:{label:"Open",color:"var(--amber)"},WONTFIX:{label:"Won't fix",color:"var(--zinc)"}};
 const CATS = Object.keys(CAT_META);
 const state = {q:"",cat:"All",status:"All",sev:"All"};
-function computeStats(){const s={total:FINDINGS.length,byStatus:{CLOSED:0,OPEN:0,WONTFIX:0},bySev:{High:0,Medium:0,Low:0},byCat:{}};for(const f of FINDINGS){s.byStatus[f.status]++;s.bySev[f.severity]=(s.bySev[f.severity]||0)+1;s.byCat[f.category]=s.byCat[f.category]||{total:0,closed:0,open:0};s.byCat[f.category].total++;if(f.status==="CLOSED")s.byCat[f.category].closed++;else s.byCat[f.category].open++;}return s;}
+function computeStats(){const s={total:FINDINGS.length,byStatus:{CLOSED:0,OPEN:0,WONTFIX:0},bySev:{High:0,Medium:0,Low:0},byCat:{},closurePct:0};for(const f of FINDINGS){s.byStatus[f.status]++;s.bySev[f.severity]=(s.bySev[f.severity]||0)+1;s.byCat[f.category]=s.byCat[f.category]||{total:0,closed:0,open:0};s.byCat[f.category].total++;if(f.status==="CLOSED")s.byCat[f.category].closed++;else s.byCat[f.category].open++;}s.closurePct=s.total?Math.round(s.byStatus.CLOSED/s.total*100):0;return s;}
 const stats=computeStats();
 document.getElementById("yr").textContent=new Date().getFullYear();
 function statCard(l,v,h,c){return '<div class="stat '+c+'"><div class="stat-val">'+v+'</div><div class="stat-lbl">'+l+'</div><div class="stat-hint">'+h+'</div></div>';}
-document.getElementById("stats").innerHTML=statCard("Findings",stats.total,"in this register","primary")+statCard("Closed",stats.byStatus.CLOSED,"tracked releases","emerald")+statCard("Open",stats.byStatus.OPEN,"active work items","amber")+statCard("Won't fix",stats.byStatus.WONTFIX,"intentional","zinc");
+document.getElementById("stats").innerHTML=statCard("Findings",stats.total,"in this register","primary")+statCard("Closed",stats.byStatus.CLOSED,stats.closurePct+"% closure rate","emerald")+statCard("Open",stats.byStatus.OPEN,"active work items","amber")+statCard("Won't fix",stats.byStatus.WONTFIX,"intentional","zinc")+statCard("Closure",stats.closurePct+"%","closed / total","cyan");
 function renderPie(){const d=[["Closed",stats.byStatus.CLOSED,STATUS_META.CLOSED.color],["Open",stats.byStatus.OPEN,STATUS_META.OPEN.color],["Won't fix",stats.byStatus.WONTFIX,STATUS_META.WONTFIX.color]];const t=d.reduce((s,x)=>s+x[1],0);const cx=110,cy=110,ro=85,ri=55;let h='<svg viewBox="0 0 220 220" width="100%" height="100%" style="max-height:220px">';let a=-90;for(const[n,v,c] of d){if(!v)continue;const sw=(v/t)*360;const a1=a*Math.PI/180,a2=(a+sw)*Math.PI/180;const lg=sw>180?1:0;const x1o=cx+ro*Math.cos(a1),y1o=cy+ro*Math.sin(a1),x2o=cx+ro*Math.cos(a2),y2o=cy+ro*Math.sin(a2);const x1i=cx+ri*Math.cos(a2),y1i=cy+ri*Math.sin(a2),x2i=cx+ri*Math.cos(a1),y2i=cy+ri*Math.sin(a1);h+='<path d="M '+x1o+' '+y1o+' A '+ro+' '+ro+' 0 '+lg+' 1 '+x2o+' '+y2o+' L '+x1i+' '+y1i+' A '+ri+' '+ri+' 0 '+lg+' 0 '+x2i+' '+y2i+' Z" fill="'+c+'" stroke="none"/>';a+=sw;}h+='<text x="'+cx+'" y="'+(cy-5)+'" text-anchor="middle" fill="var(--fg)" font-size="28" font-weight="700">'+t+'</text>';h+='<text x="'+cx+'" y="'+(cy+18)+'" text-anchor="middle" fill="var(--muted-fg)" font-size="11">findings</text>';h+='</svg>';document.getElementById("pie-box").innerHTML=h;document.getElementById("pie-legend").innerHTML=d.map(x=>'<div class="legend-item"><span class="legend-sw" style="background:'+x[2]+'"></span>'+x[0]+' <b>'+x[1]+'</b></div>').join("");}
 renderPie();
 function renderBar(){const cd=CATS.map(c=>({name:c,short:CAT_META[c].short,total:stats.byCat[c]?.total||0,closed:stats.byCat[c]?.closed||0,open:stats.byCat[c]?.open||0})).sort((a,b)=>b.total-a.total);const mx=Math.max(...cd.map(d=>d.total));const bh=22,gp=8,lw=44,cw=300;const th=cd.length*(bh+gp)+10;let h='<svg viewBox="0 0 '+(lw+cw+40)+' '+th+'" width="100%" height="100%" style="max-height:220px" preserveAspectRatio="xMidYMid meet">';cd.forEach((d,i)=>{const y=i*(bh+gp)+4;const cw2=cw*(d.closed/mx);const ow=cw*(d.open/mx);h+='<text x="'+(lw-6)+'" y="'+(y+bh/2+3)+'" text-anchor="end" fill="var(--muted-fg)" font-size="10" font-family="monospace">'+d.short+'</text>';h+='<rect x="'+lw+'" y="'+y+'" width="'+cw2+'" height="'+bh+'" fill="var(--primary)" rx="0"/>';h+='<rect x="'+(lw+cw2)+'" y="'+y+'" width="'+ow+'" height="'+bh+'" fill="var(--amber)" rx="3" style="cursor:pointer" data-cat="'+d.name+'"/>';h+='<text x="'+(lw+cw2+ow+6)+'" y="'+(y+bh/2+3)+'" fill="var(--muted-fg)" font-size="10">'+d.total+'</text>';});h+='</svg>';document.getElementById("bar-box").innerHTML=h;document.querySelectorAll('#bar-box rect[data-cat]').forEach(r=>{r.addEventListener("click",()=>{state.cat=state.cat===r.dataset.cat?"All":r.dataset.cat;render();});});}
@@ -733,12 +771,17 @@ document.getElementById("btt").addEventListener("click",()=>window.scrollTo({top
 def generate_html(findings, meta):
     """Fill the HTML template with parsed data."""
     closed_count = sum(1 for f in findings if f["status"] == "CLOSED")
+    wontfix_count = sum(1 for f in findings if f["status"] == "WONTFIX")
+    total = len(findings)
+    closure_pct = round(closed_count / total * 100) if total else 0
     html = HTML_TEMPLATE
     html = html.replace("__RELEASE__", meta["release"])
     html = html.replace("__VERSION__", meta["version"])
     html = html.replace("__BRAND_SUB__", f'{meta["release"]} · PyPI {meta["pypi"]}')
-    html = html.replace("__TOTAL__", str(len(findings)))
+    html = html.replace("__TOTAL__", str(total))
     html = html.replace("__CLOSED__", str(closed_count))
+    html = html.replace("__WONTFIX__", str(wontfix_count))
+    html = html.replace("__CLOSURE_PCT__", str(closure_pct))
     html = html.replace("__TESTS__", str(meta["tests"]))
     html = html.replace("__REPO__", meta["repo"])
     html = html.replace("__PYPI__", meta["pypiUrl"])
@@ -767,7 +810,15 @@ def generate_html(findings, meta):
 # /open, /closed, /wontfix, /all with a single client implementation.
 
 def _endpoint_envelope(meta, findings, generated_at):
-    """Common envelope for list endpoints — counts across the FULL register."""
+    """Common envelope for list endpoints — counts across the FULL register.
+
+    Includes ``closurePct`` (closed / total, 0-100 integer) so external
+    clients can show closure progress without re-deriving it. The
+    ``resolutionPct`` field (closed + wontfix) / total is also provided
+    for shops that count intentional wontfix as "resolved". Both are
+    rounded to integers for display; the raw counts remain in the
+    ``byStatus`` block for exact arithmetic.
+    """
     by_status = {"OPEN": 0, "CLOSED": 0, "WONTFIX": 0}
     by_severity = {}
     by_category = {}
@@ -776,13 +827,20 @@ def _endpoint_envelope(meta, findings, generated_at):
         by_severity[f["severity"]] = by_severity.get(f["severity"], 0) + 1
         cat = f["category"]
         by_category[cat] = by_category.get(cat, 0) + 1
+    total = len(findings)
+    closed = by_status.get("CLOSED", 0)
+    wontfix = by_status.get("WONTFIX", 0)
+    closure_pct = round(closed / total * 100) if total else 0
+    resolution_pct = round((closed + wontfix) / total * 100) if total else 0
     return {
         "meta": meta,
         "generatedAt": generated_at,
-        "total": len(findings),
+        "total": total,
         "open": by_status.get("OPEN", 0),
-        "closed": by_status.get("CLOSED", 0),
-        "wontfix": by_status.get("WONTFIX", 0),
+        "closed": closed,
+        "wontfix": wontfix,
+        "closurePct": closure_pct,
+        "resolutionPct": resolution_pct,
         "high": by_severity.get("High", 0),
         "medium": by_severity.get("Medium", 0),
         "low": by_severity.get("Low", 0),
@@ -816,15 +874,21 @@ def _summary_payload(meta, findings, generated_at):
         by_severity[sev]["total"] += 1
         by_severity[sev][st.lower()] += 1
     closed = by_status.get("CLOSED", 0)
+    wontfix = by_status.get("WONTFIX", 0)
+    total = len(findings)
+    closure_pct = round(closed / total * 100) if total else 0
+    resolution_pct = round((closed + wontfix) / total * 100) if total else 0
     return {
         "meta": meta,
         "generatedAt": generated_at,
         "totals": {
-            "total": len(findings),
+            "total": total,
             "open": by_status.get("OPEN", 0),
             "closed": closed,
-            "wontfix": by_status.get("WONTFIX", 0),
-            "closureRate": round(closed / len(findings) * 100) if findings else 0,
+            "wontfix": wontfix,
+            "closurePct": closure_pct,
+            "closureRate": closure_pct,  # legacy alias kept for back-compat
+            "resolutionPct": resolution_pct,
         },
         "byCategory": by_category,
         "bySeverity": by_severity,
