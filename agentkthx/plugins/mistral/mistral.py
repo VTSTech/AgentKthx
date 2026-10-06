@@ -1117,14 +1117,22 @@ class MistralBackend(CloudBackend):
             # deterministically when the generator is abandoned
             # mid-iteration (Ctrl+C, consumer exception, or the base
             # class's break on [DONE]).
+            #
+            # ROB-06 (R07.25 CLOSED): upgraded to use the deterministic
+            # _close_http_response helper (fp.close() + release_conn() +
+            # close()) so Windows doesn't leak the TCP connection.
             try:
                 for line in response:
                     yield line
             finally:
-                try:
-                    response.close()
-                except Exception:
-                    pass
+                close_helper = getattr(self, "_close_http_response", None)
+                if callable(close_helper):
+                    close_helper(response)
+                else:
+                    try:
+                        response.close()
+                    except Exception:
+                        pass
             return  # success — don't retry
 
         # Should not reach here — the loop either yields + returns, or raises

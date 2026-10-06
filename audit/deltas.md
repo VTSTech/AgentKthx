@@ -4,7 +4,14 @@
 **Release:** R07.25
 **Date:** 2026-10-06  
 **Archived:** 2026-10-06 (R07.25 SEC-09 WONTFIX + TEST-09 closure in-progress)
-**Counts:** 98 CLOSED · 10 WONTFIX · 108 total
+**Counts:** 101 CLOSED · 10 WONTFIX · 111 total
+
+> Counts updated at R07.25 batch 2 (3 closures: ROB-02 orchestrator parallel mode
+> now uses FIRST_COMPLETED + cancel_futures + cooperative threading.Event; ROB-06
+> CloudBackend._close_http_response deterministic Windows close helper used by all
+> 8 cloud backends; ROB-15 PersistentMemory._transaction single-lock single-commit
+> per add). The 111 detail sections below are the source of truth. Prior count:
+> 98 CLOSED · 10 WONTFIX · 108 total at R07.25 batch 1.
 
 > Counts updated at R07.25 (1 WONTFIX + 1 CLOSED: SEC-09 wontfixed — ACP has no
 > attack surface, the default `http://localhost:8766` is a placeholder; users
@@ -94,6 +101,9 @@ This file is the archive of CLOSED and WONTFIX findings moved out of
 | ROB-27 | Low | Robustness | ✓ CLOSED R07.12 | _SSRFSafeRedirectHandler DNS lookup happens outside the request timeout — 5s bounded resolution, fail-closed sentinel |
 | ROB-26 | Low | Robustness | ✓ CLOSED R07.07 | sanitize_tool_output REDACT-then-TRUNCATE ordering — secrets past 8KB cutoff not redacted (dup of SEC-12) |
 | ROB-41 | Low | Robustness | ✓ CLOSED R07.24 | `registry.search_all` swallows failures from both npm and GitHub — returns `[]` indistinguishable from a successful 0-result search; plain-mode prints `No results found` instead of a network-error hint |
+| ROB-02 | Medium | Robustness | ✓ CLOSED R07.25 | Orchestrator parallel mode cancels futures but does not join worker threads — `future.cancel()` only prevents not-yet-started futures; already-running workers kept the pool alive past the timeout |
+| ROB-06 | Medium | Robustness | ✓ CLOSED R07.25 | KeyboardInterrupt during SSE streaming may not deterministically release HTTP connection on Windows — `urllib.HTTPResponse.close()` relies on GC; can exhaust connection pool on long Ctrl+C-heavy sessions |
+| ROB-15 | Medium | Robustness | ✓ CLOSED R07.25 | PersistentMemory.add() does two separate lock acquisitions (`_write_message` + `_touch_session`) — interleaving risk under concurrent writers + 2× commit per message |
 | MAINT-06 | Low | Maintainability | ✓ CLOSED R07.05 | core/model_config.py is a 30-line deprecated module — no removal date set |
 | MAINT-07 | Low | Maintainability | ✓ CLOSED R07.15 | model_family_config.detect_family uses prefix matching with overlapping families — fragile for new Qwen variants |
 | MAINT-09 | Low | Maintainability | ✓ CLOSED R07.07 | extract_calc_expression has 12+ overlapping regex patterns — unpredictable which matches |
@@ -2030,5 +2040,55 @@ Two findings resolved in one pass — one WONTFIX (SEC-09) and one CLOSED (TEST-
 **Status:** ✓ CLOSED R07.25
 
 **Detail:** The R07.09 streaming bug (missing `_iter_sse_lines` abstract hook — first shipped as `NotImplementedError` at chat invocation) was caught by the user's live `agentkthx chat --backend mistral` run, NOT by the 64-test suite: tests asserted the method existed and unit-tested its pieces, but nothing exercised the agent loop → `generate_completions_stream` → `_iter_sse_lines` call-through. The finding's recommendation was a `tests/test_plugin_streaming_integration.py` that drives one streaming turn through `Agent`-level machinery per cloud backend. The owner chose a different fix surface: extend the existing smoke-test script family rather than add a mocked pytest file. R07.25 ships `scripts/smoke_test_r07_25.sh` — a superset of `smoke_test_r07_21.sh` that runs the existing three steps (model listing, `--think`, `--tools shell`) per backend AND adds a 4th step that re-runs the `--tools shell` invocation WITHOUT `--no-stream`, forcing the streaming path (`generate_completions_stream` → `_iter_sse_lines` → SSE chunk parse → tool-call extraction). The streaming step has a 180s timeout (vs 120s for non-streaming — the stream chunk decode + tool-call arg assembly adds latency on the first invocation). The smoke marker (`smoke-test-marker-$$`) is the SAME for both paths, so a streaming-only regression (e.g. a backend that returns `NotImplementedError` on `generate_completions_stream`, or returns SSE chunks without the `tool_calls` delta) shows up as a fail with a clear "shell tool did not execute (marker not found)" message in the streaming step but PASS in the non-streaming step — exactly the R07.09 bug shape. The script is invocable as `./scripts/smoke_test_r07_25.sh` (default: all cloud backends found in env) or `./scripts/smoke_test_r07_25.sh --backend mistral` (single backend). The R07.21 script is kept for back-compat — the R07.25 script supersedes it for any future streaming-adjacent change. Per owner policy smoke tests are run manually before GitHub/CI — no pytest regression file ships alongside the script; the contract is the script's `--help` block + the inline contract (SAME marker, both paths, `run_tool_step` helper). The TEST-10 finding (live-shape Pollinations free-model contract test) is the same lesson recurring one release later — it stays open, with the R07.25 closure of TEST-09 as the structural-template fix.
+
+---
+
+---
+
+## R07.25 Batch 2 — ROB Closures + Support Tiers
+
+Three OPEN findings closed in one pass — all surgical, non-breaking. Suite: 2951 → 2966 passed (+15 active in `tests/test_r07_25_batch2_closures.py`). Zero regressions; ruff + black clean. R07.25 also introduced backend support tiers (ZAI/OpenRouter/HuggingFace/Gemini/Mistral Fully Supported; Pollinations/OrcaRouter/OpenAI Limited Support — see `docs/SUPPORT.md`).
+
+### Robustness
+
+#### ROB-02: Orchestrator parallel mode — FIRST_COMPLETED + cancel_futures + cooperative Event cancellation
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Medium |
+| **Category** | Robustness |
+| **File(s)** | `agentkthx/orchestrator.py` (`_run_parallel`, ~70 LOC) |
+
+**Status:** ✓ CLOSED R07.25
+
+**Detail:** Pre-R07.25 `_run_parallel` used `concurrent.futures.wait(futures, timeout=self.timeout, return_when=ALL_COMPLETED)` then called `future.cancel()` on the not-done set. `future.cancel()` only prevents a future from STARTING — if the underlying callable was already running it could NOT be cancelled (Python docs: "Returns False if the call is currently being executed or finished"). The threads continued running to completion, holding open HTTP connections and consuming tokens for minutes after the orchestrator returned. On shared state (e.g. two agents sharing a `Memory` instance — not the default but possible), this caused race conditions. R07.25 has three parts: (1) **FIRST_COMPLETED** — switch the wait predicate from ALL_COMPLETED to FIRST_COMPLETED so we wake the moment ANY future returns (or the timeout fires), giving us a chance to cancel the slow ones cleanly. (2) **`executor.shutdown(wait=False, cancel_futures=True)`** (Python 3.9+) — cancels any not-yet-started futures AND releases the pool without blocking on already-running workers. The already-running callables still complete on their worker threads but they're no longer keeping the executor alive. (3) **Cooperative `threading.Event` cancellation** — a per-run `threading.Event` is stashed on each agent's `_cancel_event` attribute (best-effort via `setattr` — agents that don't accept the attribute are silently skipped) so backends that poll between SSE chunks can check it and abort cleanly. The event is set when the orchestrator returns or times out; workers that respect it stop within one SSE-chunk boundary. The event is cleaned up via `delattr` in the finally block so it doesn't leak into the next run. Workers that haven't finished when results are collected now show up as `[Timeout after Ns]` (was unreachable pre-ROB-02 — the old ALL_COMPLETED wait blocked until everything finished OR the timeout elapsed, then `future.cancel()` returned False for the running ones and the result-collection loop skipped them silently). 3 regression tests in `tests/test_r07_25_batch2_closures.py`: source-inspection pin for `FIRST_COMPLETED` + `cancel_futures=True` + `threading.Event` + `cancel_event.set()`, the cancel-event stash cleanup contract, and a timing test that verifies the slow worker shows up as `[Timeout after 0.5s]` while the fast worker returns its real answer.
+
+---
+
+#### ROB-06: CloudBackend._close_http_response — deterministic Windows close helper
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Medium |
+| **Category** | Robustness |
+| **File(s)** | `agentkthx/backends/cloud_base.py` (`_close_http_response`, ~55 LOC), `agentkthx/core/streaming.py` (KeyboardInterrupt handler comment, ~10 LOC), 8 cloud backend `_iter_sse_lines` finally blocks (ZAI, OpenRouter, Gemini, HuggingFace, Mistral, Pollinations, OrcaRouter, OpenAI — each ~10 LOC) |
+
+**Status:** ✓ CLOSED R07.25
+
+**Detail:** On Windows, `urllib.request.urlopen` returns an `http.client.HTTPResponse` whose `.close()` may not immediately close the underlying TCP connection — it relies on GC. On long sessions with many Ctrl+C interrupts, this can exhaust the connection pool. On Linux/macOS, `close()` calls `flush()` and `shutdown(SHUT_WR)` synchronously so the issue is POSIX-safe but the cross-platform promise was broken. R07.25 adds a new `CloudBackend._close_http_response(response)` static helper that does `fp.close()` + `release_conn()` + `close()` in sequence, all best-effort with `getattr` guards so missing attributes on older Python / alternate response shapes don't raise. Each of the 8 cloud backends' `_iter_sse_lines` finally block now uses the helper via `getattr(self, "_close_http_response", None)` so the helper degrades gracefully even if the backend's MRO doesn't include `CloudBackend` (e.g. OpenAI which extends `OpenAICompatibleBackend` — the `getattr` guard returns `None` and the fallback `response.close()` path runs). The streaming.py KeyboardInterrupt handler comment was upgraded to document the two-pass close contract: (1) `stream_gen.close()` triggers the backend's `_iter_sse_lines` GeneratorExit cleanup which calls the helper, (2) the helper does the deterministic `fp.close()` + `release_conn()` + `close()` sequence. On POSIX the helper is a no-op (`response.close()` already releases the socket); on Windows it's the difference between a deterministic close + a GC-dependent close that can exhaust the connection pool on long Ctrl+C-heavy sessions. 7 regression tests in `tests/test_r07_25_batch2_closures.py`: helper exists on `CloudBackend`, helper calls `fp.close()` + `release_conn()` + `close()` in sequence, helper handles missing `fp`, helper handles missing `release_conn`, helper handles `None`, helper swallows `close()` exceptions, source-inspection pin that every cloud backend's `_iter_sse_lines` uses the helper.
+
+---
+
+#### ROB-15: PersistentMemory._transaction — single-lock single-commit per add()
+
+| Property | Value |
+|----------|-------|
+| **Severity** | Medium |
+| **Category** | Robustness |
+| **File(s)** | `agentkthx/core/persistent_memory.py` (`_transaction`, `add`, `add_tool_call`, `add_tool_result`, ~50 LOC) |
+
+**Status:** ✓ CLOSED R07.25
+
+**Detail:** Pre-R07.25 `PersistentMemory.add()` called `_write_message()` then `_touch_session()` as two independent operations. Each helper acquired the per-DB-path write lock (the MAINT-15 registry, RLock per ROB-18 R07.21 CLOSED) and released it before the next call. Two consequences: (1) under concurrent writers (orchestrator parallel mode), another thread's `add()` could interleave between the message-write and the session-touch, committing rows in an order that doesn't match any single logical turn; (2) every message cost two full lock/commit cycles instead of one transaction. R07.25 introduces a new `@contextmanager _transaction()` that wraps both helpers in a single `self._write_lock` acquisition + a single idempotent commit at context-exit. The context manager is reentrant-safe because `self._write_lock` is an RLock (ROB-18 R07.21 CLOSED) — nested `_transaction()` calls won't deadlock. The transaction-level commit at exit is idempotent (`sqlite3.Connection.commit()` on a no-pending-changes connection is a no-op), so the inner helpers' own commits are absorbed. `add()`, `add_tool_call()`, and `add_tool_result()` all got the same wrap. Pairs naturally with ROB-18 (RLock) — the audit's original recommendation noted "the lock must become reentrant first, or the helpers need lock/no-lock variants"; ROB-18 closed the RLock path in R07.21, and this closure completes the transaction wrap. 5 regression tests in `tests/test_r07_25_batch2_closures.py`: `_transaction` exists, `add`/`add_tool_call`/`add_tool_result` all wrap their writes in `with self._transaction():` (source-inspection), reentrant-safe nested transaction (no deadlock), atomic persistence (after a single `add()` call, both the message row AND the session row are in the DB — verified by reading the DB directly with `sqlite3`).
 
 ---

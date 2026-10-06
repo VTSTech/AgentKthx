@@ -1006,6 +1006,19 @@ class StreamingMixin:
             # abandoned mid-iteration and may stay open until GC runs,
             # which can exhaust connection limits on long sessions with
             # many Ctrl+C interrupts. See ROB-05 (R06.57).
+            #
+            # ROB-06 (R07.25 CLOSED): on Windows, urllib's HTTPResponse.close()
+            # may not immediately close the TCP connection (it relies on GC).
+            # We use a two-pass close here:
+            #   1. stream_gen.close() — triggers the backend's _iter_sse_lines
+            #      GeneratorExit cleanup (which calls response.close() in the
+            #      finally block).
+            #   2. If the backend exposes a CloudBackend._close_http_response
+            #      helper (added R07.25), the backend's finally block now
+            #      uses it for the deterministic fp.close() + release_conn()
+            #      pattern. We don't call it from here directly because we
+            #      don't have a reference to the urllib response — it lives
+            #      inside the backend's generator frame.
             try:
                 if stream_gen is not None:
                     stream_gen.close()

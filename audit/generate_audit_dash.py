@@ -473,7 +473,7 @@ HTML_TEMPLATE = r'''<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AgentKthx — Audit Dashboard</title>
-<meta name="description" content="AgentKthx __RELEASE__ audit register — __TOTAL__ findings across 8 categories, tracked release-over-release. Closure rate __CLOSURE_PCT__%.">
+<meta name="description" content="AgentKthx __RELEASE__ audit register — __TOTAL__ findings across 8 categories, tracked release-over-release. Resolution rate __RESOLUTION_PCT__%.">
 <style>
 :root{--radius:.75rem;--bg:oklch(.165 .012 165);--fg:oklch(.965 .006 155);--card:oklch(.215 .014 165);--muted:oklch(.25 .012 165);--muted-fg:oklch(.72 .015 160);--border:oklch(1 0 0 / 9%);--primary:oklch(.8 .16 158);--primary-fg:oklch(.18 .04 165);--accent:oklch(.3 .05 162);--emerald:oklch(.8 .16 158);--amber:oklch(.769 .188 70.08);--rose:oklch(.645 .246 16.439);--sky:oklch(.696 .17 200);--violet:oklch(.627 .265 303.9);--fuchsia:oklch(.7 .22 320);--cyan:oklch(.7 .15 200);--zinc:oklch(.6 .01 260)}
 *{box-sizing:border-box;margin:0;padding:0}
@@ -645,13 +645,13 @@ footer{margin-top:auto;border-top:1px solid var(--border);background:oklch(.215 
     <div>
       <div class="eyebrow"><span class="dot"></span> internal audit bench · Alpha</div>
       <h1>⚛️ <span class="grad">AgentKthx</span> <span class="muted" style="font-weight:400">audit dashboard</span></h1>
-      <p class="lead">Live audit register for the __RELEASE__ working tree — <b id="hd-total">__TOTAL__</b> findings across 8 categories, tracked release-over-release. Closure rate <b id="hd-closure">__CLOSURE_PCT__%</b>. Filter, search, and inspect the register below.</p>
+      <p class="lead">Live audit register for the __RELEASE__ working tree — <b id="hd-total">__TOTAL__</b> findings across 8 categories, tracked release-over-release. Resolution rate <b id="hd-resolution">__RESOLUTION_PCT__%</b>. Filter, search, and inspect the register below.</p>
     </div>
     <div class="pills">
       <span class="pill"><span class="ic">⎇</span> __RELEASE__</span>
       <span class="pill"><span class="ic">✓</span> __TESTS__ tests</span>
       <span class="pill"><span class="ic">⊘</span> __TOTAL__ findings</span>
-      <span class="pill"><span class="ic">%</span> __CLOSURE_PCT__% closed</span>
+      <span class="pill"><span class="ic">%</span> __RESOLUTION_PCT__% resolved</span>
     </div>
   </div>
 </header>
@@ -774,6 +774,13 @@ def generate_html(findings, meta):
     wontfix_count = sum(1 for f in findings if f["status"] == "WONTFIX")
     total = len(findings)
     closure_pct = round(closed_count / total * 100) if total else 0
+    # Resolution rate = (closed + wontfix) / total — surfaces in the hero
+    # section + meta description because it's the more meaningful "how
+    # much of the register is fully resolved (whether by closing OR by an
+    # intentional wontfix decision)" number. The Closure rate (closed /
+    # total, NOT counting wontfix) is still surfaced in the section desc
+    # + the Closure stat card so both views are available.
+    resolution_pct = round((closed_count + wontfix_count) / total * 100) if total else 0
     html = HTML_TEMPLATE
     html = html.replace("__RELEASE__", meta["release"])
     html = html.replace("__VERSION__", meta["version"])
@@ -782,6 +789,7 @@ def generate_html(findings, meta):
     html = html.replace("__CLOSED__", str(closed_count))
     html = html.replace("__WONTFIX__", str(wontfix_count))
     html = html.replace("__CLOSURE_PCT__", str(closure_pct))
+    html = html.replace("__RESOLUTION_PCT__", str(resolution_pct))
     html = html.replace("__TESTS__", str(meta["tests"]))
     html = html.replace("__REPO__", meta["repo"])
     html = html.replace("__PYPI__", meta["pypiUrl"])

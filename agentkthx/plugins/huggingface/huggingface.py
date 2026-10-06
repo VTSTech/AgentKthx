@@ -1714,14 +1714,22 @@ class HuggingFaceBackend(OpenAICompatibleBackend):
             # ROB-06 (R06.57): try/finally so the urllib response is
             # closed deterministically when the generator is abandoned
             # mid-iteration.
+            #
+            # ROB-06 (R07.25 CLOSED): upgraded to use the deterministic
+            # _close_http_response helper (fp.close() + release_conn() +
+            # close()) so Windows doesn't leak the TCP connection.
             try:
                 for line in response:
                     yield line
             finally:
-                try:
-                    response.close()
-                except Exception:
-                    pass
+                close_helper = getattr(self, "_close_http_response", None)
+                if callable(close_helper):
+                    close_helper(response)
+                else:
+                    try:
+                        response.close()
+                    except Exception:
+                        pass
             return  # success — don't retry
 
     # _get_model_defaults() already exists above (uses _model_cache)

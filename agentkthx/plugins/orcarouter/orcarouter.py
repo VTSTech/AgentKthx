@@ -1170,14 +1170,22 @@ class OrcaRouterBackend(CloudBackend):
                 raise RuntimeError(f"OrcaRouter connection error: {e.reason}")
 
             # Stream the response
+            #
+            # ROB-06 (R07.25 CLOSED): use the deterministic _close_http_response
+            # helper (fp.close() + release_conn() + close()) so Windows
+            # doesn't leak the TCP connection.
             try:
                 for line in response:
                     yield line
             finally:
-                try:
-                    response.close()
-                except Exception:
-                    pass
+                close_helper = getattr(self, "_close_http_response", None)
+                if callable(close_helper):
+                    close_helper(response)
+                else:
+                    try:
+                        response.close()
+                    except Exception:
+                        pass
             return  # success — don't retry
 
         # ROB-22 (R07.15): exhaustion-raise matching the non-streaming

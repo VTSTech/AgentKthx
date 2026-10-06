@@ -778,10 +778,20 @@ class ZaiBackend(CloudBackend):
                 for line in response:
                     yield line
             finally:
-                try:
-                    response.close()
-                except Exception:
-                    pass
+                # ROB-06 (R07.25 CLOSED): use the deterministic close helper
+                # (fp.close() + release_conn() + close()) so Windows doesn't
+                # leak the TCP connection on Ctrl+C-mid-stream. The helper is
+                # a no-op if the response doesn't have fp/release_conn (older
+                # Python or alternate response shapes). Falls back to
+                # direct response.close() if the helper isn't available.
+                close_helper = getattr(self, "_close_http_response", None)
+                if callable(close_helper):
+                    close_helper(response)
+                else:
+                    try:
+                        response.close()
+                    except Exception:
+                        pass
             return  # success — don't retry
 
     # ARCH-03 (R06.57): ``_calculate_safe_max_tokens`` was here — now

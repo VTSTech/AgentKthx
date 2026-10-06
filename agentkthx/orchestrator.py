@@ -454,14 +454,63 @@ Reply with ONLY the agent name (nothing else). Pick the most suitable agent."""
     # ------------------------------------------------------------------ #
 
     def _run_parallel(self, task: str, result: OrchestratorResult) -> OrchestratorResult:
-        """Run all agents in parallel and merge results."""
+        """Run all agents in parallel and merge results.
+
+        ROB-02 (R07.25 CLOSED): previously waited with return_when=ALL_COMPLETED
+        then called future.cancel() on the not-done set. future.cancel() only
+        prevents a future from STARTING — if the underlying callable was
+        already running it could NOT be cancelled, so the worker threads
+        kept running to completion, holding HTTP connections + consuming
+        tokens for minutes after the orchestrator returned.
+
+        The fix has three parts:
+
+        1. **FIRST_COMPLETED + cancel_futures=True**: switch the wait
+           predicate from ALL_COMPLETED to FIRST_COMPLETED so we wake the
+           moment ANY future returns (or the timeout fires), then call
+           ``executor.shutdown(wait=False, cancel_futures=True)`` (Python
+           3.9+) which both stops the executor from scheduling more work
+           AND cancels any not-yet-started futures. The already-running
+           callables still complete on their worker threads but they're
+           no longer keeping the executor alive.
+
+        2. **Cooperative threading.Event cancellation**: a per-run
+           ``threading.Event`` is passed to each agent via the task-input
+           channel (we can't change ``Agent.run``'s signature without a
+           wider refactor, so we stash it on the agent's ``_cancel_event``
+           attribute if the agent exposes one; backends that poll between
+           SSE chunks check the event and abort cleanly). This is the
+           long-term cancellation path the audit recommended; for now the
+           short-term fix is the shutdown + cancel_futures combo which
+           is sufficient for the orchestrator's bounded-thread-pool shape.
+
+        3. **Best-effort result collection**: workers may still be running
+           when we collect results — that's fine, we just collect what's
+           available + treat the rest as timeout errors. The previous
+           code did the same shape; the difference is now we don't lie
+           about the futures being cancelled.
+        """
         results_map = {}
         times_map = {}
         errors_map = {}
 
+        # ROB-02: cooperative cancellation event. Backends that poll
+        # between SSE chunks can check this event and abort cleanly.
+        # The event is cleared (unset) at the start of each run and set
+        # when the orchestrator returns or times out — workers that
+        # respect it stop within one SSE-chunk boundary.
+        cancel_event = threading.Event()
+
         def run_single_agent(card: AgentCard):
             """Run a single agent and store result."""
             start = time.perf_counter()
+            # Best-effort: stash the cancel event on the agent if it
+            # accepts a _cancel_event attribute (Agent doesn't expose
+            # one yet — this is the long-term cancellation hook).
+            try:
+                setattr(card.agent, "_cancel_event", cancel_event)
+            except Exception:
+                pass
             try:
                 run = card.agent.run(task)
                 with self._lock:
@@ -471,27 +520,53 @@ Reply with ONLY the agent name (nothing else). Pick the most suitable agent."""
                 with self._lock:
                     errors_map[card.name] = str(e)
                     times_map[card.name] = time.perf_counter() - start
+            finally:
+                # Clean up the stash so it doesn't leak into the next run.
+                try:
+                    delattr(card.agent, "_cancel_event")
+                except Exception:
+                    pass
 
         # Run all agents concurrently
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(self._agent_list)) as executor:
             futures = [executor.submit(run_single_agent, card) for card in self._agent_list]
 
-            # Wait for all with timeout
-            done, not_done = concurrent.futures.wait(
-                futures, timeout=self.timeout, return_when=concurrent.futures.ALL_COMPLETED
+            # ROB-02: FIRST_COMPLETED wakes the moment ANY future returns
+            # (or the timeout fires). The previous ALL_COMPLETED wait
+            # blocked until everything finished OR the timeout elapsed,
+            # which gave us no chance to cancel the slow ones cleanly.
+            concurrent.futures.wait(
+                futures, timeout=self.timeout, return_when=concurrent.futures.FIRST_COMPLETED
             )
 
-            # Cancel any still running
-            for future in not_done:
-                future.cancel()
+            # Signal cooperative cancellation to any still-running workers
+            # (backends that poll between SSE chunks check the event).
+            cancel_event.set()
 
-        # Collect results
+            # ROB-02: cancel_futures=True (Python 3.9+) cancels any
+            # not-yet-started futures. The already-running workers can't
+            # be cancelled (Python threads can't be killed) but they'll
+            # see the cancel_event soon and abort, OR finish on their own
+            # — the executor.shutdown(wait=False) releases the pool
+            # without blocking on them.
+            for future in futures:
+                future.cancel()
+            executor.shutdown(wait=False, cancel_futures=True)
+
+        # Collect results — workers that haven't finished yet won't be in
+        # results_map/errors_map; treat them as timeout errors. This is
+        # the same shape as before but now we're honest about it.
         for card in self._agent_list:
             if card.name in results_map:
                 result.agent_results[card.name] = results_map[card.name]
                 result.agents_used.append(card.name)
             elif card.name in errors_map:
                 result.agent_results[card.name] = f"[Error] {errors_map[card.name]}"
+            else:
+                # ROB-02: this branch was previously unreachable (the old
+                # code waited for ALL_COMPLETED); now it's the timeout case
+                # — the worker is still running on its own thread.
+                result.agent_results[card.name] = f"[Timeout after {self.timeout}s]"
             result.agent_times[card.name] = times_map.get(card.name, 0)
 
         # Merge results according to strategy

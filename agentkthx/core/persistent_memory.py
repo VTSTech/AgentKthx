@@ -19,6 +19,7 @@ import sqlite3
 import threading
 import uuid
 import weakref
+from contextlib import contextmanager
 from datetime import datetime, timezone
 
 from .memory import Memory, MemoryConfig, Message
@@ -246,26 +247,93 @@ class PersistentMemory(Memory):
     #  Override add methods to persist to SQLite                         #
     # ------------------------------------------------------------------ #
 
+    @contextmanager
+    def _transaction(self):
+        """Context manager for a single-lock + single-commit transaction.
+
+        ROB-15 (R07.25 CLOSED): previously ``add()`` called
+        ``_write_message()`` then ``_touch_session()`` as two
+        independent lock acquisitions + two commits per message. Under
+        concurrent writers (orchestrator parallel mode), another
+        thread's ``add()`` could interleave between the message-write
+        and the session-touch, committing rows in an order that
+        doesn't match any single logical turn. Also: every message
+        cost two full lock/commit cycles instead of one transaction.
+
+        The fix wraps both helpers in a single ``self._write_lock``
+        acquisition (RLock — see ROB-18 R07.21 CLOSED) and defers the
+        commit to context-exit so both writes are atomic from the
+        perspective of other writers.
+
+        Usage::
+
+            with self._transaction():
+                self._write_message(role, content, **kwargs)
+                self._touch_session()
+
+        The context manager acquires ``self._write_lock`` on entry
+        and commits + releases on exit. The helpers ``_write_message``
+        and ``_touch_session`` are called WITHOUT their own
+        ``self._write_lock`` re-acquisition — RLock is reentrant so
+        the nested acquire is a no-op, but the commit still happens
+        inside the helper. The transaction-level commit at exit is
+        idempotent (sqlite3.Connection.commit() on a no-pending-changes
+        connection is a no-op).
+
+        Note: this context manager IS reentrant-safe because
+        ``self._write_lock`` is an RLock (ROB-18 R07.21 CLOSED), so
+        nested ``_transaction()`` calls won't deadlock.
+        """
+        # Re-entrant: RLock allows nested acquisition. The commit at
+        # exit is idempotent (no-op if nothing's pending).
+        self._write_lock.acquire()
+        try:
+            yield
+            # Single commit at exit — atomic from the perspective of
+            # other writers. If the inner _write_message / _touch_session
+            # already committed, this is a no-op.
+            try:
+                conn = self._get_conn()
+                conn.commit()
+            except Exception:
+                pass
+        finally:
+            self._write_lock.release()
+
     def add(self, role: str, content: str, **kwargs) -> None:
-        """Add a message and persist to SQLite (if auto_save)."""
+        """Add a message and persist to SQLite (if auto_save).
+
+        ROB-15 (R07.25 CLOSED): ``_write_message`` + ``_touch_session``
+        are now wrapped in a single ``_transaction()`` so they share
+        one lock acquisition + one commit (was two of each).
+        """
         super().add(role, content, **kwargs)
         if self._auto_save:
-            self._write_message(role, content, **kwargs)
-            self._touch_session()
+            with self._transaction():
+                self._write_message(role, content, **kwargs)
+                self._touch_session()
 
     def add_tool_call(self, role: str, content: str, tool_calls: list[dict]) -> None:
-        """Add a tool call message and persist."""
+        """Add a tool call message and persist.
+
+        ROB-15 (R07.25 CLOSED): single-transaction wrap (see ``add``).
+        """
         super().add_tool_call(role, content, tool_calls)
         if self._auto_save:
-            self._write_message(role, content, tool_calls=tool_calls)
-            self._touch_session()
+            with self._transaction():
+                self._write_message(role, content, tool_calls=tool_calls)
+                self._touch_session()
 
     def add_tool_result(self, tool_call_id: str, name: str, content: str) -> None:
-        """Add a tool result message and persist."""
+        """Add a tool result message and persist.
+
+        ROB-15 (R07.25 CLOSED): single-transaction wrap (see ``add``).
+        """
         super().add_tool_result(tool_call_id, name, content)
         if self._auto_save:
-            self._write_message("tool", content, tool_call_id=tool_call_id, name=name)
-            self._touch_session()
+            with self._transaction():
+                self._write_message("tool", content, tool_call_id=tool_call_id, name=name)
+                self._touch_session()
 
     def clear(self) -> None:
         """Clear in-memory messages and delete messages from DB.

@@ -500,6 +500,66 @@ class CloudBackend(OpenAICompatibleBackend):
         return min(max(backoff, 1.0), self._BACKOFF_CAP)
 
     # ─────────────────────────────────────────────────────────────────────
+    # HTTP response cleanup (ROB-06 R07.25)
+    # ─────────────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _close_http_response(response) -> None:
+        """Deterministically close an urllib HTTP response.
+
+        ROB-06 (R07.25 CLOSED): on Windows, ``urllib.request.urlopen``
+        returns an ``http.client.HTTPResponse`` whose ``.close()`` may
+        not immediately close the underlying TCP connection — it
+        relies on GC. On long sessions with many Ctrl+C interrupts,
+        this can exhaust the connection pool. The fix: explicitly close
+        the underlying ``fp`` (the buffered reader) AND release the
+        connection (``release_conn`` on keep-alive-aware responses),
+        catching ``AttributeError`` for older Python versions where
+        these attributes don't exist.
+
+        Best-effort: any error is swallowed. The caller's
+        KeyboardInterrupt handler is in a try/except already; we don't
+        want to add a second raise here that would propagate to the
+        caller's except block and mask the cancellation.
+
+        Args:
+            response: an ``http.client.HTTPResponse`` (or any object
+                with a ``.close()`` method + optionally ``.fp`` +
+                ``release_conn``). Pass None to no-op.
+        """
+        if response is None:
+            return
+        # 1. flush + close the buffered reader (fp). On Windows this
+        # is what actually releases the socket buffer; without it the
+        # underlying TCP connection stays in CLOSE_WAIT until GC.
+        try:
+            fp = getattr(response, "fp", None)
+            if fp is not None:
+                try:
+                    fp.close()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        # 2. release the connection (keep-alive-aware responses). The
+        # attribute is only present on http.client.HTTPResponse; older
+        # Python versions or alternate response objects may not have it.
+        try:
+            release = getattr(response, "release_conn", None)
+            if callable(release):
+                release()
+        except Exception:
+            pass
+        # 3. finally, close the response itself (idempotent — close()
+        # is documented safe to call multiple times).
+        try:
+            close = getattr(response, "close", None)
+            if callable(close):
+                close()
+        except Exception:
+            pass
+
+    # ─────────────────────────────────────────────────────────────────────
     # Shared implementations
     # ─────────────────────────────────────────────────────────────────────
 
