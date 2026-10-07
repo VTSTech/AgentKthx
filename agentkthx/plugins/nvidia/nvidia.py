@@ -88,10 +88,12 @@ serves as the initial defaults of the persistent model-catalog cache
 backend's cache from the live API) instead of editing code here.
 """
 
-# Default model when none specified. Llama-3.3-70B-Instruct is the flagship
-# multi-purpose chat model — supports tools, streaming, JSON mode, 128K
-# context. Override via NVIDIA_DEFAULT_MODEL env var.
-NVIDIA_DEFAULT_MODEL_STR = NVIDIA_DEFAULT_MODEL or "meta/llama-3.3-70b-instruct"
+# Default model when none specified. NVIDIA's Llama-3.1-Nemotron-70B-Instruct
+# is their flagship chat model based on Llama 3.1 70B — supports tools,
+# streaming, JSON mode, 128K context. NOTE: NVIDIA's cloud endpoint does NOT
+# serve bare "meta/llama-3.3-70b-instruct" — only their Nemotron-tuned
+# variant. Override via NVIDIA_DEFAULT_MODEL env var.
+NVIDIA_DEFAULT_MODEL_STR = NVIDIA_DEFAULT_MODEL or "nvidia/llama-3.1-nemotron-70b-instruct"
 
 
 def _is_free_model(model: str) -> bool:
@@ -107,9 +109,13 @@ def _is_free_model(model: str) -> bool:
     the live /v1/models endpoint may surface new models before the seed
     catalog is updated; those are conservatively treated as paid until
     added to the catalog).
+
+    NOTE: The seed catalog keys on the FULL prefixed model ID (e.g.
+    "meta/llama-3.3-70b-instruct") because NVIDIA's API requires the full
+    prefixed name in the request body. This function does NOT strip the
+    prefix — the model arg must match the catalog key exactly.
     """
-    model_key = model.split("/")[-1] if "/" in model else model
-    meta = NVIDIA_MODELS.get(model_key)
+    meta = NVIDIA_MODELS.get(model)
     if not meta:
         return False
     pricing = meta.get("pricing", {})
@@ -322,6 +328,75 @@ class NvidiaBackend(CloudBackend):
         return f"{self._base_url.rstrip('/')}/models"
 
     # ─────────────────────────────────────────────────────────────────────
+    # Catalog lookup overrides — NVIDIA keys on FULL prefixed IDs
+    # ─────────────────────────────────────────────────────────────────────
+    #
+    # The CloudBackend base class (cloud_base.py) strips the provider prefix
+    # before catalog lookup (model.split("/")[-1]) because ZAI/OpenRouter
+    # key their catalogs on bare post-slash segments. NVIDIA's API REQUIRES
+    # the full prefixed name in the request body (e.g. "meta/llama-3.3-70b-instruct"
+    # not "llama-3.3-70b-instruct"), so our seed catalog keys on full names.
+    # These overrides skip the prefix-stripping so lookups match.
+
+    def get_model_info(self, model: str) -> dict | None:
+        """Look up model in the static catalog by FULL prefixed ID.
+
+        Override of CloudBackend.get_model_info — does NOT strip the
+        provider prefix because NVIDIA's catalog keys on the full name
+        (e.g. "meta/llama-3.3-70b-instruct").
+        """
+        meta = self.MODELS.get(model, {})
+        if not meta:
+            return None
+        return {
+            "name": model,
+            "size": 0,
+            "details": {
+                "family": self._catalog_family_name(),
+                "backend": self._catalog_backend_name(),
+                "context_length": meta.get("context_length", self._DEFAULT_CONTEXT_FALLBACK),
+                "free_tier": _is_free_model(model),
+            },
+        }
+
+    def _get_model_defaults(self, model: str) -> dict:
+        """Return {temperature, max_tokens} from the static catalog.
+
+        Override of CloudBackend._get_model_defaults — does NOT strip
+        the provider prefix. Falls back to safe defaults (max_tokens=8192,
+        context_length=128000, temperature=0.7) when the model isn't in
+        the catalog.
+        """
+        meta = self.MODELS.get(model, {})
+        max_tokens = meta.get("default_max_tokens", 8192)
+        context_length = meta.get("context_length", self._DEFAULT_CONTEXT_FALLBACK)
+        temperature = meta.get("default_temperature", 0.7)
+        return self._apply_max_tokens_cap(max_tokens, context_length, temperature=temperature)
+
+    def get_model_max_context(self, model: str, family: str | None = None) -> int:
+        """Return the model's maximum trained context window size.
+
+        Override of CloudBackend.get_model_max_context — does NOT strip
+        the provider prefix. Falls back to 128000 when not in catalog.
+        """
+        meta = self.MODELS.get(model, {})
+        if meta:
+            ctx = meta.get("context_length")
+            if ctx and isinstance(ctx, int) and ctx > 0:
+                return ctx
+        # Fall back to live model_info if catalog misses
+        info = self.get_model_info(model)
+        if info and "details" in info:
+            ctx = info["details"].get("context_length")
+            if ctx and isinstance(ctx, int) and ctx > 0:
+                return ctx
+        return self._DEFAULT_CONTEXT_FALLBACK
+
+    def _is_free_model(self, model: str) -> bool:
+        """Override of CloudBackend._is_free_model — does NOT strip prefix."""
+        return _is_free_model(model)
+
+    # ─────────────────────────────────────────────────────────────────────
     # list_models — query GET /v1/models, merge with static catalog
     # ─────────────────────────────────────────────────────────────────────
     #
@@ -394,8 +469,10 @@ class NvidiaBackend(CloudBackend):
         for name in sorted(api_model_keys):
             if name in seen:
                 continue
-            # Catalog lookup uses the post-slash segment (mirrors ZAI pattern)
-            model_key = name.split("/")[-1] if "/" in name else name
+            # R07.26 follow-up #3: catalog keys on the FULL prefixed ID
+            # (e.g. "meta/llama-3.3-70b-instruct") — no prefix stripping.
+            # The live /v1/models endpoint returns full prefixed names
+            # that match the catalog keys directly.
             # Blocklist: skip non-chat models AgentKthx can't drive today
             if _is_non_chat_model(name):
                 if os.environ.get("AGENTKTHX_DEBUG"):
@@ -406,7 +483,7 @@ class NvidiaBackend(CloudBackend):
                     )
                 continue
             seen.add(name)
-            meta = NVIDIA_MODELS.get(model_key, {})
+            meta = NVIDIA_MODELS.get(name, {})
             models.append(
                 {
                     "name": name,

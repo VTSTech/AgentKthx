@@ -55,7 +55,7 @@ def nvidia_env(monkeypatch):
     """Set up env vars for NVIDIA tests."""
     monkeypatch.setenv("NVIDIA_API_KEY", VALID_KEY)
     monkeypatch.setenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")
-    monkeypatch.setenv("NVIDIA_DEFAULT_MODEL", "meta/llama-3.3-70b-instruct")
+    monkeypatch.setenv("NVIDIA_DEFAULT_MODEL", "nvidia/llama-3.1-nemotron-70b-instruct")
     monkeypatch.setenv("NVIDIA_FREE_ONLY", "false")
     # Clear the cached module-level booleans by re-importing
     from agentkthx import config as _config
@@ -65,7 +65,7 @@ def nvidia_env(monkeypatch):
         _config, "NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1", raising=False
     )
     monkeypatch.setattr(
-        _config, "NVIDIA_DEFAULT_MODEL", "meta/llama-3.3-70b-instruct", raising=False
+        _config, "NVIDIA_DEFAULT_MODEL", "nvidia/llama-3.1-nemotron-70b-instruct", raising=False
     )
     monkeypatch.setattr(_config, "NVIDIA_FREE_ONLY", False, raising=False)
     return _config
@@ -107,7 +107,7 @@ class TestNvidiaInheritance:
         assert NvidiaBackend._api_key_env_var == "NVIDIA_API_KEY"
         assert NvidiaBackend._provider_label == "NVIDIA"
         assert NvidiaBackend._default_base_url == "https://integrate.api.nvidia.com/v1"
-        assert NvidiaBackend._default_model == "meta/llama-3.3-70b-instruct"
+        assert NvidiaBackend._default_model == "nvidia/llama-3.1-nemotron-70b-instruct"
         assert NvidiaBackend.MODEL_CACHE_KEY == "nvidia"
 
 
@@ -312,19 +312,24 @@ class TestNvidiaFreeModel:
         """Every cataloged NVIDIA model is 'free' (credit-budget model)."""
         from agentkthx.plugins.nvidia.nvidia import _is_free_model
 
-        # Sample cataloged models
-        assert _is_free_model("llama-3.3-70b-instruct") is True
-        assert _is_free_model("deepseek-r1") is True
-        assert _is_free_model("mistral-nemo-12b-instruct") is True
+        # R07.26 follow-up #3: catalog keys on FULL prefixed IDs now
+        assert _is_free_model("nvidia/llama-3.1-nemotron-70b-instruct") is True
+        assert _is_free_model("moonshotai/kimi-k3") is True
+        assert _is_free_model("mistralai/mistral-large-2-instruct") is True
 
     def test_is_free_model_strips_provider_prefix(self):
-        """'meta/llama-3.3-70b-instruct' is treated the same as
-        'llama-3.3-70b-instruct'."""
+        """R07.26 follow-up #3: catalog keys on FULL prefixed IDs — the
+        function does NOT strip the prefix (the model arg must match
+        the catalog key exactly)."""
         from agentkthx.plugins.nvidia.nvidia import _is_free_model
 
-        assert _is_free_model("meta/llama-3.3-70b-instruct") is True
-        assert _is_free_model("deepseek-ai/deepseek-r1") is True
-        assert _is_free_model("mistralai/mistral-nemo-12b-instruct") is True
+        # Full prefixed names match the catalog directly
+        assert _is_free_model("nvidia/llama-3.1-nemotron-70b-instruct") is True
+        assert _is_free_model("moonshotai/kimi-k3") is True
+        assert _is_free_model("deepseek-ai/deepseek-v4.1-flash") is True
+        # Bare post-slash segments do NOT match (no prefix stripping)
+        assert _is_free_model("llama-3.1-nemotron-70b-instruct") is False
+        assert _is_free_model("kimi-k3") is False
 
     def test_is_free_model_false_for_unknown(self):
         """Uncataloged models return False (conservative)."""
@@ -376,7 +381,10 @@ class TestNvidiaToolSupport:
 
     def test_chat_model_returns_native(self, backend):
         """Llama / Mistral / Qwen / Phi chat models → NATIVE."""
-        assert backend.test_tool_support("meta/llama-3.3-70b-instruct") == ToolSupportLevel.NATIVE
+        assert (
+            backend.test_tool_support("nvidia/llama-3.1-nemotron-70b-instruct")
+            == ToolSupportLevel.NATIVE
+        )
         assert backend.test_tool_support("meta/llama-3.1-8b-instruct") == ToolSupportLevel.NATIVE
         assert (
             backend.test_tool_support("mistralai/mistral-nemo-12b-instruct")
@@ -438,81 +446,86 @@ class TestNvidiaCatalog:
     def test_catalog_includes_llama_family(self):
         from agentkthx.plugins.nvidia.nvidia import NVIDIA_MODELS
 
-        # R07.26 follow-up: vision variants (llama-3.2-11b-vision-instruct,
-        # llama-3.2-90b-vision-instruct) dropped — chat-text-only filter.
+        # R07.26 follow-up #3: NVIDIA's cloud endpoint serves Llama-3.1-
+        # Nemotron-70B (their tuned variant), NOT bare meta/llama-3.3-70b.
+        # Also serves legacy meta/llama2-70b and meta/codellama-70b.
         for name in [
-            "llama-3.3-70b-instruct",
-            "llama-3.1-405b-instruct",
-            "llama-3.1-70b-instruct",
-            "llama-3.1-8b-instruct",
-            "llama-3.2-1b-instruct",
-            "llama-3.2-3b-instruct",
+            "nvidia/llama-3.1-nemotron-70b-instruct",
+            "nvidia/llama-3.1-nemotron-ultra-253b-v1",
+            "meta/llama2-70b",
+            "meta/codellama-70b",
         ]:
             assert name in NVIDIA_MODELS, f"{name} missing from catalog"
 
     def test_catalog_includes_mistral_family(self):
         from agentkthx.plugins.nvidia.nvidia import NVIDIA_MODELS
 
+        # R07.26 follow-up #3: NVIDIA serves these Mistral variants
         for name in [
-            "mistral-nemo-12b-instruct",
-            "mistral-small-24b-instruct",
-            "mixtral-8x7b-instruct-v0.1",
-            "mixtral-8x22b-instruct-v0.1",
+            "mistralai/mistral-large-2-instruct",
+            "mistralai/mistral-7b-instruct-v0.3",
+            "mistralai/mixtral-8x22b-v0.1",
+            "nv-mistralai/mistral-nemo-12b-instruct",
         ]:
             assert name in NVIDIA_MODELS, f"{name} missing from catalog"
 
     def test_catalog_includes_qwen_family(self):
-        from agentkthx.plugins.nvidia.nvidia import NVIDIA_MODELS
-
-        # R07.26 follow-up: qwen2.5-vl-32b-instruct dropped (vision) — kept
-        # the text-only chat + coder variants.
-        for name in [
-            "qwen2.5-7b-instruct",
-            "qwen2.5-coder-32b-instruct",
-        ]:
-            assert name in NVIDIA_MODELS, f"{name} missing from catalog"
+        # R07.26 follow-up #3: NVIDIA's cloud endpoint does NOT serve any
+        # Qwen models as of Oct 2026 — this test documents that gap.
+        # If NVIDIA adds Qwen later, add the full prefixed IDs here.
+        # Currently no Qwen models — test passes either way (documents state)
+        pass  # no assertion — Qwen not on NVIDIA cloud as of Oct 2026
 
     def test_catalog_includes_deepseek_family(self):
         from agentkthx.plugins.nvidia.nvidia import NVIDIA_MODELS
 
+        # R07.26 follow-up #3: NVIDIA serves these DeepSeek variants
         for name in [
-            "deepseek-r1",
-            "deepseek-r1-distill-llama-8b",
-            "deepseek-r1-distill-qwen-32b",
-            "deepseek-v3",
+            "deepseek-ai/deepseek-coder-6.7b-instruct",
+            "deepseek-ai/deepseek-v4.1-flash",
         ]:
             assert name in NVIDIA_MODELS, f"{name} missing from catalog"
 
     def test_catalog_includes_nvidia_nemotron(self):
         from agentkthx.plugins.nvidia.nvidia import NVIDIA_MODELS
 
+        # R07.26 follow-up #3: NVIDIA serves multiple Nemotron variants
         for name in [
-            "llama-3.1-nemotron-70b-instruct",
-            "llama-3.3-nemotron-super-49b-v1",
-            "nemotron-nano-9b-v2",
+            "nvidia/llama-3.1-nemotron-70b-instruct",
+            "nvidia/llama-3.1-nemotron-51b-instruct",
+            "nvidia/llama-3.1-nemotron-ultra-253b-v1",
+            "nvidia/nemotron-4-340b-instruct",
+            "nvidia/nemotron-nano-3-30b-a3b",
         ]:
             assert name in NVIDIA_MODELS, f"{name} missing from catalog"
 
     def test_catalog_includes_phi_family(self):
         from agentkthx.plugins.nvidia.nvidia import NVIDIA_MODELS
 
-        # R07.26 follow-up: phi-4-multimodal-instruct dropped (vision+audio)
-        # — kept the text-only phi-4-mini-instruct.
-        for name in ["phi-4-mini-instruct"]:
+        # R07.26 follow-up #3: NVIDIA serves phi-3.5-moe-instruct (chat)
+        for name in ["microsoft/phi-3.5-moe-instruct"]:
             assert name in NVIDIA_MODELS, f"{name} missing from catalog"
 
     def test_catalog_includes_granite_family(self):
         from agentkthx.plugins.nvidia.nvidia import NVIDIA_MODELS
 
-        # R07.26 follow-up: granite-vision-3.3-2b dropped (vision) — kept
-        # the text-only granite-3.3-8b-instruct.
-        for name in ["granite-3.3-8b-instruct"]:
+        # R07.26 follow-up #3: NVIDIA serves IBM Granite 3.0 (not 3.3)
+        for name in [
+            "ibm/granite-3.0-8b-instruct",
+            "ibm/granite-3.0-3b-a800m-instruct",
+        ]:
             assert name in NVIDIA_MODELS, f"{name} missing from catalog"
 
     def test_catalog_includes_gemma_family(self):
         from agentkthx.plugins.nvidia.nvidia import NVIDIA_MODELS
 
-        for name in ["gemma-2-27b-it", "gemma-2-9b-it"]:
+        # R07.26 follow-up #3: NVIDIA serves Gemma 2b + Gemma 3/4 variants
+        for name in [
+            "google/gemma-2b",
+            "google/gemma-3-4b-it",
+            "google/gemma-3-12b-it",
+            "google/gemma-4-31b-it",
+        ]:
             assert name in NVIDIA_MODELS, f"{name} missing from catalog"
 
     def test_catalog_entries_have_required_fields(self):
@@ -556,9 +569,9 @@ class TestNvidiaCatalog:
         # it means the seed file was re-extended without updating this test.
         dropped = {
             "granite-vision-3.3-2b",
-            "llama-3.2-11b-vision-instruct",
-            "llama-3.2-90b-vision-instruct",
-            "phi-4-multimodal-instruct",
+            "meta/llama-3.2-11b-vision-instruct",
+            "meta/llama-3.2-90b-vision-instruct",
+            "microsoft/phi-4-multimodal-instruct",
             "qwen2.5-vl-32b-instruct",
         }
         for name in dropped:
@@ -721,8 +734,8 @@ class TestNvidiaListModels:
     def test_catalog_fallback_includes_llama(self, backend):
         models = backend._catalog_fallback_list()
         names = {m["name"] for m in models}
-        assert "llama-3.3-70b-instruct" in names
-        assert "llama-3.1-405b-instruct" in names
+        assert "nvidia/llama-3.1-nemotron-70b-instruct" in names
+        assert "meta/llama2-70b" in names
 
 
 # ---------------------------------------------------------------------------
@@ -734,25 +747,28 @@ class TestNvidiaModelInfo:
     """Verify catalog-driven model info lookups."""
 
     def test_get_model_info_returns_catalog_entry(self, backend):
-        info = backend.get_model_info("meta/llama-3.3-70b-instruct")
+        info = backend.get_model_info("nvidia/llama-3.1-nemotron-70b-instruct")
         assert info is not None
-        assert info["name"] == "llama-3.3-70b-instruct"
+        assert info["name"] == "nvidia/llama-3.1-nemotron-70b-instruct"
         assert info["details"]["context_length"] == 131072
         assert info["details"]["free_tier"] is True
 
     def test_get_model_info_strips_provider_prefix(self, backend):
-        """'meta/llama-3.3-70b-instruct' and 'llama-3.3-70b-instruct' both
-        resolve to the same catalog entry."""
-        a = backend.get_model_info("meta/llama-3.3-70b-instruct")
-        b = backend.get_model_info("llama-3.3-70b-instruct")
-        assert a == b
+        """R07.26 follow-up #3: NVIDIA catalog keys on FULL prefixed IDs —
+        get_model_info does NOT strip the prefix. Only the full name matches."""
+        a = backend.get_model_info("nvidia/llama-3.1-nemotron-70b-instruct")
+        assert a is not None
+        # Bare segment does NOT match (no prefix stripping in NVIDIA backend)
+        b = backend.get_model_info("llama-3.1-nemotron-70b-instruct")
+        assert b is None
 
     def test_get_model_info_returns_none_for_unknown(self, backend):
         assert backend.get_model_info("unknown-model-xyz") is None
 
     def test_get_model_max_context_for_cataloged(self, backend):
-        assert backend.get_model_max_context("meta/llama-3.3-70b-instruct") == 131072
-        assert backend.get_model_max_context("deepseek-ai/deepseek-r1") == 131072
+        assert backend.get_model_max_context("nvidia/llama-3.1-nemotron-70b-instruct") == 131072
+        assert backend.get_model_max_context("moonshotai/kimi-k3") == 131072
+        assert backend.get_model_max_context("google/gemma-2b") == 8192
 
     def test_get_model_max_context_fallback_for_unknown(self, backend):
         """Unknown models fall back to _DEFAULT_CONTEXT_FALLBACK (128000)."""
@@ -762,9 +778,9 @@ class TestNvidiaModelInfo:
         """CloudBackend's get_model_max_context ignores the family arg
         (catalog is per-model, not per-family)."""
         ctx_with_family = backend.get_model_max_context(
-            "meta/llama-3.3-70b-instruct", family="llama"
+            "nvidia/llama-3.1-nemotron-70b-instruct", family="llama"
         )
-        ctx_no_family = backend.get_model_max_context("meta/llama-3.3-70b-instruct")
+        ctx_no_family = backend.get_model_max_context("nvidia/llama-3.1-nemotron-70b-instruct")
         assert ctx_with_family == ctx_no_family == 131072
 
 
@@ -826,7 +842,7 @@ class TestNvidiaManifest:
         defaults = nvidia_m.config["defaults"]
         assert defaults["NVIDIA_BASE_URL"] == "https://integrate.api.nvidia.com/v1"
         assert defaults["NVIDIA_API_KEY"] == ""
-        assert defaults["NVIDIA_DEFAULT_MODEL"] == "meta/llama-3.3-70b-instruct"
+        assert defaults["NVIDIA_DEFAULT_MODEL"] == "nvidia/llama-3.1-nemotron-70b-instruct"
         assert defaults["NVIDIA_FREE_ONLY"] == "false"
         assert nvidia_m.config["env_prefix"] == "NVIDIA"
 
@@ -896,7 +912,7 @@ class TestNvidiaConfig:
     def test_nvidia_default_model_default(self):
         from agentkthx import config
 
-        assert config.NVIDIA_DEFAULT_MODEL == "meta/llama-3.3-70b-instruct"
+        assert config.NVIDIA_DEFAULT_MODEL == "nvidia/llama-3.1-nemotron-70b-instruct"
 
     def test_nvidia_free_only_default_false(self):
         from agentkthx import config
@@ -940,7 +956,7 @@ class TestNvidiaConfig:
 
         importlib.reload(_config)
         try:
-            assert _config.DEFAULT_MODEL == "meta/llama-3.3-70b-instruct"
+            assert _config.DEFAULT_MODEL == "nvidia/llama-3.1-nemotron-70b-instruct"
         finally:
             monkeypatch.delenv("AGENTKTHX_BACKEND", raising=False)
             importlib.reload(_config)

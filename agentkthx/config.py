@@ -335,9 +335,14 @@ NVIDIA_BASE_URL = os.environ.get("NVIDIA_BASE_URL", "https://integrate.api.nvidi
 # API Keys. Same `nvapi-` prefix as NGC personal keys (which pull NIM
 # containers from nvcr.io); the cloud endpoint distinguishes them by scope.
 NVIDIA_API_KEY = os.environ.get("NVIDIA_API_KEY", "")
-# Default model — Llama-3.3-70B-Instruct (flagship, 128K context, supports
-# tools + streaming + JSON mode). Override with NVIDIA_DEFAULT_MODEL env.
-NVIDIA_DEFAULT_MODEL = os.environ.get("NVIDIA_DEFAULT_MODEL", "meta/llama-3.3-70b-instruct")
+# Default model — NVIDIA's Llama-3.1-Nemotron-70B-Instruct (flagship chat
+# model based on Llama 3.1 70B, 128K context, supports tools + streaming).
+# NOTE: NVIDIA's cloud endpoint does NOT serve bare "meta/llama-3.3-70b-instruct"
+# — they serve their Nemotron-tuned variant instead. Override with
+# NVIDIA_DEFAULT_MODEL env var. Verified against the live /v1/models endpoint.
+NVIDIA_DEFAULT_MODEL = os.environ.get(
+    "NVIDIA_DEFAULT_MODEL", "nvidia/llama-3.1-nemotron-70b-instruct"
+)
 # Strict free-tier enforcement: when true, the 429-with-credit-exhausted
 # error message surfaces a clear "monthly quota exhausted" hint instead of
 # the generic rate-limit boilerplate. NVIDIA's quota is account-wide (not
@@ -378,7 +383,7 @@ elif AGENTKTHX_BACKEND == "huggingface" or AGENTKTHX_BACKEND == "hf":
 elif AGENTKTHX_BACKEND == "openai" or AGENTKTHX_BACKEND == "oai":
     DEFAULT_MODEL = os.environ.get("AGENTKTHX_MODEL", "gpt-6-sol")
 elif AGENTKTHX_BACKEND == "nvidia":
-    DEFAULT_MODEL = os.environ.get("AGENTKTHX_MODEL", "meta/llama-3.3-70b-instruct")
+    DEFAULT_MODEL = os.environ.get("AGENTKTHX_MODEL", "nvidia/llama-3.1-nemotron-70b-instruct")
 else:
     DEFAULT_MODEL = os.environ.get("AGENTKTHX_MODEL", "qwen2.5:0.5b")
 

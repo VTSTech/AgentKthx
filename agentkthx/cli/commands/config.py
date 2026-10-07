@@ -592,7 +592,7 @@ def _print_config_summary(
         ),
         (
             "NVIDIA_DEFAULT_MODEL",
-            "Default model (default: meta/llama-3.3-70b-instruct)",
+            "Default model (default: nvidia/llama-3.1-nemotron-70b-instruct)",
         ),
         (
             "NVIDIA_FREE_ONLY",
