@@ -116,6 +116,73 @@ def _is_free_model(model: str) -> bool:
     return pricing.get("input", -1) == 0.0 and pricing.get("output", -1) == 0.0
 
 
+#: Name-pattern blocklist for non-chat models AgentKthx can't drive today.
+#: If ANY of these substrings appears in the model name (lowercased), the
+#: model is filtered out of the live /v1/models results. Conservative by
+#: design — only patterns that clearly indicate non-chat models are included.
+#: Legitimate chat models (even ones we haven't seeded, like kimi-k3) pass
+#: through automatically.
+#:
+#: Categories covered:
+#:   - Embeddings: embed, embedqa, nv-embed, arctic-embed
+#:   - Reward / ranking: reward
+#:   - Safety / guardrails: safety, guard, nemoguard
+#:   - Translation: translate, riva-translate
+#:   - Vision / multimodal: vision, vl-, vlm, multimodal, vila, neva,
+#:     nvclip, deplot, kosmos, omni
+#:   - Document parsing: parse (nemotron-parse, nemotron-parse-2.0)
+#:   - Video analysis: video-detector, video-
+#:   - Specialized tools: ising-calibration, muse-glimmer, diffusion
+#:   - Writer.com verticals: palmyra (creative/financial/medical — not
+#:     general-purpose chat)
+#:   - Poolside: laguna (coding-specific SaaS, not general chat)
+#:   - Snowflake: arctic (excluding arctic-embed which is caught above)
+#:
+#: When image I/O lands, remove the vision/multimodal patterns from this
+#: blocklist and add the 5 dropped seed entries back.
+_NON_CHAT_PATTERNS: tuple[str, ...] = (
+    "embed",  # embed-qa-4, embedqa, nemotron-3-embed, arctic-embed, etc.
+    "reward",  # nemotron-4-340b-reward
+    "safety",  # content-safety, nemotron-safety-guard, nemotron-3.5-content-safety
+    "guard",  # nemoguard, llama-guard, llama-3.1-nemoguard-*
+    "translate",  # riva-translate-4b-instruct, riva-translate-4b-instruct-v2
+    "vision",  # *-vision-instruct, llama-3.2-11b-vision-instruct
+    "vl-",  # qwen2.5-vl-32b-instruct, *-vl-*
+    "vlm",  # nemoretriever-1b-vlm-embed-v1
+    "multimodal",  # phi-4-multimodal-instruct
+    "vila",  # nvidia/vila (vision-language)
+    "neva",  # nvidia/neva-22b (vision)
+    "nvclip",  # nvidia/nvclip (vision-language)
+    "deplot",  # google/deplot (chart→text, not general chat)
+    "kosmos",  # microsoft/kosmos-2 (vision-language)
+    "omni",  # nemotron-3-nano-omni-* (omnimodal: text+image+audio)
+    "parse",  # nemotron-parse, nemotron-parse-2.0
+    "video",  # ai-synthetic-video-detector
+    "ising-calibration",  # nvidia/ising-calibration-1.5-31b
+    "muse-glimmer",  # meta/muse-glimmer-30b (image gen)
+    "diffusion",  # google/diffusiongemma-* (image gen)
+    "palmyra",  # writer/palmyra-* (vertical: creative/financial/medical)
+    "laguna",  # poolside/laguna-xs-2.1 (vertical: coding SaaS)
+    "arctic-embed",  # snowflake/arctic-embed-l (caught by "embed" too, but explicit)
+)
+
+
+def _is_non_chat_model(model_name: str) -> bool:
+    """Check if a model name matches the non-chat blocklist.
+
+    Returns True if the model should be filtered out (embeddings, reward,
+    safety, vision, translation, or specialized models that AgentKthx
+    can't drive today with chat-text I/O only).
+
+    Conservative by design — only blocks patterns that CLEARLY indicate
+    non-chat models. Legitimate chat models (even ones not in the seed
+    catalog) pass through. When image I/O lands, remove the vision/
+    multimodal patterns to un-block those models.
+    """
+    name_lower = model_name.lower()
+    return any(pattern in name_lower for pattern in _NON_CHAT_PATTERNS)
+
+
 def _looks_like_credit_exhaustion(status_code: int, body_text: str) -> bool:
     """Detect NVIDIA NIM's monthly-credit-exhausted 429.
 
@@ -312,26 +379,30 @@ class NvidiaBackend(CloudBackend):
         seen: set[str] = set()
         models: list[dict] = []
 
-        # R07.26 follow-up: filter live API results to ONLY include models
-        # present in the seed catalog. NVIDIA's /v1/models returns 100+
-        # entries including embeddings, reward, safety, translation, and
-        # vision-only models — none of which AgentKthx can drive today
-        # (chat-text I/O only). The seed catalog (23 entries) is the
-        # authoritative "chat-capable" allowlist; vision/multimodal entries
-        # can be re-added when image I/O lands.
+        # R07.26 follow-up #2: BLOCKLIST approach (not allowlist).
+        #
+        # The prior allowlist (only seed-catalog entries) was too aggressive —
+        # it dropped legitimate chat models like moonshotai/kimi-k3 that
+        # NVIDIA serves but we hadn't seeded. Now we use a blocklist of name
+        # patterns that clearly indicate non-chat models (embeddings, reward,
+        # safety, vision, translation, etc.). Everything else passes through
+        # — new chat models get included automatically.
+        #
+        # The seed catalog remains a metadata enrichment layer: models that
+        # ARE in the seed get accurate context_length + pricing; models that
+        # aren't get defaults (128K context, free_tier=True).
         for name in sorted(api_model_keys):
             if name in seen:
                 continue
             # Catalog lookup uses the post-slash segment (mirrors ZAI pattern)
             model_key = name.split("/")[-1] if "/" in name else name
-            # Skip live-discovered models NOT in our seed catalog — they're
-            # either non-chat (embeddings/reward/safety/translation) or
-            # multimodal (vision/audio) which AgentKthx doesn't support yet.
-            if model_key not in NVIDIA_MODELS:
+            # Blocklist: skip non-chat models AgentKthx can't drive today
+            if _is_non_chat_model(name):
                 if os.environ.get("AGENTKTHX_DEBUG"):
                     print(
-                        f"  [NVIDIA] Skipping {name} — not in seed catalog "
-                        f"(non-chat or unsupported modality)"
+                        f"  [NVIDIA] Skipping {name} — matches non-chat "
+                        f"blocklist pattern (embedding/reward/safety/"
+                        f"vision/translation/specialized)"
                     )
                 continue
             seen.add(name)
@@ -346,7 +417,7 @@ class NvidiaBackend(CloudBackend):
                         "context_length": meta.get(
                             "context_length", self._DEFAULT_CONTEXT_FALLBACK
                         ),
-                        "free_tier": _is_free_model(name),
+                        "free_tier": _is_free_model(name) if meta else True,
                         "is_chat_model": True,
                         "pricing": meta.get("pricing", {}),
                     },
@@ -355,8 +426,6 @@ class NvidiaBackend(CloudBackend):
 
         # Catalog-only models — surfaced even if the API didn't list them
         # (flash variants, models that may be temporarily unavailable).
-        # R07.26 follow-up: the seed catalog is already chat-text-only,
-        # so this loop only adds cataloged models the live API missed.
         for catalog_name in sorted(NVIDIA_MODELS.keys()):
             if catalog_name in seen:
                 continue

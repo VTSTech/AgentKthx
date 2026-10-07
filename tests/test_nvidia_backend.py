@@ -569,6 +569,132 @@ class TestNvidiaCatalog:
 
 
 # ---------------------------------------------------------------------------
+# Non-chat blocklist (R07.26 follow-up #2)
+# ---------------------------------------------------------------------------
+
+
+class TestNvidiaNonChatBlocklist:
+    """Verify _is_non_chat_model keeps chat models and drops non-chat.
+
+    R07.26 follow-up #2: switched from an allowlist (only seed-catalog
+    entries pass) to a blocklist (only known non-chat patterns are
+    filtered). This lets new chat models like kimi-k3 through automatically
+    without requiring a seed-catalog update for every new model NVIDIA
+    deploys.
+    """
+
+    def test_kimi_k3_passes_through(self):
+        """kimi-k3 is a legitimate chat model — must NOT be blocked."""
+        from agentkthx.plugins.nvidia.nvidia import _is_non_chat_model
+
+        assert _is_non_chat_model("moonshotai/kimi-k3") is False
+        assert _is_non_chat_model("moonshotai/kimi-k2.6") is False
+
+    def test_mistral_large_passes_through(self):
+        """mistral-large-2-instruct is chat-capable — must NOT be blocked."""
+        from agentkthx.plugins.nvidia.nvidia import _is_non_chat_model
+
+        assert _is_non_chat_model("mistralai/mistral-large-2-instruct") is False
+        assert _is_non_chat_model("mistralai/mistral-large") is False
+
+    def test_phi_3_5_moe_passes_through(self):
+        """phi-3.5-moe-instruct is a chat MoE model — must NOT be blocked
+        (MoE = Mixture of Experts, not multimodal)."""
+        from agentkthx.plugins.nvidia.nvidia import _is_non_chat_model
+
+        assert _is_non_chat_model("microsoft/phi-3.5-moe-instruct") is False
+
+    def test_codegemma_codellama_pass_through(self):
+        """Code models with -instruct suffix are chat-capable — must NOT
+        be blocked."""
+        from agentkthx.plugins.nvidia.nvidia import _is_non_chat_model
+
+        assert _is_non_chat_model("google/codegemma-7b") is False
+        assert _is_non_chat_model("meta/codellama-70b") is False
+        assert _is_non_chat_model("mistralai/codestral-22b-instruct-v0.1") is False
+        assert _is_non_chat_model("ibm/granite-34b-code-instruct") is False
+
+    def test_nemotron_ultra_passes_through(self):
+        """Large Nemotron models without 'instruct' suffix are still chat."""
+        from agentkthx.plugins.nvidia.nvidia import _is_non_chat_model
+
+        assert _is_non_chat_model("nvidia/nemotron-3-ultra-550b-a55b") is False
+        assert _is_non_chat_model("nvidia/nemotron-3-super-120b-a12b") is False
+        assert _is_non_chat_model("nvidia/nemotron-4-340b-instruct") is False
+        assert _is_non_chat_model("nvidia/llama-3.1-nemotron-ultra-253b-v1") is False
+
+    def test_embedding_models_blocked(self):
+        """Embedding models must be blocked."""
+        from agentkthx.plugins.nvidia.nvidia import _is_non_chat_model
+
+        assert _is_non_chat_model("nvidia/embed-qa-4") is True
+        assert _is_non_chat_model("nvidia/nv-embedqa-mistral-7b-v2") is True
+        assert _is_non_chat_model("nvidia/llama-3.2-nv-embedqa-1b-v1") is True
+        assert _is_non_chat_model("nvidia/nemotron-3-embed-1b") is True
+        assert _is_non_chat_model("snowflake/arctic-embed-l") is True
+
+    def test_reward_models_blocked(self):
+        """Reward / ranking models must be blocked."""
+        from agentkthx.plugins.nvidia.nvidia import _is_non_chat_model
+
+        assert _is_non_chat_model("nvidia/nemotron-4-340b-reward") is True
+
+    def test_safety_guard_models_blocked(self):
+        """Safety / guardrail models must be blocked."""
+        from agentkthx.plugins.nvidia.nvidia import _is_non_chat_model
+
+        assert _is_non_chat_model("nvidia/llama-3.1-nemoguard-8b-content-safety") is True
+        assert _is_non_chat_model("nvidia/llama-3.1-nemotron-safety-guard-8b-v3") is True
+        assert _is_non_chat_model("nvidia/nemotron-3.5-content-safety") is True
+        assert _is_non_chat_model("meta/llama-guard-4-12b") is True
+
+    def test_translation_models_blocked(self):
+        """Translation-only models must be blocked."""
+        from agentkthx.plugins.nvidia.nvidia import _is_non_chat_model
+
+        assert _is_non_chat_model("nvidia/riva-translate-4b-instruct") is True
+        assert _is_non_chat_model("nvidia/riva-translate-4b-instruct-v2") is True
+
+    def test_vision_models_blocked(self):
+        """Vision / multimodal models must be blocked (no image I/O yet)."""
+        from agentkthx.plugins.nvidia.nvidia import _is_non_chat_model
+
+        assert _is_non_chat_model("meta/llama-3.2-11b-vision-instruct") is True
+        assert _is_non_chat_model("meta/llama-3.2-90b-vision-instruct") is True
+        assert _is_non_chat_model("microsoft/phi-3-vision-128k-instruct") is True
+        assert _is_non_chat_model("microsoft/kosmos-2") is True
+        assert _is_non_chat_model("nvidia/vila") is True
+        assert _is_non_chat_model("nvidia/neva-22b") is True
+        assert _is_non_chat_model("nvidia/nvclip") is True
+        assert _is_non_chat_model("google/deplot") is True
+
+    def test_parse_models_blocked(self):
+        """Document parsing models must be blocked."""
+        from agentkthx.plugins.nvidia.nvidia import _is_non_chat_model
+
+        assert _is_non_chat_model("nvidia/nemotron-parse") is True
+        assert _is_non_chat_model("nvidia/nemotron-parse-2.0") is True
+
+    def test_specialized_models_blocked(self):
+        """Specialized tools (video detection, calibration, image gen,
+        vertical SaaS) must be blocked."""
+        from agentkthx.plugins.nvidia.nvidia import _is_non_chat_model
+
+        assert _is_non_chat_model("nvidia/ai-synthetic-video-detector") is True
+        assert _is_non_chat_model("nvidia/ising-calibration-1.5-31b") is True
+        assert _is_non_chat_model("meta/muse-glimmer-30b") is True
+        assert _is_non_chat_model("google/diffusiongemma-26b-a4b-it") is True
+        assert _is_non_chat_model("writer/palmyra-creative-122b") is True
+        assert _is_non_chat_model("poolside/laguna-xs-2.1") is True
+
+    def test_omni_models_blocked(self):
+        """Omni (omnimodal: text+image+audio) models must be blocked."""
+        from agentkthx.plugins.nvidia.nvidia import _is_non_chat_model
+
+        assert _is_non_chat_model("nvidia/nemotron-3-nano-omni-30b-a3b-reasoning") is True
+
+
+# ---------------------------------------------------------------------------
 # list_models + catalog fallback
 # ---------------------------------------------------------------------------
 
