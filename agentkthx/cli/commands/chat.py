@@ -1635,9 +1635,11 @@ def cmd_chat(args: argparse.Namespace) -> int:
                 acp.log_chat("user", user_input)
 
             # Run with spinner (suppress spinner when debug is on — debug already prints progress).
-            # PERF-01: also suppress the spinner when stream=True — streaming output
-            # itself is the progress indicator (typewriter effect on stdout), and a
-            # spinning cursor on stderr would visually compete with it.
+            # The spinner shows "⠇ thinking..." on stderr while waiting for the
+            # first response. For streaming, the spinner covers the gap before
+            # the first token arrives (thinking models can take 60-90+ seconds);
+            # once streaming output starts on stdout, the spinner is still
+            # running on stderr but visually the streaming output takes over.
             spinner_t = None
             # Pre-compute stream flag so we know whether to suppress the spinner.
             # This must mirror the logic used below when calling agent.run().
@@ -1646,7 +1648,11 @@ def cmd_chat(args: argparse.Namespace) -> int:
             _is_cloud = getattr(agent.backend, "is_cloud", False)
             _explicit = getattr(args, "stream", None)
             _will_stream = _explicit is True or (_explicit is None and _is_cloud)
-            if not agent.debug and not _will_stream:
+            # R07.26: always start the spinner unless debug is on — even for
+            # streaming. Thinking models (GLM-5.3-flash, DeepSeek-V4.1-flash,
+            # kimi-k3) can take 60-90+ seconds before the first token; without
+            # the spinner, the user sees nothing and assumes it's hung.
+            if not agent.debug:
                 print()  # blank line before spinner
                 spinner_t = _spinner_start()
             try:

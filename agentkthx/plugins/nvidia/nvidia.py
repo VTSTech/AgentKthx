@@ -891,7 +891,14 @@ class NvidiaBackend(CloudBackend):
                 method="POST",
             )
             try:
-                response = urllib.request.urlopen(req, timeout=self.config.timeout)
+                # Thinking models can take 60-90+ seconds before the first
+                # token. Use a longer timeout for them (300s vs default 120s)
+                # so the connection doesn't timeout mid-reasoning.
+                model_name = body.get("model", "")
+                stream_timeout = (
+                    300 if self._name_matches_thinking(model_name) else self.config.timeout
+                )
+                response = urllib.request.urlopen(req, timeout=stream_timeout)
             except urllib.error.HTTPError as e:
                 status_code = e.code
                 body_bytes = e.read() if e.fp else b""
@@ -1004,6 +1011,11 @@ class NvidiaBackend(CloudBackend):
             # Success — yield raw SSE line bytes. The base class's
             # generate_completions_stream() handles the JSON parsing,
             # [DONE] detection, and delta/tool_call extraction.
+            #
+            # Note: the chat.py spinner handles the "thinking..." progress
+            # indicator. Thinking models (GLM-5.3-flash, DeepSeek-V4.1-flash)
+            # can take 60-90+ seconds before the first token — the spinner
+            # runs until agent.run() returns, so it covers that gap.
             # ROB-06: try/finally so the urllib response is closed
             # deterministically when the generator is abandoned
             # mid-iteration (Ctrl+C, consumer exception, or the base
