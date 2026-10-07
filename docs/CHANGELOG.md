@@ -44,10 +44,10 @@ The live NVIDIA `/v1/models` endpoint returns 108 entries including embeddings, 
 
 Four new reference docs added, each grounded in primary sources (provider's own docs pages + verified free-tier claims via independent corroboration):
 
-- **`NVIDIA_NIM_API_TECHNICAL_REFERENCE.md`** (37 KB) — based on https://docs.nvidia.com/nim/large-language-models/latest/api-reference.html + live `/v1/models` probe. Documents the credit-budget free tier, the open catalog endpoint, tool-support caveats for reasoning models, the credit-exhaustion 429 detection, and the `BackendType.NVIDIA` enum integration.
-- **`CLOUDFLARE_WORKERS_AI_API_TECHNICAL_REFERENCE.md`** (40 KB) — based on https://developers.cloudflare.com/workers-ai/configuration/open-ai-compatibility/ + REST API get-started. Documents the account-ID-in-URL auth pattern, the `options.rejectIfBusy` Cloudflare-specific extension, the GPT-OSS Responses-API-only constraint, and the daily neuron quota (10K/day, UTC reset).
+- **`NVIDIA_API_TECHNICAL_REFERENCE.md`** (37 KB) — based on https://docs.nvidia.com/nim/large-language-models/latest/api-reference.html + live `/v1/models` probe. Documents the credit-budget free tier, the open catalog endpoint, tool-support caveats for reasoning models, the credit-exhaustion 429 detection, and the `BackendType.NVIDIA` enum integration.
+- **`CLOUDFLARE_API_TECHNICAL_REFERENCE.md`** (40 KB) — based on https://developers.cloudflare.com/workers-ai/configuration/open-ai-compatibility/ + REST API get-started. Documents the account-ID-in-URL auth pattern, the `options.rejectIfBusy` Cloudflare-specific extension, the GPT-OSS Responses-API-only constraint, and the daily neuron quota (10K/day, UTC reset).
 - **`SILICONFLOW_API_TECHNICAL_REFERENCE.md`** (43 KB) — based on https://docs.siliconflow.com/en/api-reference/chat-completions/chat-completions.md + the function-calling guide. Documents the 3 permanently-free models (`Qwen/Qwen3-8B`, `deepseek-ai/DeepSeek-R1-Distill-Qwen-7B`, `deepseek-ai/DeepSeek-OCR`) with no quota, the heterogeneous error envelopes (JSON for 400/429/503, plain string for 401/404/504), and the `enable_thinking` + `reasoning_content` extension fields.
-- **`DUCKDUCKGO_AI_CHAT_API_TECHNICAL_REFERENCE.md`** (42 KB) — based on reverse-engineered source at https://github.com/mrgick/duck_chat (api.py, cli.py, models/model_type.py) + JSR `@mumulhl/duckduckgo-ai-chat` + DuckDuckGo help pages. Documents the keyless/anonymous protocol, the `x-vqd-4` token rotation lifecycle, the system-message-stripping workaround, the conversation-limit (~20 turns), and the ReAct-only tool path (no native function calling).
+- **`DUCKDUCKGO_API_TECHNICAL_REFERENCE.md`** (42 KB) — based on reverse-engineered source at https://github.com/mrgick/duck_chat (api.py, cli.py, models/model_type.py) + JSR `@mumulhl/duckduckgo-ai-chat` + DuckDuckGo help pages. Documents the keyless/anonymous protocol, the `x-vqd-4` token rotation lifecycle, the system-message-stripping workaround, the conversation-limit (~20 turns), and the ReAct-only tool path (no native function calling).
 
 ### CI fixes
 
@@ -78,10 +78,10 @@ Four new reference docs added, each grounded in primary sources (provider's own 
 - `tests/test_r07_20_auth_picker.py` — bumped 8→9 backend count assertions; fixed `test_key_display_masked_or_not_set` to handle short-key mask shape.
 - `scripts/add_nvidia_to_seed.py` — **new** (idempotent seed-extension script).
 - `scripts/filter_nvidia_seed_chat_only.py` — **new** (idempotent filter script that dropped 5 vision/multimodal entries from the seed catalog).
-- `docs/api/NVIDIA_NIM_API_TECHNICAL_REFERENCE.md` — **new** (37 KB).
-- `docs/api/CLOUDFLARE_WORKERS_AI_API_TECHNICAL_REFERENCE.md` — **new** (40 KB).
+- `docs/api/NVIDIA_API_TECHNICAL_REFERENCE.md` — **new** (37 KB).
+- `docs/api/CLOUDFLARE_API_TECHNICAL_REFERENCE.md` — **new** (40 KB).
 - `docs/api/SILICONFLOW_API_TECHNICAL_REFERENCE.md` — **new** (43 KB).
-- `docs/api/DUCKDUCKGO_AI_CHAT_API_TECHNICAL_REFERENCE.md` — **new** (42 KB).
+- `docs/api/DUCKDUCKGO_API_TECHNICAL_REFERENCE.md` — **new** (42 KB).
 
 ### Next steps (planned)
 

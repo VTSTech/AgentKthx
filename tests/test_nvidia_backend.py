@@ -372,6 +372,56 @@ class TestNvidiaFreeModel:
 
 
 # ---------------------------------------------------------------------------
+# Fixed-param 400 detection (R07.26 follow-up: kimi-k3 top_p=0.95)
+# ---------------------------------------------------------------------------
+
+
+class TestNvidiaFixedParamDetection:
+    """Verify _extract_fixed_param detects "param is fixed at X" 400 errors.
+
+    NVIDIA NIM returns 400 for models that have fixed parameter values.
+    Example (kimi-k3): "Validation: `top_p` is fixed at 0.95 for Kimi K3;
+    overriding it is not supported (got 0.9)"
+
+    The retry loop detects this, sets the param to the fixed value, and
+    retries — so the request succeeds on the second attempt.
+    """
+
+    def test_kimi_k3_top_p_fixed(self):
+        """The exact error message from kimi-k3's 400 response."""
+        from agentkthx.plugins.nvidia.nvidia import _extract_fixed_param
+
+        body = (
+            '{"error":{"message":"Validation: `top_p` is fixed at 0.95 '
+            'for Kimi K3; overriding it is not supported (got 0.9)"}}'
+        )
+        result = _extract_fixed_param(body)
+        assert result is not None
+        assert result == ("top_p", "0.95")
+
+    def test_extract_returns_none_on_empty_body(self):
+        from agentkthx.plugins.nvidia.nvidia import _extract_fixed_param
+
+        assert _extract_fixed_param("") is None
+
+    def test_extract_returns_none_on_no_fixed_pattern(self):
+        from agentkthx.plugins.nvidia.nvidia import _extract_fixed_param
+
+        assert _extract_fixed_param("Invalid model ID") is None
+        assert _extract_fixed_param("Context length exceeded") is None
+        assert _extract_fixed_param("rate limit exceeded") is None
+
+    def test_extract_handles_temperature_fixed(self):
+        """Hypothetical case: a model fixes temperature instead of top_p."""
+        from agentkthx.plugins.nvidia.nvidia import _extract_fixed_param
+
+        body = "Validation: `temperature` is fixed at 0.7 for Model X"
+        result = _extract_fixed_param(body)
+        assert result is not None
+        assert result == ("temperature", "0.7")
+
+
+# ---------------------------------------------------------------------------
 # Tool support detection
 # ---------------------------------------------------------------------------
 

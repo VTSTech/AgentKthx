@@ -329,7 +329,7 @@ POLLINATIONS_ANON_CATALOG = os.environ.get("POLLINATIONS_ANON_CATALOG", "").lowe
 # backed by vLLM. Catalog: Llama, Mistral, Qwen, Phi, DeepSeek, NV Nemotron,
 # Granite, GLM (80+ models). Free tier: 1,000 credits on signup, resets
 # MONTHLY, up to 5,000 by request. 40 RPM. No credit card. See
-# docs/api/NVIDIA_NIM_API_TECHNICAL_REFERENCE.md.
+# docs/api/NVIDIA_API_TECHNICAL_REFERENCE.md.
 NVIDIA_BASE_URL = os.environ.get("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")
 # NVIDIA cloud NIM API key. Issued at https://build.nvidia.com → Account →
 # API Keys. Same `nvapi-` prefix as NGC personal keys (which pull NIM

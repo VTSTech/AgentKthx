@@ -165,7 +165,7 @@ class BackendType(Enum):
     # Reasoning models (DeepSeek-R1, Qwen3-Thinking) do NOT support
     # tools — ReAct fallback applies.
     # See agentkthx/plugins/nvidia/ and
-    # docs/api/NVIDIA_NIM_API_TECHNICAL_REFERENCE.md.
+    # docs/api/NVIDIA_API_TECHNICAL_REFERENCE.md.
     NVIDIA = "nvidia"
 
 

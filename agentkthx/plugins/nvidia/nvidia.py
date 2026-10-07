@@ -77,7 +77,7 @@ from agentkthx.model_cache import load_seed_catalog
 # Pricing: 0.0/0.0 for ALL entries because NVIDIA's credit-budget model
 # means every model is "free" within the monthly quota. This triggers
 # _is_free_model()=True on every model, matching the
-# NVIDIA_NIM_API_TECHNICAL_REFERENCE.md guidance that NVIDIA_FREE_ONLY
+# NVIDIA_API_TECHNICAL_REFERENCE.md guidance that NVIDIA_FREE_ONLY
 # does NOT filter the catalog (returns full catalog — quota is
 # account-wide, not per-model).
 NVIDIA_MODELS: dict[str, dict] = load_seed_catalog("nvidia")
@@ -210,6 +210,33 @@ def _looks_like_credit_exhaustion(status_code: int, body_text: str) -> bool:
     body_lower = body_text.lower()
     indicators = ("credit", "quota", "balance", "exhausted", "monthly")
     return any(ind in body_lower for ind in indicators)
+
+
+def _extract_fixed_param(body_text: str) -> tuple[str, str] | None:
+    """Detect NVIDIA NIM's "param is fixed at X" 400 error.
+
+    NVIDIA NIM returns 400 for models that have fixed parameter values.
+    Example (kimi-k3): ``Validation: `top_p` is fixed at 0.95 for Kimi K3;
+    overriding it is not supported (got 0.9)``
+
+    This helper extracts (param_name, fixed_value) from the error body so
+    the retry loop can drop the offending param (or set it to the fixed
+    value) and retry.
+
+    Returns:
+        (param_name, fixed_value) tuple, or None if no fixed-param
+        pattern is found.
+    """
+    if not body_text:
+        return None
+    import re
+
+    # Match: `param` is fixed at VALUE
+    # NVIDIA's error format: "Validation: `top_p` is fixed at 0.95 for ..."
+    match = re.search(r"`(\w+)`[^`]*?fixed at\s+([\d.]+)", body_text, re.IGNORECASE)
+    if match:
+        return (match.group(1), match.group(2))
+    return None
 
 
 class NvidiaBackend(CloudBackend):
@@ -736,6 +763,33 @@ class NvidiaBackend(CloudBackend):
                         f"developer forums. Details: {err_msg}"
                     ) from e
 
+                # Fixed-param 400: some NVIDIA NIM models have parameters
+                # fixed at specific values (e.g. kimi-k3 fixes top_p=0.95).
+                # Detect "fixed at X" in the error, drop the offending param
+                # (or set it to the fixed value), and retry.
+                if status_code == 400 and attempt == 0:
+                    fixed = _extract_fixed_param(body_text)
+                    if fixed:
+                        param_name, fixed_value = fixed
+                        if param_name in body:
+                            old_val = body[param_name]
+                            # Set to the fixed value (safer than dropping —
+                            # some models reject requests that omit the param
+                            # entirely, others accept omission. Setting to
+                            # the fixed value works universally.)
+                            try:
+                                body[param_name] = type(body[param_name])(fixed_value)
+                            except (ValueError, TypeError):
+                                body[param_name] = fixed_value
+                            if os.environ.get("AGENTKTHX_DEBUG"):
+                                print(
+                                    f"  [NVIDIA] {param_name} is fixed at "
+                                    f"{fixed_value} for this model — "
+                                    f"overriding {old_val} → {body[param_name]} "
+                                    f"and retrying"
+                                )
+                            continue
+
                 # ARCH-03: shared context-length 400 handler. Only on
                 # the first attempt (don't loop forever on a 400).
                 if status_code == 400 and attempt == 0:
@@ -855,6 +909,29 @@ class NvidiaBackend(CloudBackend):
                         f"or request additional credits at the NVIDIA "
                         f"developer forums. Details: {body_text[:300]}"
                     ) from e
+
+                # Fixed-param 400: some NVIDIA NIM models have parameters
+                # fixed at specific values (e.g. kimi-k3 fixes top_p=0.95).
+                # Detect "fixed at X" in the error, set the param to the
+                # fixed value, and retry.
+                if status_code == 400 and attempt == 0:
+                    fixed = _extract_fixed_param(body_text)
+                    if fixed:
+                        param_name, fixed_value = fixed
+                        if param_name in body:
+                            old_val = body[param_name]
+                            try:
+                                body[param_name] = type(body[param_name])(fixed_value)
+                            except (ValueError, TypeError):
+                                body[param_name] = fixed_value
+                            if os.environ.get("AGENTKTHX_DEBUG"):
+                                print(
+                                    f"  [NVIDIA-Stream] {param_name} is fixed "
+                                    f"at {fixed_value} for this model — "
+                                    f"overriding {old_val} → {body[param_name]} "
+                                    f"and retrying"
+                                )
+                            continue
 
                 # ARCH-03: shared context-length 400 handler. Only on
                 # the first attempt (don't loop forever on a 400).

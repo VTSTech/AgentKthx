@@ -324,6 +324,8 @@ curl -s https://integrate.api.nvidia.com/v1/models \
 
 The catalog includes 80+ models. New models appear regularly; the local `tool_support.json` cache key scheme mirrors the existing CloudBackend pattern (one key per `<model>` + a separate `thinking:<model>` axis for thinking support).
 
+**Live finding (verified Oct 2026)**: The `/v1/models` endpoint is **open** — it returns the full 108-model catalog even with an invalid `nvapi-` test key (the auth check applies only to inference endpoints, not catalog reads). This means `agentkthx models --backend nvidia` works without a real API key, which is useful for catalog exploration but does not grant inference access.
+
 ---
 
 ## Function Calling Implementation

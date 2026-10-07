@@ -6,7 +6,7 @@ NV Nemotron, Granite, GLM) via OpenAI Chat-Completions API at
 integrate.api.nvidia.com. Free tier with monthly-recurring 1,000 inference
 credits, no credit card required.
 
-See docs/api/NVIDIA_NIM_API_TECHNICAL_REFERENCE.md for full details.
+See docs/api/NVIDIA_API_TECHNICAL_REFERENCE.md for full details.
 
 Written by VTSTech — https://www.vts-tech.org
 """
