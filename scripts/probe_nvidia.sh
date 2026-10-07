@@ -28,6 +28,41 @@
 # ═══════════════════════════════════════════════════════════════════════════
 set -euo pipefail
 
+# ═══════════════════════════════════════════════════════════════════════════
+# Load ~/.agentkthx/.env (same as `agentkthx` itself does at startup)
+# ═══════════════════════════════════════════════════════════════════════════
+# The `agentkthx auth` command persists API keys to ~/.agentkthx/.env
+# (override with AGENTKTHX_ENV_FILE). This file is a simple KEY=VALUE
+# format with # comments and optional single/double quotes. We load it
+# here so the probe script can see keys that were set via `agentkthx auth`
+# without requiring the user to also export them in their shell.
+#
+# Shell exports ALWAYS win (mirrors agentkthx.env_file.load_env_file) —
+# we only fill gaps, never clobber already-set variables.
+ENV_FILE="${AGENTKTHX_ENV_FILE:-$HOME/.agentkthx/.env}"
+if [ -f "$ENV_FILE" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+        # Skip comments and blank lines
+        line="${line%%#*}"  # strip inline comments
+        line="$(echo "$line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+        [ -z "$line" ] && continue
+        # Parse KEY=VALUE
+        key="${line%%=*}"
+        val="${line#*=}"
+        key="$(echo "$key" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+        # Strip optional surrounding quotes from value
+        if [[ "${val:0:1}" == '"' && "${val: -1}" == '"' ]]; then
+            val="${val:1:-1}"
+        elif [[ "${val:0:1}" == "'" && "${val: -1}" == "'" ]]; then
+            val="${val:1:-1}"
+        fi
+        # Only set if not already in the environment (shell exports win)
+        if [ -z "${!key:-}" ]; then
+            export "$key=$val"
+        fi
+    done < "$ENV_FILE"
+fi
+
 API_KEY="${NVIDIA_API_KEY:-}"
 BASE_URL="${NVIDIA_BASE_URL:-https://integrate.api.nvidia.com/v1}"
 DEEP=false
