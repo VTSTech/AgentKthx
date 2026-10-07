@@ -312,12 +312,29 @@ class NvidiaBackend(CloudBackend):
         seen: set[str] = set()
         models: list[dict] = []
 
+        # R07.26 follow-up: filter live API results to ONLY include models
+        # present in the seed catalog. NVIDIA's /v1/models returns 100+
+        # entries including embeddings, reward, safety, translation, and
+        # vision-only models — none of which AgentKthx can drive today
+        # (chat-text I/O only). The seed catalog (23 entries) is the
+        # authoritative "chat-capable" allowlist; vision/multimodal entries
+        # can be re-added when image I/O lands.
         for name in sorted(api_model_keys):
             if name in seen:
                 continue
-            seen.add(name)
             # Catalog lookup uses the post-slash segment (mirrors ZAI pattern)
             model_key = name.split("/")[-1] if "/" in name else name
+            # Skip live-discovered models NOT in our seed catalog — they're
+            # either non-chat (embeddings/reward/safety/translation) or
+            # multimodal (vision/audio) which AgentKthx doesn't support yet.
+            if model_key not in NVIDIA_MODELS:
+                if os.environ.get("AGENTKTHX_DEBUG"):
+                    print(
+                        f"  [NVIDIA] Skipping {name} — not in seed catalog "
+                        f"(non-chat or unsupported modality)"
+                    )
+                continue
+            seen.add(name)
             meta = NVIDIA_MODELS.get(model_key, {})
             models.append(
                 {
@@ -337,7 +354,9 @@ class NvidiaBackend(CloudBackend):
             )
 
         # Catalog-only models — surfaced even if the API didn't list them
-        # (flash variants, vision models that may be temporarily unavailable).
+        # (flash variants, models that may be temporarily unavailable).
+        # R07.26 follow-up: the seed catalog is already chat-text-only,
+        # so this loop only adds cataloged models the live API missed.
         for catalog_name in sorted(NVIDIA_MODELS.keys()):
             if catalog_name in seen:
                 continue

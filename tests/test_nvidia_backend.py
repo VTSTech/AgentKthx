@@ -421,17 +421,25 @@ class TestNvidiaToolSupport:
 class TestNvidiaCatalog:
     """Verify the seed catalog loaded from model_seed.json."""
 
-    def test_catalog_loaded_with_28_plus_models(self):
-        """Seed catalog must include the 28 documented NVIDIA models."""
+    def test_catalog_loaded_with_23_plus_models(self):
+        """Seed catalog must include the 23 chat-text-only NVIDIA models.
+
+        R07.26 follow-up: filtered from 28 → 23 by dropping vision /
+        multimodal entries (granite-vision, llama-3.2-*-vision-instruct,
+        phi-4-multimodal, qwen2.5-vl) since AgentKthx only supports
+        chat text I/O today. Re-add when image I/O lands.
+        """
         from agentkthx.plugins.nvidia.nvidia import NVIDIA_MODELS
 
         assert (
-            len(NVIDIA_MODELS) >= 28
-        ), f"Seed catalog has {len(NVIDIA_MODELS)} models, expected >= 28"
+            len(NVIDIA_MODELS) >= 23
+        ), f"Seed catalog has {len(NVIDIA_MODELS)} models, expected >= 23"
 
     def test_catalog_includes_llama_family(self):
         from agentkthx.plugins.nvidia.nvidia import NVIDIA_MODELS
 
+        # R07.26 follow-up: vision variants (llama-3.2-11b-vision-instruct,
+        # llama-3.2-90b-vision-instruct) dropped — chat-text-only filter.
         for name in [
             "llama-3.3-70b-instruct",
             "llama-3.1-405b-instruct",
@@ -439,8 +447,6 @@ class TestNvidiaCatalog:
             "llama-3.1-8b-instruct",
             "llama-3.2-1b-instruct",
             "llama-3.2-3b-instruct",
-            "llama-3.2-11b-vision-instruct",
-            "llama-3.2-90b-vision-instruct",
         ]:
             assert name in NVIDIA_MODELS, f"{name} missing from catalog"
 
@@ -458,10 +464,11 @@ class TestNvidiaCatalog:
     def test_catalog_includes_qwen_family(self):
         from agentkthx.plugins.nvidia.nvidia import NVIDIA_MODELS
 
+        # R07.26 follow-up: qwen2.5-vl-32b-instruct dropped (vision) — kept
+        # the text-only chat + coder variants.
         for name in [
             "qwen2.5-7b-instruct",
             "qwen2.5-coder-32b-instruct",
-            "qwen2.5-vl-32b-instruct",
         ]:
             assert name in NVIDIA_MODELS, f"{name} missing from catalog"
 
@@ -489,13 +496,17 @@ class TestNvidiaCatalog:
     def test_catalog_includes_phi_family(self):
         from agentkthx.plugins.nvidia.nvidia import NVIDIA_MODELS
 
-        for name in ["phi-4-mini-instruct", "phi-4-multimodal-instruct"]:
+        # R07.26 follow-up: phi-4-multimodal-instruct dropped (vision+audio)
+        # — kept the text-only phi-4-mini-instruct.
+        for name in ["phi-4-mini-instruct"]:
             assert name in NVIDIA_MODELS, f"{name} missing from catalog"
 
     def test_catalog_includes_granite_family(self):
         from agentkthx.plugins.nvidia.nvidia import NVIDIA_MODELS
 
-        for name in ["granite-3.3-8b-instruct", "granite-vision-3.3-2b"]:
+        # R07.26 follow-up: granite-vision-3.3-2b dropped (vision) — kept
+        # the text-only granite-3.3-8b-instruct.
+        for name in ["granite-3.3-8b-instruct"]:
             assert name in NVIDIA_MODELS, f"{name} missing from catalog"
 
     def test_catalog_includes_gemma_family(self):
@@ -534,6 +545,28 @@ class TestNvidiaCatalog:
                 pricing["output"] == 0.0
             ), f"{name} pricing.output is {pricing['output']}, expected 0.0"
 
+    def test_no_vision_or_multimodal_models_in_seed(self):
+        """R07.26 follow-up: vision / multimodal models are filtered out
+        of the seed catalog because AgentKthx only supports chat-text I/O
+        today. Re-add when image I/O lands.
+        """
+        from agentkthx.plugins.nvidia.nvidia import NVIDIA_MODELS
+
+        # These were the 5 dropped in R07.26 follow-up. If any reappear,
+        # it means the seed file was re-extended without updating this test.
+        dropped = {
+            "granite-vision-3.3-2b",
+            "llama-3.2-11b-vision-instruct",
+            "llama-3.2-90b-vision-instruct",
+            "phi-4-multimodal-instruct",
+            "qwen2.5-vl-32b-instruct",
+        }
+        for name in dropped:
+            assert name not in NVIDIA_MODELS, (
+                f"{name} should be filtered out (vision/multimodal) — "
+                f"AgentKthx doesn't support image I/O yet"
+            )
+
 
 # ---------------------------------------------------------------------------
 # list_models + catalog fallback
@@ -547,7 +580,7 @@ class TestNvidiaListModels:
         """_catalog_fallback_list returns the static catalog shaped as
         list_models() entries."""
         models = backend._catalog_fallback_list()
-        assert len(models) >= 28
+        assert len(models) >= 23
 
         # Each entry has the list_models() shape
         for m in models:
