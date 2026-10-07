@@ -953,6 +953,24 @@ class StreamingMixin:
                     # Capture usage from the final usage-only chunk
                     # (arrives when stream_options.include_usage=True)
                     acc.set_usage(chunk.get("_usage"))
+                    # R07.26: stop the chat.py "thinking..." spinner on the
+                    # first chunk that carries content or reasoning. The
+                    # spinner runs on stderr; streaming output goes to stdout.
+                    # Without this, the spinner keeps overwriting streaming
+                    # text until agent.run() returns (the finally block).
+                    if (
+                        delta
+                        or (isinstance(tc_delta, dict) and tc_delta.get("reasoning_content"))
+                        or chunk.get("reasoning_content")
+                        or tc_delta
+                    ):
+                        _spinner_cb = getattr(self, "_on_first_stream_chunk", None)
+                        if _spinner_cb is not None:
+                            try:
+                                _spinner_cb()
+                            except Exception:
+                                pass
+                            self._on_first_stream_chunk = None
                     # Content delta — print immediately
                     if delta:
                         renderer.write_content(delta)
@@ -989,6 +1007,14 @@ class StreamingMixin:
                     **params["backend_kwargs"],
                 )
                 for chunk in stream_gen:
+                    # R07.26: stop the spinner on the first chunk
+                    _spinner_cb = getattr(self, "_on_first_stream_chunk", None)
+                    if _spinner_cb is not None:
+                        try:
+                            _spinner_cb()
+                        except Exception:
+                            pass
+                        self._on_first_stream_chunk = None
                     if isinstance(chunk, str):
                         renderer.write_plain(chunk)
                         acc.add_content_delta(chunk)

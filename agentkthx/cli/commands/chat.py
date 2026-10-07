@@ -1655,6 +1655,19 @@ def cmd_chat(args: argparse.Namespace) -> int:
             if not agent.debug:
                 print()  # blank line before spinner
                 spinner_t = _spinner_start()
+
+                # R07.26: set a callback so the spinner is stopped + cleared
+                # the moment the first streaming chunk arrives (content or
+                # reasoning). Without this, the spinner keeps overwriting
+                # streaming text on stderr until agent.run() returns.
+                # The callback is one-shot: streaming.py sets it to None
+                # after the first invocation so subsequent chunks don't
+                # re-trigger it.
+                def _stop_spinner_on_first_chunk():
+                    if spinner_t:
+                        _spinner_stop_thread(spinner_t)
+
+                agent._on_first_stream_chunk = _stop_spinner_on_first_chunk
             try:
                 # Enable streaming by default for cloud providers, but respect
                 # explicit --stream / --no-stream from the user.
