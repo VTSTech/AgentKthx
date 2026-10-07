@@ -5,6 +5,90 @@ All notable changes to AgentKthx will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [R07.26] - 2026-10-07
+
+**NVIDIA NIM cloud backend + `agentkthx auth` top-level subcommand.** R07.26 adds the 9th cloud backend (NVIDIA NIM at `integrate.api.nvidia.com/v1`) backed by vLLM with a free tier of 1,000 monthly-recurring inference credits, no credit card required. Also ships a new `agentkthx auth` top-level subcommand that exposes the existing `/auth` interactive picker so users can configure API keys + toggle FREE_ONLY flags BEFORE launching a chat session (fixes the misleading `--api-key` reference in the missing-key error message — that flag never existed). The NVIDIA plugin filters its live catalog against a non-chat blocklist (embeddings / reward / safety / vision / translation / specialized tools) so the `agentkthx models --backend nim` output only shows models AgentKthx can actually drive today. Four new API Technical References added under `docs/api/` (NVIDIA NIM, Cloudflare Workers AI, SiliconFlow, DuckDuckGo AI Chat) covering the four free-tier providers being added this release cycle. Suite: 2966 → 3051 passed (+85 net) / 20 skipped. Zero regressions; ruff + black clean.
+
+This release is the first of four planned cloud-backend additions (NVIDIA → Cloudflare → SiliconFlow → DuckDuckGo). The API Technical Reference docs for all four were written first (primary sources cited in each), then the NVIDIA plugin was scaffolded from the `CloudBackend` base class following the Mistral plugin pattern (cleanest modern example, uses R07.24 retry helpers).
+
+### NVIDIA NIM plugin added (`agentkthx/plugins/nvidia/`)
+
+- New 9th cloud backend: `NvidiaBackend(CloudBackend)` (~700 LOC). Registers under both `nvidia` and `nim` aliases via the plugin manifest.
+- **Free tier** (verified Oct 2026 via [stevescargall.com](https://stevescargall.com/run-free-llms-at-scale-litellm-gateway-with-groq-nvidia-nim-and-cloudflare-workers-ai/), [gopenai.com](https://blog.gopenai.com), [stork.ai](https://www.stork.ai)): 1,000 inference credits on signup, **resets monthly** (not daily like Cloudflare), up to 5,000 by request. 40 RPM hard rate limit. No credit card. Quota is account-wide (not per-model) — every model is "free" within the credit budget.
+- **Catalog**: 23 chat-text-only models seeded in `agentkthx/data/model_seed.json` covering Llama (8), Mistral (4), Qwen (2), DeepSeek (4), NVIDIA Nemotron (1), Microsoft Phi (1), IBM Granite (1), Google Gemma (2). Vision/multimodal variants deliberately filtered out — AgentKthx only supports chat text I/O today; image I/O is planned but not yet implemented.
+- **Live catalog filter**: `_fetch_live_models()` queries NVIDIA's open `/v1/models` endpoint (108 entries) and filters via `_NON_CHAT_PATTERNS` blocklist (23 name substrings covering embeddings, reward, safety, vision, translation, document parsing, video analysis, specialized tools, vertical SaaS). New chat models like `moonshotai/kimi-k3` pass through automatically without requiring a seed-catalog update. Blocklist is conservative by design — only patterns that CLEARLY indicate non-chat models are filtered.
+- **Tool support**: chat models default to `NATIVE`. Reasoning models (DeepSeek-R1, R1-distill, Qwen3-Thinking) pre-classified as `REACT` via `_REASONING_NAME_PATTERNS` (deepseek-r\d, -r1, \bthinking\b) — sending `tools` to these models returns 400 from vLLM, so ReAct prompting is used instead.
+- **Credit-exhaustion detection**: `_looks_like_credit_exhaustion(status_code, body_text)` distinguishes the monthly-credit-exhausted 429 (body contains "credit" / "quota" / "balance") from a transient rate-limit 429. Credit-exhausted 429s surface immediately as a clear "monthly quota exhausted — wait for the next reset" RuntimeError instead of burning through retries.
+- **Standard CloudBackend plumbing**: inherits `__init__`, `is_running()`, `_get_auth_headers()`, `_get_model_defaults()`, `get_model_info()`, `get_model_max_context()`, retry helpers (`_compute_retry_after`, `_compute_network_backoff`, `_is_retryable_http_status`), and the ROB-06 deterministic `_close_http_response` from R07.25.
+- **Plugin manifest** (`plugin.json` v0.2): registers `nvidia` + `nim` aliases, declares `NVIDIA_BASE_URL` / `NVIDIA_API_KEY` / `NVIDIA_DEFAULT_MODEL` / `NVIDIA_FREE_ONLY` config defaults, compatibility `agentkthx >=0.7.25`.
+- **83 regression tests** in `tests/test_nvidia_backend.py` covering inheritance, init + URL resolution, auth headers, free-model + credit-exhaustion detection, tool-support classification, catalog content (chat-text-only), blocklist behavior (keeps kimi-k3, blocks embeddings/reward/safety/vision/etc.), model-info lookups, PluginManager discovery + alias registration, config.py env-var defaults, BackendType enum.
+
+### `agentkthx auth` top-level subcommand added
+
+- **Problem**: `CloudBackend.__init__` raised `ValueError: NVIDIA_API_KEY is required for the NVIDIA backend. Set it via --api-key, NVIDIA_API_KEY env var, or Config.` — but `--api-key` was never a real CLI flag. Users hitting this error had no way to set the key without exporting a shell var first.
+- **Fix**: new `agentkthx auth` subcommand exposes the existing `run_auth_picker()` (which already backed the in-chat `/auth` slash command and persisted to `~/.agentkthx/.env`). Loaded on every CLI startup via `env_file.load_env_file()` at `config.py` import time.
+- **Workflow**: `agentkthx auth` → arrow-key picker over 9 backends × 2 entries (key + FREE_ONLY flag) → paste key, Enter → key persisted to `~/.agentkthx/.env` → next CLI invocation picks it up automatically. No shell export needed.
+- New file: `agentkthx/cli/commands/auth.py` — wraps `run_auth_picker(agent=None)` with `KeyboardInterrupt` handling + clean exit codes. Registered in `commands/__init__.py`, the parser, and the dispatch table in `main.py`.
+- Updated `CloudBackend.__init__` error message: now says "Run `agentkthx auth` to set it interactively (persists to ~/.agentkthx/.env), or export <ENV_VAR> in your shell." (no more `--api-key` reference).
+
+### NVIDIA catalog filter (chat-text-only)
+
+The live NVIDIA `/v1/models` endpoint returns 108 entries including embeddings, reward, safety, vision-only, translation, document parsing, video analysis, and specialized-tool models — none of which AgentKthx can drive today (chat-text I/O only; image I/O planned but not yet implemented).
+
+- **Approach**: blocklist (not allowlist). The prior allowlist (only seed-catalog entries) was too aggressive — it dropped legitimate chat models like `moonshotai/kimi-k3` that NVIDIA serves but we hadn't seeded. Switched to a blocklist of 23 name substrings that clearly indicate non-chat models. New chat models pass through automatically without requiring a seed-catalog update.
+- `_NON_CHAT_PATTERNS` covers: embeddings (`embed`, `arctic-embed`), reward (`reward`), safety/guardrails (`safety`, `guard`), translation (`translate`), vision/multimodal (`vision`, `vl-`, `vlm`, `multimodal`, `vila`, `neva`, `nvclip`, `deplot`, `kosmos`, `omni`), document parsing (`parse`), video analysis (`video`), specialized tools (`ising-calibration`, `muse-glimmer`, `diffusion`), vertical SaaS (`palmyra`, `laguna`).
+- **Verified**: 46 chat-capable models pass through (including `kimi-k3`, `mistralai/mistral-large-2-instruct`, `microsoft/phi-3.5-moe-instruct`, `databricks/dbrx-instruct`, `meta/codellama-70b`); 35 non-chat models blocked; 0 chat models incorrectly filtered.
+- When image I/O lands, remove the vision/multimodal patterns from the blocklist + re-add the 5 dropped seed entries (`granite-vision-3.3-2b`, `llama-3.2-11b-vision-instruct`, `llama-3.2-90b-vision-instruct`, `phi-4-multimodal-instruct`, `qwen2.5-vl-32b-instruct`).
+
+### New API Technical Reference docs (`docs/api/`)
+
+Four new reference docs added, each grounded in primary sources (provider's own docs pages + verified free-tier claims via independent corroboration):
+
+- **`NVIDIA_NIM_API_TECHNICAL_REFERENCE.md`** (37 KB) — based on https://docs.nvidia.com/nim/large-language-models/latest/api-reference.html + live `/v1/models` probe. Documents the credit-budget free tier, the open catalog endpoint, tool-support caveats for reasoning models, the credit-exhaustion 429 detection, and the `BackendType.NVIDIA` enum integration.
+- **`CLOUDFLARE_WORKERS_AI_API_TECHNICAL_REFERENCE.md`** (40 KB) — based on https://developers.cloudflare.com/workers-ai/configuration/open-ai-compatibility/ + REST API get-started. Documents the account-ID-in-URL auth pattern, the `options.rejectIfBusy` Cloudflare-specific extension, the GPT-OSS Responses-API-only constraint, and the daily neuron quota (10K/day, UTC reset).
+- **`SILICONFLOW_API_TECHNICAL_REFERENCE.md`** (43 KB) — based on https://docs.siliconflow.com/en/api-reference/chat-completions/chat-completions.md + the function-calling guide. Documents the 3 permanently-free models (`Qwen/Qwen3-8B`, `deepseek-ai/DeepSeek-R1-Distill-Qwen-7B`, `deepseek-ai/DeepSeek-OCR`) with no quota, the heterogeneous error envelopes (JSON for 400/429/503, plain string for 401/404/504), and the `enable_thinking` + `reasoning_content` extension fields.
+- **`DUCKDUCKGO_AI_CHAT_API_TECHNICAL_REFERENCE.md`** (42 KB) — based on reverse-engineered source at https://github.com/mrgick/duck_chat (api.py, cli.py, models/model_type.py) + JSR `@mumulhl/duckduckgo-ai-chat` + DuckDuckGo help pages. Documents the keyless/anonymous protocol, the `x-vqd-4` token rotation lifecycle, the system-message-stripping workaround, the conversation-limit (~20 turns), and the ReAct-only tool path (no native function calling).
+
+### CI fixes
+
+- `tests/test_r07_19_help_sort.py::TestSubcommandListingSorted::test_root_choices_registered_alphabetically` — updated expected subcommand list to include `auth` (now alphabetically between `agent` and `chat`).
+- `tests/test_r07_20_auth_picker.py::TestConfigBackendRows::test_key_display_masked_or_not_set` — fixed order-dependent failure when `OPENROUTER_API_KEY` is left as a short (≤ 8 char) value by `tests/test_api_resilience.py:381` (which sets `"test-key"` without monkeypatch cleanup). The test now accepts both mask shapes: `Set (***<4chars>)` (long-key path) and `Set (***)` (short-key path, no last-4 suffix).
+
+### Files touched
+
+- `agentkthx/__init__.py` — version bumped to `0.7.26`.
+- `pyproject.toml` — `version = "0.7.26"`.
+- `README.md` — header `# ⚛️ AgentKthx R07.26`.
+- `agentkthx/mcp/client.py` — `_CLIENT_VERSION` bumped to `0.7.26` (sent in MCP `initialize` handshake).
+- `agentkthx/core/types.py` — added `BackendType.NVIDIA` enum value.
+- `agentkthx/config.py` — added `NVIDIA_BASE_URL`, `NVIDIA_API_KEY`, `NVIDIA_DEFAULT_MODEL`, `NVIDIA_FREE_ONLY` env vars + DEFAULT_MODEL ladder entry for `nvidia` backend.
+- `agentkthx/cli/auth.py` — added `("NVIDIA", "NVIDIA_API_KEY", "NVIDIA_FREE_ONLY", ())` to `AUTH_BACKENDS` + `"NVIDIA_API_KEY": "nvidia"` to `_KEY_VAR_TO_SLUG` (so `/auth` picker shows NVIDIA row).
+- `agentkthx/cli/commands/config.py` — added NVIDIA to imports, URLs dump, `--full` dump, `_backend_auth_rows` specs, `_BACKEND_SLUG_TO_LABEL` (nvidia + nim), env-var reference dump.
+- `agentkthx/cli/commands/__init__.py` — exported `cmd_auth`.
+- `agentkthx/cli/commands/auth.py` — **new** (cmd_auth wrapper around `run_auth_picker`).
+- `agentkthx/cli/main.py` — added `"auth": cmd_auth` to dispatch table.
+- `agentkthx/cli/parser.py` — registered `auth` subparser.
+- `agentkthx/backends/cloud_base.py` — updated missing-key `ValueError` message (no more `--api-key` reference; now points at `agentkthx auth`).
+- `agentkthx/data/model_seed.json` — added `nvidia` backend key with 23 chat-text-only catalog entries.
+- `agentkthx/plugins/nvidia/__init__.py` — **new** (registers `nvidia` + `nim` aliases).
+- `agentkthx/plugins/nvidia/plugin.json` — **new** (manifest v0.2).
+- `agentkthx/plugins/nvidia/nvidia.py` — **new** (~700 LOC; `NvidiaBackend(CloudBackend)`).
+- `tests/test_nvidia_backend.py` — **new** (83 regression tests).
+- `tests/test_r07_19_help_sort.py` — updated expected subcommand list (added `auth`).
+- `tests/test_r07_20_auth_picker.py` — bumped 8→9 backend count assertions; fixed `test_key_display_masked_or_not_set` to handle short-key mask shape.
+- `scripts/add_nvidia_to_seed.py` — **new** (idempotent seed-extension script).
+- `scripts/filter_nvidia_seed_chat_only.py` — **new** (idempotent filter script that dropped 5 vision/multimodal entries from the seed catalog).
+- `docs/api/NVIDIA_NIM_API_TECHNICAL_REFERENCE.md` — **new** (37 KB).
+- `docs/api/CLOUDFLARE_WORKERS_AI_API_TECHNICAL_REFERENCE.md` — **new** (40 KB).
+- `docs/api/SILICONFLOW_API_TECHNICAL_REFERENCE.md` — **new** (43 KB).
+- `docs/api/DUCKDUCKGO_AI_CHAT_API_TECHNICAL_REFERENCE.md` — **new** (42 KB).
+
+### Next steps (planned)
+
+- Scaffold the Cloudflare Workers AI plugin (slightly more work than NVIDIA due to the account-ID-in-URL pattern + absence of `/v1/models` on the OpenAI-compat path).
+- Scaffold the SiliconFlow plugin (third easiest, with the most useful FREE_ONLY filter — 3 permanently-free models with no quota).
+- Scaffold the DuckDuckGo AI Chat plugin (highest integration cost — custom backend from scratch since DDG is not OpenAI-compatible; unique value: only keyless alternative to Pollinations).
+
 ## [R07.25] - 2026-10-06 05:27:09 PM
 
 **Two-batch closure pass + backend support tiers introduced.** R07.25 ships 5 closures (4 CLOSED + 1 WONTFIX) across two batches, plus a new `docs/SUPPORT.md` policy that splits the cloud backends into Fully Supported (ZAI, OpenRouter, HuggingFace, Gemini, Mistral) and Limited Support (Pollinations, OrcaRouter, OpenAI) tiers based on maintainer testing coverage. The `audit/generate_audit_dash.py` dashboard generator also gained an MCP category bucket + a hero resolution-rate % (was closure-rate %). Suite: 2959 → 2966 passed (+7 net across the two batches) / 20 skipped. Zero regressions; ruff + black clean. Register: 125 findings — 14 OPEN / 101 CLOSED / 10 WONTFIX (111 archived, ~89%). Closure rate 81% / resolution rate 89%.

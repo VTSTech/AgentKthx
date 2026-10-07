@@ -143,6 +143,7 @@ class TestSubcommandListingSorted:
         assert names == sorted(names)
         assert names == [
             "agent",
+            "auth",
             "chat",
             "config",
             "mcp",

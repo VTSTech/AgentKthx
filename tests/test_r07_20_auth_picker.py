@@ -701,12 +701,35 @@ class TestConfigBackendRows:
         ]
 
     def test_key_display_masked_or_not_set(self, rows_ansi):
+        """Every key is either Not Set or masked as Set (***<last4>).
+
+        Two valid mask shapes:
+          - ``Set (***<4chars>)`` — long-key path (key > 8 chars; last 4 shown)
+          - ``Set (***)``         — short-key path (key ≤ 8 chars; no last4)
+
+        The short-key path matters because some prior tests (e.g.
+        test_api_resilience.py:381) set ``OPENROUTER_API_KEY=test-key``
+        without monkeypatch cleanup, leaking 8-char values into the env.
+        The mask itself is correct in both cases — only the test's
+        tail-length assertion was too strict for the short-key case.
+        """
         for marker, label, key_s, free_s, fb in rows_ansi:
             plain = self._strip(key_s)
             assert plain == "Not Set" or plain.startswith("Set (***")
             if plain.startswith("Set (***"):
+                # Two valid shapes:
+                #   "Set (***abcd)" — long key, last 4 chars shown (len 13)
+                #   "Set (***)"      — short key (≤ 8 chars), no last4 (len 9)
+                if plain == "Set (***)":
+                    # Short-key path — no last4 to verify. Already confirmed
+                    # by the startswith check above; nothing else to assert.
+                    continue
+                # Long-key path: verify exactly 4 chars of last-4 tail.
                 tail = plain[len("Set (***") : -1]
-                assert len(tail) == 4
+                assert len(tail) == 4, (
+                    f"{label}: masked display {plain!r} — expected 4-char "
+                    f"tail, got {tail!r} (len {len(tail)})"
+                )
 
     def test_masked_key_shows_last4_only(self, monkeypatch):
         monkeypatch.setenv("ZAI_API_KEY", "sk-zai-test-key-1234567890abcd")
