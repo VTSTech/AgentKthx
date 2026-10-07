@@ -2,7 +2,7 @@
 
 **Status: Alpha**
 
-A minimal, modular, python stdlib, agentic framework for tool calling AI agents. Runs **locally** with [BitNet](https://github.com/microsoft/BitNet), [Ollama](https://ollama.com), [TurboQuant](https://github.com/TheTom/llama-cpp-turboquant), **in the cloud** with [Google Gemini](https://ai.google.dev/gemini-api/docs), [HuggingFace](https://huggingface.co/), [Mistral](https://mistral.ai), [NVIDIA](https://build.nvidia.com), [OpenAI](https://openai.com), [OpenRouter](https://openrouter.ai), [OrcaRouter](https://www.orcarouter.ai), [Pollinations](https://enter.pollinations.ai) and [ZAI](https://api.z.ai). Extensible via a manifest-based **plugin system** for additional backends and features.
+A minimal, modular, python stdlib, agentic framework for tool calling AI agents. Runs **locally** with [BitNet](https://github.com/microsoft/BitNet), [Ollama](https://ollama.com), [TurboQuant](https://github.com/TheTom/llama-cpp-turboquant), **in the cloud** with [Google](https://ai.google.dev/gemini-api/docs), [HuggingFace](https://huggingface.co/), [Mistral](https://mistral.ai), [NVIDIA](https://build.nvidia.com), [OpenAI](https://openai.com), [OpenRouter](https://openrouter.ai), [OrcaRouter](https://www.orcarouter.ai), [Pollinations](https://enter.pollinations.ai) and [ZAI](https://api.z.ai). Extensible via a manifest-based **plugin system** for additional backends and features.
 
 Inspired by the architecture of OpenClaw, rebuilt from scratch for local-first operation.
 
