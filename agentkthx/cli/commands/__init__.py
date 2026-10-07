@@ -7,6 +7,7 @@ facade (agentkthx.cli) and main() can import every handler in one place.
 from __future__ import annotations
 
 from .agent import cmd_agent
+from .auth import cmd_auth
 from .chat import cmd_chat
 from .config import cmd_config
 from .mcp import cmd_mcp
@@ -41,4 +42,5 @@ __all__ = [
     "cmd_sessions",
     "cmd_plugins",
     "cmd_mcp",
+    "cmd_auth",
 ]

@@ -309,7 +309,9 @@ class CloudBackend(OpenAICompatibleBackend):
         if not self._api_key or not self._api_key.strip():
             raise ValueError(
                 f"{self._api_key_env_var} is required for the {self._provider_label} backend. "
-                f"Set it via --api-key, {self._api_key_env_var} env var, or Config."
+                f"Run `agentkthx auth` to set it interactively (persists to "
+                f"~/.agentkthx/.env), or export {self._api_key_env_var} in "
+                f"your shell."
             )
         if len(self._api_key.strip()) < self._MIN_API_KEY_LEN:
             raise ValueError(

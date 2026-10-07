@@ -1,7 +1,7 @@
 {
   "_meta": {
-    "release": "R07.20",
-    "generated": "2026-10-03",
+    "release": "R07.26",
+    "generated": "2026-10-07",
     "note": "Static model catalogs extracted from the plugin modules by scripts/generate_model_seed.py. Loaded by agentkthx.model_cache.load_seed_catalog() and used as the initial defaults of the persistent model-catalog cache (and the offline fallback lists). Backend keys must not start with '_' — that prefix is reserved for metadata."
   },
   "zai": {
@@ -1252,6 +1252,260 @@
       "max_completion_tokens": 4096,
       "provider": "prism-ml",
       "description": "Ternary-Bonsai-27B AWQ 4-bit, $0/token via Together"
+    }
+  },
+  "nvidia": {
+    "llama-3.3-70b-instruct": {
+      "context_length": 131072,
+      "default_temperature": 0.7,
+      "default_max_tokens": 16384,
+      "pricing": {
+        "input": 0.0,
+        "output": 0.0
+      }
+    },
+    "llama-3.1-405b-instruct": {
+      "context_length": 131072,
+      "default_temperature": 0.7,
+      "default_max_tokens": 16384,
+      "pricing": {
+        "input": 0.0,
+        "output": 0.0
+      }
+    },
+    "llama-3.1-70b-instruct": {
+      "context_length": 131072,
+      "default_temperature": 0.7,
+      "default_max_tokens": 16384,
+      "pricing": {
+        "input": 0.0,
+        "output": 0.0
+      }
+    },
+    "llama-3.1-8b-instruct": {
+      "context_length": 131072,
+      "default_temperature": 0.7,
+      "default_max_tokens": 4096,
+      "pricing": {
+        "input": 0.0,
+        "output": 0.0
+      }
+    },
+    "llama-3.2-1b-instruct": {
+      "context_length": 131072,
+      "default_temperature": 0.7,
+      "default_max_tokens": 4096,
+      "pricing": {
+        "input": 0.0,
+        "output": 0.0
+      }
+    },
+    "llama-3.2-3b-instruct": {
+      "context_length": 131072,
+      "default_temperature": 0.7,
+      "default_max_tokens": 4096,
+      "pricing": {
+        "input": 0.0,
+        "output": 0.0
+      }
+    },
+    "llama-3.2-11b-vision-instruct": {
+      "context_length": 131072,
+      "default_temperature": 0.7,
+      "default_max_tokens": 4096,
+      "pricing": {
+        "input": 0.0,
+        "output": 0.0
+      }
+    },
+    "llama-3.2-90b-vision-instruct": {
+      "context_length": 131072,
+      "default_temperature": 0.7,
+      "default_max_tokens": 8192,
+      "pricing": {
+        "input": 0.0,
+        "output": 0.0
+      }
+    },
+    "mistral-nemo-12b-instruct": {
+      "context_length": 131072,
+      "default_temperature": 0.7,
+      "default_max_tokens": 8192,
+      "pricing": {
+        "input": 0.0,
+        "output": 0.0
+      }
+    },
+    "mistral-small-24b-instruct": {
+      "context_length": 131072,
+      "default_temperature": 0.7,
+      "default_max_tokens": 8192,
+      "pricing": {
+        "input": 0.0,
+        "output": 0.0
+      }
+    },
+    "mixtral-8x7b-instruct-v0.1": {
+      "context_length": 32768,
+      "default_temperature": 0.7,
+      "default_max_tokens": 4096,
+      "pricing": {
+        "input": 0.0,
+        "output": 0.0
+      }
+    },
+    "mixtral-8x22b-instruct-v0.1": {
+      "context_length": 65536,
+      "default_temperature": 0.7,
+      "default_max_tokens": 8192,
+      "pricing": {
+        "input": 0.0,
+        "output": 0.0
+      }
+    },
+    "qwen2.5-7b-instruct": {
+      "context_length": 32768,
+      "default_temperature": 0.7,
+      "default_max_tokens": 4096,
+      "pricing": {
+        "input": 0.0,
+        "output": 0.0
+      }
+    },
+    "qwen2.5-coder-32b-instruct": {
+      "context_length": 131072,
+      "default_temperature": 0.7,
+      "default_max_tokens": 8192,
+      "pricing": {
+        "input": 0.0,
+        "output": 0.0
+      }
+    },
+    "qwen2.5-vl-32b-instruct": {
+      "context_length": 131072,
+      "default_temperature": 0.7,
+      "default_max_tokens": 8192,
+      "pricing": {
+        "input": 0.0,
+        "output": 0.0
+      }
+    },
+    "deepseek-r1": {
+      "context_length": 131072,
+      "default_temperature": 0.6,
+      "default_max_tokens": 32768,
+      "pricing": {
+        "input": 0.0,
+        "output": 0.0
+      }
+    },
+    "deepseek-r1-distill-llama-8b": {
+      "context_length": 131072,
+      "default_temperature": 0.6,
+      "default_max_tokens": 16384,
+      "pricing": {
+        "input": 0.0,
+        "output": 0.0
+      }
+    },
+    "deepseek-r1-distill-qwen-32b": {
+      "context_length": 131072,
+      "default_temperature": 0.6,
+      "default_max_tokens": 16384,
+      "pricing": {
+        "input": 0.0,
+        "output": 0.0
+      }
+    },
+    "deepseek-v3": {
+      "context_length": 131072,
+      "default_temperature": 0.7,
+      "default_max_tokens": 8192,
+      "pricing": {
+        "input": 0.0,
+        "output": 0.0
+      }
+    },
+    "llama-3.1-nemotron-70b-instruct": {
+      "context_length": 131072,
+      "default_temperature": 0.7,
+      "default_max_tokens": 16384,
+      "pricing": {
+        "input": 0.0,
+        "output": 0.0
+      }
+    },
+    "llama-3.3-nemotron-super-49b-v1": {
+      "context_length": 131072,
+      "default_temperature": 0.7,
+      "default_max_tokens": 16384,
+      "pricing": {
+        "input": 0.0,
+        "output": 0.0
+      }
+    },
+    "nemotron-nano-9b-v2": {
+      "context_length": 131072,
+      "default_temperature": 0.7,
+      "default_max_tokens": 4096,
+      "pricing": {
+        "input": 0.0,
+        "output": 0.0
+      }
+    },
+    "phi-4-mini-instruct": {
+      "context_length": 131072,
+      "default_temperature": 0.7,
+      "default_max_tokens": 4096,
+      "pricing": {
+        "input": 0.0,
+        "output": 0.0
+      }
+    },
+    "phi-4-multimodal-instruct": {
+      "context_length": 131072,
+      "default_temperature": 0.7,
+      "default_max_tokens": 8192,
+      "pricing": {
+        "input": 0.0,
+        "output": 0.0
+      }
+    },
+    "granite-3.3-8b-instruct": {
+      "context_length": 131072,
+      "default_temperature": 0.7,
+      "default_max_tokens": 4096,
+      "pricing": {
+        "input": 0.0,
+        "output": 0.0
+      }
+    },
+    "granite-vision-3.3-2b": {
+      "context_length": 32768,
+      "default_temperature": 0.7,
+      "default_max_tokens": 4096,
+      "pricing": {
+        "input": 0.0,
+        "output": 0.0
+      }
+    },
+    "gemma-2-27b-it": {
+      "context_length": 8192,
+      "default_temperature": 0.7,
+      "default_max_tokens": 4096,
+      "pricing": {
+        "input": 0.0,
+        "output": 0.0
+      }
+    },
+    "gemma-2-9b-it": {
+      "context_length": 8192,
+      "default_temperature": 0.7,
+      "default_max_tokens": 4096,
+      "pricing": {
+        "input": 0.0,
+        "output": 0.0
+      }
     }
   }
 }

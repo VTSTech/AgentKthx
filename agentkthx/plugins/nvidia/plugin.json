@@ -1,0 +1,45 @@
+{
+  "$schema": "https://raw.githubusercontent.com/VTSTech/AgentKthx/main/schemas/v0.2/plugin.schema.json",
+  "name": "nvidia",
+  "version": "0.1.0",
+  "description": "NVIDIA NIM API backend for 80+ models (Llama, Mistral, Qwen, Phi, DeepSeek, Nemotron, Granite, GLM) via OpenAI Chat-Completions API at integrate.api.nvidia.com — free tier with monthly-recurring 1,000 inference credits, no credit card required",
+  "author": {
+    "name": "VTSTech",
+    "url": "https://www.vts-tech.org"
+  },
+  "license": "MIT",
+  "extensions": {
+    "org.vts-tech.agentkthx": {
+      "display_name": "NVIDIA NIM Cloud Backend",
+      "type": "backend",
+      "entrypoint": "__init__",
+      "depends": [],
+      "optional_depends": [],
+      "config": {
+        "env_prefix": "NVIDIA",
+        "defaults": {
+          "NVIDIA_BASE_URL": "https://integrate.api.nvidia.com/v1",
+          "NVIDIA_API_KEY": "",
+          "NVIDIA_DEFAULT_MODEL": "meta/llama-3.3-70b-instruct",
+          "NVIDIA_FREE_ONLY": "false"
+        }
+      },
+      "provides": {
+        "backends": {
+          "nvidia": "nvidia.NvidiaBackend",
+          "nim": "nvidia.NvidiaBackend"
+        },
+        "cli_commands": [],
+        "cli_flags": {
+          "--backend": [
+            "nvidia",
+            "nim"
+          ]
+        }
+      },
+      "compatibility": {
+        "agentkthx": ">=0.7.25"
+      }
+    }
+  }
+}

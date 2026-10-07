@@ -108,6 +108,7 @@ AUTH_BACKENDS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("OpenAI", "OPENAI_API_KEY", "OPENAI_FREE_ONLY", ()),
     ("Mistral", "MISTRAL_API_KEY", "MISTRAL_FREE_ONLY", ()),
     ("Pollinations", "POLLINATIONS_API_KEY", "POLLINATIONS_FREE_ONLY", ()),
+    ("NVIDIA", "NVIDIA_API_KEY", "NVIDIA_FREE_ONLY", ()),
 )
 
 # Canonical API-key env var -> BackendType.slug, used to patch the LIVE
@@ -123,6 +124,7 @@ _KEY_VAR_TO_SLUG: dict[str, str] = {
     "OPENAI_API_KEY": "openai",
     "MISTRAL_API_KEY": "mistral",
     "POLLINATIONS_API_KEY": "pollinations",
+    "NVIDIA_API_KEY": "nvidia",
 }
 
 

@@ -133,21 +133,28 @@ class FakeAgent:
 
 class TestAuthRegistry:
     def test_sixteen_entries_eight_pairs(self):
+        """R07.26: NVIDIA added — 18 entries (9 keys + 9 flags).
+
+        Historical name retained; the count grew from 8 pairs to 9 when
+        the NVIDIA NIM backend was added in R07.26.
+        """
         entries = auth_vars()
-        assert len(entries) == 16
-        assert len({e.name for e in entries}) == 16
+        assert len(entries) == 18
+        assert len({e.name for e in entries}) == 18
         kinds = [e.kind for e in entries]
-        assert kinds.count("key") == 8
-        assert kinds.count("flag") == 8
+        assert kinds.count("key") == 9
+        assert kinds.count("flag") == 9
 
     def test_pairs_grouped_key_first(self):
         entries = auth_vars()
-        for i in range(0, 16, 2):
+        # R07.26: 18 entries (9 pairs of key+flag)
+        for i in range(0, 18, 2):
             key, flag = entries[i], entries[i + 1]
             assert key.kind == "key" and flag.kind == "flag"
             assert key.backend == flag.backend
 
     def test_all_eight_cloud_backends_present(self):
+        """R07.26: NVIDIA added — 9 cloud backends now."""
         labels = {t[0] for t in AUTH_BACKENDS}
         assert labels == {
             "ZAI",
@@ -158,6 +165,7 @@ class TestAuthRegistry:
             "OpenAI",
             "Mistral",
             "Pollinations",
+            "NVIDIA",
         }
 
     def test_canonical_env_names_match_backend_resolution(self):
@@ -171,6 +179,7 @@ class TestAuthRegistry:
             "OPENAI_API_KEY",
             "MISTRAL_API_KEY",
             "POLLINATIONS_API_KEY",
+            "NVIDIA_API_KEY",
         }
         flags = {t[2] for t in AUTH_BACKENDS}
         assert flags == {
@@ -182,6 +191,7 @@ class TestAuthRegistry:
             "OPENAI_FREE_ONLY",
             "MISTRAL_FREE_ONLY",
             "POLLINATIONS_FREE_ONLY",
+            "NVIDIA_FREE_ONLY",
         }
 
     def test_gemini_and_hf_carry_alt_names(self):
@@ -676,6 +686,7 @@ class TestConfigBackendRows:
         return re.compile(r"\x1b\[[0-9;]*m").sub("", s)
 
     def test_eight_rows_all_cloud_backends(self, rows_ansi):
+        """R07.26: NVIDIA added — 9 rows now. Historical name retained."""
         labels = [r[1] for r in rows_ansi]
         assert labels == [
             "ZAI",
@@ -686,6 +697,7 @@ class TestConfigBackendRows:
             "OpenAI",
             "Mistral",
             "Pollinations",
+            "NVIDIA",
         ]
 
     def test_key_display_masked_or_not_set(self, rows_ansi):

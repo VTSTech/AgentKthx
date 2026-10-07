@@ -324,6 +324,28 @@ POLLINATIONS_ANON_CATALOG = os.environ.get("POLLINATIONS_ANON_CATALOG", "").lowe
 )
 
 
+# NVIDIA NIM plugin (agentkthx/plugins/nvidia/)
+# Cloud-hosted OpenAI-compatible endpoint at integrate.api.nvidia.com/v1
+# backed by vLLM. Catalog: Llama, Mistral, Qwen, Phi, DeepSeek, NV Nemotron,
+# Granite, GLM (80+ models). Free tier: 1,000 credits on signup, resets
+# MONTHLY, up to 5,000 by request. 40 RPM. No credit card. See
+# docs/api/NVIDIA_NIM_API_TECHNICAL_REFERENCE.md.
+NVIDIA_BASE_URL = os.environ.get("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")
+# NVIDIA cloud NIM API key. Issued at https://build.nvidia.com → Account →
+# API Keys. Same `nvapi-` prefix as NGC personal keys (which pull NIM
+# containers from nvcr.io); the cloud endpoint distinguishes them by scope.
+NVIDIA_API_KEY = os.environ.get("NVIDIA_API_KEY", "")
+# Default model — Llama-3.3-70B-Instruct (flagship, 128K context, supports
+# tools + streaming + JSON mode). Override with NVIDIA_DEFAULT_MODEL env.
+NVIDIA_DEFAULT_MODEL = os.environ.get("NVIDIA_DEFAULT_MODEL", "meta/llama-3.3-70b-instruct")
+# Strict free-tier enforcement: when true, the 429-with-credit-exhausted
+# error message surfaces a clear "monthly quota exhausted" hint instead of
+# the generic rate-limit boilerplate. NVIDIA's quota is account-wide (not
+# per-model), so FREE_ONLY does NOT filter the catalog — every model is
+# "free" within the monthly credit budget. Default false.
+NVIDIA_FREE_ONLY = os.environ.get("NVIDIA_FREE_ONLY", "").lower() in ("1", "true", "yes")
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # BACKEND SELECTION
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -355,6 +377,8 @@ elif AGENTKTHX_BACKEND == "huggingface" or AGENTKTHX_BACKEND == "hf":
     DEFAULT_MODEL = os.environ.get("AGENTKTHX_MODEL", "openai/gpt-oss-120b")
 elif AGENTKTHX_BACKEND == "openai" or AGENTKTHX_BACKEND == "oai":
     DEFAULT_MODEL = os.environ.get("AGENTKTHX_MODEL", "gpt-6-sol")
+elif AGENTKTHX_BACKEND == "nvidia":
+    DEFAULT_MODEL = os.environ.get("AGENTKTHX_MODEL", "meta/llama-3.3-70b-instruct")
 else:
     DEFAULT_MODEL = os.environ.get("AGENTKTHX_MODEL", "qwen2.5:0.5b")
 

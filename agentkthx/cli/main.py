@@ -10,6 +10,7 @@ from typing import Callable, Optional
 from .banner import _print_update_notice, _run_update_check, print_banner
 from .commands import (
     cmd_agent,
+    cmd_auth,
     cmd_chat,
     cmd_config,
     cmd_mcp,
@@ -146,6 +147,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         "plugins": cmd_plugins,
         "mcp": cmd_mcp,
         "update": cmd_update,
+        "auth": cmd_auth,
     }
 
     handler = commands.get(args.command)

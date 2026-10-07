@@ -156,6 +156,18 @@ class BackendType(Enum):
     # docs/api/POLLINATIONS_API_TECHNICAL_REFERENCE.md.
     POLLINATIONS = "pollinations"
 
+    # NVIDIA NIM — cloud-hosted OpenAI-compatible endpoint at
+    # https://integrate.api.nvidia.com/v1 backed by vLLM. Broad catalog
+    # (Llama, Mistral, Qwen, Phi, DeepSeek, NV Nemotron, Granite, GLM).
+    # Free tier: 1,000 inference credits on signup, resets MONTHLY (not
+    # daily like Cloudflare), up to 5,000 by request. 40 RPM. No credit
+    # card. Supports tools, streaming, repetition_penalty, top_k.
+    # Reasoning models (DeepSeek-R1, Qwen3-Thinking) do NOT support
+    # tools — ReAct fallback applies.
+    # See agentkthx/plugins/nvidia/ and
+    # docs/api/NVIDIA_NIM_API_TECHNICAL_REFERENCE.md.
+    NVIDIA = "nvidia"
+
 
 class ApiMode(Enum):
     """API mode for backend communication.

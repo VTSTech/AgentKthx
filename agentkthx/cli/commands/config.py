@@ -20,6 +20,8 @@ _BACKEND_SLUG_TO_LABEL = {
     "openai": "OpenAI",
     "mistral": "Mistral",
     "pollinations": "Pollinations",
+    "nvidia": "NVIDIA",
+    "nim": "NVIDIA",
 }
 
 
@@ -55,6 +57,10 @@ def cmd_config(args: argparse.Namespace) -> int:
         MISTRAL_SAFE_PROMPT,
         MISTRAL_SERVICE_TIER,
         NUM_CTX,
+        NVIDIA_API_KEY,
+        NVIDIA_BASE_URL,
+        NVIDIA_DEFAULT_MODEL,
+        NVIDIA_FREE_ONLY,
         OLLAMA_BASE_URL,
         OPENAI_API_KEY,
         OPENAI_BASE_URL,
@@ -109,6 +115,7 @@ def cmd_config(args: argparse.Namespace) -> int:
             ("MISTRAL_BASE_URL", MISTRAL_BASE_URL),
             ("ORCAROUTER_BASE_URL", ORCAROUTER_BASE_URL),
             ("POLLINATIONS_BASE_URL", POLLINATIONS_BASE_URL),
+            ("NVIDIA_BASE_URL", NVIDIA_BASE_URL),
             ("ACP_BASE_URL", ACP_BASE_URL),
         ]
         for name, val in urls:
@@ -195,6 +202,11 @@ def cmd_config(args: argparse.Namespace) -> int:
                 ("POLLINATIONS_FREE_ONLY", str(POLLINATIONS_FREE_ONLY)),
                 ("POLLINATIONS_ANON_CATALOG", str(POLLINATIONS_ANON_CATALOG)),
             ],
+            "NVIDIA NIM": [
+                ("NVIDIA_API_KEY", _mask_key(NVIDIA_API_KEY)),
+                ("NVIDIA_DEFAULT_MODEL", NVIDIA_DEFAULT_MODEL),
+                ("NVIDIA_FREE_ONLY", str(NVIDIA_FREE_ONLY)),
+            ],
             "ACP": [
                 ("ACP_USER", ACP_USER),
                 ("ACP_PASS", _mask_key(ACP_PASS)),
@@ -255,6 +267,7 @@ def cmd_config(args: argparse.Namespace) -> int:
             "Mistral": MISTRAL_BASE_URL,
             "OrcaRouter": ORCAROUTER_BASE_URL,
             "Pollinations": POLLINATIONS_BASE_URL,
+            "NVIDIA": NVIDIA_BASE_URL,
             "ACP": ACP_BASE_URL,
         },
         acp_user=ACP_USER,
@@ -298,6 +311,8 @@ def _backend_auth_rows(active_backend: str) -> list[tuple[str, str, str, str, st
         MISTRAL_API_KEY,
         MISTRAL_FREE_FALLBACK_MODEL,
         MISTRAL_FREE_ONLY,
+        NVIDIA_API_KEY,
+        NVIDIA_FREE_ONLY,
         OPENAI_API_KEY,
         OPENAI_FREE_FALLBACK_MODEL,
         OPENAI_FREE_ONLY,
@@ -325,6 +340,7 @@ def _backend_auth_rows(active_backend: str) -> list[tuple[str, str, str, str, st
         ("OpenAI", OPENAI_API_KEY, OPENAI_FREE_ONLY, OPENAI_FREE_FALLBACK_MODEL),
         ("Mistral", MISTRAL_API_KEY, MISTRAL_FREE_ONLY, MISTRAL_FREE_FALLBACK_MODEL),
         ("Pollinations", POLLINATIONS_API_KEY, POLLINATIONS_FREE_ONLY, POLLINATIONS_FALLBACK_MODEL),
+        ("NVIDIA", NVIDIA_API_KEY, NVIDIA_FREE_ONLY, ""),
     ]
     rows: list[tuple[str, str, str, str, str]] = []
     for label, key_val, free_only, fallback in specs:
@@ -568,6 +584,20 @@ def _print_config_summary(
             "Browse the public catalog anonymously even when a key is set",
         ),
         ("POLLINATIONS_MAX_RETRIES", "Max transient-error retries (default: 5)"),
+        # ── NVIDIA NIM ──
+        ("NVIDIA_BASE_URL", "NVIDIA NIM API URL (default: https://integrate.api.nvidia.com/v1)"),
+        (
+            "NVIDIA_API_KEY",
+            "NVIDIA NIM API key (nvapi-... prefix, issued at https://build.nvidia.com)",
+        ),
+        (
+            "NVIDIA_DEFAULT_MODEL",
+            "Default model (default: meta/llama-3.3-70b-instruct)",
+        ),
+        (
+            "NVIDIA_FREE_ONLY",
+            "Surfaces monthly-quota-exhausted 429 message clearly (default: false)",
+        ),
         # ── ACP / TurboQuant ──
         ("ACP_BASE_URL", "ACP server URL"),
         ("ACP_USER", "ACP username (default: admin)"),

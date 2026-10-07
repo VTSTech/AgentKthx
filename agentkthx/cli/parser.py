@@ -117,6 +117,14 @@ def create_parser() -> argparse.ArgumentParser:
         help="Show all configuration variables including dataclass defaults",
     )
 
+    # Auth command — top-level entry point for the interactive /auth picker.
+    # Lets users set API keys + toggle FREE_ONLY flags BEFORE launching a
+    # chat session. Persists to ~/.agentkthx/.env (loaded on every startup).
+    subparsers.add_parser(
+        "auth",
+        help="Set API keys + toggle FREE_ONLY flags (interactive; persists to ~/.agentkthx/.env)",
+    )
+
     # Models command
     models_parser = subparsers.add_parser("models", help="List available models")
     models_parser.add_argument(
