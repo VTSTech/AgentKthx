@@ -2,9 +2,9 @@
 
 AgentKthx is a modular agent framework designed for local LLMs with tool-calling capabilities. It implements the OpenResponses specification for multi-provider, interoperable LLM interfaces.
 
-**Specification Compliance**: 100% (R03.5+) -- R04.x, R05.x, R06.0–R07.24
+**Specification Compliance**: 100% (R03.5+) -- R04.x, R05.x, R06.0–R07.26
 
-**Version**: R07.24 (0.7.24)
+**Version**: R07.26 (0.7.26)
 - OpenResponses API: 100%
 - Chat Completions API: 100%
 - Soul Spec v0.5: 100%
@@ -15,7 +15,7 @@ AgentKthx is a modular agent framework designed for local LLMs with tool-calling
 ```
 agentkthx/
 ├── core/
-│   ├── types.py              # Enum types (StepResultType, BackendType.{OLLAMA, LLAMA_SERVER, BITNET, ZAI, OPENROUTER, GEMINI, HUGGINGFACE, OPENAI, ORCAROUTER, MISTRAL, POLLINATIONS}, ApiMode.OPENRE/OPENAI/JEV, ToolSupportLevel)
+│   ├── types.py              # Enum types (StepResultType, BackendType.{OLLAMA, TURBOQUANT, LLAMA_SERVER, BITNET, ZAI, OPENROUTER, GEMINI, HUGGINGFACE, OPENAI, ORCAROUTER, MISTRAL, POLLINATIONS, NVIDIA}, ApiMode.OPENRE/OPENAI/JEV, ToolSupportLevel)
 │   ├── models.py             # Data models (Tool, ToolParam, StepResult, AgentRun)
 │   ├── memory.py             # Sliding window conversation memory
 │   ├── persistent_memory.py  # SQLite-backed PersistentMemory(Memory) subclass (R04.3)
@@ -130,6 +130,15 @@ agentkthx/
 │   ├── pollinations/         # Pollinations free-tier plugin
 │   │   ├── plugin.json       # Manifest (type: backend, provides: pollinations + poll alias)
 │   │   └── pollinations.py   # PollinationsBackend: free-tier chat models
+│   ├── nvidia/               # NVIDIA NIM cloud API plugin (R07.26)
+│   │   ├── plugin.json       # Manifest (type: backend, provides: nvidia + nim alias)
+│   │   ├── __init__.py       # register()/unregister() entrypoints
+│   │   └── nvidia.py         # NvidiaBackend: 45-model catalog (rebuilt from live
+│   │                         # /v1/models), non-chat blocklist filter (embeddings/
+│   │                         # reward/safety/vision/translation), credit-exhaustion
+│   │                         # 429 detection, fixed-param 400 handler (kimi-k3 top_p),
+│   │                         # thinking-model timeout (300s), full prefixed ID
+│   │                         # catalog lookup (no prefix stripping)
 │   ├── turboquant/           # TurboQuant server management plugin
 │   │   ├── plugin.json       # Manifest (type: feature, provides: turbo CLI command)
 │   │   └── turbo.py           # Server lifecycle, Ollama model registry, GGUF parsing.

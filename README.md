@@ -2,7 +2,7 @@
 
 **Status: Alpha**
 
-A minimal, modular, python stdlib, agentic framework for tool calling AI agents. Runs **locally** with [BitNet](https://github.com/microsoft/BitNet), [Ollama](https://ollama.com), [TurboQuant](https://github.com/TheTom/llama-cpp-turboquant), **in the cloud** with [Google Gemini](https://ai.google.dev/gemini-api/docs), [HuggingFace](https://huggingface.co/), [Mistral](https://mistral.ai), [OpenAI](https://openai.com), [OpenRouter](https://openrouter.ai), [OrcaRouter](https://www.orcarouter.ai), [Pollinations](https://enter.pollinations.ai) and [ZAI](https://api.z.ai). Extensible via a manifest-based **plugin system** for additional backends and features.
+A minimal, modular, python stdlib, agentic framework for tool calling AI agents. Runs **locally** with [BitNet](https://github.com/microsoft/BitNet), [Ollama](https://ollama.com), [TurboQuant](https://github.com/TheTom/llama-cpp-turboquant), **in the cloud** with [Google Gemini](https://ai.google.dev/gemini-api/docs), [HuggingFace](https://huggingface.co/), [Mistral](https://mistral.ai), [NVIDIA NIM](https://build.nvidia.com), [OpenAI](https://openai.com), [OpenRouter](https://openrouter.ai), [OrcaRouter](https://www.orcarouter.ai), [Pollinations](https://enter.pollinations.ai) and [ZAI](https://api.z.ai). Extensible via a manifest-based **plugin system** for additional backends and features.
 
 Inspired by the architecture of OpenClaw, rebuilt from scratch for local-first operation.
 
@@ -35,7 +35,7 @@ Inspired by the architecture of OpenClaw, rebuilt from scratch for local-first o
 | [ARCH.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/ARCH.md) | Technical documentation for developers (directory structure, core design, orchestrator modes) |
 | [CHANGELOG.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/CHANGELOG.md) | Version history and release notes (includes LocalClaw history) |
 | [CREDITS.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/CREDITS.md) | Acknowledges every project, inspiration, API, model creator, and specification that makes AgentKthx possible |
-| [docs/api/](https://github.com/VTSTech/AgentKthx/blob/main/docs/api/) | **API Technical References** — one deep-dive per provider, all in one folder: ZAI, OpenRouter, Gemini, Hugging Face Router, OpenAI, Mistral, Pollinations, OrcaRouter (auth & endpoints, request/response schemas, model catalogs, function calling, streaming, error codes & recovery, rate limits, free-tier behavior, AgentKthx `Backend` + `plugin.json` blueprints, troubleshooting matrices) |
+| [docs/api/](https://github.com/VTSTech/AgentKthx/blob/main/docs/api/) | **API Technical References** — one deep-dive per provider, all in one folder: NVIDIA NIM, ZAI, OpenRouter, Gemini, Hugging Face Router, OpenAI, Mistral, Pollinations, OrcaRouter (auth & endpoints, request/response schemas, model catalogs, function calling, streaming, error codes & recovery, rate limits, free-tier behavior, AgentKthx `Backend` + `plugin.json` blueprints, troubleshooting matrices) |
 | [JEV_API_MODE.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/JEV_API_MODE.md) | JEV API mode — System-One decisions via any free LLM (Jev-compatible shape) |
 | [mcp/ROADMAP.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/mcp/ROADMAP.md) | **MCP support** — Phase 1 (client mode, stdio) status + Phase 2 (`kthx-audit` MCP server) + Phase 3 (generic `mcp serve`) plan |
 | [PLUGIN_SPEC_v0.2.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/PLUGIN_SPEC_v0.2.md) | Plugin spec v0.2 — lifecycle hooks, plugin tools API, external plugin roots, dual-form manifests, migration guide from v0.1 |
@@ -47,12 +47,12 @@ Inspired by the architecture of OpenClaw, rebuilt from scratch for local-first o
 
 - **Zero dependencies** — Uses Python stdlib only (urllib for HTTP)
 - **Plugin system** — Manifest-based plugin discovery, lazy loading, dependency resolution (R05.0), plugin spec v0.2 lifecycle hooks (`on_init`/`on_run_start`/`on_run_end`/`on_error`/`on_shutdown`), plugin-provided tools, external plugin roots (`~/.agentkthx/plugins/`, `$AGENTKTHX_PLUGIN_PATH`), optional `sha256` content pinning (R07.05 SEC-06), `plugins --load/--unload/--reload/--json/--verbose` management
-- **Native + plugin backends** — Ollama + TurboQuant built-in; OpenRouter, BitNet, ZAI, ACP, Gemini, OrcaRouter, Mistral, HuggingFace, OpenAI, Pollinations as plugins. (The TurboQuant backend uses llama.cpp's `llama-server` binary under the hood — `--backend turboquant` is the primary name; `--backend llama-server` remains as a backward-compat alias.)
-- **Backend support tiers** (R07.25) — ZAI, OpenRouter, HuggingFace, Gemini, Mistral are Fully Supported (maintainer-tested before every release); Pollinations, OrcaRouter, OpenAI are Limited Support (code-quality identical, but the maintainer's API key access has been unavailable for an extended period). See [docs/SUPPORT.md](docs/SUPPORT.md) for the full policy + what "Limited Support" means in practice. Local backends (TurboQuant, Ollama, BitNet) are always Fully Supported (no external API key needed).
-- **Multi-cloud support** — Access to 500+ models from OpenRouter, OpenAI, Anthropic, Google (Gemini + Gemma), Cohere, plus 11 upstream providers via OrcaRouter's zero-markup gateway
+- **Native + plugin backends** — Ollama + TurboQuant built-in; NVIDIA NIM, OpenRouter, BitNet, ZAI, ACP, Gemini, OrcaRouter, Mistral, HuggingFace, OpenAI, Pollinations as plugins. (The TurboQuant backend uses llama.cpp's `llama-server` binary under the hood — `--backend turboquant` is the primary name; `--backend llama-server` remains as a backward-compat alias.)
+- **Backend support tiers** (R07.25) — ZAI, OpenRouter, HuggingFace, Gemini, Mistral, NVIDIA NIM are Fully Supported (maintainer-tested before every release); Pollinations, OrcaRouter, OpenAI are Limited Support (code-quality identical, but the maintainer's API key access has been unavailable for an extended period). See [docs/SUPPORT.md](docs/SUPPORT.md) for the full policy + what "Limited Support" means in practice. Local backends (TurboQuant, Ollama, BitNet) are always Fully Supported (no external API key needed).
+- **Multi-cloud support** — Access to 500+ models from OpenRouter, OpenAI, Anthropic, Google (Gemini + Gemma), Cohere, plus 80+ models from NVIDIA NIM and 11 upstream providers via OrcaRouter's zero-markup gateway
 - **Dual API support** — OpenResponses (`--api openre`) and OpenAI Chat-Completions (`--api openai`)
 - **JEV decision mode** — System-One decisions via any free LLM (`--api jev`) — Jev-compatible shape, no TypeSafe API key required
-- **Thinking controls** — `--thinking off|auto|low|medium|high` to control model reasoning effort, `--think` flag to display reasoning_content (chain-of-thought) in CLI output
+- **Thinking controls** — `--thinking off|auto|low|medium|high` to control model reasoning effort, `--think` flag to display reasoning_content (chain-of-thought) in CLI output. R07.26: streaming spinner starts even during streaming and stops on first chunk (thinking models that take 60-90+ seconds before the first token no longer look hung)
 - **Tool support** — Native or ReAct, auto-detected from the server's own capabilities (a would-be `none` falls back to ReAct — no models classified none) plus a `think` column for thinking/reasoning support
 - **Small model optimized** — Fuzzy matching, argument normalization, string-literal-aware Python-literal substitution (R07.07 MAINT-14 — `True`/`False`/`None` inside string values no longer mangled)
 - **Built-in security** — Path validation, command blocklist (incl. shells + heredocs since R07.05), SSRF protection (DNS-resolving since R07.05), plugin sha256 pinning (R07.05), tool-output sanitization (R07.05), persistent-memory perms `0o700`/`0o600` (R07.05). Toggleable via `--security max|off`.
@@ -105,6 +105,9 @@ agentkthx chat
 # Autonomous agent mode
 agentkthx agent "Research the latest AgentKthx release"
 
+# Set API keys (interactive picker, persists to ~/.agentkthx/.env)
+agentkthx auth
+
 # MCP (Model Context Protocol) — see docs/USAGE.md#mcp-model-context-protocol
 agentkthx mcp init
 agentkthx chat --mcp filesystem
@@ -131,7 +134,7 @@ scripts covering reasoning, knowledge, and tool usage. See
 categories, and benchmark results.
 
 ```bash
-# Regression test suite (2966 passed / 20 skipped in ~21s)
+# Regression test suite (3055 passed / 20 skipped in ~21s)
 pytest
 
 # Quick 5-question diagnostic example
@@ -144,7 +147,7 @@ python -m agentkthx.examples.01_quick_diagnostic
 # Install dev dependencies
 pip install -e ".[dev]"
 
-# Run unit tests (2966 passed / 20 skipped in ~21s)
+# Run unit tests (3055 passed / 20 skipped in ~21s)
 pytest
 
 # Format code (CI gates on ruff + black over agentkthx/ and tests/)
@@ -162,7 +165,7 @@ AgentKthx is developed with an audit-tracked discipline: every release since R07
 - The `codebase-audit` skill ships with the repo at `agentkthx/skills/codebase-audit/` — invoke via `/skill codebase-audit` in chat mode to regenerate the brief against the current codebase.
 - The [audit dashboard](https://kthx.vts-tech.org/audit-dash/) is regenerated by `audit/generate_audit_dash.py` (run manually before GitHub/CI per owner policy).
 
-**Cumulative closure state: 101 CLOSED + 10 WONTFIX of 125 findings (111 archived, ~89%)** across R07.00 → R07.25; test suite at 2966 passed / 20 skipped.
+**Cumulative closure state: 101 CLOSED + 10 WONTFIX of 125 findings (111 archived, ~89%)** across R07.00 → R07.26; test suite at 3055 passed / 20 skipped.
 
 ## License
 
