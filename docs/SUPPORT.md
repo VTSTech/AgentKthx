@@ -62,10 +62,10 @@ but have not been recently verified.
   without an active key. Users who report bugs and can test a fix
   will get fast turnaround; users who report bugs without a
   reproducer may wait until the maintainer has key access again.
-- **Smoke test coverage**: the smoke test (`scripts/smoke_test_r07_25.sh`)
-  exercises all 8 cloud backends, but Limited Support backends are
+- **Smoke test coverage**: the smoke test (`scripts/smoke_test.sh`)
+  exercises all 9 cloud backends, but Limited Support backends are
   expected to skip with "no API key" on the maintainer's machine. A
-  user with a working key can run `./scripts/smoke_test_r07_25.sh
+  user with a working key can run `./scripts/smoke_test.sh
   --backend pollinations` to verify their own setup.
 - **Audit findings**: findings filed against Limited Support backends
   (e.g. ROB-31 Pollinations entitlement mismatch, FEAT-08
