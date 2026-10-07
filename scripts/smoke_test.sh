@@ -147,6 +147,12 @@ default_model_for_backend() {
   case "$backend" in
     openrouter)  echo "openrouter/free" ;;
     orcarouter)  echo "orcarouter/free" ;;
+    # NVIDIA: hardcode a known-working model — the free tier doesn't have
+    # access to all 45 cataloged models. The first_free_model() picker would
+    # pick "01-ai/yi-large" (alphabetically first) which 404s for most accounts.
+    # nvidia/nemotron-3.5-lightning-30b-a3b confirmed working on the free
+    # tier (verified Oct 2026 — fast, supports tools + streaming + thinking).
+    nvidia)      echo "nvidia/nemotron-3.5-lightning-30b-a3b" ;;
     *)           echo "" ;;
   esac
 }

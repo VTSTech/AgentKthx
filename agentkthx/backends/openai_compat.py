@@ -826,6 +826,18 @@ class OpenAICompatibleBackend(BaseBackend):
             choice = choices[0]
             delta = choice.get("delta", {}) or {}
             text_delta = delta.get("content", "") or ""
+            # R07.26: some models (Mistral labs-leanstral, OpenAI o-series)
+            # return delta.content as a LIST (the Responses API content array
+            # format: [{"type": "text", "text": "Hello"}]) instead of a string.
+            # Coerce to string so downstream stream.write() doesn't fail with
+            # "write() argument must be str, not list".
+            if isinstance(text_delta, list):
+                text_delta = "".join(
+                    part.get("text", "") if isinstance(part, dict) else str(part)
+                    for part in text_delta
+                )
+            elif not isinstance(text_delta, str):
+                text_delta = str(text_delta)
             tool_calls_delta = delta.get("tool_calls")
             reasoning_delta = delta.get("reasoning_content", "") or ""
             finish_reason = choice.get("finish_reason")
