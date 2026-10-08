@@ -1,0 +1,46 @@
+{
+  "$schema": "https://raw.githubusercontent.com/VTSTech/AgentKthx/main/schemas/v0.2/plugin.schema.json",
+  "name": "cloudflare",
+  "version": "0.1.0",
+  "description": "Cloudflare Workers AI backend for 20+ open models (Llama, Mistral, Qwen, DeepSeek, Phi, Gemma, GPT-OSS) via OpenAI Chat-Completions API at api.cloudflare.com \u2014 free tier with 10,000 neurons per day (UTC reset), no credit card required. Unique among cloud backends: requires both CLOUDFLARE_API_KEY and CLOUDFLARE_ACCOUNT_ID (the account ID is baked into the URL path).",
+  "author": {
+    "name": "VTSTech",
+    "url": "https://www.vts-tech.org"
+  },
+  "license": "MIT",
+  "extensions": {
+    "org.vts-tech.agentkthx": {
+      "display_name": "Cloudflare Workers AI Cloud Backend",
+      "type": "backend",
+      "entrypoint": "__init__",
+      "depends": [],
+      "optional_depends": [],
+      "config": {
+        "env_prefix": "CLOUDFLARE",
+        "defaults": {
+          "CLOUDFLARE_BASE_URL": "",
+          "CLOUDFLARE_API_KEY": "",
+          "CLOUDFLARE_ACCOUNT_ID": "",
+          "CLOUDFLARE_DEFAULT_MODEL": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+          "CLOUDFLARE_FREE_ONLY": "false"
+        }
+      },
+      "provides": {
+        "backends": {
+          "cloudflare": "cloudflare.CloudflareBackend",
+          "cf": "cloudflare.CloudflareBackend"
+        },
+        "cli_commands": [],
+        "cli_flags": {
+          "--backend": [
+            "cloudflare",
+            "cf"
+          ]
+        }
+      },
+      "compatibility": {
+        "agentkthx": ">=0.7.25"
+      }
+    }
+  }
+}

@@ -46,7 +46,7 @@ set -u
 # ─── config ──────────────────────────────────────────────────────────────
 # Backends to test, in order. Skip any by passing --skip "openai mistral"
 # (the SKIP env var is no longer supported — use --skip).
-DEFAULT_BACKENDS="zai openrouter orcarouter gemini huggingface openai mistral pollinations nvidia"
+DEFAULT_BACKENDS="zai openrouter orcarouter gemini huggingface openai mistral pollinations nvidia cloudflare"
 # SKIP + BACKENDS are populated by the arg parser below (deferred so --skip
 # can override before the filter loop runs).
 SKIP=""
@@ -104,6 +104,7 @@ has_key() {
     mistral)     envvar="MISTRAL_API_KEY" ;;
     pollinations) envvar="POLLINATIONS_API_KEY" ;;
     nvidia)       envvar="NVIDIA_API_KEY" ;;
+    cloudflare)   envvar="CLOUDFLARE_API_KEY" ;;
   esac
   # Empty envvar (unknown backend) → no key. Guard against the
   # `${!envvar:-}` indirect-expansion error on empty var names.
@@ -133,6 +134,7 @@ free_only_var() {
     mistral)     echo "MISTRAL_FREE_ONLY" ;;
     pollinations) echo "POLLINATIONS_FREE_ONLY" ;;
     nvidia)       echo "NVIDIA_FREE_ONLY" ;;
+    cloudflare)   echo "CLOUDFLARE_FREE_ONLY" ;;
     *)           echo "" ;;
   esac
 }
@@ -153,6 +155,14 @@ default_model_for_backend() {
     # nvidia/nemotron-3.5-lightning-30b-a3b confirmed working on the free
     # tier (verified Oct 2026 — fast, supports tools + streaming + thinking).
     nvidia)      echo "nvidia/nemotron-3.5-lightning-30b-a3b" ;;
+    # Cloudflare: hardcode a known-working chat model. The free tier (10k
+    # neurons/day, UTC reset) has access to all 20+ cataloged models, but
+    # the first_free_model() picker would still need to hit /ai/models/search
+    # (Cloudflare has NO /v1/models on the OpenAI-compat path). Hardcoding
+    # skips that probe and goes straight to a flagship chat model verified
+    # Oct 2026 — supports tools, streaming, JSON mode, 128K context, FP8
+    # quantization for ~3x throughput vs the fp16 variant.
+    cloudflare)   echo "@cf/meta/llama-3.3-70b-instruct-fp8-fast" ;;
     *)           echo "" ;;
   esac
 }
@@ -435,7 +445,7 @@ while [[ $# -gt 0 ]]; do
       echo "Usage: $0 [--backend <name>] [--skip \"<names>\"] [--debug] [--no-stream-only]"
       echo ""
       echo "Options:"
-      echo "  --backend <name>      Test only one backend (zai, openrouter, gemini, nvidia, etc.)"
+      echo "  --backend <name>      Test only one backend (zai, openrouter, gemini, nvidia, cloudflare, etc.)"
       echo "  --skip \"<names>\"      Space-separated list of backends to skip (e.g. --skip \"openai mistral\")"
       echo "  --debug               Show ALL output (no head/tail truncation, full agentkthx stderr)"
       echo "  --no-stream-only      Skip step 4 (the streaming step) — debug escape hatch"

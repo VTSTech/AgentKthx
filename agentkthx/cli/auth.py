@@ -109,6 +109,7 @@ AUTH_BACKENDS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("Mistral", "MISTRAL_API_KEY", "MISTRAL_FREE_ONLY", ()),
     ("Pollinations", "POLLINATIONS_API_KEY", "POLLINATIONS_FREE_ONLY", ()),
     ("NVIDIA", "NVIDIA_API_KEY", "NVIDIA_FREE_ONLY", ()),
+    ("Cloudflare", "CLOUDFLARE_API_KEY", "CLOUDFLARE_FREE_ONLY", ()),
 )
 
 # Canonical API-key env var -> BackendType.slug, used to patch the LIVE
@@ -125,14 +126,46 @@ _KEY_VAR_TO_SLUG: dict[str, str] = {
     "MISTRAL_API_KEY": "mistral",
     "POLLINATIONS_API_KEY": "pollinations",
     "NVIDIA_API_KEY": "nvidia",
+    "CLOUDFLARE_API_KEY": "cloudflare",
 }
+
+# Cloudflare is unique among AgentKthx cloud backends: it requires BOTH an
+# API key AND a 32-hex-char account ID (baked into the URL path, NOT
+# derivable from the Bearer token). The account ID is treated as a
+# non-secret "key" entry in the picker (masked for parity, but the value
+# is not actually secret — it appears in the dashboard URL bar). It is
+# appended to the standard (key, flag) pair so the Cloudflare block in
+# the picker reads:
+#   Cloudflare   CLOUDFLARE_API_KEY       set (***xyz)
+#   Cloudflare   CLOUDFLARE_ACCOUNT_ID    set (***abc)
+#   Cloudflare   CLOUDFLARE_FREE_ONLY     [off]
+# Live-patching the account ID is NOT supported — the CloudflareBackend
+# resolves account_id once at __init__ time (it's baked into the base
+# URL), so changing it mid-session requires a backend restart. The
+# env-file + config module + os.environ are still updated so the next
+# CLI invocation picks it up.
+_EXTRA_AUTH_ENTRIES: tuple[AuthVar, ...] = (
+    AuthVar("CLOUDFLARE_ACCOUNT_ID", "key", "Cloudflare", ()),
+)
 
 
 def auth_vars() -> list[AuthVar]:
-    """Flat registry in display order — (key, flag) pairs per backend."""
+    """Flat registry in display order - (key, flag) pairs per backend.
+
+    Cloudflare gets a third entry (``CLOUDFLARE_ACCOUNT_ID``) injected
+    after its API-key row, before its FREE_ONLY flag - see the
+    ``_EXTRA_AUTH_ENTRIES`` constant for the rationale (Cloudflare
+    requires both an API key AND an account ID, unlike every other
+    cloud backend which derives everything from the API key alone).
+    """
     entries: list[AuthVar] = []
     for backend_label, key_var, flag_var, alt_names in AUTH_BACKENDS:
         entries.append(AuthVar(key_var, "key", backend_label, alt_names))
+        # Inject any extra (non-flag) entries that belong between the key
+        # and the flag for this backend (Cloudflare's account ID).
+        for extra in _EXTRA_AUTH_ENTRIES:
+            if extra.backend == backend_label:
+                entries.append(extra)
         entries.append(AuthVar(flag_var, "flag", backend_label))
     return entries
 

@@ -254,3 +254,92 @@ def cache_thinking_support(model: str, support: ThinkingSupport, family: str = "
         "family": family,
     }
     save_tool_cache(cache)
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Cloudflare Workers AI paid-plan-only model cache (R07.27 follow-up)
+#
+# Cloudflare's /ai/models/search endpoint lists ALL models including
+# paid-tier-only ones (e.g. @cf/zai-org/glm-5.3-flash returns code 5035
+# with "not available on the Workers Free plan" when invoked on a free
+# account). When a free-tier user hits one, we cache the paid-only verdict
+# under a ``cf-paid:<model>`` key prefix so subsequent list_models() calls
+# can filter them out automatically when CLOUDFLARE_FREE_ONLY=true.
+#
+# Same pattern as the thinking:<model> prefix above: a separate prefix
+# (instead of a field inside the tool entry) keeps the verdicts independent.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def _cloudflare_paid_key(model: str) -> str:
+    """Cache key for a Cloudflare model's paid-plan-only verdict."""
+    return f"cf-paid:{model}"
+
+
+def cache_cloudflare_paid_only(model: str, paid_only: bool = True) -> None:
+    """Cache whether a Cloudflare Workers AI model is paid-plan-only.
+
+    Called when a free-tier account hits HTTP 403 with Cloudflare error
+    code 5035 ("not available on the Workers Free plan"). The verdict is
+    stashed so subsequent ``list_models()`` calls with
+    ``CLOUDFLARE_FREE_ONLY=true`` can filter the model out automatically
+    without re-triggering the 403.
+
+    Args:
+        model: Full prefixed Cloudflare model ID (e.g.
+            "@cf/zai-org/glm-5.3-flash")
+        paid_only: True if the model is paid-only, False to clear a stale
+            verdict (e.g. if the user upgrades to a paid Workers plan)
+    """
+    cache = load_tool_cache()
+    key = _cloudflare_paid_key(model)
+    if paid_only:
+        cache[key] = {
+            "paid_only": True,
+            "tested_at": time.time(),
+        }
+    else:
+        cache.pop(key, None)
+    save_tool_cache(cache)
+
+
+def is_cached_cloudflare_paid_only(model: str) -> bool:
+    """Return True if ``model`` is cached as Cloudflare paid-plan-only.
+
+    Reads the ``cf-paid:<model>`` entry from ``~/.agentkthx/tool_support.json``.
+    Returns False when the entry is missing or stale (Cloudflare may move
+    models between tiers; the entry has no TTL but is overwritten on the
+    next 403 hit, and a user who upgrades to a paid plan can clear it by
+    running ``cache_cloudflare_paid_only(model, paid_only=False)`` or
+    by deleting the entry from the JSON file).
+
+    Args:
+        model: Full prefixed Cloudflare model ID
+
+    Returns:
+        True if the model is cached as paid-only, False otherwise.
+    """
+    cache = load_tool_cache()
+    entry = cache.get(_cloudflare_paid_key(model))
+    if not isinstance(entry, dict):
+        return False
+    return bool(entry.get("paid_only", False))
+
+
+def clear_cloudflare_paid_only() -> int:
+    """Clear ALL cached Cloudflare paid-only verdicts.
+
+    Useful after upgrading to a paid Workers plan — drops every
+    ``cf-paid:<model>`` entry so the next ``list_models()`` re-discovers
+    each model's tier from scratch.
+
+    Returns:
+        Number of entries cleared.
+    """
+    cache = load_tool_cache()
+    keys_to_drop = [k for k in cache if k.startswith("cf-paid:")]
+    for k in keys_to_drop:
+        cache.pop(k, None)
+    if keys_to_drop:
+        save_tool_cache(cache)
+    return len(keys_to_drop)

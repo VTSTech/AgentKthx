@@ -133,28 +133,69 @@ class FakeAgent:
 
 class TestAuthRegistry:
     def test_sixteen_entries_eight_pairs(self):
-        """R07.26: NVIDIA added — 18 entries (9 keys + 9 flags).
+        """R07.27: Cloudflare added — 21 entries (10 keys + 10 flags + 1
+        extra account-ID key entry).
 
-        Historical name retained; the count grew from 8 pairs to 9 when
-        the NVIDIA NIM backend was added in R07.26.
+        Historical name retained. The count grew from 8 pairs (16) to 9
+        pairs (18) when NVIDIA NIM was added in R07.26, and again to 10
+        pairs (20) + 1 extra (Cloudflare's CLOUDFLARE_ACCOUNT_ID) when
+        Cloudflare Workers AI was added in R07.27. Cloudflare is unique
+        among cloud backends: it requires BOTH an API key AND an account
+        ID baked into the URL path.
         """
         entries = auth_vars()
-        assert len(entries) == 18
-        assert len({e.name for e in entries}) == 18
+        assert len(entries) == 21
+        assert len({e.name for e in entries}) == 21
         kinds = [e.kind for e in entries]
-        assert kinds.count("key") == 9
-        assert kinds.count("flag") == 9
+        # 10 API-key rows + 1 extra account-ID row = 11 key-kind entries
+        assert kinds.count("key") == 11
+        assert kinds.count("flag") == 10
 
     def test_pairs_grouped_key_first(self):
         entries = auth_vars()
-        # R07.26: 18 entries (9 pairs of key+flag)
-        for i in range(0, 18, 2):
-            key, flag = entries[i], entries[i + 1]
-            assert key.kind == "key" and flag.kind == "flag"
-            assert key.backend == flag.backend
+        # R07.27: 21 entries — 10 (key, flag) pairs PLUS one extra
+        # CLOUDFLARE_ACCOUNT_ID entry injected between the Cloudflare
+        # key row and the Cloudflare flag row. The simple-pair iteration
+        # only applies to backends WITHOUT an extra entry; for those,
+        # every (key, flag) pair is adjacent. For Cloudflare, the triple
+        # (key, account_id, flag) is adjacent. We verify both shapes.
+        # Iterate the standard pairs by walking entries and matching each
+        # (key, flag) we find adjacent. The extra account-ID entry sits
+        # between Cloudflare's key and flag.
+        i = 0
+        seen_cloudflare_account_id = False
+        while i < len(entries):
+            e = entries[i]
+            if e.kind == "key":
+                # The next entry is either the matching flag (standard pair)
+                # or the Cloudflare account ID (then the flag after that).
+                if (
+                    e.backend == "Cloudflare"
+                    and i + 2 < len(entries)
+                    and entries[i + 1].name == "CLOUDFLARE_ACCOUNT_ID"
+                ):
+                    # Cloudflare triple: key, account_id, flag
+                    assert entries[i + 1].kind == "key"
+                    assert entries[i + 1].backend == "Cloudflare"
+                    assert entries[i + 2].kind == "flag"
+                    assert entries[i + 2].backend == "Cloudflare"
+                    seen_cloudflare_account_id = True
+                    i += 3
+                    continue
+                # Standard pair: key, flag
+                flag = entries[i + 1]
+                assert flag.kind == "flag"
+                assert e.backend == flag.backend
+                i += 2
+            else:
+                pytest.fail(f"unexpected entry kind at index {i}: {e!r}")
+        assert seen_cloudflare_account_id, (
+            "Expected the CLOUDFLARE_ACCOUNT_ID entry to appear between "
+            "the Cloudflare API key row and the Cloudflare FREE_ONLY flag row"
+        )
 
     def test_all_eight_cloud_backends_present(self):
-        """R07.26: NVIDIA added — 9 cloud backends now."""
+        """R07.27: Cloudflare added — 10 cloud backends now."""
         labels = {t[0] for t in AUTH_BACKENDS}
         assert labels == {
             "ZAI",
@@ -166,6 +207,7 @@ class TestAuthRegistry:
             "Mistral",
             "Pollinations",
             "NVIDIA",
+            "Cloudflare",
         }
 
     def test_canonical_env_names_match_backend_resolution(self):
@@ -180,6 +222,7 @@ class TestAuthRegistry:
             "MISTRAL_API_KEY",
             "POLLINATIONS_API_KEY",
             "NVIDIA_API_KEY",
+            "CLOUDFLARE_API_KEY",
         }
         flags = {t[2] for t in AUTH_BACKENDS}
         assert flags == {
@@ -192,6 +235,7 @@ class TestAuthRegistry:
             "MISTRAL_FREE_ONLY",
             "POLLINATIONS_FREE_ONLY",
             "NVIDIA_FREE_ONLY",
+            "CLOUDFLARE_FREE_ONLY",
         }
 
     def test_gemini_and_hf_carry_alt_names(self):
@@ -204,6 +248,22 @@ class TestAuthRegistry:
         assert set(_KEY_VAR_TO_SLUG) == {t[1] for t in AUTH_BACKENDS}
         assert _KEY_VAR_TO_SLUG["ZAI_API_KEY"] == "zai"
         assert _KEY_VAR_TO_SLUG["HF_TOKEN"] == "huggingface"
+        assert _KEY_VAR_TO_SLUG["CLOUDFLARE_API_KEY"] == "cloudflare"
+
+    def test_extra_auth_entries_includes_cloudflare_account_id(self):
+        """R07.27: Cloudflare needs BOTH an API key AND an account ID.
+        The account ID is registered as an extra 'key'-kind AuthVar so
+        the /auth picker prompts for it between the Cloudflare API key
+        row and the Cloudflare FREE_ONLY flag row."""
+        from agentkthx.cli.auth import _EXTRA_AUTH_ENTRIES
+
+        names = {e.name for e in _EXTRA_AUTH_ENTRIES}
+        assert "CLOUDFLARE_ACCOUNT_ID" in names
+        for e in _EXTRA_AUTH_ENTRIES:
+            if e.name == "CLOUDFLARE_ACCOUNT_ID":
+                assert e.kind == "key"
+                assert e.backend == "Cloudflare"
+                assert e.alt_names == ()
 
     def test_no_local_backends_in_registry(self):
         labels = " ".join(t[0] for t in AUTH_BACKENDS)
@@ -686,7 +746,7 @@ class TestConfigBackendRows:
         return re.compile(r"\x1b\[[0-9;]*m").sub("", s)
 
     def test_eight_rows_all_cloud_backends(self, rows_ansi):
-        """R07.26: NVIDIA added — 9 rows now. Historical name retained."""
+        """R07.27: Cloudflare added — 10 rows now. Historical name retained."""
         labels = [r[1] for r in rows_ansi]
         assert labels == [
             "ZAI",
@@ -698,6 +758,7 @@ class TestConfigBackendRows:
             "Mistral",
             "Pollinations",
             "NVIDIA",
+            "Cloudflare",
         ]
 
     def test_key_display_masked_or_not_set(self, rows_ansi):

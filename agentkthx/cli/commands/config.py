@@ -22,6 +22,8 @@ _BACKEND_SLUG_TO_LABEL = {
     "pollinations": "Pollinations",
     "nvidia": "NVIDIA",
     "nim": "NVIDIA",
+    "cloudflare": "Cloudflare",
+    "cf": "Cloudflare",
 }
 
 
@@ -33,6 +35,11 @@ def cmd_config(args: argparse.Namespace) -> int:
         ACP_USER,
         AGENTKTHX_BACKEND,
         BITNET_BASE_URL,
+        CLOUDFLARE_ACCOUNT_ID,
+        CLOUDFLARE_API_KEY,
+        CLOUDFLARE_BASE_URL,
+        CLOUDFLARE_DEFAULT_MODEL,
+        CLOUDFLARE_FREE_ONLY,
         DEBUG,
         DEFAULT_MODEL,
         GEMINI_API_KEY,
@@ -116,6 +123,7 @@ def cmd_config(args: argparse.Namespace) -> int:
             ("ORCAROUTER_BASE_URL", ORCAROUTER_BASE_URL),
             ("POLLINATIONS_BASE_URL", POLLINATIONS_BASE_URL),
             ("NVIDIA_BASE_URL", NVIDIA_BASE_URL),
+            ("CLOUDFLARE_BASE_URL", CLOUDFLARE_BASE_URL or "(built from CLOUDFLARE_ACCOUNT_ID)"),
             ("ACP_BASE_URL", ACP_BASE_URL),
         ]
         for name, val in urls:
@@ -207,6 +215,15 @@ def cmd_config(args: argparse.Namespace) -> int:
                 ("NVIDIA_DEFAULT_MODEL", NVIDIA_DEFAULT_MODEL),
                 ("NVIDIA_FREE_ONLY", str(NVIDIA_FREE_ONLY)),
             ],
+            "Cloudflare Workers AI": [
+                ("CLOUDFLARE_API_KEY", _mask_key(CLOUDFLARE_API_KEY)),
+                (
+                    "CLOUDFLARE_ACCOUNT_ID",
+                    _mask_key(CLOUDFLARE_ACCOUNT_ID) if CLOUDFLARE_ACCOUNT_ID else "(not set)",
+                ),
+                ("CLOUDFLARE_DEFAULT_MODEL", CLOUDFLARE_DEFAULT_MODEL),
+                ("CLOUDFLARE_FREE_ONLY", str(CLOUDFLARE_FREE_ONLY)),
+            ],
             "ACP": [
                 ("ACP_USER", ACP_USER),
                 ("ACP_PASS", _mask_key(ACP_PASS)),
@@ -268,6 +285,8 @@ def cmd_config(args: argparse.Namespace) -> int:
             "OrcaRouter": ORCAROUTER_BASE_URL,
             "Pollinations": POLLINATIONS_BASE_URL,
             "NVIDIA": NVIDIA_BASE_URL,
+            "Cloudflare": CLOUDFLARE_BASE_URL
+            or f"https://api.cloudflare.com/client/v4/accounts/{CLOUDFLARE_ACCOUNT_ID or '<ID>'}/ai/v1",
             "ACP": ACP_BASE_URL,
         },
         acp_user=ACP_USER,
@@ -303,6 +322,8 @@ def _backend_auth_rows(active_backend: str) -> list[tuple[str, str, str, str, st
     a free-fallback env var show ``—``.
     """
     from ...config import (
+        CLOUDFLARE_API_KEY,
+        CLOUDFLARE_FREE_ONLY,
         GEMINI_API_KEY,
         GEMINI_FREE_ONLY,
         HF_FREE_FALLBACK_MODEL,
@@ -341,6 +362,11 @@ def _backend_auth_rows(active_backend: str) -> list[tuple[str, str, str, str, st
         ("Mistral", MISTRAL_API_KEY, MISTRAL_FREE_ONLY, MISTRAL_FREE_FALLBACK_MODEL),
         ("Pollinations", POLLINATIONS_API_KEY, POLLINATIONS_FREE_ONLY, POLLINATIONS_FALLBACK_MODEL),
         ("NVIDIA", NVIDIA_API_KEY, NVIDIA_FREE_ONLY, ""),
+        # Cloudflare: account_id is set via the /auth picker separately;
+        # the row here only shows the API key + FREE_ONLY (the account ID
+        # is part of the URL, displayed in the URLs section). Cloudflare
+        # has no free-fallback model - the daily quota is account-wide.
+        ("Cloudflare", CLOUDFLARE_API_KEY, CLOUDFLARE_FREE_ONLY, ""),
     ]
     rows: list[tuple[str, str, str, str, str]] = []
     for label, key_val, free_only, fallback in specs:
@@ -597,6 +623,27 @@ def _print_config_summary(
         (
             "NVIDIA_FREE_ONLY",
             "Surfaces monthly-quota-exhausted 429 message clearly (default: false)",
+        ),
+        # ── Cloudflare Workers AI ──
+        (
+            "CLOUDFLARE_BASE_URL",
+            "Cloudflare Workers AI URL (default: built from CLOUDFLARE_ACCOUNT_ID at https://api.cloudflare.com/client/v4/accounts/<ID>/ai/v1)",
+        ),
+        (
+            "CLOUDFLARE_API_KEY",
+            "Cloudflare API token (Workers AI:Read+Edit scope, issued at dash.cloudflare.com → My Profile → API Tokens)",
+        ),
+        (
+            "CLOUDFLARE_ACCOUNT_ID",
+            "32-hex Cloudflare account ID (REQUIRED, baked into the URL path; find at dash.cloudflare.com/?to=/:account/ai/workers-ai)",
+        ),
+        (
+            "CLOUDFLARE_DEFAULT_MODEL",
+            "Default model (default: @cf/meta/llama-3.3-70b-instruct-fp8-fast)",
+        ),
+        (
+            "CLOUDFLARE_FREE_ONLY",
+            "Surfaces daily-neuron-quota-exhausted 429 message clearly (default: false)",
         ),
         # ── ACP / TurboQuant ──
         ("ACP_BASE_URL", "ACP server URL"),

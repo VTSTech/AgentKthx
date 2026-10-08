@@ -1,7 +1,7 @@
 # Backend Support Tiers
 
-AgentKthx ships 8 cloud backends plus TurboQuant (local llama.cpp) and
-Ollama (local). As of R07.25, the cloud backends are split into two
+AgentKthx ships 10 cloud backends plus TurboQuant (local llama.cpp) and
+Ollama (local). As of R07.27, the cloud backends are split into two
 support tiers based on **owner testing coverage** — not on code
 quality, completeness, or feature surface.
 
@@ -16,7 +16,7 @@ in the foreseeable future. Rather than ship those backends with the
 implicit "fully tested" promise the other backends carry, this file
 makes the distinction explicit so users know what to expect.
 
-**This is not a code-quality judgment.** All 8 cloud backends share
+**This is not a code-quality judgment.** All 10 cloud backends share
 the same `CloudBackend` base class (R07.05 MAINT-02), the same
 retry-loop helpers (R07.24 MAINT-23), the same SSE streaming pattern,
 the same tool-support detection, and the same JSON-endpoint layout.
@@ -35,6 +35,7 @@ before every release. Bug reports against them are prioritized.
 | **HuggingFace** | huggingface.co (inference endpoints) | `HF_TOKEN` | Yes (`HF_FREE_ONLY=1`) |
 | **Gemini** | Google AI Studio (Gemini + Gemma) | `GEMINI_API_KEY` | Yes (`GEMINI_FREE_ONLY=1`) |
 | **Mistral** | mistral.ai (La Plateforme) | `MISTRAL_API_KEY` | Yes (`MISTRAL_FREE_ONLY=1`) |
+| **Cloudflare** | Cloudflare Workers AI (20+ open models) | `CLOUDFLARE_API_KEY` + `CLOUDFLARE_ACCOUNT_ID` | Yes (`CLOUDFLARE_FREE_ONLY=1`) — 10,000 neurons/day, UTC reset |
 
 Plus the local backends:
 - **TurboQuant** — llama.cpp's `llama-server` binary (primary local backend)
@@ -109,6 +110,28 @@ of their respective maintainers.
 
 ## Changelog
 
+- **R07.27** (2026-10-08): Cloudflare Workers AI added as a new cloud
+  backend and **promoted straight to Fully Supported** after the
+  maintainer's end-to-end smoke test passed 5/5 (`./scripts/smoke_test.sh
+  --backend cloudflare`): models listing, non-streaming inference,
+  non-streaming shell tool, streaming shell tool, all on a free-tier
+  account using `@cf/meta/llama-3.3-70b-instruct-fp8-fast`. The smoke
+  test also verified the batch-3 paid-only cache fix: the log line
+  `[Cloudflare] CLOUDFLARE_FREE_ONLY=true: filtered out 2 cached
+  paid-only model(s) from the catalog` confirmed the `cf-paid:<model>`
+  cache (populated by earlier 403/5035 hits on `@cf/zai-org/glm-5.3-flash`
+  + `@cf/zai-org/glm-5.2`) auto-filtered them out before the model picker
+  ran — so the smoke test only saw models the free plan can actually
+  access. Scaffolds the full plugin (`agentkthx/plugins/cloudflare/`,
+  ~750 LOC + 115 unit tests) modeled on the NVIDIA NIM pattern but with
+  the unique Cloudflare twists: account-ID baked into the URL path,
+  no `/v1/models` on the OpenAI-compat path (uses native
+  `/ai/models/search` with a Cloudflare-shaped `{result, success}`
+  envelope — NOT OpenAI's `{data}`; the model ID lives in `name` not
+  `id`, the category lives in `task.name == "Text Generation"` not a
+  lowercase `type` field), daily-neuron-quota 429 classification, and
+  403/5035 paid-plan-only detection + cache. The 9 prior cloud backends
+  unchanged.
 - **R07.25** (2026-10-06): Support tier policy introduced. Pollinations,
   OrcaRouter, and OpenAI demoted to Limited Support. ZAI, OpenRouter,
   HuggingFace, Gemini, Mistral confirmed as Fully Supported. Local

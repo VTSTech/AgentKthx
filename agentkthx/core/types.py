@@ -168,6 +168,22 @@ class BackendType(Enum):
     # docs/api/NVIDIA_API_TECHNICAL_REFERENCE.md.
     NVIDIA = "nvidia"
 
+    # Cloudflare Workers AI — cloud-hosted OpenAI-compatible endpoint at
+    # https://api.cloudflare.com/client/v4/accounts/{id}/ai/v1. Unique
+    # among AgentKthx cloud backends: requires BOTH CLOUDFLARE_API_KEY
+    # (Bearer token) AND CLOUDFLARE_ACCOUNT_ID (32-hex-char, baked into
+    # the URL path). Catalog: 20+ open models (Llama 3.x, Mistral 7B,
+    # Qwen2.5, DeepSeek R1-distill, Phi, Gemma, GPT-OSS). Free tier:
+    # 10,000 neurons per day, UTC reset, no credit card. No /v1/models
+    # on the OpenAI-compat path — uses native /ai/models/search. Vision
+    # / R1-distill / GPT-OSS models reject `tools` with 400 — ReAct
+    # fallback applies. top_k + repetition_penalty NOT supported on the
+    # OpenAI-compat path (silently dropped; native /ai/run/{model}
+    # endpoint supports them).
+    # See agentkthx/plugins/cloudflare/ and
+    # docs/api/CLOUDFLARE_API_TECHNICAL_REFERENCE.md.
+    CLOUDFLARE = "cloudflare"
+
 
 class ApiMode(Enum):
     """API mode for backend communication.

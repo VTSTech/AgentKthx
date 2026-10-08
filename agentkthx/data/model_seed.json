@@ -1,7 +1,7 @@
 {
   "_meta": {
-    "release": "R07.26",
-    "generated": "2026-10-07",
+    "release": "R07.26-cloudflare-scaffold",
+    "generated": "2026-10-08",
     "note": "Static model catalogs extracted from the plugin modules by scripts/generate_model_seed.py. Loaded by agentkthx.model_cache.load_seed_catalog() and used as the initial defaults of the persistent model-catalog cache (and the offline fallback lists). Backend keys must not start with '_' — that prefix is reserved for metadata."
   },
   "zai": {
@@ -1655,6 +1655,143 @@
       "context_length": 32768,
       "default_temperature": 0.7,
       "default_max_tokens": 8192,
+      "pricing": {
+        "input": 0.0,
+        "output": 0.0
+      }
+    }
+  },
+  "cloudflare": {
+    "@cf/meta/llama-3.3-70b-instruct-fp8-fast": {
+      "context_length": 131072,
+      "default_temperature": 0.7,
+      "default_max_tokens": 8192,
+      "pricing": {
+        "input": 0.0,
+        "output": 0.0
+      }
+    },
+    "@cf/meta/llama-3.1-8b-instruct": {
+      "context_length": 131072,
+      "default_temperature": 0.7,
+      "default_max_tokens": 4096,
+      "pricing": {
+        "input": 0.0,
+        "output": 0.0
+      }
+    },
+    "@cf/meta/llama-3.2-3b-instruct": {
+      "context_length": 131072,
+      "default_temperature": 0.7,
+      "default_max_tokens": 4096,
+      "pricing": {
+        "input": 0.0,
+        "output": 0.0
+      }
+    },
+    "@cf/meta/llama-3.2-1b-instruct": {
+      "context_length": 131072,
+      "default_temperature": 0.7,
+      "default_max_tokens": 4096,
+      "pricing": {
+        "input": 0.0,
+        "output": 0.0
+      }
+    },
+    "@cf/meta/llama-3.2-11b-vision-instruct": {
+      "context_length": 131072,
+      "default_temperature": 0.7,
+      "default_max_tokens": 4096,
+      "pricing": {
+        "input": 0.0,
+        "output": 0.0
+      }
+    },
+    "@cf/mistralai/mistral-7b-instruct-v0.3": {
+      "context_length": 32768,
+      "default_temperature": 0.7,
+      "default_max_tokens": 4096,
+      "pricing": {
+        "input": 0.0,
+        "output": 0.0
+      }
+    },
+    "@cf/qwen/qwen2.5-coder-32b-instruct": {
+      "context_length": 32768,
+      "default_temperature": 0.7,
+      "default_max_tokens": 8192,
+      "pricing": {
+        "input": 0.0,
+        "output": 0.0
+      }
+    },
+    "@cf/qwen/qwen2.5-7b-instruct": {
+      "context_length": 32768,
+      "default_temperature": 0.7,
+      "default_max_tokens": 4096,
+      "pricing": {
+        "input": 0.0,
+        "output": 0.0
+      }
+    },
+    "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b": {
+      "context_length": 131072,
+      "default_temperature": 0.6,
+      "default_max_tokens": 16384,
+      "pricing": {
+        "input": 0.0,
+        "output": 0.0
+      }
+    },
+    "@cf/deepseek-ai/deepseek-r1-distill-llama-8b": {
+      "context_length": 131072,
+      "default_temperature": 0.6,
+      "default_max_tokens": 16384,
+      "pricing": {
+        "input": 0.0,
+        "output": 0.0
+      }
+    },
+    "@cf/google/gemma-3-12b-it": {
+      "context_length": 131072,
+      "default_temperature": 0.7,
+      "default_max_tokens": 4096,
+      "pricing": {
+        "input": 0.0,
+        "output": 0.0
+      }
+    },
+    "@cf/google/gemma-2-9b-it": {
+      "context_length": 8192,
+      "default_temperature": 0.7,
+      "default_max_tokens": 2048,
+      "pricing": {
+        "input": 0.0,
+        "output": 0.0
+      }
+    },
+    "@cf/microsoft/phi-4-mini-instruct": {
+      "context_length": 131072,
+      "default_temperature": 0.7,
+      "default_max_tokens": 4096,
+      "pricing": {
+        "input": 0.0,
+        "output": 0.0
+      }
+    },
+    "@cf/openai/gpt-oss-120b": {
+      "context_length": 131072,
+      "default_temperature": 0.7,
+      "default_max_tokens": 16384,
+      "pricing": {
+        "input": 0.0,
+        "output": 0.0
+      }
+    },
+    "@cf/openai/gpt-oss-20b": {
+      "context_length": 131072,
+      "default_temperature": 0.7,
+      "default_max_tokens": 16384,
       "pricing": {
         "input": 0.0,
         "output": 0.0

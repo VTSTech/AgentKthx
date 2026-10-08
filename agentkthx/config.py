@@ -351,6 +351,49 @@ NVIDIA_DEFAULT_MODEL = os.environ.get(
 NVIDIA_FREE_ONLY = os.environ.get("NVIDIA_FREE_ONLY", "").lower() in ("1", "true", "yes")
 
 
+# Cloudflare Workers AI plugin (agentkthx/plugins/cloudflare/)
+# Cloud-hosted OpenAI-compatible endpoint at
+# https://api.cloudflare.com/client/v4/accounts/{ACCOUNT_ID}/ai/v1. Catalog:
+# 20+ open models (Llama 3.x, Mistral 7B, Qwen2.5, DeepSeek R1-distill, Phi,
+# Gemma, GPT-OSS). Free tier: 10,000 neurons per day, UTC reset, no credit
+# card. See docs/api/CLOUDFLARE_API_TECHNICAL_REFERENCE.md.
+#
+# UNIQUE among AgentKthx cloud backends: requires BOTH CLOUDFLARE_API_KEY
+# (Bearer token) AND CLOUDFLARE_ACCOUNT_ID (32-hex-char, baked into the URL
+# path). The CloudflareBackend.__init__ raises ValueError if account ID
+# is missing — fail-fast prevents confusing 404s later.
+# CLOUDFLARE_BASE_URL: when empty (default), the backend constructs the URL
+# from CLOUDFLARE_ACCOUNT_ID using the standard Cloudflare Workers AI
+# template. Override to use a proxy or alternate endpoint.
+CLOUDFLARE_BASE_URL = os.environ.get("CLOUDFLARE_BASE_URL", "")
+# Cloudflare API token. Create at dash.cloudflare.com → My Profile → API
+# Tokens → "Create Workers AI API Token" (prefilled with Workers AI - Read +
+# Edit). Cloudflare tokens don't carry a recognizable prefix (unlike
+# NVIDIA's nvapi- or OpenAI's sk-); the backend surfaces a debug-mode
+# warning if the key starts with a known wrong-provider prefix.
+CLOUDFLARE_API_KEY = os.environ.get("CLOUDFLARE_API_KEY", "")
+# 32-hex-char account ID. Find at
+# https://dash.cloudflare.com/?to=/:account/ai/workers-ai (the ID is in
+# the URL bar after clicking into the Workers AI section). REQUIRED.
+CLOUDFLARE_ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "")
+# Default model — Cloudflare's Llama-3.3-70B-Instruct-FP8-Fast flagship.
+# Supports tools, streaming, JSON mode, 128K context, FP8 quantization
+# for ~3x throughput vs the fp16 variant. Override via env var.
+CLOUDFLARE_DEFAULT_MODEL = os.environ.get(
+    "CLOUDFLARE_DEFAULT_MODEL", "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
+)
+# Strict free-tier enforcement: when true, the 429-with-quota-exhausted
+# error surfaces a clearer "wait for UTC midnight reset" hint instead of
+# the generic rate-limit boilerplate. Cloudflare's neuron quota is
+# account-wide (not per-model), so FREE_ONLY does NOT filter the catalog
+# — every model is "free" within the daily 10k neuron budget. Default false.
+CLOUDFLARE_FREE_ONLY = os.environ.get("CLOUDFLARE_FREE_ONLY", "").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # BACKEND SELECTION
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -384,6 +427,8 @@ elif AGENTKTHX_BACKEND == "openai" or AGENTKTHX_BACKEND == "oai":
     DEFAULT_MODEL = os.environ.get("AGENTKTHX_MODEL", "gpt-6-sol")
 elif AGENTKTHX_BACKEND == "nvidia":
     DEFAULT_MODEL = os.environ.get("AGENTKTHX_MODEL", "nvidia/llama-3.1-nemotron-70b-instruct")
+elif AGENTKTHX_BACKEND == "cloudflare" or AGENTKTHX_BACKEND == "cf":
+    DEFAULT_MODEL = os.environ.get("AGENTKTHX_MODEL", "@cf/meta/llama-3.3-70b-instruct-fp8-fast")
 else:
     DEFAULT_MODEL = os.environ.get("AGENTKTHX_MODEL", "qwen2.5:0.5b")
 
