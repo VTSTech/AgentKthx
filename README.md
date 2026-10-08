@@ -15,14 +15,14 @@ Inspired by the architecture of OpenClaw, rebuilt from scratch for local-first o
 
 [![License](https://img.shields.io/badge/License-MIT-blue)](#license) [![Go to Python website](https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2FVTSTech%2FAgentKthx%2Frefs%2Fheads%2Fmain%2Fpyproject.toml&query=project.requires-python&label=python&logo=python&logoColor=white)](https://python.org)
 
-<img width="1605" height="947" alt="image" src="https://github.com/user-attachments/assets/8e7e8107-80ce-4361-9147-df3e7edec220" />
-<img width="1291" height="940" alt="image" src="https://github.com/user-attachments/assets/d0e48efd-a738-442a-9e8e-ead7bddb6c03" />
+<img width="1648" height="996" alt="image" src="https://github.com/user-attachments/assets/42a7dfd6-ffb4-4e1a-844d-7984b4c8b59c" />
+<img width="1295" height="1002" alt="image" src="https://github.com/user-attachments/assets/4264616b-1af7-44ad-bc74-24f78737f8e3" />
 <img width="1498" height="721" alt="image" src="https://github.com/user-attachments/assets/f1f1e13b-c489-4fc3-b05c-9f6084818e7b" />
 <img width="1117" height="882" alt="image" src="https://github.com/user-attachments/assets/d3e1a716-f3df-4383-ade2-c34882dbddb8" />
 <img width="1247" height="622" alt="image" src="https://github.com/user-attachments/assets/f71e2221-57ac-4c15-850b-206039a95063" />
 <img width="848" height="316" alt="image" src="https://github.com/user-attachments/assets/86724683-b217-4788-9277-1e16b65d74c2" />
 <img width="1067" height="342" alt="image" src="https://github.com/user-attachments/assets/8b7870ca-5393-46b4-8d7a-0ea165cb2d41" />
-<img width="791" height="587" alt="image" src="https://github.com/user-attachments/assets/49b94726-e0d6-4d90-ad9d-a52ab2bac601" />
+<img width="1042" height="650" alt="image" src="https://github.com/user-attachments/assets/7743850a-634b-4fe6-96ea-977a96c26572" />
 <img width="672" height="617" alt="image" src="https://github.com/user-attachments/assets/59b4a074-fd8a-4970-8289-5ec671324a94" />
 <img width="1553" height="648" alt="image" src="https://github.com/user-attachments/assets/aeeb37b8-8f80-429b-b0e3-a31f8b3a482d" />
 
