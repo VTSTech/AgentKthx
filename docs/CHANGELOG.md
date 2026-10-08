@@ -5,7 +5,7 @@ All notable changes to AgentKthx will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [R07.29] - 2026-10-09
+## [R07.29] - 2026-10-08 6:57:36 PM
 
 **SiliconFlow cloud backend (the 11th) — the first scaffold built on the post-R07.28 hardened CloudBackend patterns.** R07.29 adds `agentkthx/plugins/siliconflow/` (~700 LOC + 106 unit tests), the third of four planned cloud-backend additions (NVIDIA → Cloudflare → SiliconFlow → DuckDuckGo). This is the payoff release for R07.28's closure pass: the SiliconFlow backend inherits the shared `_make_api_request`/`_iter_sse_lines`/`generate_stream`/`_jev_call_completions` transport **untouched** (identity-pinned by test — the MAINT-31 dedup backlog can't grow from this backend), implements the ROB-42-hardened `list_models` (narrowed 5-tuple except incl. OSError, store-on-success-only, stale-first fallback), and supplies only the MAINT-28 hook surface: `_error_brand`, `_STATUS_REMEDIATIONS` (401 "Invalid token" + 404 "404 page not found" — both documented plain-string envelopes), the balance-vs-TPM quota classifier, and the Mistral-style FREE_ONLY filter. No retry-loop code was copied — nvidia.py's 818 LOC vs this backend's ~700, of which ~450 are docstrings/comments.
 
