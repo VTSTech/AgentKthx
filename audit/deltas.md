@@ -2092,3 +2092,24 @@ Three OPEN findings closed in one pass — all surgical, non-breaking. Suite: 29
 **Detail:** Pre-R07.25 `PersistentMemory.add()` called `_write_message()` then `_touch_session()` as two independent operations. Each helper acquired the per-DB-path write lock (the MAINT-15 registry, RLock per ROB-18 R07.21 CLOSED) and released it before the next call. Two consequences: (1) under concurrent writers (orchestrator parallel mode), another thread's `add()` could interleave between the message-write and the session-touch, committing rows in an order that doesn't match any single logical turn; (2) every message cost two full lock/commit cycles instead of one transaction. R07.25 introduces a new `@contextmanager _transaction()` that wraps both helpers in a single `self._write_lock` acquisition + a single idempotent commit at context-exit. The context manager is reentrant-safe because `self._write_lock` is an RLock (ROB-18 R07.21 CLOSED) — nested `_transaction()` calls won't deadlock. The transaction-level commit at exit is idempotent (`sqlite3.Connection.commit()` on a no-pending-changes connection is a no-op), so the inner helpers' own commits are absorbed. `add()`, `add_tool_call()`, and `add_tool_result()` all got the same wrap. Pairs naturally with ROB-18 (RLock) — the audit's original recommendation noted "the lock must become reentrant first, or the helpers need lock/no-lock variants"; ROB-18 closed the RLock path in R07.21, and this closure completes the transaction wrap. 5 regression tests in `tests/test_r07_25_batch2_closures.py`: `_transaction` exists, `add`/`add_tool_call`/`add_tool_result` all wrap their writes in `with self._transaction():` (source-inspection), reentrant-safe nested transaction (no deadlock), atomic persistence (after a single `add()` call, both the message row AND the session row are in the DB — verified by reading the DB directly with `sqlite3`).
 
 ---
+
+---
+
+## R07.26–R07.27 Re-audit Delta (2026-10-09, commit f138f8d)
+
+No closures this pass — R07.26 (NVIDIA NIM backend + `agentkthx auth` top-level subcommand + streaming spinner fix for thinking models) and R07.27 (Cloudflare Workers AI backend + live-catalog shape fix + paid-plan-only 403/5035 detection + `cf-paid:<model>` cache helpers) were pure feature releases that shipped without a register update. All 14 carried-forward OPEN findings were re-verified against the R07.27 tree (`verify_open_findings.py`: 10 STILL_OPEN_LIKELY; FEAT-03 PATTERN_GONE / FEAT-07 + TEST-05 FILE_EXISTS_NO_PATTERN / TEST-01 UNKNOWN are the same heuristic false-positive classes documented since the R07.18 delta; the `d675926 audit-medium-pass` git-log flag on MAINT-01/TEST-01 resolved to the April 2026 historical commit — per-session todo isolation, not a closure of the 1,733-line cmd_chat finding).
+
+**Six new findings registered** (detailed in `audit.md`; the changelog's planned `CF-*` category was resolved as standard ROB/MAINT-prefixed IDs to preserve the dashboard parser's 7-category whitelist — a `CF` category string would be silently dropped from the dashboard):
+
+| ID | Severity | Category | Status | Title |
+|----|----------|----------|--------|-------|
+| ROB-42 | Medium | Robustness | OPEN | `list_models()` failure path in nvidia.py + cloudflare.py persists the seed fallback as fresh API-labeled cache (bare `except Exception` + unconditional `store_models(source="api")`, no `get_stale_models` service) — regresses the R07.24 ROB-28/ROB-30 closure class |
+| MAINT-28 | Medium | Maintainability | OPEN | ~400 LOC of retry-loop skeleton duplicated ×4 across the two new backends — drift already fired (cloudflare `_make_api_request` docstring still lists "limit" as a quota indicator that `_looks_like_neuron_quota_exhaustion` deliberately excludes) |
+| ROB-43 | Low | Robustness | OPEN | Quota-exhaustion fast-fail gated to `attempt == 0` in all four new retry loops — a quota 429 after ≥1 transient retry burns the retry budget and surfaces the generic error |
+| ROB-44 | Low | Robustness | OPEN | Cloudflare `_get_models_url` hardcodes `api.cloudflare.com` — discovery ignores a `CLOUDFLARE_BASE_URL` override that chat traffic honors |
+| MAINT-29 | Low | Maintainability | OPEN | `test_tool_support` docstrings in both new backends claim a first-use probe + tool_cache write the overrides never perform; `_is_free_model` docstring vs `else True` drift |
+| MAINT-30 | Low | Maintainability | OPEN | `docs/SUPPORT.md` tier tables miss NVIDIA entirely — 6 Fully Supported + 3 Limited rows for a claimed 10-cloud-backend register |
+
+Suite 2,966 → 3,171 (+205 net) / 20 skipped. Register: 131 findings — 20 OPEN / 101 CLOSED / 10 WONTFIX (111 archived, ~85%). The priority matrix was re-cut: MAINT-28 is flagged urgent-before-SiliconFlow/DuckDuckGo (the R07.26 changelog names them as the next two planned backends; scaffolded from this pattern they would grow the duplication family to ×8).
+
+---
