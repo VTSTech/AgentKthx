@@ -60,6 +60,8 @@ Process note: this pass re-verified all 14 carried-forward OPEN findings against
 | MAINT-31 | Low | Maintainability | OPEN | Remaining CloudBackend dedup backlog — list_models ×6 template, test_tool_support ×7 name-pattern shape, _fetch_live_models transport trio, legacy request loops (mistral/pollinations/zai/orcarouter) never migrated to the shared MAINT-28 machinery |
 | FEAT-09 | Low | New Features | OPEN | SiliconFlow enable_thinking + repetition_penalty request-field passthrough — the API supports both fields; the R07.29 scaffold drops them (cloud-drop-repeat_* house convention), and mapping think→enable_thinking needs BOTH _build_stream_body and _tweak_request_body to avoid the MAINT-22 streaming-drift class |
 | TEST-12 | Low | Testing | OPEN | No live-shape contract test for the SiliconFlow scaffold — the seed catalog/envelope/error shapes are mock-verified only; the R07.27 Cloudflare lesson says the live /v1/models shape diverges from the docs until the maintainer's first smoke run — 2026-10-09: the smoke attempt verified auth/catalog/one `--think` generation before the account balance drained (tool steps → 402); the 402 balance shape is now test-pinned, the tools/429 live shapes still await a topped-up key |
+| FEAT-10 | Low | New Features | OPEN | DuckDuckGo generate_stream() not implemented — DDG always streams at the protocol level, so a true incremental generator is near-free follow-up work (yield per-chunk instead of buffering in `_consume_sse`); the scaffold ships `generate()` via internal SSE buffering only |
+| TEST-13 | Low | Testing | OPEN | No live-shape verification for the DuckDuckGo scaffold — the maintainer sandbox could not reach duckduckgo.com (whole-IP-range egress timeout, 2026-10-09), so the 5-model seed catalog was verified against the mumu-lhl v3.3.0 client source instead of a live /chat probe; the x-vqd-4 handshake, SSE shape, token rotation, and error taxonomy are mock-verified only until the first live run (scripts/probe_duckduckgo.py automates it) |
 ---
 ## R07.18 New Findings
 Two findings, both from the R07.18 flag-parsing surface (`_parse_token_size` + the `SharedConfig` coalescing layer). No closures this pass — all 34 carried-forward OPEN findings re-verified in current code.
@@ -98,6 +100,15 @@ Two findings from the SiliconFlow scaffold pass (2026-10-09). No closures this p
 |----|----------|----------|---------|-------|
 | FEAT-09 | Low | New Features | `agentkthx/plugins/siliconflow/siliconflow.py` (`generate`, `_tweak_request_body` inherited no-op) | SiliconFlow enable_thinking + repetition_penalty request-field passthrough — both fields documented as supported (vLLM-style passthrough), neither forwarded by the scaffold; think is accepted-but-ignored |
 | TEST-12 | Low | Testing | `tests/test_siliconflow_backend.py`, `scripts/smoke_test.sh` (siliconflow step) | No live-shape contract test for the SiliconFlow scaffold — 106 mocked tests pin the documented shapes, but the live /v1/models + error envelopes are unverified until the maintainer's first smoke run (2026-10-09: auth/catalog/`--think` verified + the 402 balance shape pinned; tools/429 shapes still gated on a topped-up key) |
+
+---
+
+## R07.30 New Findings
+Two findings from the DuckDuckGo scaffold pass (2026-10-09). No closures this pass (feature release). The scaffold is the FIRST backend to subclass BaseBackend directly instead of CloudBackend — the /duckchat/v1 protocol (x-vqd-4 header-token handshake, own SSE shape, no /models endpoint, no sampling params, tools stripped) shares nothing with the OpenAI-compat shared transport, so zero lines of cloud_base.py/openai_compat.py were touched. Live-probe pivot: the maintainer sandbox could not reach duckduckgo.com (whole-IP-range egress timeout), so the model catalog was verified against the actively-maintained mumu-lhl/duckduckgo-ai-chat v3.3.0 client source (the same source the API reference cites) instead of a live /chat probe — the ID set matches the Oct 2026 duck.ai help-page lineup (GPT-4o mini, Claude Haiku behind the claude-3-haiku wire ID, Llama 3.3 70B, Mistral Small 3 24B, o3-mini). Register: 136 findings / 19 OPEN.
+| ID | Severity | Category | File(s) | Title |
+|----|----------|----------|---------|-------|
+| FEAT-10 | Low | New Features | `agentkthx/plugins/duckduckgo/duckduckgo.py` (`generate_stream`, `_consume_sse`) | DuckDuckGo generate_stream() not implemented — the protocol is always-streaming, so the incremental generator is near-free follow-up work (refactor `_consume_sse` to yield per-chunk); generate() buffers internally meanwhile |
+| TEST-13 | Low | Testing | `tests/test_duckduckgo_backend.py`, `scripts/probe_duckduckgo.py` | No live-shape verification for the DuckDuckGo scaffold — the sandbox egress block forced a source-verified (not live-verified) seed catalog; x-vqd-4 handshake/SSE shape/token rotation/error taxonomy are mock-verified only until the first live run |
 
 ---
 
@@ -225,6 +236,17 @@ Proposal: override `_build_stream_body` to delegate through a shared `_build_sil
 **Impact:** Users lose the API's thinking-mode toggle and anti-loop sampling knob on the one provider that supports both per-request; wiring them is the difference between parity and passthrough.
 ---
 
+#### FEAT-10: DuckDuckGo `generate_stream()` not implemented at scaffold time
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | New Feature |
+| **File(s)** | `agentkthx/plugins/duckduckgo/duckduckgo.py` (`generate_stream`, `_consume_sse`) |
+DuckDuckGo's protocol is ALWAYS-streaming — every /chat response arrives as SSE regardless of the caller's preference, so `generate()` buffers the stream internally (`_consume_sse` accumulates `action:"chunk"` messages into one string). The inverse of every other backend's problem: the streaming path is the cheap one here. A true incremental `generate_stream()` needs only a refactor of `_consume_sse` into a generator that yields each chunk's `message` as it parses (same buffer/split/[DONE] grammar, plus rotation bookkeeping moved to a `finally`), then a thin wrapper that feeds it through the house StreamAccumulator contract. Deliberately deferred at scaffold time: the buffered path is fully mock-tested (49 tests), the CLI works today, and bolting streaming on without the StreamAccumulator/StreamRenderer split risks the exact half-integrated shape the FEAT-06 streaming-delta finding tracks.
+Recommendation: implement as a `_stream_sse` generator sharing the parse loop with `_consume_sse` (one grammar, two consumers), wire `generate_stream()` through the existing StreamingMixin contract, and pin both paths with the same SSE fixtures the buffered tests use.
+**Impact:** CLI users see the full response only after the stream completes (~token-at-a-time display missing); no functional gap — content, rotation, and error handling are identical.
+---
+
 ---
 ### Architecture
 <!-- ARCH-02, ARCH-03, ARCH-04, ARCH-05, ARCH-06 all CLOSED in R07.13.
@@ -305,6 +327,17 @@ Recommendation: a live-gated contract test (skips without `POLLINATIONS_API_KEY`
 The R07.27 Cloudflare scaffold is the precedent: its docs-vs-reality mismatch (the model ID lives in `name` not `id`; the category is `task.name == "Text Generation"` not a lowercase `type`) was caught only by the maintainer's first live `agentkthx models --backend cf` — the 88 mocked tests stayed green on the documented shape. The SiliconFlow scaffold is in the same posture: 106 mocked tests pin the documented OpenAI `{data: [...]}` envelope, the plain-string 401/404/504 bodies, the heterogeneous error shapes, and the 30-model seed — but the live `/v1/models` field set, the actual 429 wording, and whether `/v1/models` carries context metadata are all unverified until a key-holding user or the maintainer runs the smoke step. 2026-10-09 update: the maintainer's smoke run ATTEMPTED — auth, the 79→58 catalog (parity with the probe), and one `--think` generation verified before the account balance drained; both tool-call steps returned 402 "Sorry, your account balance is insufficient", now pinned by `test_402_balance_exhaustion_live_evidence` + the zero-retry full-loop test — the remaining unknowns are the tools/429 live shapes on a topped-up key.
 Recommendation: after the first `./scripts/smoke_test.sh --backend siliconflow` pass, add a live-gated contract test (skips without `SILICONFLOW_API_KEY`, the TEST-11 `AGENTKTHX_LIVE_TESTS=1` pattern): fetch the real `/v1/models`, assert the OpenAI list envelope + non-empty chat subset after the blocklist, and pin the first observed 429 body wording against `_looks_like_balance_exhaustion`'s classifier split.
 **Impact:** Live-shape drift (the Cloudflare class) surfaces via user bug reports instead of CI — one cheap gated test closes the gap after the first smoke run.
+---
+
+#### TEST-13: No live-shape verification for the DuckDuckGo scaffold (egress-blocked probe)
+| Property | Value |
+|----------|-------|
+| **Severity** | Low |
+| **Category** | Testing |
+| **File(s)** | `tests/test_duckduckgo_backend.py` (49 mocked tests), `scripts/probe_duckduckgo.py` (the live probe tool) |
+The scaffold was built with the user's "live probe first, seed only what answers" directive, but the maintainer sandbox could not reach duckduckgo.com at all — every DDG property (duckduckgo.com, www, duck.ai, html., lite.) times out while github.com and api.siliconflow.com answer, i.e. a whole-IP-range egress block, most likely DDG's datacenter-IP anti-abuse list. The pivot: the model catalog was verified against the mumu-lhl/duckduckgo-ai-chat v3.3.0 client source fetched from GitHub (the same client the API reference cites — its ID set matches the Oct 2026 help-page lineup), and the protocol details (the `[LIMIT_CONVERSATION]` terminal marker, the message-less-chunk stream end, the 2-entry token cap) were cross-checked against mrgick/duck_chat's api.py. All 49 tests therefore pin DOCUMENTED/SOURCE-VERIFIED shapes, not live ones — the exact posture TEST-12 tracks for SiliconFlow, one notch further from certainty because the probe never ran.
+Recommendation: run `python3 scripts/probe_duckduckgo.py` from an unrestricted network (it bootstraps a token, probes every candidate ID, and prints a seed-catalog JSON block); reconcile the seed + first-sample evidence into a live-gated contract test (the TEST-11 `AGENTKTHX_LIVE_TESTS=1` pattern — though DDG needs no key, so gate on reachability), and record the first live SSE error wording against the error-taxonomy mappings.
+**Impact:** If DDG rotated model IDs or changed the SSE grammar between the client-source snapshot and the first live run, the failure surfaces at runtime with the backend's protocol-change remediation message rather than at CI time — one probe run from an unblocked network closes it.
 ---
 
 <!-- Filed at the R07.23 re-audit (commit 1d7f1ee). All three from the new mcp search + install surface. -->

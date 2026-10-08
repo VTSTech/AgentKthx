@@ -26,6 +26,8 @@ _BACKEND_SLUG_TO_LABEL = {
     "cf": "Cloudflare",
     "siliconflow": "SiliconFlow",
     "sf": "SiliconFlow",
+    "duckduckgo": "DuckDuckGo",
+    "ddg": "DuckDuckGo",
 }
 
 
@@ -244,6 +246,24 @@ _ENV_REFERENCE = [
         "RESERVED for a future free tier — unused today (no free models; "
         "default: Qwen/Qwen3-8B)",
     ),
+    # ── DuckDuckGo AI Chat ──
+    (
+        "DUCKDUCKGO_BASE_URL",
+        "DuckDuckGo AI Chat URL (default: https://duckduckgo.com — the "
+        "protocol lives under /duckchat/v1)",
+    ),
+    (
+        "DUCKDUCKGO_USER_AGENT",
+        "Browser User-Agent override — DDG 403s non-browser UAs; empty = "
+        "built-in Chrome 120 UA (only set if DDG rejects the built-in one)",
+    ),
+    (
+        "DUCKDUCKGO_DEFAULT_MODEL",
+        "Default model (default: gpt-4o-mini; catalog: gpt-4o-mini, "
+        "claude-3-haiku-20240307, meta-llama/Llama-3.3-70B-Instruct-Turbo, "
+        "mistralai/Mistral-Small-24B-Instruct-2501, o3-mini — no API key "
+        "needed, the backend is keyless and anonymous)",
+    ),
     # ── ACP / TurboQuant ──
     ("ACP_BASE_URL", "ACP server URL"),
     ("ACP_USER", "ACP username (default: admin)"),
@@ -286,6 +306,9 @@ def cmd_config(args: argparse.Namespace) -> int:
         CLOUDFLARE_FREE_ONLY,
         DEBUG,
         DEFAULT_MODEL,
+        DUCKDUCKGO_BASE_URL,
+        DUCKDUCKGO_DEFAULT_MODEL,
+        DUCKDUCKGO_USER_AGENT,
         GEMINI_API_KEY,
         GEMINI_BASE_URL,
         GEMINI_DEFAULT_MODEL,
@@ -374,6 +397,7 @@ def cmd_config(args: argparse.Namespace) -> int:
             ("NVIDIA_BASE_URL", NVIDIA_BASE_URL),
             ("CLOUDFLARE_BASE_URL", CLOUDFLARE_BASE_URL or "(built from CLOUDFLARE_ACCOUNT_ID)"),
             ("SILICONFLOW_BASE_URL", SILICONFLOW_BASE_URL),
+            ("DUCKDUCKGO_BASE_URL", DUCKDUCKGO_BASE_URL),
             ("ACP_BASE_URL", ACP_BASE_URL),
         ]
         for name, val in urls:
@@ -400,6 +424,7 @@ def cmd_config(args: argparse.Namespace) -> int:
                 ("MISTRAL_BASE_URL", MISTRAL_BASE_URL),
                 ("ORCAROUTER_BASE_URL", ORCAROUTER_BASE_URL),
                 ("POLLINATIONS_BASE_URL", POLLINATIONS_BASE_URL),
+                ("DUCKDUCKGO_BASE_URL", DUCKDUCKGO_BASE_URL),
                 ("ACP_BASE_URL", ACP_BASE_URL),
             ],
             "OpenRouter": [
@@ -480,6 +505,14 @@ def cmd_config(args: argparse.Namespace) -> int:
                 ("SILICONFLOW_FREE_ONLY", str(SILICONFLOW_FREE_ONLY)),
                 ("SILICONFLOW_FREE_FALLBACK_MODEL", SILICONFLOW_FREE_FALLBACK_MODEL),
             ],
+            "DuckDuckGo": [
+                ("DUCKDUCKGO_BASE_URL", DUCKDUCKGO_BASE_URL),
+                ("DUCKDUCKGO_DEFAULT_MODEL", DUCKDUCKGO_DEFAULT_MODEL),
+                (
+                    "DUCKDUCKGO_USER_AGENT",
+                    DUCKDUCKGO_USER_AGENT or "(built-in browser UA)",
+                ),
+            ],
             "ACP": [
                 ("ACP_USER", ACP_USER),
                 ("ACP_PASS", _mask_key(ACP_PASS)),
@@ -544,6 +577,7 @@ def cmd_config(args: argparse.Namespace) -> int:
             "Cloudflare": CLOUDFLARE_BASE_URL
             or f"https://api.cloudflare.com/client/v4/accounts/{CLOUDFLARE_ACCOUNT_ID or '<ID>'}/ai/v1",
             "SiliconFlow": SILICONFLOW_BASE_URL,
+            "DuckDuckGo": DUCKDUCKGO_BASE_URL,
             "ACP": ACP_BASE_URL,
         },
         acp_user=ACP_USER,

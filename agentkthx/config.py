@@ -436,6 +436,31 @@ SILICONFLOW_FREE_FALLBACK_MODEL = os.environ.get("SILICONFLOW_FREE_FALLBACK_MODE
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# DuckDuckGo plugin (agentkthx/plugins/duckduckgo/)
+# DuckDuckGo AI Chat (duck.ai) — the keyless, anonymous, zero-cost LLM
+# surface via the NON-OpenAI /duckchat/v1 protocol (x-vqd-4 token
+# handshake). NO API KEY EXISTS — "authentication" is the rotating
+# x-vqd-4 session token, bootstrapped from GET /status and refreshed by
+# every /chat response header. Held in-memory per backend instance,
+# never persisted. See
+# docs/api/DUCKDUCKGO_API_TECHNICAL_REFERENCE.md.
+# ═══════════════════════════════════════════════════════════════════════════════
+DUCKDUCKGO_BASE_URL = os.environ.get("DUCKDUCKGO_BASE_URL", "https://duckduckgo.com")
+# Browser User-Agent — DDG's anti-bot layer returns 403 for
+# non-browser UAs. Empty string falls back to the backend's built-in
+# Chrome 120 UA (the default). Only set this if DDG starts rejecting
+# the built-in one (UA rotation is an anti-fingerprinting last
+# resort, not a routine knob).
+DUCKDUCKGO_USER_AGENT = os.environ.get("DUCKDUCKGO_USER_AGENT", "")
+# Default model — gpt-4o-mini is DuckDuckGo's own default pick. The
+# catalog: gpt-4o-mini, claude-3-haiku-20240307,
+# meta-llama/Llama-3.3-70B-Instruct-Turbo,
+# mistralai/Mistral-Small-24B-Instruct-2501, o3-mini (aliases:
+# claude-3-haiku, llama, mixtral resolve to canonical IDs).
+DUCKDUCKGO_DEFAULT_MODEL = os.environ.get("DUCKDUCKGO_DEFAULT_MODEL", "gpt-4o-mini")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # BACKEND SELECTION
 # ═══════════════════════════════════════════════════════════════════════════════
 # Set AGENTKTHX_BACKEND to select a backend.
