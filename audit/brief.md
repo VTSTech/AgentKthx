@@ -305,28 +305,38 @@ Key coupling points:
 
 ## Known Landmines
 
-1. **`_is_process_alive` KILLS the target on Windows** (ROB-33, `plugins/turboquant/turbo.py:159-183`) — `os.kill(pid, 0)` is TerminateProcess on Windows (any sig ≠ CTRL_* kills). R07.16 put this on the chat startup path via `TurboState.load()` in `_get_local_catalog_defaults` (agent_factory.py:571) — `turbo start` + `chat` on Windows kills its own server; a stale state file with a reused PID can kill an UNRELATED process. POSIX is safe (`/proc` zombie check present).
-2. **Pre-#13 thinking caches keep stale vendor-bleed verdicts** — machines that ran an R07.19-era `models` scan cached `YES` for `thinkingmachines/*` under `thinking:<model>` keys (the #13 fix stopped NEW false YES writes but does not invalidate old ones); they render `think ✓ yes` until the cache entry expires or `~/.agentkthx/tool_support.json` is deleted.
-3. **`--force-react=False` is not a valid CLI invocation** (MAINT-25) — `--force-react` is `store_true` (parser.py:312); passing `=False` is an argparse ERROR. The UNTESTED debug hint suggests exactly that. No opt-out exists for the local-backend default-to-ReAct behavior short of deleting `~/.agentkthx/tool_support.json`.
-4. **Custom souls can lose ReAct format instructions** (MAINT-24) — R07.16 removed the ReAct block from `_build_tool_section` (dedup). Souls that don't ship their own `Action:`/`Action Input:` block (and lack example placeholders) now produce prompts with ZERO format instructions when ReAct is active — the parser then sees no valid tool calls. The docstring still claims otherwise.
-5. **`parse_shared_args` drops the documented `0` sentinel** (ROB-35, NEW R07.18, `shared_args.py:448-462`) — `0 or _env_int(...)` coalescing means `--repeat-last-n 0` ("0 = full context" per its own help) reaches `SharedConfig` as `None` (or the env-var value). Main chat/run/agent/test CLI unaffected (passes args straight to `_build_agent`); the bug bites example scripts + programmatic `SharedConfig` users. Fix pattern: `is not None` checks.
-6. **`--num-ctx infk` crashes with a raw OverflowError** (ROB-36, NEW R07.18, `shared_args.py:480-543`) — `float("inf")` succeeds, `int(inf*1024)` raises `OverflowError`, which argparse does NOT convert to a usage error (it only catches ValueError/TypeError) and `_env_int`'s `except (ValueError, TypeError)` also misses. Affects any `inf*`/`1e400k`-shaped input on flag or env path.
-7. **Remote-catalog probe can stall chat startup** — `_probe_remote_catalog` calls `backend.list_models()` synchronously with the backend's own timeouts (llama-server `/v1/models` timeout=10s). A dead Cloudflare tunnel adds up to ~10s before falling back to `config.num_ctx`. R07.18's `_detect_weight_quant` adds up to TWO more sequential HTTP calls at startup (`get_model_info` then `list_models`) with silent `except Exception: pass` — the stall stacks.
-8. **`_is_local_base_url` excludes 172.16/12** — RFC1918 `172.16-31.x.x` backends take the REMOTE probe path (documented in-code); local TurboState/Ollama-catalog lookups are skipped for them. Empty/unknown URLs are treated as local (conservative).
-9. **`Agent.add_tool` is deprecated but emits NO `DeprecationWarning`** (MAINT-16) — use `register_tool` mid-session (no memory clear). `add_tool` still clears conversation for backward compat, with no programmatic migration signal.
-10. **`--api` default is `"openai"`, not `"openre"`** — `shared_args.py` sets openai (Chat-Completions); surprising given the OpenResponses branding. Note `repeat_penalty`/`repeat_last_n`/`num_batch` only work on Ollama via `--api openre` (the OpenAI-compat path doesn't accept them).
+> **Refreshed 2026-10-09 against the R07.27 tree (commit `f138f8d`) by Super-Z** — 10 of the original 22 are verified FIXED in code (each matches its `deltas.md` closure AND the current source), 5 are intentional/as-designed, 7 remain active. Original item numbers kept for cross-reference continuity. The deltas register itself has no R07.26/R07.27 entries yet (the two backend releases shipped without a register update — backfill pending).
+
+### Active (7)
+
+2. **Pre-#13 thinking caches keep stale vendor-bleed verdicts** — machines that ran an R07.19-era `models` scan cached `YES` for `thinkingmachines/*` under `thinking:<model>` keys (`tool_cache.py:217`; still NO cache-version or invalidation mechanism — verified R07.27). The #13 fix stopped NEW false YES writes but does not invalidate old ones; they render `think ✓ yes` until the entry expires or `~/.agentkthx/tool_support.json` is deleted.
+7. **Remote-catalog probe can stall chat startup** — `_probe_remote_catalog` calls `backend.list_models()` synchronously with the backend's own timeouts (llama-server `/v1/models` timeout=10s); a dead tunnel adds ~10s before falling back to `config.num_ctx`. `_detect_weight_quant` (`agent_factory.py:52`) still stacks up to TWO more sequential HTTP calls with silent `except Exception: pass` ×2 (`:87-88`, `:98-99` — verified R07.27, same family as the closed ROB-28/30 bare-except class).
+8. **`_is_local_base_url` excludes 172.16/12** (`agent_factory.py:767`) — RFC1918 `172.16-31.x.x` backends take the REMOTE probe path (docstring `:770-772`: Local = localhost/`::1`/`127.x`/`192.168.x`/`10.x` only); local TurboState/Ollama-catalog lookups are skipped for them. Empty/unknown URLs are treated as local (conservative).
+13. **Streaming-path JSON parse errors fall back to `{"_raw_arguments": ...}`** (`streaming.py:206`) without the debug chain the ReAct path has — malformed streaming tool-call args are hard to diagnose without a reproducer.
+16. **`BUILTIN_REGISTRY` todo store is a module-level singleton** (`builtins.py:1702`) — two `Agent` instances in one process share todos unless `set_todo_session()` is called during init.
+17. **`__init__.py` optional imports are silent `None`** — three feature guards fail silent: PersistentMemory (`:144-145`), ACPPlugin (`:150-151`), Soul types (`:164-166`); import failures surface only as missing features, never as warnings. (A fourth guard at `:91` covers `_git_meta` build metadata and is benign by design.)
+19. **llama-server kwargs forwarding has an exclusion-list trap** — `_agent_internal` is duplicated across `_generate_completion` (`llama_server.py:443`) and `_stream_completion` (`:558`); add a new agent-internal kwarg to only one → the other leaks it into /completion request bodies (harmless-ish, but pollutes and can 400 on strict servers). The two forwarding loops are copy-paste by design (R07.18) — keep them in sync manually.
+
+### Intentional / as-designed (5) — do NOT "fix"
+
+10. **`--api` default is `"openai"`, not `"openre"`** (`shared_args.py:254`) — surprising given the OpenResponses branding; unchanged through R07.27 (choices now `openre|openai|jev`). Note `repeat_penalty`/`repeat_last_n`/`num_batch` only work on Ollama via `--api openre` (the OpenAI-compat path doesn't accept them).
 11. **`update_check.py` makes 3 sequential HTTPS requests on every CLI invocation** — INTENTIONAL per owner (ROB-05 WONTFIX). Opt out with `AGENTKTHX_NO_UPDATE_CHECK=1`.
-12. **`Memory.sanitize_history` mutates `_messages` in place** on every `get_messages()` (PERF-01 open) — subtle bugs possible in nested iteration.
-13. **Streaming-path JSON parse errors fall back to `{"_raw_arguments": ...}`** without the debug chain the ReAct path has — malformed streaming tool-call args are hard to diagnose without a reproducer.
-14. **`ErrorRecoveryTracker.consecutive_all` resets on ANY success** — alternating fail/succeed tool calls loop until `max_steps`.
-15. **`MemoryConfig.max_tokens` defaults to `0`** (tier disabled) — token-tier pruning is opt-in; long agentic runs rely on compaction at 85% num_ctx. Single messages larger than the whole budget still defeat the tier (ROB-17).
-16. **`BUILTIN_REGISTRY` todo store is a module-level singleton** — two `Agent` instances in one process share todos unless `set_todo_session()` is called.
-17. **`__init__.py` optional imports are silent `None`** — PersistentMemory/ACPPlugin/Soul import failures surface only as missing features, never as warnings.
-18. **`normalize_args` strategy 5 matches substrings** (`{"e": ...}` → `expression`) — last-match-wins on dict order (MAINT-03). Prefer exact keys in tool args.
-19. **llama-server kwargs forwarding has an exclusion-list trap** (R07.18) — `_agent_internal` in `llama_server.py` lists the kwargs that must NOT reach /completion; it's duplicated in two methods. Add a new agent-internal kwarg to only one → the other leaks it into request bodies (harmless-ish, but pollutes and can 400 on strict servers).
-20. **BitNet `repeat_penalty=1.3` is a default, not a hardcode** (R07.18) — an explicit kwarg/`/param repeat_penalty` overrides it. Don't "restore" the hardcode; the kwargs loop deliberately does NOT skip repeat_penalty.
-21. **OpenRouter shows `tools ✓ native` for non-chat slugs** (ROB-39, `openrouter.py:817-850`) — `lyria`/`gpt-audio`/`llama-guard` display native with zero probing; runtime is safe (400→ReAct fallback) but the table overstates. Fix: static non-chat name-pattern set → UNKNOWN.
-22. **The chat empty-answer boilerplate misdiagnoses fatal errors** (ROB-38, `chat.py:1593-1647`) — after a definitive quota/auth failure the REPL still prints "likely a rate limit (429)… try again in a few seconds"; the real error printed above is the truth — ignore the boilerplate until ROB-38 lands.
+14. **`ErrorRecoveryTracker.consecutive_all` resets on ANY success** (`error_recovery.py:496`) — deliberate R06.52 semantics ("any success proves the run is not stuck"); alternating fail/succeed tool calls can loop until `max_steps`.
+15. **`MemoryConfig.max_tokens` defaults to `0`** (`memory.py:35`, tier disabled) — token-tier pruning is opt-in; long agentic runs rely on compaction at 85% num_ctx. Single messages larger than the whole budget still defeat the tier (ROB-17).
+20. **BitNet `repeat_penalty=1.3` is a default, not a hardcode** (`llama_server.py:431,552`) — an explicit kwarg/`/param repeat_penalty` overrides it. Don't "restore" the hardcode; the kwargs loop deliberately does NOT skip repeat_penalty.
+
+### Closed — verified fixed in the R07.27 tree (10)
+
+1. ~~**`_is_process_alive` KILLS the target on Windows**~~ (ROB-33, CLOSED R07.24) — Windows path now uses ctypes `OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION)` + `GetExitCodeProcess`, fail-closed (`turbo.py:184-246`); POSIX keeps `os.kill(pid, 0)` + the `/proc` zombie check.
+3. ~~**`--force-react=False` is not a valid CLI invocation**~~ (MAINT-25, CLOSED R07.21) — `--force-react` is tri-state `on/off/auto` (`agent_factory.py:304-344`); the bare flag stays backwards-compatible and the debug hints now say `--force-react off`.
+4. ~~**Custom souls can lose ReAct format instructions**~~ (MAINT-24, CLOSED R07.21) — contract fixed: format instructions live in the default prompt or the soul's SOUL.md; `_build_tool_section` emits real per-tool Action/Action Input examples (`soul/loader.py:760-775`, `:942-949`) and the docstring no longer claims otherwise.
+5. ~~**`parse_shared_args` drops the documented `0` sentinel**~~ (ROB-35, CLOSED R07.21) — `is None` checks replace `or`-coalescing (`shared_args.py:516-518`); `--repeat-last-n 0` / `--num-ctx 0` reach SharedConfig as `0`.
+6. ~~**`--num-ctx infk` crashes with a raw OverflowError**~~ (ROB-36, CLOSED R07.21) — `math.isfinite` guard in `_parse_token_size` turns inf/nan into a clean argparse-formatted `ValueError` on both flag and env paths.
+9. ~~**`Agent.add_tool` emits no `DeprecationWarning`**~~ (MAINT-16, CLOSED R07.07) — warns once per call site with `stacklevel=2` (`agent.py:1264-1268`); the memory-clear behavior is retained for back-compat, so `register_tool` remains the mid-session recommendation.
+12. ~~**`Memory.sanitize_history` mutates `_messages` in place on every `get_messages()`**~~ (PERF-01, CLOSED R07.14) — sanitize/size caches invalidated via a single `_invalidate_caches()` funnel; two-pass repair is O(n × tool_calls) and idempotent (`memory.py:144-310`).
+18. ~~**`normalize_args` strategy 5 matches substrings**~~ (MAINT-03, CLOSED R07.24) — strategy 5 (prefix/substring) removed entirely (`helpers.py:255-269`); curated per-tool alias maps are the sanctioned mechanism.
+21. ~~**OpenRouter shows `tools ✓ native` for non-chat slugs**~~ (ROB-39, CLOSED R07.21) — `_NON_CHAT_SLUG_PATTERNS` classifies image/audio/moderation/embedding slugs as UNTESTED (`openrouter.py:865-960`).
+22. ~~**The chat empty-answer boilerplate misdiagnoses fatal errors**~~ (ROB-38, CLOSED R07.21) — a definitive fatal-error branch (401/402/403/quota/auth) shows the right remedy instead of the "likely a rate limit (429)" boilerplate (`chat.py:1743`).
 
 ---
 
@@ -376,14 +386,13 @@ Key coupling points:
 
 1. **Read the Critical Files Index** — start with `cli/agent_factory.py` (wiring), `shared_args.py` (flags + the two NEW findings), `plugins/turboquant/turbo.py` (server lifecycle), `core/agent_setup.py` (prompt strategy + constructor). The "Why It Matters" column tells you when to touch each.
 2. **Understand the Lifecycle** — `cmd_chat → _build_agent (auto-detection + catalog ladder + quant detect) → Agent.run → _run_loop_iteration → _generate_with_retry (records TPS) → backend.generate (kwargs forwarding) → tool dispatch (sanitize → memory)`.
-3. **Check Known Landmines** before changing:
-   - Never probe process liveness with `os.kill(pid, 0)` on Windows paths (ROB-33)
-   - Don't follow the UNTESTED debug hint — `--force-react=False` errors (MAINT-25)
-   - Mid-session tool addition: `register_tool`, NOT `add_tool` (memory clear, no warning)
-   - New agent-internal kwarg → add to `_agent_internal` in BOTH llama_server methods
+3. **Check Known Landmines** before changing (refreshed R07.27 — see the Known Landmines section for the full Active/Intentional/Closed split):
+   - New agent-internal kwarg → add to `_agent_internal` in BOTH llama_server methods (`:443` + `:558`, still duplicated)
    - New CLI param → wire in 3 surfaces + `parse_shared_args` + `SharedConfig`, use `is not None` (not `or`), mirror the `_explicit` pin
+   - Mid-session tool addition: `register_tool`, NOT `add_tool` (add_tool still clears memory, and now emits a DeprecationWarning since R07.07)
    - `AGENTKTHX_NO_UPDATE_CHECK=1` skips the 3-request startup check
    - `MemoryConfig.max_tokens=0` default — token tier is opt-in
+   - Retired traps (do not re-report): ROB-33 Windows `os.kill(pid, 0)` kill (fixed R07.24, ctypes path) and MAINT-25 `--force-react=False` argparse error (fixed R07.21, tri-state flag)
 4. **Follow Patterns** — hybrid native/ReAct tool calling via `_use_native_tools`; `num_predict = ctx // 32`; `sanitize_tool_output` on every tool result; per-release regression-test files (e.g. `tests/test_r07_18_repeat_penalty.py`).
 5. **Blast radius**: `core/helpers.py` → 18+ modules · `backends/cloud_base.py` → 8 cloud plugins · `cli/agent_factory.py` → every backend launch · `plugins/_loader.py` → every backend load · `shared_args.py` → every CLI surface.
 6. **Run tests before committing**: `python -m pytest tests/ -q` (~21s, 2,966 tests, +20 skipped). Lint is a REQUIRED CI check: `ruff check agentkthx/ tests/ && black --check agentkthx/ tests/`. Live-gated contract tests: `AGENTKTHX_LIVE_TESTS=1 python -m pytest tests/test_mcp_live_contract.py -v`. Manual smoke + dashboard (run before GitHub/CI per owner policy): `./scripts/smoke_test_r07_25.sh --backend <name>` (streaming + non-streaming paths) + `python3 audit/generate_audit_dash.py --audit audit/audit.md --deltas audit/deltas.md --brief audit/brief.md --output dashboard.html`.
