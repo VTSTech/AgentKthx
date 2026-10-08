@@ -136,7 +136,10 @@ free_only_var() {
     pollinations) echo "POLLINATIONS_FREE_ONLY" ;;
     nvidia)       echo "NVIDIA_FREE_ONLY" ;;
     cloudflare)   echo "CLOUDFLARE_FREE_ONLY" ;;
-    siliconflow)  echo "SILICONFLOW_FREE_ONLY" ;;
+    # SiliconFlow: NO free models (R07.29 billing probe — even Qwen3-8B
+    # bills ≈$0.06/1M input), so FREE_ONLY=1 would filter the models
+    # listing to EMPTY and make generate() refuse. List unfiltered.
+    siliconflow)  ;;
     *)           echo "" ;;
   esac
 }
@@ -165,11 +168,12 @@ default_model_for_backend() {
     # Oct 2026 — supports tools, streaming, JSON mode, 128K context, FP8
     # quantization for ~3x throughput vs the fp16 variant.
     cloudflare)   echo "@cf/meta/llama-3.3-70b-instruct-fp8-fast" ;;
-    # SiliconFlow: hardcode the free tier's tool-capable chat model —
-    # Qwen/Qwen3-8B is permanently free (no quota, no credit card),
-    # supports tools + streaming, and is the SILICONFLOW_DEFAULT_MODEL.
-    # (The other free model, deepseek-ai/DeepSeek-R1-Distill-Qwen-7B,
-    # has NO tools support — the ReAct path would diverge from the
+    # SiliconFlow: hardcode the cheapest known tool-capable chat model —
+    # Qwen/Qwen3-8B (input ≈$0.06/1M tokens, billing-verified Oct 2026 —
+    # NOT free; each smoke step bills a fraction of a cent), supports
+    # tools + streaming, and is the SILICONFLOW_DEFAULT_MODEL. (The
+    # formerly-free deepseek-ai/DeepSeek-R1-Distill-Qwen-7B is off-catalog
+    # AND has no tools support — the ReAct path would diverge from the
     # other backends' native-tools smoke steps.)
     siliconflow)  echo "Qwen/Qwen3-8B" ;;
     *)           echo "" ;;
@@ -281,10 +285,12 @@ test_backend() {
   fi
   ok "API key present"
 
-  # ─── step 1: model listing (free only via per-backend FREE_ONLY env var) ──
+  # ─── step 1: model listing (free-filtered where a FREE_ONLY var exists) ──
   local fo_var
   fo_var=$(free_only_var "$backend")
-  step "agentkthx models --backend $backend ($fo_var=1)"
+  local fo_label=""
+  [[ -n "$fo_var" ]] && fo_label=" ($fo_var=1)"
+  step "agentkthx models --backend $backend$fo_label"
   local models_output
   if [[ -n "$fo_var" ]]; then
     models_output=$(env "$fo_var=1" ${DEBUG:+AGENTKTHX_DEBUG=1} agentkthx models --backend "$backend" 2>&1)
@@ -305,7 +311,7 @@ test_backend() {
     skip "openai — 0 free models (known: OpenAI has no free tier)"
   elif [[ "$model_count" -gt 0 ]]; then
     echo "$models_output" | show_output | sed 's/^/    /'
-    ok "models listing — $model_count free models"
+    ok "models listing — $model_count models"
   else
     echo "$models_output" | show_output | sed 's/^/    /'
     fail "models listing — no free models returned"
