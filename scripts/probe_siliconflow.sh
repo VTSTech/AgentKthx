@@ -352,9 +352,9 @@ sf_get() { # $1=label  $2=path  $3=outfile  $4=auth(true/false)
 
 show_body() { # $1=outfile  $2=max-bytes
     if [ -s "$1" ]; then
-        head -c "$2" "$1"; echo
+        head -c "$2" "$1" | sed 's/^/    /'; echo
     else
-        echo "  (empty body)"
+        echo "    (empty body)"
     fi
 }
 
@@ -407,7 +407,7 @@ if [ "$CODE_PRICING" = "200" ] || [ "$CODE_MODPRICING" = "200" ]; then
     echo -e "    ${GREEN}✓ machine-readable pricing FOUND — body:${NC}"
     show_body "$PROBE_TMP" 400
 else
-    echo -e "    ${YELLOW}○ no pricing API — hardcode from https://cloud.siliconflow.cn/pricing (seed catalog){NC}"
+    echo -e "    ${YELLOW}○ no pricing API — hardcode from https://cloud.siliconflow.cn/pricing (seed catalog)${NC}"
 fi
 
 echo ""
