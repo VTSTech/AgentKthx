@@ -2,16 +2,20 @@
 # ═══════════════════════════════════════════════════════════════════════════
 # probe_siliconflow.sh — Validate SiliconFlow API Technical Reference (R07.29)
 # ═══════════════════════════════════════════════════════════════════════════
-# GET-only by default (no inference calls, no credits burned).
+# GET-only by default — ZERO billable usage (billing-table verified: GET
+#              requests log no usage rows; only POST /chat/completions does).
 # --deep flag: minimal POST /chat/completions per live model (max_tokens=5,
 #              temperature=0.7, top_p=0.9 — non-default sampling to detect
 #              fixed-param models). Free models cost ¥0; paid models burn a
 #              fraction of a cent each. Use --filter to limit scope.
+#              ⚡ BILLABLE USAGE — gated: requires --confirm-billable.
 # --caps flag:  capability spot-check — plain chat + tools + enable_thinking
-#              on/off (4 tiny POSTs per model) on 3 representative models
-#              (override with --cap-models "A,B,C"). Settles the CLI's
-#              "tools: native/react" and "think: yes/no" columns with live
-#              evidence instead of doc-derived heuristics.
+#              on/off (4 tiny POSTs per model). Default spot-check model is
+#              the FREE Qwen/Qwen3-8B ($0.00, but still logged as billable
+#              usage); add paid models via --cap-models "A,B,C". Settles the
+#              CLI's "tools: native/react" and "think: yes/no" columns with
+#              live evidence instead of doc-derived heuristics.
+#              ⚡ BILLABLE USAGE — gated: requires --confirm-billable.
 #
 # SILICONFLOW_API_KEY REQUIRED — unlike NVIDIA, /v1/models is NOT open:
 #              unauthenticated GET → 401 {"code":30014,"message":"Token is
@@ -19,11 +23,12 @@
 #              ~/.agentkthx/.env if `agentkthx auth` was used (override:
 #              AGENTKTHX_ENV_FILE). Keys: https://cloud.siliconflow.cn/account/ak
 #
-# Usage:  bash probe_siliconflow.sh                       # GET-only (safe)
-#         bash probe_siliconflow.sh --deep                # + per-model inference
-#         bash probe_siliconflow.sh --deep --filter qwen3 # scope to substring
-#         bash probe_siliconflow.sh --caps                # tools/thinking matrix
-#         bash probe_siliconflow.sh --caps --cap-models "Qwen/Qwen3-8B"
+# Usage:  bash probe_siliconflow.sh                                  # GET-only (safe, $0)
+#         bash probe_siliconflow.sh --deep                           # gated → opt-in hint
+#         bash probe_siliconflow.sh --deep --confirm-billable        # + per-model inference
+#         bash probe_siliconflow.sh --deep --confirm-billable --filter qwen3
+#         bash probe_siliconflow.sh --caps --confirm-billable        # tools/thinking matrix
+#         bash probe_siliconflow.sh --caps --confirm-billable --cap-models "Qwen/Qwen3-8B,deepseek-ai/DeepSeek-R1"
 # Output: /tmp/agentkthx_probe_siliconflow.json          (raw /v1/models)
 #         /tmp/agentkthx_probe_siliconflow_headers.txt   (response headers)
 #         /tmp/agentkthx_probe_siliconflow_deep.json     (--deep results)
@@ -41,7 +46,7 @@
 #   4. Endpoint surface      — /models/{id} detail, /user/info, /user/balance,
 #                              pricing endpoint candidates, unauth behavior,
 #                              rate-limit headers
-#   5. Seed catalog drift    — 57-entry chat-only seed vs live (404
+#   5. Seed catalog drift    — 30-entry live-verified seed vs live (404
 #                              candidates, enrichment gaps)
 #   6. Non-chat filter       — _NON_CHAT_PATTERNS applied to live; names the
 #                              media/audio families that currently LEAK
@@ -61,7 +66,8 @@ set -euo pipefail
 # (override with AGENTKTHX_ENV_FILE). Shell exports ALWAYS win — we only
 # fill gaps, never clobber already-set variables.
 ENV_FILE="${AGENTKTHX_ENV_FILE:-$HOME/.agentkthx/.env}"
-KEY_SOURCE="shell env"
+SHELL_HAD_KEY=false
+[ -n "${SILICONFLOW_API_KEY:-}" ] && SHELL_HAD_KEY=true
 if [ -f "$ENV_FILE" ]; then
     while IFS= read -r line || [ -n "$line" ]; do
         line="${line%%#*}"  # strip inline comments
@@ -79,16 +85,13 @@ if [ -f "$ENV_FILE" ]; then
             export "$key=$val"
         fi
     done < "$ENV_FILE"
-    [ -z "${SILICONFLOW_API_KEY:-}" ] && KEY_SOURCE="unset" || KEY_SOURCE="${KEY_SOURCE}"
 fi
 if [ -z "${SILICONFLOW_API_KEY:-}" ]; then
     KEY_SOURCE="unset"
-elif [ "$KEY_SOURCE" = "shell env" ] && [ ! -f "$ENV_FILE" ]; then
-    KEY_SOURCE="shell env"
-elif [ "$KEY_SOURCE" = "shell env" ] && ! grep -q "^SILICONFLOW_API_KEY=" "$ENV_FILE" 2>/dev/null; then
+elif $SHELL_HAD_KEY; then
     KEY_SOURCE="shell env"
 else
-    KEY_SOURCE="$ENV_FILE (loaded; shell env wins)"
+    KEY_SOURCE="${ENV_FILE} (via agentkthx auth)"
 fi
 
 API_KEY="${SILICONFLOW_API_KEY:-}"
@@ -100,13 +103,18 @@ CAPS_JSON="/tmp/agentkthx_probe_siliconflow_caps.json"
 
 DEEP=false
 CAPS=false
+BILLABLE=false
 FILTER=""
-CAP_MODELS="Qwen/Qwen3-8B,zai-org/GLM-4.5-Air,deepseek-ai/DeepSeek-R1"
+# Default spot-check = the FREE model only ($0.00 — free of CHARGE, not of
+# usage-log entries; the R07.29 live run's billing row: 0.563K tokens, $0.0000).
+# Paid spot-checks require --cap-models + --confirm-billable.
+CAP_MODELS="Qwen/Qwen3-8B"
 
 for arg in "$@"; do
     case "$arg" in
         --deep) DEEP=true ;;
         --caps) CAPS=true ;;
+        --confirm-billable) BILLABLE=true ;;
         --filter) EXPECT_FILTER=true ;;
         --filter=*) FILTER="${arg#--filter=}" ;;
         --cap-models) EXPECT_CAPS=true ;;
@@ -148,13 +156,21 @@ if [ -z "$API_KEY" ]; then
 fi
 echo "  Auth:           Bearer \$SILICONFLOW_API_KEY (source: ${KEY_SOURCE}, len=${#API_KEY}, prefix=${API_KEY:0:8}...)"
 if $DEEP; then
-    echo -e "  Deep probe:     ${YELLOW}ON (per-model POST — free models ¥0, paid a fraction of a cent)${NC}"
+    if $BILLABLE; then
+        echo -e "  Deep probe:     ${YELLOW}ON — per-model POST (BILLABLE usage; free models ¥0, paid a fraction of a cent)${NC}"
+    else
+        echo -e "  Deep probe:     ${YELLOW}GATED — POSTs are billable; add --confirm-billable to run${NC}"
+    fi
     [ -n "$FILTER" ] && echo "  Filter:         only testing models matching '${FILTER}'"
 else
-    echo "  Deep probe:     off (GET-only — no credits burned)"
+    echo "  Deep probe:     off (GET-only — zero billable usage)"
 fi
 if $CAPS; then
-    echo -e "  Caps probe:     ${YELLOW}ON (4 tiny POSTs per spot-check model)${NC}"
+    if $BILLABLE; then
+        echo -e "  Caps probe:     ${YELLOW}ON — 4 tiny POSTs per spot-check model (BILLABLE usage)${NC}"
+    else
+        echo -e "  Caps probe:     ${YELLOW}GATED — POSTs are billable; add --confirm-billable to run${NC}"
+    fi
     echo "  Cap models:     ${CAP_MODELS}"
 fi
 echo "  Request:        GET ${BASE_URL}/models"
@@ -251,8 +267,13 @@ from collections import Counter
 
 CYAN='\033[0;36m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; NC='\033[0m'
 d = json.load(open(sys.argv[1]))
-models = d.get("data", d if isinstance(d, (list,)) else d.get("models", []))
-if isinstance(models, dict):
+if isinstance(d, list):
+    models = d
+elif isinstance(d.get("data"), list):
+    models = d["data"]
+elif isinstance(d.get("models"), list):
+    models = d["models"]
+else:
     models = []
 
 total = len(models)
@@ -361,16 +382,20 @@ show_body() { # $1=outfile  $2=max-bytes
 PROBE_TMP="/tmp/agentkthx_probe_sf_surface.json"
 
 echo "  Per-model detail endpoint (OpenAI-style GET /models/{id}):"
-CODE_DETAIL=$(sf_get "detail" "/models/Qwen/Qwen3-8B" "$PROBE_TMP" true)
+PROBE_D1="/tmp/agentkthx_probe_sf_detail1.json"
+PROBE_D2="/tmp/agentkthx_probe_sf_detail2.json"
+CODE_DETAIL=$(sf_get "detail" "/models/Qwen/Qwen3-8B" "$PROBE_D1" true)
 echo "    GET /models/Qwen/Qwen3-8B (raw slash)     → HTTP ${CODE_DETAIL}"
-CODE_DETAIL_ENC=$(sf_get "detail-enc" "/models/Qwen%2FQwen3-8B" "$PROBE_TMP" true)
+CODE_DETAIL_ENC=$(sf_get "detail-enc" "/models/Qwen%2FQwen3-8B" "$PROBE_D2" true)
 echo "    GET /models/Qwen%2FQwen3-8B (encoded)     → HTTP ${CODE_DETAIL_ENC}"
 CODE_DETAIL_FAKE=$(sf_get "detail-fake" "/models/ThisModelDoesNotExist-xyz" "$PROBE_TMP" true)
 echo "    GET /models/ThisModelDoesNotExist-xyz     → HTTP ${CODE_DETAIL_FAKE}  (baseline)"
-if [ "$CODE_DETAIL" = "200" ] || [ "$CODE_DETAIL_ENC" = "200" ]; then
-    echo -e "    ${GREEN}✓ per-model detail endpoint EXISTS${NC} — body of the 200 above:"
-    [ "$CODE_DETAIL" = "200" ] || CODE_DETAIL_ENC="skip"
-    show_body "$PROBE_TMP" 400
+if [ "$CODE_DETAIL" = "200" ]; then
+    echo -e "    ${GREEN}✓ per-model detail endpoint EXISTS — body (raw slash form):${NC}"
+    show_body "$PROBE_D1" 400
+elif [ "$CODE_DETAIL_ENC" = "200" ]; then
+    echo -e "    ${GREEN}✓ per-model detail endpoint EXISTS — body (percent-encoded form):${NC}"
+    show_body "$PROBE_D2" 400
 else
     echo -e "    ${YELLOW}○ no per-model detail endpoint (real + fake both non-200) — catalog = flat /models list only${NC}"
 fi
@@ -446,7 +471,14 @@ import json, sys
 
 CYAN='\033[0;36m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; RED='\033[0;31m'; NC='\033[0m'
 d = json.load(open(sys.argv[1]))
-models = d.get("data", d if isinstance(d, list) else d.get("models", []))
+if isinstance(d, list):
+    models = d
+elif isinstance(d.get("data"), list):
+    models = d["data"]
+elif isinstance(d.get("models"), list):
+    models = d["models"]
+else:
+    models = []
 live_ids = {m.get("id") for m in models if isinstance(m, dict) and m.get("id")}
 
 seed = json.load(open(sys.argv[2]))
@@ -502,7 +534,14 @@ import json, os, re, sys
 CYAN='\033[0;36m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; NC='\033[0m'
 repo_root = sys.argv[2]
 d = json.load(open(sys.argv[1]))
-models = d.get("data", d if isinstance(d, list) else d.get("models", []))
+if isinstance(d, list):
+    models = d
+elif isinstance(d.get("data"), list):
+    models = d["data"]
+elif isinstance(d.get("models"), list):
+    models = d["models"]
+else:
+    models = []
 ids = [m.get("id") for m in models if isinstance(m, dict) and m.get("id")]
 
 is_non_chat = None
@@ -581,6 +620,13 @@ if ! $DEEP; then
     echo -e "  ${DIM}(skipped — run with --deep to POST /chat/completions per kept model:${NC}"
     echo -e "   ${DIM}HTTP status, response time, reasoning flag, 429 balance-vs-TPM split;${NC}"
     echo -e "   ${DIM}free models ¥0, paid a fraction of a cent each; --filter limits scope)${NC}"
+elif ! $BILLABLE; then
+    echo ""
+    echo -e "${CYAN}── 7. Deep probe ──${NC}"
+    echo -e "  ${YELLOW}⚡ GATED — --deep POSTs /chat/completions once per kept model, which is${NC}"
+    echo -e "  ${YELLOW}   BILLABLE USAGE (every POST logs a usage row, even $0.00 free-model${NC}"
+    echo -e "  ${YELLOW}   calls). Re-run with:  --deep --confirm-billable${NC}"
+    echo -e "  ${DIM}   (the GET requests above logged zero usage rows on the billing table)${NC}"
 else
     echo ""
     echo -e "${CYAN}── 7. Deep probe (per-model inference test) ──${NC}"
@@ -605,7 +651,14 @@ OUT = os.environ["PROBE_SF_DEEP_OUT"]
 REPO = os.environ["PROBE_SF_REPO"]
 
 d = json.load(open(os.environ["PROBE_SF_MODELS"]))
-models = d.get("data", d if isinstance(d, list) else d.get("models", []))
+if isinstance(d, list):
+    models = d
+elif isinstance(d.get("data"), list):
+    models = d["data"]
+elif isinstance(d.get("models"), list):
+    models = d["models"]
+else:
+    models = []
 ids = [m.get("id") for m in models if isinstance(m, dict) and m.get("id")]
 
 is_non_chat = None
@@ -739,8 +792,15 @@ if ! $CAPS; then
     echo ""
     echo -e "${CYAN}── 8. Capability matrix ──${NC}"
     echo -e "  ${DIM}(skipped — run with --caps to live-test tools + enable_thinking on${NC}"
-    echo -e "   ${DIM}3 representative models; settles the CLI's 'tools: native/react'${NC}"
-    echo -e "   ${DIM}and 'think: yes/no' columns with live evidence)${NC}"
+    echo -e "   ${DIM}the free default spot-check model (paid via --cap-models); settles${NC}"
+    echo -e "   ${DIM}the CLI's 'tools: native/react' and 'think: yes/no' columns)${NC}"
+elif ! $BILLABLE; then
+    echo ""
+    echo -e "${CYAN}── 8. Capability matrix ──${NC}"
+    echo -e "  ${YELLOW}⚡ GATED — --caps POSTs /chat/completions 4x per spot-check model,${NC}"
+    echo -e "  ${YELLOW}   which is BILLABLE USAGE (the free default Qwen/Qwen3-8B bills${NC}"
+    echo -e "  ${YELLOW}   $0.00 but still logs a usage row; paid --cap-models cost real${NC}"
+    echo -e "  ${YELLOW}   money). Re-run with:  --caps --confirm-billable${NC}"
 else
     echo ""
     echo -e "${CYAN}── 8. Capability matrix (tools + thinking spot-check) ──${NC}"
@@ -806,11 +866,15 @@ def post(body, timeout=60):
         return "ERR", {"_error": f"{type(e).__name__}: {e}"}, time.time() - t0
 
 def analyze(data):
-    msg = (data.get("choices") or [{}])[0].get("message", {}) if "choices" in data else {}
+    choices = data.get("choices") or [{}]
+    choice = choices[0] if choices and isinstance(choices[0], dict) else {}
+    msg = choice.get("message") or {}
+    if not isinstance(msg, dict):
+        msg = {}
     tool_calls = bool(msg.get("tool_calls"))
     reasoning = bool(msg.get("reasoning_content"))
     content = (msg.get("content") or "").strip()
-    finish = (data.get("choices") or [{}])[0].get("finish_reason", "—")
+    finish = choice.get("finish_reason", "—")
     return {"tool_calls": tool_calls, "reasoning": reasoning,
             "content": content, "finish": finish}
 
@@ -876,8 +940,14 @@ for model in CAP_MODELS:
     default_r = bool(a_p and a_p["reasoning"])
 
     print(f"  {CYAN}[{model}]{NC}")
-    print(f"    plain chat:    HTTP {code_p}  content={a_p['content'][:20]!r}  finish={a_p['finish'] if a_p else '—'}"
-          f"  default_reasoning={'yes' if default_r else 'no'}")
+    if code_p == "200":
+        print(f"    plain chat:    HTTP 200  content={(a_p or {}).get('content', '')[:20]!r}"
+              f"  finish={(a_p or {}).get('finish', '—')}"
+              f"  default_reasoning={'yes' if default_r else 'no'}")
+    else:
+        # R07.29 live-run crash fix: a non-200 plain-chat previously died on
+        # a_p['content'] (NoneType not subscriptable) — print the error body.
+        print(f"    plain chat:    HTTP {code_p}  body: {data_p.get('_error', '')[:90]}")
     if code_t == "400":
         print(f"    tools probe:   HTTP 400  body: {data_t.get('_error', '')[:80]}")
     else:
@@ -928,7 +998,14 @@ import json, os, sys
 
 CYAN='\033[0;36m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; NC='\033[0m'
 d = json.load(open(sys.argv[1]))
-models = d.get("data", d if isinstance(d, list) else d.get("models", []))
+if isinstance(d, list):
+    models = d
+elif isinstance(d.get("data"), list):
+    models = d["data"]
+elif isinstance(d.get("models"), list):
+    models = d["models"]
+else:
+    models = []
 ids = [m.get("id") for m in models if isinstance(m, dict) and m.get("id")]
 prefixed = sum(1 for i in ids if "/" in i)
 bare = [i for i in ids if "/" not in i]
@@ -955,8 +1032,10 @@ print(f"  Context length:   {'API-exposed ✓' if ctx_ok else 'NOT available via
 print(f"  Capabilities:     {'API-exposed ✓' if cap_ok else 'NOT available via API'}"
       f" — tools/think columns are heuristics; run --caps for live verdicts")
 print(f"\n  {CYAN}Next steps:{NC}")
-print(f"    --deep            per-model 200/429/400 sweep (free models ¥0)")
-print(f"    --caps            tools + enable_thinking live matrix (FEAT-09 evidence)")
-print(f"    Section 6 leaks   add blocklist patterns for media/audio models")
-print(f"    Section 6 gaps    seed the unseeded chat-capable live models")
+print(f"    --deep --confirm-billable   per-model 200/429/400 sweep (BILLABLE)")
+print(f"    --caps --confirm-billable   tools + enable_thinking matrix (BILLABLE;)")
+print(f"                                default cap model = free Qwen/Qwen3-8B,")
+print(f"                                paid via --cap-models)")
+print(f"    Section 6 leaks             add blocklist patterns for media/audio models")
+print(f"    Section 6 gaps              seed the unseeded chat-capable live models")
 PYEOF
