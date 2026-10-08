@@ -2,10 +2,11 @@
 
 > **Technical Implementation Guide**
 > **Generated from**: https://docs.siliconflow.com/en/api-reference/chat-completions/chat-completions.md + https://docs.siliconflow.com/en/userguide/guides/function-calling.md + https://docs.siliconflow.com/llms.txt (verified Oct 2026)
-> **Free-tier verification**: 3 permanently-free models (Qwen3-8B, DeepSeek-R1-Distill-Qwen-7B, DeepSeek-OCR), no credit card required, no usage limits on the free tier. Source: [pricepertoken.com](https://pricepertoken.com) + [therouter.ai](https://therouter.ai) — *"Three models are completely free: Qwen3-8B, DeepSeek-R1-Distill-Qwen-7B, DeepSeek-OCR. No credit card required, no usage limits on the free tier."*
-> **Live-behavior notes**: 2026-10-07 — SiliconFlow is a China-hosted OpenAI-compatible aggregator offering 200+ models. Free tier is the narrowest of the four documented providers (3 models, no quota) but the free models have NO daily/monthly cap — useful for high-volume agentic workloads on Qwen3-8B or DeepSeek-R1-Distill.
+> **Free-tier verification (SUPERSEDED — billing-corrected 2026-10-09)**: the third-party free-tier claim ("3 permanently-free models: Qwen3-8B, DeepSeek-R1-Distill-Qwen-7B, DeepSeek-OCR — no usage limits", via [pricepertoken.com](https://pricepertoken.com) + [therouter.ai](https://therouter.ai)) is **WRONG for the current API**. SiliconFlow's own billing console shows `Qwen/Qwen3-8B` **BILLS**: meter `qwen/qwen3-8b.online.input-tokens`, 0.235K input tokens → **$0.000014** (≈ **$0.06 per 1M input tokens**). A "0.563K tokens → $0.0000" console row is **4-decimal display rounding** (real ≈ $0.0000338) — never read a $0.0000 row as free. **There is no free tier: every model bills against the account balance.**
+> **R07.29 live-probe update (2026-10-09)**: `GET /v1/models` lists **79 models**; two of the three formerly-documented free models (`deepseek-ai/DeepSeek-R1-Distill-Qwen-7B`, `deepseek-ai/DeepSeek-OCR`) are **no longer served**. `Qwen/Qwen3-8B` survives as the **cheapest known** chat model (input ≈$0.06/1M tokens — BILLS, not free; see the billing correction above). Also probe-verified: `/v1/models` cards carry only `{id, object, created, owned_by}` (no pricing / context / capabilities fields), `GET /v1/user/info` → **410 deprecated**, `GET /v1/user/balance` → **404**, and there is **no `/v1/pricing` endpoint** (pricing lives on the web console). The AgentKthx seed catalog was pruned to the 30 confirmed-live chat models.
+> **Live-behavior notes**: 2026-10-07 (updated 2026-10-09) — SiliconFlow is a China-hosted OpenAI-compatible aggregator. No free tier at all: every model bills the account balance — `Qwen/Qwen3-8B` at ≈$0.06/1M input is the cheapest known option for high-volume agentic workloads.
 > **Primary focus**: OpenAI-compatible Chat Completions endpoint at `https://api.siliconflow.com/v1` (also accessible via the `.cn` TLD at `https://api.siliconflow.cn/v1` for China-domestic traffic).
-> **Last Updated**: 2026-10-07
+> **Last Updated**: 2026-10-09 (R07.29 live-probe reconciliation + billing correction — no free tier)
 > **Target Audience**: AgentKthx Developers
 
 ## Table of Contents
@@ -21,7 +22,7 @@
 9. [Thinking & Reasoning Configuration](#thinking--reasoning-configuration)
 10. [Implementation Notes for AgentKthx](#implementation-notes-for-agentkthx)
 11. [Troubleshooting Matrix](#troubleshooting-matrix)
-12. [Appendix: Free-Model Catalog](#appendix-free-model-catalog)
+12. [Appendix: Model Pricing Reality](#appendix-model-pricing-reality)
 13. [Appendix: OpenAI Wire-Format Deltas](#appendix-openai-wire-format-deltas)
 
 ---
@@ -67,10 +68,10 @@ SiliconFlow issues a single key type per account, scoped by the account's availa
 
 | Key type | Prefix | Where obtained | What it can do |
 |----------|--------|----------------|----------------|
-| Account API key | `sk-` | https://cloud.siliconflow.com/account/ak | Full account access — all models the account can access (free + paid). One key per account. |
+| Account API key | `sk-` | https://cloud.siliconflow.com/account/ak | Full account access — every model the account balance covers (no free tier — all models bill). One key per account. |
 | Sub-account key | `sk-` | Console → Sub-accounts | Same scope but tied to a sub-account; useful for team isolation |
 
-**AgentKthx guidance**: Use a single `sk-` key read from `SILICONFLOW_API_KEY` env var. Free models (`Qwen/Qwen3-8B`, `deepseek-ai/DeepSeek-R1-Distill-Qwen-7B`, `deepseek-ai/DeepSeek-OCR`) require no payment setup; paid models require balance top-up.
+**AgentKthx guidance**: Use a single `sk-` key read from `SILICONFLOW_API_KEY` env var. Every model requires account balance (no free tier — keep it topped up at https://cloud.siliconflow.com; `Qwen/Qwen3-8B` at input ≈$0.06/1M tokens is the cheapest known model).
 
 ### Request Format Requirements
 
@@ -262,7 +263,7 @@ CATALOG_ENUM = [
     "Qwen/Qwen2.5-72B-Instruct",
     "Qwen/Qwen2.5-72B-Instruct-128K",
     "Qwen/Qwen2.5-VL-7B-Instruct",
-    "Qwen/Qwen3-8B",                    # FREE TIER
+    "Qwen/Qwen3-8B",                    # cheapest known (input ≈$0.06/1M — BILLS)
     "Qwen/Qwen3-14B",
     "Qwen/Qwen3-32B",
     "Qwen/Qwen3-235B-A22B",
@@ -298,15 +299,15 @@ CATALOG_ENUM = [
 ]
 ```
 
-### Free Tier Models (verified Oct 2026)
+### Pricing & Free-Tier Reality (billing-verified Oct 2026)
 
 | Model ID | Family | Context | Notes |
 |----------|--------|---------|-------|
-| `Qwen/Qwen3-8B` | Qwen3 | 32K | General chat + light reasoning. No usage limits. |
-| `deepseek-ai/DeepSeek-R1-Distill-Qwen-7B` | DeepSeek-R1 distill | 32K | Reasoning model (distilled). No tools support. |
-| `deepseek-ai/DeepSeek-OCR` | DeepSeek OCR | 4K | OCR model (image → text), not a chat model. Listed for completeness. |
+| `Qwen/Qwen3-8B` | Qwen3 | 32K | Cheapest known chat model. **BILLS ≈$0.06/1M input tokens** (billing-console evidence: 235 input tokens → $0.000014, meter `qwen/qwen3-8b.online.input-tokens`). |
+| `deepseek-ai/DeepSeek-R1-Distill-Qwen-7B` | DeepSeek-R1 distill | 32K | ~~Formerly free reasoning model (no tools).~~ **REMOVED from live catalog (R07.29 probe).** |
+| `deepseek-ai/DeepSeek-OCR` | DeepSeek OCR | 4K | ~~Formerly free OCR model (image → text).~~ **REMOVED from live catalog (R07.29 probe).** |
 
-The free catalog is small but the two chat models cover both the "general chat" and "reasoning" use cases. **No daily or monthly quota** on these free models — useful for sustained agentic workloads.
+There is **no free tier on the SiliconFlow API** — the third-party "3 permanently-free models" claim is stale, and even the cheapest model bills. Budget accordingly: a 1M-token input workload on Qwen3-8B costs ≈$0.06 (output pricing unverified — not on the SSR pricing page; the billing console is the source of truth). And beware the console's 4-decimal display rounding: a $0.0000 row can still be a real charge (0.563K tokens → $0.0000338 renders as $0.0000).
 
 ### Model Detection & Auto-configuration
 
@@ -675,12 +676,12 @@ class SiliconFlowErrorHandler:
                        "Model may have been removed from catalog"]
         },
         429: {
-            "message": "Rate Limit (TPM) OR Free Tier Quota Exceeded",
-            "recoverable": True,  # rate limit; NOT quota exhaustion on paid models
+            "message": "Rate Limit (TPM) OR Account Balance Exhausted",
+            "recoverable": True,  # rate limit; balance exhaustion is NOT retryable
             "retry_after": "Retry-After header (when present)",
             "actions": ["Distinguish: 'TPM limit reached' = transient rate limit (backoff)",
-                       "Free-tier exhaustion: free models have NO quota, so 429 is always transient",
-                       "Paid model exhaustion: top up balance at cloud.siliconflow.com"]
+                       "No free tier exists — every model bills the account balance",
+                       "Balance exhaustion ('balance'/'quota'/'insufficient'): top up at cloud.siliconflow.com"]
         },
         500: {
             "message": "Internal Server Error",
@@ -735,9 +736,9 @@ class SiliconFlowErrorHandler:
                 info = {**info, "recoverable": True, "message": "TPM rate limit"}
             elif "balance" in message.lower() or "quota" in message.lower():
                 info = {**info, "recoverable": False,
-                        "message": "Account balance exhausted (paid models)",
+                        "message": "Account balance exhausted",
                         "actions": ["Top up balance at cloud.siliconflow.com",
-                                   "Switch to free-tier models (Qwen3-8B, R1-Distill-Qwen-7B)"]}
+                                   "No free model exists to switch to (every model bills)"]}
 
         return {
             "code": code,
@@ -764,14 +765,13 @@ SiliconFlow's documented limits (from the 429 error message):
 | Concurrent requests | (not documented) | Server queues internally |
 | Streaming duration | (not documented) | Standard 5-min HTTP timeout recommended |
 
-### Free Model Specifics
+### Qwen3-8B Specifics (cheapest known model — BILLS)
 
-Free-tier models (`Qwen/Qwen3-8B`, `deepseek-ai/DeepSeek-R1-Distill-Qwen-7B`, `deepseek-ai/DeepSeek-OCR`) have:
-- **No daily quota** (unlimited requests, subject to TPM)
-- **No monthly quota**
-- **No credit card required**
+`Qwen/Qwen3-8B` (the former "free tier" claim, billing-corrected R07.29) has:
+- **No daily or monthly request quota** (subject to TPM)
+- **No free pricing**: input ≈ $0.06/1M tokens ($0.000014 per 235-token request, billing-verified Oct 2026)
 
-This makes SiliconFlow unique among the four documented providers — the only one with a truly uncapped free tier (subject to per-request rate limits).
+SiliconFlow has the lowest cost floor of the four documented providers (a rounding error per tiny Qwen3-8B request), but it is a floor, not zero — sustained agentic workloads draw down the account balance.
 
 ### Rate-Limit Headers
 
@@ -844,7 +844,7 @@ In streaming mode, `reasoning_content` chunks arrive BEFORE `content` chunks —
 | Model ID | Thinking Support | Tool Support | Notes |
 |----------|-------------------|--------------|-------|
 | `deepseek-ai/DeepSeek-R1` | ✅ Always on | ❌ | Pure reasoning model |
-| `deepseek-ai/DeepSeek-R1-Distill-Qwen-7B` | ✅ Always on | ❌ | FREE TIER |
+| `deepseek-ai/DeepSeek-R1-Distill-Qwen-7B` | ✅ Always on | ❌ | ~~FREE TIER~~ **removed from live catalog (R07.29 probe)** |
 | `deepseek-ai/DeepSeek-R1-Distill-Qwen-14B` | ✅ Always on | ❌ | |
 | `deepseek-ai/DeepSeek-R1-Distill-Qwen-32B` | ✅ Always on | ❌ | |
 | `THUDM/GLM-Z1-32B-0414` | ✅ Always on | ✅ | Hybrid: thinking + tools |
@@ -919,27 +919,23 @@ class SiliconFlowBackend(OpenAICompatMixin, CloudBackend):
             return [m["id"] for m in data.get("data", [])]
 
     def list_free_models(self) -> list:
-        """SiliconFlow's free-tier model list (verified Oct 2026)."""
-        FREE_MODELS = [
-            "Qwen/Qwen3-8B",                            # general chat
-            "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",  # reasoning
-            # deepseek-ai/DeepSeek-OCR is image-OCR, not chat — exclude
-        ]
-        if not getattr(self, "_free_only", False):
-            return self.list_models()
-        # Filter the live catalog against the known-free set
-        catalog = self.list_models()
-        return [m for m in catalog if m in FREE_MODELS]
+        """SiliconFlow's free-tier model list — EMPTY (R07.29 billing
+        probe: no free models exist; every model bills)."""
+        # Formerly returned ["Qwen/Qwen3-8B"] — the billing console proved
+        # it bills (235 input tokens → $0.000014), so the verified-free
+        # set is empty. Re-verify via the console if a free tier returns.
+        return []
 ```
 
 ### 2. FREE_ONLY Enforcement
 
 ```python
 # Set SILICONFLOW_FREE_ONLY=1 env var
-# Filters catalog to the 3 free models — useful for cost-conscious agentic workflows
+# Filters the catalog to the free models — currently NONE exist, so the
+# listing empties and generate() RAISES before any billable request
 ```
 
-Unlike NVIDIA/Cloudflare where FREE_ONLY doesn't filter (because quota is account-wide), SiliconFlow's FREE_ONLY actually filters the catalog to the 3 known-free models. This is the most useful FREE_ONLY implementation among the four providers.
+Unlike NVIDIA/Cloudflare where FREE_ONLY doesn't filter (because quota is account-wide), SiliconFlow's FREE_ONLY genuinely filters (per-model pricing) — but with NO free models on the API (R07.29 billing probe), the honest filtered result is an EMPTY list, and generate() refuses rather than swapping to a "cheap" fallback that would silently bill under a flag that promises free. `SILICONFLOW_FREE_FALLBACK_MODEL` stays reserved for a future free tier.
 
 ### 3. Plugin Manifest
 
@@ -948,13 +944,13 @@ Unlike NVIDIA/Cloudflare where FREE_ONLY doesn't filter (because quota is accoun
     "$schema": "https://raw.githubusercontent.com/VTSTech/AgentKthx/main/schemas/v0.2/plugin.schema.json",
     "name": "siliconflow",
     "version": "0.1.0",
-    "description": "SiliconFlow API backend for 200+ models (DeepSeek, Qwen, GLM, Llama, Kimi, MiniMax, ERNIE, Hunyuan, Phi, Gemma) via OpenAI Chat-Completions API at api.siliconflow.com — free tier with 3 permanently-free models (Qwen3-8B, DeepSeek-R1-Distill-Qwen-7B, DeepSeek-OCR), no quota, no credit card required",
+    "description": "SiliconFlow API backend for the 79-model live catalog (DeepSeek, Qwen, GLM, Kimi, MiniMax, Hunyuan, Gemma, gpt-oss) via OpenAI Chat-Completions API at api.siliconflow.com — no free tier: every model bills (Qwen/Qwen3-8B is the cheapest known, input ≈$0.06/1M tokens, billing-verified R07.29)",
     "backend_class": "agentkthx.backends.siliconflow.SiliconFlowBackend",
     "backend_type": "cloud",
     "env_vars": ["SILICONFLOW_API_KEY"],
     "optional_env_vars": ["SILICONFLOW_FREE_ONLY", "SILICONFLOW_BASE_URL"],
     "default_base_url": "https://api.siliconflow.com/v1",
-    "free_tier": true
+    "free_tier": false  # no free tier — every model bills (R07.29 billing probe)
 }
 ```
 
@@ -972,7 +968,7 @@ Unlike NVIDIA/Cloudflare where FREE_ONLY doesn't filter (because quota is accoun
 - **`enable_thinking` toggle**: Only the second provider (after ZAI) to expose a thinking on/off switch. AgentKthx's existing `thinking: {type: "enabled"|"disabled"}` config maps onto `enable_thinking: true|false`.
 - **Heterogeneous error envelopes**: 401 and 404 return plain strings, not JSON. The error parser must handle both. This is a divergence from the OpenAI spec — handled in the `SiliconFlowErrorHandler` above.
 - **CN TLD alternative**: For users inside China, `api.siliconflow.cn` offers lower latency than `api.siliconflow.com`. The base URL is configurable via `SILICONFLOW_BASE_URL` env var.
-- **DeepSeek-OCR free model is NOT a chat model**: It's an OCR endpoint (image → text). AgentKthx should exclude it from the chat-eligible catalog even when `SILICONFLOW_FREE_ONLY=1` is set — the `list_free_models()` implementation above filters it out.
+- **DeepSeek-OCR is NOT a chat model**: It's an OCR endpoint (image → text), and it (plus the formerly-free R1-Distill-7B) was removed from the live catalog entirely per the R07.29 probe — and with the billing correction there is no free tier at all; `Qwen/Qwen3-8B` is merely the cheapest known chat model (input ≈$0.06/1M — bills).
 
 ---
 
@@ -984,7 +980,7 @@ Unlike NVIDIA/Cloudflare where FREE_ONLY doesn't filter (because quota is accoun
 | `404 "404 page not found"` | Wrong endpoint URL | Verify base URL is `https://api.siliconflow.com/v1` (no trailing slash, no path beyond `/v1`) |
 | `400` with `code: 20012` | Bad request — usually model-specific issue | Check `message` field for details; verify model supports requested features |
 | `429` with "TPM limit reached" | Tokens-per-minute rate limit | Backoff with Retry-After; reduce max_tokens |
-| `429` with "balance" or "quota" | Account balance exhausted (paid models) | Top up balance OR switch to free-tier models |
+| `429` with "balance" or "quota" | Account balance exhausted | Top up balance (no free model exists to switch to — every model bills) |
 | `503` with `code: 50505` | Model service overloaded | Retry with longer backoff; try alternative model in same family |
 | `504` | Gateway timeout (typically DeepSeek-R1 with long thinking) | Reduce max_tokens, set `enable_thinking: false`, or use non-streaming |
 | `400` with "tool calls not supported" | Reasoning model (R1, GLM-Z1-thinking, Kimi-K2-Thinking) with `tools` in body | Disable native tools, use ReAct mode |
@@ -995,27 +991,30 @@ Unlike NVIDIA/Cloudflare where FREE_ONLY doesn't filter (because quota is accoun
 
 ---
 
-## Appendix: Free-Model Catalog
+## Appendix: Model Pricing Reality (no free tier)
 
-### Permanently-Free Models (Verified Oct 2026)
+### Billing-Verified Pricing (Oct 2026)
 
-| Model ID | Family | Type | Context | Notes |
-|----------|--------|------|---------|-------|
-| `Qwen/Qwen3-8B` | Qwen3 | Chat + thinking | 32K | Best general-purpose free model on SiliconFlow |
-| `deepseek-ai/DeepSeek-R1-Distill-Qwen-7B` | DeepSeek-R1 distill | Reasoning | 32K | Free reasoning model; no tools support |
-| `deepseek-ai/DeepSeek-OCR` | DeepSeek OCR | OCR (image→text) | 4K | Not a chat model — exclude from chat catalog |
+| Model ID | Family | Type | Context | Pricing |
+|----------|--------|------|---------|---------|
+| `Qwen/Qwen3-8B` | Qwen3 | Chat + thinking | 32K | Input ≈ **$0.06/1M tokens** (235 tokens → $0.000014, meter `qwen/qwen3-8b.online.input-tokens`); output unverified — not on the SSR pricing page |
+| `deepseek-ai/DeepSeek-R1-Distill-Qwen-7B` | DeepSeek-R1 distill | Reasoning | 32K | ~~Formerly free~~ removed from live catalog (R07.29 probe) |
+| `deepseek-ai/DeepSeek-OCR` | DeepSeek OCR | OCR (image→text) | 4K | ~~Formerly free~~ removed from live catalog (R07.29 probe) |
 
-### Free-Model Recommendations for AgentKthx
+Flagship list prices (SSR pricing page, siliconflow.com/pricing, extracted 2026-10-09): Kimi-K3 $2.7/$13.5, GLM-5.3 $1.4/$4.4 per 1M input/output. Qwen3-8B is absent from the page — the billing console is the ground truth for it.
 
-- **For tool-using agentic workflows**: `Qwen/Qwen3-8B` is the only free model that supports `tools` (via the chat-completions API). At 8B params, it's capable for general chat + light tool use.
-- **For pure reasoning tasks** (no tools needed): `deepseek-ai/DeepSeek-R1-Distill-Qwen-7B` provides DeepSeek-R1 quality reasoning at zero cost. The 7B distill is competitive with the 32B distill on most benchmarks.
-- **For long-running agentic sessions**: SiliconFlow's no-quota free tier is the strongest of the four documented providers — no daily/monthly caps to exhaust during a long agentic run.
+### Cost-Conscious Recommendations for AgentKthx
 
-### Free-Model Caveats
+- **For tool-using agentic workflows**: `Qwen/Qwen3-8B` is the cheapest known tool-capable model (input ≈$0.06/1M — a rounding error per tiny request, but NOT free).
+- **For pure reasoning tasks**: use the paid `deepseek-ai/DeepSeek-R1` (the former free R1-Distill-7B was removed from the live catalog, R07.29 probe).
+- **For long-running agentic sessions**: no quota caps (only TPM), but the balance drains — monitor usage in the billing console.
 
-- **TPM rate limits still apply**: Even on free models, the TPM (tokens-per-minute) cap can throttle sustained high-volume workflows. Backoff via the existing `api_resilience.py` handles this.
-- **Free models can change**: SiliconFlow reserves the right to change the free-tier model set. Verify via the live `/models` endpoint before relying on a specific model for production.
-- **Free models do NOT include multimodal**: All three free models are text-only. For vision, must use paid `deepseek-vl2`, `Qwen2.5-VL`, or GLM-V variants.
+### Billing Gotchas
+
+- **$0.0000 display rounding**: the console renders amounts to 4 decimals — a $0.0000 row can be a real sub-$0.00005 charge (e.g. 0.563K tokens → $0.0000338 displays as $0.0000). Check the token counts and unit price, never just the displayed total.
+- **Every POST logs a usage row** — even tiny probes. GETs log nothing (GET-only tooling is the zero-cost path).
+- **The free-tier model set can change** (it already did: R1-Distill-7B and DeepSeek-OCR vanished, and Qwen3-8B's "free" status turned out to be display rounding). Verify via the live `/models` endpoint + your billing console before relying on any model's cost profile for production.
+- **Pricing is NOT API-exposed**: no `/v1/pricing`, cards carry no pricing fields — the web pricing page + the billing console are the only sources.
 
 ---
 

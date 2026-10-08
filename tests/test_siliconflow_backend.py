@@ -17,7 +17,8 @@ the post-MAINT-28/ROB-42 patterns) correctly implements:
   - ``_validate_api_key`` warns (not errors) on non-sk- prefix
   - ``_catalog_model_key()`` keeps FULL prefixed IDs (NVIDIA contract)
   - ``_is_free_model()`` — per-model pricing (the only FREE_ONLY that
-    actually filters among the four documented providers)
+    actually filters among the four documented providers; currently
+    False for EVERY model — no free tier, R07.29 billing probe)
   - ``_is_non_chat_model()`` blocklist (OCR, VL, Omni, GLM-*V, MT,
     embed, rerank, media)
   - ``_looks_like_balance_exhaustion()`` distinguishes transient TPM
@@ -31,8 +32,10 @@ the post-MAINT-28/ROB-42 patterns) correctly implements:
     source="api"; stale-first service; malformed shape raises; success
     still stores; the non-chat blocklist filters live results
   - ``_apply_free_only()`` filters the catalog to the free models
-  - ``generate()`` swaps paid models to the free fallback under
-    SILICONFLOW_FREE_ONLY (Mistral pattern)
+    (currently an EMPTY filter result — no free models exist)
+  - ``generate()`` REJECTS under SILICONFLOW_FREE_ONLY before any
+    billable request (a flag that promises "free only" must never
+    emit a billable request — the R07.29 billing-probe lesson)
   - Quota-429 fast-fail through the shared classifier (transient
     TPM 429 retries; balance 429 raises the clear message)
   - 401/404 remediation texts through _STATUS_REMEDIATIONS
@@ -65,6 +68,77 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from agentkthx.backends.cloud_base import CloudBackend  # noqa: E402
 from agentkthx.backends.openai_compat import OpenAICompatibleBackend  # noqa: E402
 from agentkthx.core.types import BackendType, ToolSupportLevel  # noqa: E402
+
+# ---------------------------------------------------------------------------
+# Live-catalog snapshot (R07.29 probe, Oct 2026) — the 58 chat-kept model
+# IDs from GET /v1/models after the non-chat blocklist. The seed catalog
+# must ONLY carry models confirmed on this snapshot: a stale entry that
+# would 404 at generate time fails test_seed_only_carries_live_models
+# here instead. Re-sync after catalog drift via
+# scripts/probe_siliconflow.sh Section 5 (seed drift).
+# ---------------------------------------------------------------------------
+_LIVE_KEPT_SNAPSHOT: frozenset[str] = frozenset(
+    {
+        "ByteDance-Seed/Seed-OSS-36B-Instruct",
+        "FunAudioLLM/CosyVoice2-0.5B",
+        "IndexTeam/IndexTTS-2",
+        "Kev-4B",
+        "MiniMaxAI/MiniMax-M3",
+        "Qwen/Qwen-Image",
+        "Qwen/Qwen-Image-Edit",
+        "Qwen/Qwen2.5-7B-Instruct",
+        "Qwen/Qwen2.5-72B-Instruct",
+        "Qwen/Qwen3-14B",
+        "Qwen/Qwen3-30B-A3B-Instruct-2507",
+        "Qwen/Qwen3-32B",
+        "Qwen/Qwen3-8B",
+        "Qwen/Qwen3-Coder-30B-A3B-Instruct",
+        "Qwen/Qwen3.5-122B-A10B",
+        "Qwen/Qwen3.5-27B",
+        "Qwen/Qwen3.5-35B-A3B",
+        "Qwen/Qwen3.5-9B",
+        "Qwen/Qwen3.6-27B",
+        "Qwen/Qwen3.6-35B-A3B",
+        "Qwen/Qwen3.8-2.4T-A95B",
+        "Qwen/Qwen3.8-27B",
+        "Tongyi-MAI/Z-Image-Turbo",
+        "Wan-AI/Wan2.2-I2V-A14B",
+        "Wan-AI/Wan2.2-T2V-A14B",
+        "deepseek-ai/DeepSeek-R1",
+        "deepseek-ai/DeepSeek-V3",
+        "deepseek-ai/DeepSeek-V3.1",
+        "deepseek-ai/DeepSeek-V3.1-Terminus",
+        "deepseek-ai/DeepSeek-V3.2",
+        "deepseek-ai/DeepSeek-V3.2-Exp",
+        "deepseek-ai/DeepSeek-V4-Flash",
+        "deepseek-ai/DeepSeek-V4-Flash-0731",
+        "deepseek-ai/DeepSeek-V4-Pro",
+        "deepseek-ai/DeepSeek-V4-Pro-0813",
+        "deepseek-ai/DeepSeek-V4.1-Flash",
+        "fishaudio/fish-speech-1.5",
+        "google/gemma-4-12B-it",
+        "google/gemma-4-26B-A4B-it",
+        "google/gemma-4-31B-it",
+        "inclusionAI/Ling-flash-2.0",
+        "meituan-longcat/LongCat-2.0",
+        "moonshotai/Kimi-K2.5",
+        "moonshotai/Kimi-K2.6",
+        "moonshotai/Kimi-K2.7-Code",
+        "moonshotai/Kimi-K3",
+        "openai/gpt-oss-120b",
+        "openai/gpt-oss-20b",
+        "stepfun-ai/Step-3.5-Flash",
+        "tencent/Hunyuan-A13B-Instruct",
+        "tencent/Hy3",
+        "tencent/Hy4-preview",
+        "zai-org/GLM-4.5-Air",
+        "zai-org/GLM-5",
+        "zai-org/GLM-5.1",
+        "zai-org/GLM-5.2",
+        "zai-org/GLM-5.3",
+        "zai-org/GLM-5.3-Flash",
+    }
+)
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -391,12 +465,34 @@ class TestSiliconflowAuth:
 class TestSiliconflowFreeModel:
     """Verify the free-model classifier (per-model pricing)."""
 
-    def test_is_free_model_for_verified_free_models(self):
-        """The two verified permanently-free chat models resolve True."""
+    def test_is_free_model_false_for_qwen3_8b(self):
+        """Qwen/Qwen3-8B is NOT free — billing-verified Oct 2026 (a
+        235-input-token request cost $0.000014, ≈$0.06/1M input; the
+        earlier "0.563K tokens → $0.0000" console row was 4-decimal
+        display rounding of ≈$0.0000338). Its seed entry carries
+        input 0.06, so the classifier must resolve False."""
         from agentkthx.plugins.siliconflow.siliconflow import _is_free_model
 
-        assert _is_free_model("Qwen/Qwen3-8B") is True
-        assert _is_free_model("deepseek-ai/DeepSeek-R1-Distill-Qwen-7B") is True
+        assert _is_free_model("Qwen/Qwen3-8B") is False
+
+    def test_no_verified_free_models_on_intl_api(self):
+        """The verified-free set is EMPTY — the SiliconFlow API bills
+        every model (R07.29 billing probe). The constant stays as the
+        ground-truth extension point for a future free tier."""
+        from agentkthx.plugins.siliconflow.siliconflow import (
+            _SILICONFLOW_FREE_CHAT_MODELS,
+        )
+
+        assert _SILICONFLOW_FREE_CHAT_MODELS == frozenset()
+
+    def test_is_free_model_false_for_dead_free_model(self):
+        """DeepSeek-R1-Distill-Qwen-7B (documented free, but no longer on
+        /v1/models per the R07.29 probe) is pruned from BOTH the seed and
+        the verified free set — it must resolve False, never silently
+        resurrect as a FREE_ONLY swap target that would 404."""
+        from agentkthx.plugins.siliconflow.siliconflow import _is_free_model
+
+        assert _is_free_model("deepseek-ai/DeepSeek-R1-Distill-Qwen-7B") is False
 
     def test_is_free_model_false_for_paid(self):
         """Paid models (no pricing key — never fabricated) resolve False."""
@@ -404,7 +500,7 @@ class TestSiliconflowFreeModel:
 
         assert _is_free_model("deepseek-ai/DeepSeek-V3") is False
         assert _is_free_model("zai-org/GLM-5") is False
-        assert _is_free_model("Qwen/Qwen3-235B-A22B-Instruct-2507") is False
+        assert _is_free_model("Qwen/Qwen3-14B") is False
 
     def test_is_free_model_false_for_unknown(self):
         """Uncataloged models return False (conservative — unknown
@@ -424,17 +520,28 @@ class TestSiliconflowFreeModel:
         assert _is_free_model("DeepSeek-R1-Distill-Qwen-7B") is False
 
     def test_ocr_free_model_not_in_catalog(self):
-        """DeepSeek-OCR (the third free-tier model) is OCR, not chat —
-        deliberately absent from the seed catalog."""
+        """DeepSeek-OCR is OCR, not chat — deliberately absent from the
+        seed catalog (and no longer on the live endpoint, R07.29 probe)."""
         from agentkthx.plugins.siliconflow.siliconflow import SILICONFLOW_MODELS
 
         assert "deepseek-ai/DeepSeek-OCR" not in SILICONFLOW_MODELS
 
     def test_seed_catalog_size(self):
-        """The R07.29 seed carries the 57-model chat subset."""
+        """The R07.29 seed carries the 30 live-verified chat models (the
+        27 stale entries that would 404 are pruned)."""
         from agentkthx.plugins.siliconflow.siliconflow import SILICONFLOW_MODELS
 
-        assert len(SILICONFLOW_MODELS) == 57
+        assert len(SILICONFLOW_MODELS) == 30
+
+    def test_seed_only_carries_live_models(self):
+        """R07.29 probe contract: every seed entry is confirmed on the
+        live /v1/models snapshot (58 chat-kept IDs). A stale entry
+        re-landing in the seed fails here instead of 404-ing at
+        generate time."""
+        from agentkthx.plugins.siliconflow.siliconflow import SILICONFLOW_MODELS
+
+        stale = set(SILICONFLOW_MODELS) - _LIVE_KEPT_SNAPSHOT
+        assert not stale, f"seed carries non-live models: {sorted(stale)}"
 
 
 class TestSiliconflowBalanceExhaustion:
@@ -486,13 +593,15 @@ class TestSiliconflowBalanceExhaustion:
         assert _looks_like_balance_exhaustion(429, body) is False
 
     def test_quota_exhaustion_message_content(self, backend):
-        """The remediation text points at the top-up path AND the free
-        models (the two documented remedies)."""
+        """The remediation text points at the top-up path — the only
+        remedy, because no free models exist to switch to."""
         msg = backend._quota_exhaustion_message()
         assert "balance exhausted" in msg
         assert "cloud.siliconflow.com" in msg
-        assert "Qwen/Qwen3-8B" in msg
-        assert "SILICONFLOW_FREE_ONLY=1" in msg
+        assert "no free models" in msg
+        # The old "switch to the free model via SILICONFLOW_FREE_ONLY=1"
+        # remedy is GONE — that flag now refuses instead of swapping.
+        assert "SILICONFLOW_FREE_ONLY" not in msg
 
 
 # ---------------------------------------------------------------------------
@@ -560,7 +669,10 @@ class TestSiliconflowToolSupport:
     """Verify test_tool_support's name-pattern classification."""
 
     def test_reasoning_models_react(self, backend):
-        """DeepSeek-R1 family + *-Thinking models reject tools → REACT."""
+        """DeepSeek-R1 family + *-Thinking models reject tools → REACT.
+        (Name-pattern classification — some named models are no longer
+        live per the R07.29 probe; the patterns stay valid for future
+        re-listings and unlisted siblings.)"""
         assert backend.test_tool_support("deepseek-ai/DeepSeek-R1") == ToolSupportLevel.REACT
         assert (
             backend.test_tool_support("deepseek-ai/DeepSeek-R1-Distill-Qwen-7B")
@@ -586,16 +698,15 @@ class TestSiliconflowToolSupport:
         assert backend.test_tool_support("Qwen/Qwen3-8B") == ToolSupportLevel.NATIVE
         assert backend.test_tool_support("deepseek-ai/DeepSeek-V3") == ToolSupportLevel.NATIVE
         assert backend.test_tool_support("zai-org/GLM-5") == ToolSupportLevel.NATIVE
-        assert (
-            backend.test_tool_support("meta-llama/Meta-Llama-3.1-8B-Instruct")
-            == ToolSupportLevel.NATIVE
-        )
+        assert backend.test_tool_support("tencent/Hunyuan-A13B-Instruct") == ToolSupportLevel.NATIVE
 
     def test_glm_z1_native_by_design(self, backend):
         """GLM-Z1 is deliberately NATIVE: SiliconFlow's own docs list
         THUDM/GLM-Z1-32B-0414 as 'thinking + tools' (the general caveat
         and the verified list contradict each other — the conservative
-        default + runtime 400 fallback resolves the drift)."""
+        default + runtime 400 fallback resolves the drift). Z1 is no
+        longer live (R07.29 probe) — the pin stays for the classification
+        contract."""
         assert backend.test_tool_support("THUDM/GLM-Z1-32B-0414") == ToolSupportLevel.NATIVE
 
     def test_patterns_match_model_segment_not_vendor(self, backend):
@@ -640,15 +751,17 @@ class TestSiliconflowCatalog:
         assert info is not None
         assert info["name"] == "Qwen/Qwen3-8B"
         assert info["details"]["context_length"] == 32768
-        assert info["details"]["free_tier"] is True
+        assert info["details"]["free_tier"] is False
 
     def test_get_model_info_unknown(self, backend):
         assert backend.get_model_info("not/a-real-model") is None
 
-    def test_get_model_max_context_verified_free(self, backend):
-        """The two verified free models carry their documented 32K ctx."""
+    def test_get_model_max_context_seeded_model(self, backend):
+        """The seeded default model carries its documented 32K ctx; the
+        dead formerly-free model has no seed entry left → 128K
+        fallback."""
         assert backend.get_model_max_context("Qwen/Qwen3-8B") == 32768
-        assert backend.get_model_max_context("deepseek-ai/DeepSeek-R1-Distill-Qwen-7B") == 32768
+        assert backend.get_model_max_context("deepseek-ai/DeepSeek-R1-Distill-Qwen-7B") == 128000
 
     def test_get_model_max_context_fallback(self, backend):
         """Uncataloged/paid-without-ctx models fall back to 128K (the
@@ -692,7 +805,7 @@ class TestSiliconflowListModels:
         monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
 
         models = backend.list_models()
-        assert len(models) == 57
+        assert len(models) == 30
         assert all(m.get("name") for m in models)
         names = {m["name"] for m in models}
         assert "Qwen/Qwen3-8B" in names
@@ -721,7 +834,7 @@ class TestSiliconflowListModels:
         models = backend.list_models()
 
         assert store_calls == []
-        assert len(models) == 57
+        assert len(models) == 30
 
     def test_failed_fetch_serves_stale_first(self, backend, monkeypatch, isolated_cache):
         """ROB-42: on discovery failure, the stale last-known-good cache
@@ -755,7 +868,7 @@ class TestSiliconflowListModels:
         names = {m["name"] for m in models}
         # Stale live data beats the seed
         assert "vendor/new-model-live" in names
-        assert len(models) < 57
+        assert len(models) < 30
 
     def test_malformed_shape_raises(self, backend, monkeypatch, isolated_cache):
         """ROB-42 catch-narrowing: a malformed response shape (JSON list
@@ -813,8 +926,8 @@ class TestSiliconflowListModels:
         assert "Qwen/Qwen3-8B" in names
         # ...blocklist applied to live results...
         assert "deepseek-ai/DeepSeek-OCR" not in names
-        # ...catalog-only models merged in (seed is 57 + 1 new = 58)
-        assert len(models) == 58
+        # ...catalog-only models merged in (seed is 30 live-verified + 1 new = 31)
+        assert len(models) == 31
 
         # Provenance: stored under the backend key, source=api
         cache_path = isolated_cache.get_cache_path()
@@ -822,9 +935,10 @@ class TestSiliconflowListModels:
         assert data["backends"]["siliconflow"]["source"] == "api"
 
     def test_free_only_filters_catalog(self, backend, monkeypatch, isolated_cache):
-        """SILICONFLOW_FREE_ONLY filters to the free models — the only
-        FREE_ONLY that genuinely filters among the four documented
-        providers (per-model pricing)."""
+        """SILICONFLOW_FREE_ONLY filters to the free models — with NO
+        free models on the API (R07.29 billing probe), the honest
+        result is an EMPTY list, never a silently-billing 'cheap'
+        subset."""
         import agentkthx.plugins.siliconflow.siliconflow as sf_module
 
         monkeypatch.setattr(sf_module, "SILICONFLOW_FREE_ONLY", True)
@@ -836,7 +950,10 @@ class TestSiliconflowListModels:
 
         models = backend.list_models()
         names = {m["name"] for m in models}
-        assert names == {"Qwen/Qwen3-8B", "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"}
+        # No free models exist — the filter empties the catalog (the
+        # formerly-free Qwen3-8B bills ≈$0.06/1M input, so it is NOT a
+        # FREE_ONLY result)
+        assert names == set()
 
     def test_l1_cache_avoids_refetch(self, backend, monkeypatch, isolated_cache):
         """A fresh L1 entry short-circuits the live fetch entirely."""
@@ -857,49 +974,58 @@ class TestSiliconflowListModels:
 
 
 # ---------------------------------------------------------------------------
-# FREE_ONLY generate() swap
+# FREE_ONLY generate() rejection (no free models — R07.29 billing probe)
 # ---------------------------------------------------------------------------
 
 
 class TestSiliconflowFreeOnlyGenerate:
-    """Verify generate() swaps paid models to the free fallback."""
+    """Verify generate() REFUSES under FREE_ONLY (no free models)."""
 
-    def test_generate_swaps_paid_model(self, backend, monkeypatch):
-        """SILICONFLOW_FREE_ONLY + paid model → body carries the free
-        fallback model (Mistral pattern — swap, don't raise)."""
-        import agentkthx.plugins.siliconflow.siliconflow as sf_module
-
-        monkeypatch.setattr(sf_module, "SILICONFLOW_FREE_ONLY", True)
-        monkeypatch.setattr(sf_module, "SILICONFLOW_FREE_FALLBACK_MODEL", "Qwen/Qwen3-8B")
-
-        captured = {}
-
-        def fake_make_api_request(body, *, stream=False):
-            captured.update(body)
-            return {"content": "ok", "tool_calls": [], "finish_reason": "stop"}
-
-        monkeypatch.setattr(backend, "_make_api_request", fake_make_api_request)
-
-        result = backend.generate("deepseek-ai/DeepSeek-V3", [{"role": "user", "content": "hi"}])
-        assert result["content"] == "ok"
-        assert captured["model"] == "Qwen/Qwen3-8B"
-
-    def test_generate_keeps_free_model(self, backend, monkeypatch):
-        """A free model passes through untouched under FREE_ONLY."""
+    def test_generate_rejects_under_free_only(self, backend, monkeypatch):
+        """SILICONFLOW_FREE_ONLY + any model → RuntimeError BEFORE any
+        request is built (a flag that promises 'free only' must never
+        emit a billable request — even Qwen/Qwen3-8B bills ≈$0.06/1M
+        input, R07.29 billing probe; the Mistral-style swap would have
+        silently billed)."""
         import agentkthx.plugins.siliconflow.siliconflow as sf_module
 
         monkeypatch.setattr(sf_module, "SILICONFLOW_FREE_ONLY", True)
 
-        captured = {}
+        called = []
 
         def fake_make_api_request(body, *, stream=False):
-            captured.update(body)
+            called.append(body)
             return {"content": "ok", "tool_calls": [], "finish_reason": "stop"}
 
-        monkeypatch.setattr(backend, "_make_api_request", fake_make_api_request)
+        def fake_jev_dispatch(**kwargs):
+            called.append("jev")
+            return None
 
-        backend.generate("Qwen/Qwen3-8B", [{"role": "user", "content": "hi"}])
-        assert captured["model"] == "Qwen/Qwen3-8B"
+        monkeypatch.setattr(backend, "_make_api_request", fake_make_api_request)
+        monkeypatch.setattr(backend, "_maybe_jev_dispatch", fake_jev_dispatch)
+
+        with pytest.raises(RuntimeError, match="no free models"):
+            backend.generate("deepseek-ai/DeepSeek-V3", [{"role": "user", "content": "hi"}])
+        # Not even the JEV decision call fired — the guard sits BEFORE
+        # the dispatch (which is itself a billable LLM call).
+        assert called == []
+
+    def test_generate_free_only_message_carries_remedy(self, backend, monkeypatch):
+        """The rejection text names the flag, the billing evidence, and
+        the remedy (unset the flag / top up) — the maintainer-facing
+        contract from the 2026-10 billing incident."""
+        import agentkthx.plugins.siliconflow.siliconflow as sf_module
+
+        monkeypatch.setattr(sf_module, "SILICONFLOW_FREE_ONLY", True)
+
+        with pytest.raises(RuntimeError) as exc_info:
+            backend.generate("Qwen/Qwen3-8B", [{"role": "user", "content": "hi"}])
+
+        message = str(exc_info.value)
+        assert "SILICONFLOW_FREE_ONLY" in message
+        assert "no free models" in message
+        assert "Qwen/Qwen3-8B" in message
+        assert "cloud.siliconflow.com" in message
 
     def test_generate_without_free_only_keeps_paid_model(self, backend, monkeypatch):
         """FREE_ONLY off → paid models pass through (paid usage is
@@ -1200,6 +1326,8 @@ class TestSiliconflowConfig:
         assert config.SILICONFLOW_FREE_ONLY is False
 
     def test_siliconflow_free_fallback_default(self):
+        """Reserved-for-future-free-tier var; defaults to the cheapest
+        known model (currently unused — no free models exist)."""
         from agentkthx import config
 
         assert config.SILICONFLOW_FREE_FALLBACK_MODEL == "Qwen/Qwen3-8B"
@@ -1233,7 +1361,8 @@ class TestSiliconflowConfig:
             importlib.reload(_config)
 
     def test_siliconflow_in_backend_selection_ladder(self, monkeypatch):
-        """AGENTKTHX_BACKEND=siliconflow picks up the free default model."""
+        """AGENTKTHX_BACKEND=siliconflow picks up the cheapest default
+        model (the SILICONFLOW_DEFAULT_MODEL)."""
         monkeypatch.setenv("AGENTKTHX_BACKEND", "siliconflow")
         import importlib
 
@@ -1338,19 +1467,30 @@ class TestSiliconflowCliRegistries:
 class TestSiliconflowSeedIntegrity:
     """Verify the model_seed.json siliconflow section's shape."""
 
-    def test_free_models_carry_zero_pricing(self):
-        """Zero pricing on exactly the two free chat models."""
+    def test_qwen3_8b_carries_billing_derived_price(self):
+        """Qwen/Qwen3-8B is the ONLY priced entry — the billing-derived
+        input rate (≈$0.06/1M tokens; a 235-input-token request billed
+        $0.000014, Oct 2026). Output is unknown → omitted, never
+        fabricated. NO entry carries 0.0/0.0 — the API has no free
+        models (R07.29 billing probe)."""
         from agentkthx.plugins.siliconflow.siliconflow import SILICONFLOW_MODELS
 
         priced = {name for name, meta in SILICONFLOW_MODELS.items() if "pricing" in meta}
-        assert priced == {"Qwen/Qwen3-8B", "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"}
+        assert priced == {"Qwen/Qwen3-8B"}
+        pricing = SILICONFLOW_MODELS["Qwen/Qwen3-8B"]["pricing"]
+        assert pricing["input"] == 0.06
+        assert "output" not in pricing  # unverified — never fabricated
+        # No zero-zero pricing anywhere → _is_free_model is False for all
+        for meta in SILICONFLOW_MODELS.values():
+            p = meta.get("pricing", {})
+            assert not (p.get("input") == 0.0 and p.get("output") == 0.0)
 
     def test_paid_models_omit_pricing(self):
         """Paid models never carry fabricated prices."""
         from agentkthx.plugins.siliconflow.siliconflow import SILICONFLOW_MODELS
 
         for name, meta in SILICONFLOW_MODELS.items():
-            if name in ("Qwen/Qwen3-8B", "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"):
+            if name == "Qwen/Qwen3-8B":
                 continue
             assert "pricing" not in meta, name
 

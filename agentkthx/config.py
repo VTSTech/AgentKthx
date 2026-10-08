@@ -397,10 +397,11 @@ CLOUDFLARE_FREE_ONLY = os.environ.get("CLOUDFLARE_FREE_ONLY", "").lower() in (
 # SiliconFlow plugin (agentkthx/plugins/siliconflow/)
 # China-hosted OpenAI-compatible aggregator at api.siliconflow.com/v1
 # (api.siliconflow.cn/v1 for China-domestic traffic — same API, lower
-# latency from inside China). Catalog: 200+ models (DeepSeek, Qwen, GLM,
-# Llama, Kimi, MiniMax, ERNIE, Hunyuan, Gemma, gpt-oss). Free tier: 3
-# permanently-free models (Qwen3-8B, DeepSeek-R1-Distill-Qwen-7B,
-# DeepSeek-OCR), no daily/monthly quota, no credit card. See
+# latency from inside China). Catalog: 79 live models (DeepSeek, Qwen,
+# GLM, Kimi, MiniMax, Hunyuan, Gemma, gpt-oss — R07.29 probe). NO free
+# tier: every model bills (Qwen/Qwen3-8B is the cheapest known, input
+# ≈$0.06/1M tokens, billing-verified Oct 2026 — a $0.0000 console row
+# is 4-decimal display rounding). See
 # docs/api/SILICONFLOW_API_TECHNICAL_REFERENCE.md.
 SILICONFLOW_BASE_URL = os.environ.get("SILICONFLOW_BASE_URL", "https://api.siliconflow.com/v1")
 # SiliconFlow API key. Issued at https://cloud.siliconflow.com/account/ak
@@ -408,24 +409,29 @@ SILICONFLOW_BASE_URL = os.environ.get("SILICONFLOW_BASE_URL", "https://api.silic
 # isolation). A key without the sk- prefix draws a debug-mode warning in
 # the backend (same-loose-validation pattern as NVIDIA's nvapi-).
 SILICONFLOW_API_KEY = os.environ.get("SILICONFLOW_API_KEY", "")
-# Default model — Qwen/Qwen3-8B, the free tier's only tool-capable chat
-# model (32K context, permanently free, no quota). The verified free
-# reasoning model (DeepSeek-R1-Distill-Qwen-7B) has NO tools support.
+# Default model — Qwen/Qwen3-8B, the cheapest known tool-capable chat
+# model (32K context, input ≈$0.06/1M tokens — BILLS, not free: the
+# R07.29 billing probe priced a 235-token request at $0.000014; the
+# earlier "$0.0000" console row was display rounding).
 # Override via SILICONFLOW_DEFAULT_MODEL env var.
 SILICONFLOW_DEFAULT_MODEL = os.environ.get("SILICONFLOW_DEFAULT_MODEL", "Qwen/Qwen3-8B")
 # Strict free-tier enforcement: when true, list_models() filters to the
-# permanently-free models and generate() swaps paid models to the free
-# fallback. SiliconFlow is the only one of the four documented providers
-# whose FREE_ONLY genuinely filters (per-model pricing, not an
-# account-wide quota). Default false.
+# permanently-free models and generate() REJECTS (raises) instead of
+# billing — the API has no free models (R07.29 billing probe), so the
+# filter empties the catalog and the guard refuses every request.
+# SiliconFlow is the only one of the four documented providers whose
+# FREE_ONLY genuinely filters (per-model pricing, not an account-wide
+# quota). Default false.
 SILICONFLOW_FREE_ONLY = os.environ.get("SILICONFLOW_FREE_ONLY", "").lower() in (
     "1",
     "true",
     "yes",
 )
-# Used when SILICONFLOW_FREE_ONLY=true and a paid model is requested —
-# the backend swaps to this model and retries (Mistral
-# MISTRAL_FREE_FALLBACK_MODEL pattern). Defaults to the free default.
+# RESERVED for a future free tier: when SiliconFlow (re)introduces a
+# genuinely-free model (seed 0.0/0.0 pricing + add to the verified set),
+# this becomes the FREE_ONLY swap target (Mistral
+# MISTRAL_FREE_FALLBACK_MODEL pattern). Currently unused — no free
+# models exist. Defaults to the cheapest known model.
 SILICONFLOW_FREE_FALLBACK_MODEL = os.environ.get("SILICONFLOW_FREE_FALLBACK_MODEL", "Qwen/Qwen3-8B")
 
 

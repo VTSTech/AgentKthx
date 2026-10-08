@@ -1,11 +1,11 @@
 """
 AgentKthx Plugin — SiliconFlow Cloud Backend
 
-SiliconFlow API backend for 200+ models (DeepSeek, Qwen, GLM, Llama, Kimi,
-MiniMax, ERNIE, Hunyuan, Gemma, gpt-oss) via the OpenAI Chat-Completions
-API at api.siliconflow.com. Free tier with 3 permanently-free models
-(Qwen3-8B, DeepSeek-R1-Distill-Qwen-7B, DeepSeek-OCR), no quota, no
-credit card required.
+SiliconFlow API backend for the 79-model live catalog (DeepSeek, Qwen,
+GLM, Kimi, MiniMax, Hunyuan, Gemma, gpt-oss) via the OpenAI
+Chat-Completions API at api.siliconflow.com. No free tier — every
+model bills (Qwen/Qwen3-8B is the cheapest known, input ≈$0.06/1M
+tokens, billing-verified R07.29).
 
 See docs/api/SILICONFLOW_API_TECHNICAL_REFERENCE.md for full details.
 

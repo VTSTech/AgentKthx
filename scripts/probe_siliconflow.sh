@@ -6,13 +6,16 @@
 #              requests log no usage rows; only POST /chat/completions does).
 # --deep flag: minimal POST /chat/completions per live model (max_tokens=5,
 #              temperature=0.7, top_p=0.9 — non-default sampling to detect
-#              fixed-param models). Free models cost ¥0; paid models burn a
-#              fraction of a cent each. Use --filter to limit scope.
+#              fixed-param models). Every model BILLS (no free tier, R07.29
+#              billing probe): Qwen3-8B ≈ a rounding error per tiny request,
+#              paid models a fraction of a cent each. Use --filter to limit
+#              scope.
 #              ⚡ BILLABLE USAGE — gated: requires --confirm-billable.
 # --caps flag:  capability spot-check — plain chat + tools + enable_thinking
 #              on/off (4 tiny POSTs per model). Default spot-check model is
-#              the FREE Qwen/Qwen3-8B ($0.00, but still logged as billable
-#              usage); add paid models via --cap-models "A,B,C". Settles the
+#              the CHEAPEST Qwen/Qwen3-8B (input ≈$0.06/1M tokens — BILLS
+#              real money, a rounding error per tiny request); add models
+#              via --cap-models "A,B,C". Settles the
 #              CLI's "tools: native/react" and "think: yes/no" columns with
 #              live evidence instead of doc-derived heuristics.
 #              ⚡ BILLABLE USAGE — gated: requires --confirm-billable.
@@ -105,9 +108,10 @@ DEEP=false
 CAPS=false
 BILLABLE=false
 FILTER=""
-# Default spot-check = the FREE model only ($0.00 — free of CHARGE, not of
-# usage-log entries; the R07.29 live run's billing row: 0.563K tokens, $0.0000).
-# Paid spot-checks require --cap-models + --confirm-billable.
+# Default spot-check = the CHEAPEST model (Qwen/Qwen3-8B, input ≈$0.06/1M
+# tokens — billing-verified R07.29: 235 input tokens → $0.000014; the earlier
+# "0.563K → $0.0000" console row was 4-decimal display rounding, NOT free).
+# Other spot-checks via --cap-models; all require --confirm-billable.
 CAP_MODELS="Qwen/Qwen3-8B"
 
 for arg in "$@"; do
@@ -157,7 +161,7 @@ fi
 echo "  Auth:           Bearer \$SILICONFLOW_API_KEY (source: ${KEY_SOURCE}, len=${#API_KEY}, prefix=${API_KEY:0:8}...)"
 if $DEEP; then
     if $BILLABLE; then
-        echo -e "  Deep probe:     ${YELLOW}ON — per-model POST (BILLABLE usage; free models ¥0, paid a fraction of a cent)${NC}"
+        echo -e "  Deep probe:     ${YELLOW}ON — per-model POST (BILLABLE usage; every model bills — Qwen3-8B a rounding error, paid models a fraction of a cent)${NC}"
     else
         echo -e "  Deep probe:     ${YELLOW}GATED — POSTs are billable; add --confirm-billable to run${NC}"
     fi
@@ -342,12 +346,12 @@ cap_ok = any(any(f in m for f in cap_fields) for m in models if isinstance(m, di
 print(f"\n  {CYAN}VERDICTS (what this means for the plugin):{NC}")
 print(f"    Pricing via /v1/models:       {'YES — parse it in list_models' if pricing_ok else 'NO'}")
 if not pricing_ok:
-    print(f"      → seed pricing (0/0 on the 2 verified free models) + https://cloud.siliconflow.cn/pricing")
+    print(f"      → seed pricing (input-only, billing-derived, on Qwen/Qwen3-8B) + https://siliconflow.com/pricing")
     print(f"        remain the source of truth; no machine-readable pricing API (see Section 4)")
 print(f"    Context length via /v1/models: {'YES — parse it in list_models' if ctx_ok else 'NO'}")
 if not ctx_ok:
     print(f"      → CLI shows CloudBackend._DEFAULT_CONTEXT_FALLBACK=128000 ('125K') for most models")
-    print(f"        and seed context_length=32768 ('32K') for the free models — NOT API data")
+    print(f"        and seed context_length=32768 ('32K') for Qwen/Qwen3-8B — NOT API data")
 print(f"    Capabilities via /v1/models:  {'YES — parse it in list_models' if cap_ok else 'NO'}")
 if not cap_ok:
     print(f"      → CLI tools/think columns are doc-derived heuristics (REACT patterns + seed)")
@@ -515,6 +519,10 @@ free = sorted(k for k, v in sf_seed.items()
 print(f"\n  Free models (seed pricing 0/0):           {len(free)}")
 for k in free:
     print(f"    {GREEN}✓{NC} {k}  (context_length={sf_seed[k].get('context_length', '—')})")
+if not free:
+    print(f"    {YELLOW}(none — every model bills: Qwen/Qwen3-8B input ≈$0.06/1M;${NC}")
+    print(f"    {YELLOW} billing-derived 2026-10-08: 235 input tokens → $0.000014;${NC}")
+    print(f"    {YELLOW} no seed entry carries 0/0 pricing)${NC}")
 print(f"    (matches _is_free_model() — pricing-derived, no ':free' suffix convention)")
 PYEOF
 fi
@@ -619,13 +627,15 @@ if ! $DEEP; then
     echo -e "${CYAN}── 7. Deep probe ──${NC}"
     echo -e "  ${DIM}(skipped — run with --deep to POST /chat/completions per kept model:${NC}"
     echo -e "   ${DIM}HTTP status, response time, reasoning flag, 429 balance-vs-TPM split;${NC}"
-    echo -e "   ${DIM}free models ¥0, paid a fraction of a cent each; --filter limits scope)${NC}"
+    echo -e "   ${DIM}every model bills — Qwen3-8B a rounding error, paid a fraction of${NC}"
+    echo -e "   ${DIM}   a cent each; --filter limits scope)${NC}"
 elif ! $BILLABLE; then
     echo ""
     echo -e "${CYAN}── 7. Deep probe ──${NC}"
     echo -e "  ${YELLOW}⚡ GATED — --deep POSTs /chat/completions once per kept model, which is${NC}"
-    echo -e "  ${YELLOW}   BILLABLE USAGE (every POST logs a usage row, even $0.00 free-model${NC}"
-    echo -e "  ${YELLOW}   calls). Re-run with:  --deep --confirm-billable${NC}"
+    echo -e "  ${YELLOW}   BILLABLE USAGE (every POST logs a usage row — and every model${NC}"
+    echo -e "  ${YELLOW}   bills: Qwen3-8B ≈ $0.000014 per tiny request, ≈$0.06/1M input).${NC}"
+    echo -e "  ${YELLOW}   Re-run with:  --deep --confirm-billable${NC}"
     echo -e "  ${DIM}   (the GET requests above logged zero usage rows on the billing table)${NC}"
 else
     echo ""
@@ -771,7 +781,7 @@ bal = [e for e in results["error"] if e.get("class") == "429-BALANCE"]
 tpm = [e for e in results["error"] if e.get("class") == "429-TPM"]
 if bal:
     print(f"    429 balance-exhausted:       {len(bal)}  (matches _looks_like_quota_exhaustion")
-    print(f"        wording — top up at cloud.siliconflow.cn or switch to the free models)")
+    print(f"        wording — top up at cloud.siliconflow.com; no free model exists to switch to)")
 if tpm:
     print(f"    429 TPM (transient):         {len(tpm)}  (retryable — shared retry loop backs off)")
 
@@ -792,15 +802,15 @@ if ! $CAPS; then
     echo ""
     echo -e "${CYAN}── 8. Capability matrix ──${NC}"
     echo -e "  ${DIM}(skipped — run with --caps to live-test tools + enable_thinking on${NC}"
-    echo -e "   ${DIM}the free default spot-check model (paid via --cap-models); settles${NC}"
+    echo -e "   ${DIM}the cheapest default spot-check model (others via --cap-models); settles${NC}"
     echo -e "   ${DIM}the CLI's 'tools: native/react' and 'think: yes/no' columns)${NC}"
 elif ! $BILLABLE; then
     echo ""
     echo -e "${CYAN}── 8. Capability matrix ──${NC}"
     echo -e "  ${YELLOW}⚡ GATED — --caps POSTs /chat/completions 4x per spot-check model,${NC}"
-    echo -e "  ${YELLOW}   which is BILLABLE USAGE (the free default Qwen/Qwen3-8B bills${NC}"
-    echo -e "  ${YELLOW}   $0.00 but still logs a usage row; paid --cap-models cost real${NC}"
-    echo -e "  ${YELLOW}   money). Re-run with:  --caps --confirm-billable${NC}"
+    echo -e "  ${YELLOW}   which is BILLABLE USAGE (NO free models exist — even the cheapest${NC}"
+    echo -e "  ${YELLOW}   Qwen/Qwen3-8B bills real money: ≈$0.000014 per tiny request,${NC}"
+    echo -e "  ${YELLOW}   ≈$0.06/1M input). Re-run with:  --caps --confirm-billable${NC}"
 else
     echo ""
     echo -e "${CYAN}── 8. Capability matrix (tools + thinking spot-check) ──${NC}"
@@ -1034,8 +1044,8 @@ print(f"  Capabilities:     {'API-exposed ✓' if cap_ok else 'NOT available via
 print(f"\n  {CYAN}Next steps:{NC}")
 print(f"    --deep --confirm-billable   per-model 200/429/400 sweep (BILLABLE)")
 print(f"    --caps --confirm-billable   tools + enable_thinking matrix (BILLABLE;)")
-print(f"                                default cap model = free Qwen/Qwen3-8B,")
-print(f"                                paid via --cap-models)")
+print(f"                                every model bills — the default cap")
+print(f"                                model Qwen/Qwen3-8B is the cheapest, ≈$0.06/1M input)")
 print(f"    Section 6 leaks             add blocklist patterns for media/audio models")
 print(f"    Section 6 gaps              seed the unseeded chat-capable live models")
 PYEOF

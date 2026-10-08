@@ -230,16 +230,19 @@ _ENV_REFERENCE = [
     ),
     (
         "SILICONFLOW_DEFAULT_MODEL",
-        "Default model (default: Qwen/Qwen3-8B — the free tier's tool-capable chat model)",
+        "Default model (default: Qwen/Qwen3-8B — the cheapest known "
+        "tool-capable chat model, input ≈$0.06/1M tokens)",
     ),
     (
         "SILICONFLOW_FREE_ONLY",
-        "Restrict to the permanently-free models — the only FREE_ONLY that "
-        "filters, per-model pricing (default: false)",
+        "Restrict to the permanently-free models — currently NONE exist "
+        "(no free tier), so this empties the listing and makes generate() "
+        "refuse (default: false)",
     ),
     (
         "SILICONFLOW_FREE_FALLBACK_MODEL",
-        "Model to swap to when FREE_ONLY rejects a paid model (default: Qwen/Qwen3-8B)",
+        "RESERVED for a future free tier — unused today (no free models; "
+        "default: Qwen/Qwen3-8B)",
     ),
     # ── ACP / TurboQuant ──
     ("ACP_BASE_URL", "ACP server URL"),

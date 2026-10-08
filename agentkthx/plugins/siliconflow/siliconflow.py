@@ -3,8 +3,9 @@
 Backend implementation for the SiliconFlow cloud inference API.
 
 SiliconFlow (siliconflow.com) is a China-hosted OpenAI-compatible
-aggregator offering 200+ models (DeepSeek, Qwen, GLM, Llama, Kimi,
-MiniMax, ERNIE, Hunyuan, Gemma, gpt-oss). This backend inherits the
+aggregator (79-model live catalog at the R07.29 probe: DeepSeek, Qwen,
+GLM, Kimi, MiniMax, Hunyuan, Gemma, gpt-oss — plus media/embedding
+families this backend blocklists). This backend inherits the
 OpenAI Chat-Completions logic from CloudBackend and adds API-key
 authentication and SiliconFlow-specific defaults.
 
@@ -18,23 +19,30 @@ Configuration:
                             for lower latency — same API, domestic TLD)
   SILICONFLOW_API_KEY     — sk- API key for authentication (required)
   SILICONFLOW_DEFAULT_MODEL — default model when none specified
-                            (default: Qwen/Qwen3-8B — the free tier's only
-                            tool-capable chat model)
+                            (default: Qwen/Qwen3-8B — the cheapest known
+                            tool-capable chat model, input ≈ $0.06 per 1M
+                            tokens)
   SILICONFLOW_FREE_ONLY   — when true, list_models() filters to the
-                            permanently-free models and generate() swaps
-                            paid models to the free fallback (default: false)
-  SILICONFLOW_FREE_FALLBACK_MODEL — model generate() swaps to when
-                            SILICONFLOW_FREE_ONLY=1 rejects a paid model
-                            (default: Qwen/Qwen3-8B)
+                            permanently-free models and generate() REJECTS
+                            before building any request (default: false) —
+                            see the billing note below for why this
+                            currently filters to an empty catalog
+  SILICONFLOW_FREE_FALLBACK_MODEL — RESERVED for a future free tier
+                            (default: Qwen/Qwen3-8B; unused today — no
+                            free models exist, R07.29 billing probe)
 
-Free tier (verified Oct 2026 — see docs/api/SILICONFLOW_API_TECHNICAL_REFERENCE.md):
-  - 3 permanently-free models: Qwen/Qwen3-8B (chat+tools),
-    deepseek-ai/DeepSeek-R1-Distill-Qwen-7B (reasoning, no tools),
-    deepseek-ai/DeepSeek-OCR (OCR, not chat — excluded from the catalog)
-  - NO daily or monthly quota on free models (the only provider of the
-    four documented with a truly uncapped free tier — subject to TPM)
-  - No credit card required
-  - Paid models require account balance top-up
+Billing reality (R07.29 billing probe, Oct 2026):
+  - NO free models on the SiliconFlow API. Qwen/Qwen3-8B — the
+    cheapest known chat model — BILLS: a 235-input-token request cost
+    $0.000014 on the billing console (meter
+    qwen/qwen3-8b.online.input-tokens; ≈ $0.06 per 1M input tokens).
+    The earlier "0.563K tokens → $0.0000" console row that seeded the
+    free-tier claim was 4-decimal DISPLAY ROUNDING (real ≈ $0.0000338).
+  - The formerly-documented free models are gone or billing:
+    Qwen/Qwen3-8B bills; deepseek-ai/DeepSeek-R1-Distill-Qwen-7B and
+    deepseek-ai/DeepSeek-OCR are absent from GET /v1/models.
+  - Every model draws on the account balance — keep it topped up
+    (https://cloud.siliconflow.com) for sustained runs.
 
 Tool support:
   Most chat models support OpenAI-compatible function calling.
@@ -58,8 +66,8 @@ Quota model:
   neurons), SiliconFlow's 429 splits by BODY wording: "TPM limit
   reached" / "rate limiting" is a transient rate limit (retry with
   backoff), while "balance"/"quota"/"insufficient" wording means the
-  account balance is exhausted for paid models (NOT retryable — top up
-  or switch to the free models). ``_looks_like_quota_exhaustion``
+  account balance is exhausted (NOT retryable — top up the balance;
+  there is no free model to switch to). ``_looks_like_quota_exhaustion``
   implements the split with the transient indicators checked FIRST so
   "TPM limit reached" can never trip the quota fast-fail on the word
   "limit" (the same wording-drift class the Cloudflare "limit" bug
@@ -82,7 +90,6 @@ from agentkthx.backends.cloud_base import CloudBackend
 from agentkthx.config import (
     SILICONFLOW_BASE_URL,
     SILICONFLOW_DEFAULT_MODEL,
-    SILICONFLOW_FREE_FALLBACK_MODEL,
     SILICONFLOW_FREE_ONLY,
 )
 from agentkthx.core.types import BackendType, ToolSupportLevel
@@ -95,50 +102,58 @@ from agentkthx.model_cache import load_seed_catalog
 # prefixed name in the request body — the same contract as the NVIDIA
 # seed (see _catalog_model_key below).
 #
-# Pricing: 0.0/0.0 ONLY for the two verified permanently-free chat models
-# (drives _is_free_model() → free_tier + SILICONFLOW_FREE_ONLY filtering).
-# Paid models carry NO pricing key — unknown prices are never fabricated;
-# _is_free_model() then returns False (pricing.get("input", -1) != 0.0).
+# Pricing: NO entry carries 0.0/0.0 — the SiliconFlow API has no free
+# models (billing-verified R07.29: Qwen/Qwen3-8B billed $0.000014 for
+# 235 input tokens, ≈$0.06/1M input; the earlier "$0.0000" console row
+# was 4-decimal display rounding). Qwen/Qwen3-8B seeds its verified
+# INPUT price only (output is unknown — omitted, never fabricated);
+# every other model carries NO pricing key. _is_free_model() therefore
+# returns False for everything (pricing.get("input", -1) != 0.0),
+# driving free_tier + SILICONFLOW_FREE_ONLY.
 SILICONFLOW_MODELS: dict[str, dict] = load_seed_catalog("siliconflow")
-"""Static catalog for the siliconflow backend — R07.29 seed (57 chat
-models from the verified Oct 2026 catalog enum). Serves as the initial
+"""Static catalog for the siliconflow backend — R07.29 seed (30 chat
+models, each confirmed on the live /v1/models probe; the 27 stale
+entries that would 404 are pruned). Serves as the initial
 defaults of the persistent model-catalog cache and the offline fallback
 list. Update the seed JSON (or refresh the backend's cache from the
 live API) instead of editing code here.
 """
 
-# Default model when none specified. Qwen/Qwen3-8B is the free tier's
-# only tool-capable chat model (32K context, no quota, no credit card) —
-# the recommended default for cost-conscious agentic workflows. Override
-# via SILICONFLOW_DEFAULT_MODEL env var.
+# Default model when none specified. Qwen/Qwen3-8B is the cheapest
+# known tool-capable chat model (32K context, input ≈$0.06/1M tokens —
+# BILLS, not free) — the recommended default for cost-conscious agentic
+# workflows. Override via SILICONFLOW_DEFAULT_MODEL env var.
 SILICONFLOW_DEFAULT_MODEL_STR = SILICONFLOW_DEFAULT_MODEL or "Qwen/Qwen3-8B"
 
-#: The verified permanently-free CHAT models (Oct 2026). The third free
-#: model, deepseek-ai/DeepSeek-OCR, is an OCR (image→text) endpoint and
-#: is deliberately absent — it is not drivable as a chat model.
-#: Used by _apply_free_only() as the ground truth when the live catalog
-#: surfaces free models the seed hasn't priced yet.
-_SILICONFLOW_FREE_CHAT_MODELS: frozenset[str] = frozenset(
-    {
-        "Qwen/Qwen3-8B",
-        "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
-    }
-)
+#: Verified-live permanently-free CHAT models — EMPTY as of the R07.29
+#: billing probe (Oct 2026): the SiliconFlow API bills every model.
+#: Qwen/Qwen3-8B — the former "sole verified-live free model" — cost
+#: $0.000014 for 235 input tokens (the earlier $0.0000 console row was
+#: 4-decimal display rounding), and the formerly-documented free
+#: deepseek-ai/DeepSeek-R1-Distill-Qwen-7B / deepseek-ai/DeepSeek-OCR
+#: are no longer served. Kept (empty) as the ground-truth extension
+#: point: when SiliconFlow (re)introduces a genuinely-free model, add
+#: its ID here + seed 0.0/0.0 pricing and the free_tier flag, the
+#: FREE_ONLY filter, and the reserved fallback all reactivate.
+_SILICONFLOW_FREE_CHAT_MODELS: frozenset[str] = frozenset()
 
 
 def _is_free_model(model: str) -> bool:
     """Check if a SiliconFlow model is permanently free.
 
-    Free = zero input AND output pricing in the seed catalog. Only the
-    two verified permanently-free chat models carry 0.0/0.0 pricing, so
-    this returns True for exactly those. Paid models omit the pricing
-    key entirely (prices are not fabricated at scaffold time), which
-    resolves to not-free via the ``pricing.get("input", -1) != 0.0``
-    contract.
+    Free = zero input AND output pricing in the seed catalog. As of
+    the R07.29 billing probe (Oct 2026) this returns False for EVERY
+    model: the SiliconFlow API has no free models. Qwen/Qwen3-8B —
+    the former free-tier claim — bills ≈$0.06/1M input tokens
+    ($0.000014 for a 235-token request), so its seed entry now carries
+    input 0.06 instead of 0.0/0.0. The other seeded models omit the
+    pricing key entirely (prices are not fabricated), which resolves
+    to not-free via the ``pricing.get("input", -1) != 0.0`` contract.
 
     Returns False for models NOT in the catalog (unknown models the
     live /v1/models endpoint surfaces before the seed is updated —
-    conservatively treated as paid).
+    conservatively treated as paid; the verified-free fallback set
+    is empty).
 
     NOTE: The seed catalog keys on the FULL prefixed model ID (e.g.
     "Qwen/Qwen3-8B") because SiliconFlow's API requires the full
@@ -147,9 +162,9 @@ def _is_free_model(model: str) -> bool:
     """
     meta = SILICONFLOW_MODELS.get(model)
     if not meta:
-        # Not in the seed — fall back to the verified free set so a
-        # live-catalog refresh listing a known-free model before the
-        # seed catches up still classifies correctly.
+        # Not in the seed — fall back to the verified free set
+        # (currently empty — every unknown model is conservatively
+        # paid until a genuinely-free model is re-verified).
         return model in _SILICONFLOW_FREE_CHAT_MODELS
     pricing = meta.get("pricing", {})
     return pricing.get("input", -1) == 0.0 and pricing.get("output", -1) == 0.0
@@ -175,7 +190,7 @@ def _is_free_model(model: str) -> bool:
 #: When image I/O lands, remove the vision/multimodal patterns from
 #: this blocklist and seed the corresponding models.
 _NON_CHAT_PATTERNS: tuple[str, ...] = (
-    r"ocr",  # deepseek-ai/DeepSeek-OCR (free tier, but image→text only)
+    r"ocr",  # deepseek-ai/DeepSeek-OCR (formerly free tier; image→text only)
     r"-vl",  # Qwen/Qwen2.5-VL-7B-Instruct, *-VL-*
     r"vl-",  # mid-name VL variants
     r"vl2",  # deepseek-ai/deepseek-vl2
@@ -216,9 +231,9 @@ def _looks_like_balance_exhaustion(status_code: int, body_text: str) -> bool:
     """Detect SiliconFlow's paid-balance-exhausted 429.
 
     SiliconFlow returns 429 for both transient rate limits ("TPM limit
-    reached" — retryable) AND account-balance exhaustion on paid models
-    (NOT retryable — top up or switch to the free models). The two are
-    distinguished by the error body:
+    reached" — retryable) AND account-balance exhaustion (NOT retryable
+    — top up the balance; no free model exists to switch to). The two
+    are distinguished by the error body:
 
       - Transient rate limit: message contains "rate limiting" / "TPM"
       - Balance exhaustion: message contains "balance" / "quota" /
@@ -228,12 +243,13 @@ def _looks_like_balance_exhaustion(status_code: int, body_text: str) -> bool:
     message can never trip the quota fast-fail on the word "limit" (the
     exact wording-drift class the Cloudflare "limit" bug taught MAINT-28
     — Cloudflare's classifier deliberately excludes "limit" for the
-    same reason). SiliconFlow free models have no quota at all, so any
-    quota/balance wording is a paid-model condition.
+    same reason). SiliconFlow bills every model (no free tier, R07.29
+    billing probe), so quota/balance wording is always an
+    account-balance condition.
 
     This helper lets the shared retry loop classify the 429 correctly —
     transient ones back off and retry, balance-exhaustion surfaces
-    immediately with a clear "top up or switch to free models" message.
+    immediately with a clear top-up message.
     """
     if status_code != 429:
         return False
@@ -272,11 +288,14 @@ class SiliconFlowBackend(CloudBackend):
         except, store-on-success, stale-first fallback)
       - ``_apply_free_only()`` — SILICONFLOW_FREE_ONLY catalog filter
         (the only FREE_ONLY that actually filters among the four
-        documented providers — SiliconFlow has per-model pricing)
+        documented providers — SiliconFlow prices per model; with no
+        free models live, the filter currently empties the catalog)
       - ``test_tool_support()`` — reasoning + vision models → REACT
       - ``_looks_like_quota_exhaustion()`` — balance vs TPM split
-      - ``generate()`` — entry point, JEV dispatch, FREE_ONLY swap,
-        builds body, calls ``_make_api_request(stream=False)``
+      - ``generate()`` — entry point, FREE_ONLY reject (no free models
+        — refuses before any billable request instead of silently
+        billing), JEV dispatch, builds body, calls
+        ``_make_api_request(stream=False)``
 
     Usage:
         backend = get_backend("siliconflow")
@@ -413,9 +432,9 @@ class SiliconFlowBackend(CloudBackend):
 
         Enriches API results with ``context_length`` from the static
         catalog (the API listing doesn't carry it). Sets ``free_tier``
-        from the catalog pricing via ``_is_free_model()`` — only the two
-        verified permanently-free chat models (plus anything the verified
-        free set covers) resolve True.
+        from the catalog pricing via ``_is_free_model()`` — currently
+        False for every model (no free models on the API, R07.29
+        billing probe).
 
         Non-chat models (OCR, vision, embeddings, rerankers, translation,
         media) are filtered by the ``_NON_CHAT_PATTERNS`` blocklist so
@@ -516,13 +535,24 @@ class SiliconFlowBackend(CloudBackend):
 
         SiliconFlow is the only one of the four documented providers
         whose FREE_ONLY genuinely filters (per-model pricing, not an
-        account-wide quota like NVIDIA/Cloudflare): the catalog drops
-        to the permanently-free models. Mirrors the Mistral
-        ``_apply_free_only`` shape (filters on the ``free_tier``
-        details flag).
+        account-wide quota like NVIDIA/Cloudflare). With NO free
+        models on the API (R07.29 billing probe — even Qwen/Qwen3-8B
+        bills), the filter currently drops the catalog to EMPTY —
+        honest, because there is nothing free to show. Mirrors the
+        Mistral ``_apply_free_only`` shape (filters on the
+        ``free_tier`` details flag); when a genuinely-free model
+        returns, it lights up again automatically.
         """
         if SILICONFLOW_FREE_ONLY:
-            return [m for m in models if m["details"].get("free_tier")]
+            kept = [m for m in models if m["details"].get("free_tier")]
+            if not kept and models and os.environ.get("AGENTKTHX_DEBUG"):
+                print(
+                    "  [SiliconFlow] FREE_ONLY filter left 0 models — the "
+                    "SiliconFlow API has no free models (R07.29 billing "
+                    "probe); unset SILICONFLOW_FREE_ONLY to see the full "
+                    "catalog"
+                )
+            return kept
         return models
 
     def list_models(self) -> list[dict]:
@@ -532,8 +562,8 @@ class SiliconFlowBackend(CloudBackend):
         persistent JSON cache (30-minute TTL, ``AGENTKTHX_MODEL_CACHE_TTL``
         to override) shared across processes. When
         ``SILICONFLOW_FREE_ONLY=true``, the result is filtered to the
-        permanently-free models (the two free chat models — DeepSeek-OCR
-        is excluded from the catalog entirely as a non-chat model).
+        permanently-free models — currently an EMPTY list (the API has
+        no free models, R07.29 billing probe).
 
         Returns:
             List of ``{"name": ..., "size": 0, "details": {...}}`` dicts
@@ -611,7 +641,8 @@ class SiliconFlowBackend(CloudBackend):
 
         Used when the live /v1/models endpoint is unreachable AND the
         persistent JSON cache is empty/missing — the static seed catalog
-        (57 SiliconFlow chat models) is the offline fallback.
+        (30 live-verified SiliconFlow chat models) is the offline
+        fallback.
         """
         models: list[dict] = []
         for name in sorted(SILICONFLOW_MODELS.keys()):
@@ -756,13 +787,17 @@ class SiliconFlowBackend(CloudBackend):
         return _looks_like_balance_exhaustion(status_code, body_text)
 
     def _quota_exhaustion_message(self) -> str:
-        """Paid-balance remediation text (MAINT-28)."""
+        """Balance-exhaustion remediation text (MAINT-28).
+
+        No free-model remedy exists — the SiliconFlow API bills every
+        model (R07.29 billing probe), so topping up the account balance
+        is the only remedy.
+        """
         return (
-            "SiliconFlow account balance exhausted for this paid model. "
-            "Top up at https://cloud.siliconflow.com or switch to the "
-            "permanently-free models (Qwen/Qwen3-8B, "
-            "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B) via "
-            "SILICONFLOW_FREE_ONLY=1."
+            "SiliconFlow account balance exhausted. Top up at "
+            "https://cloud.siliconflow.com. (Note: the SiliconFlow API "
+            "has no free models — every model, including Qwen/Qwen3-8B, "
+            "bills against the balance.)"
         )
 
     # generate — non-streaming entry point (mirrors Mistral + NVIDIA)
@@ -787,13 +822,33 @@ class SiliconFlowBackend(CloudBackend):
         surface ``reasoning_content`` automatically, which the shared
         parser already extracts).
 
-        SILICONFLOW_FREE_ONLY enforcement: when true, a paid model is
-        swapped to ``SILICONFLOW_FREE_FALLBACK_MODEL`` (default:
-        Qwen/Qwen3-8B) before the request is built — the Mistral
-        MISTRAL_FREE_ONLY pattern (siliconflow is one of the few
-        providers where FREE_ONLY genuinely filters, since pricing is
-        per-model rather than account-wide).
+        SILICONFLOW_FREE_ONLY enforcement: when true, generate() RAISES
+        before any request is built. The SiliconFlow API has no free
+        models (billing-verified R07.29 — even Qwen/Qwen3-8B billed
+        $0.000014 for 235 input tokens), so the Mistral-style
+        paid→free swap would silently BILL under a flag that promises
+        "free only". A flag that promises free must never emit a
+        billable request — refusing loudly is the only honest
+        behavior. ``SILICONFLOW_FREE_FALLBACK_MODEL`` stays reserved
+        for a future free tier (re-seed 0.0/0.0 pricing to reactivate
+        the swap path).
         """
+        # SILICONFLOW_FREE_ONLY: refuse BEFORE any request — including
+        # the JEV dispatch below, which is itself a billable LLM call.
+        # R07.29 billing probe: the API has NO free models, so the
+        # Mistral-style swap-to-fallback would silently bill under a
+        # flag that promises "free only" — raise instead.
+        if SILICONFLOW_FREE_ONLY and not self._is_free_model(model):
+            raise RuntimeError(
+                "SILICONFLOW_FREE_ONLY=1 but the SiliconFlow API has no "
+                "free models (billing-verified Oct 2026 — even "
+                "Qwen/Qwen3-8B billed $0.000014 for 235 input tokens, "
+                "≈$0.06/1M input). Unset SILICONFLOW_FREE_ONLY to use the "
+                "paid catalog (Qwen/Qwen3-8B is the cheapest known model) "
+                "and keep the balance topped up at "
+                "https://cloud.siliconflow.com."
+            )
+
         # JEV dispatch — if api_mode is JEV, route through
         # generate_decision() which wraps the underlying LLM call with
         # a constrained decision prompt.
@@ -807,18 +862,6 @@ class SiliconFlowBackend(CloudBackend):
         )
         if jev_response is not None:
             return jev_response
-
-        # SILICONFLOW_FREE_ONLY: reject paid models upfront (Mistral
-        # pattern — swap, don't raise, so long agentic runs degrade to
-        # the free tier instead of dying).
-        if SILICONFLOW_FREE_ONLY and not self._is_free_model(model):
-            fallback = SILICONFLOW_FREE_FALLBACK_MODEL
-            if os.environ.get("AGENTKTHX_DEBUG"):
-                print(
-                    f"  [SiliconFlow] FREE_ONLY mode — '{model}' is a paid "
-                    f"model, switching to '{fallback}'"
-                )
-            model = fallback
 
         # Model defaults from catalog
         defaults = self._get_model_defaults(model)
