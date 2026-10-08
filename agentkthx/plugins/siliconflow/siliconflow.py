@@ -63,15 +63,17 @@ Error shape note (SiliconFlow is heterogeneous):
 
 Quota model:
   Unlike NVIDIA (account-wide monthly credits) and Cloudflare (daily
-  neurons), SiliconFlow's 429 splits by BODY wording: "TPM limit
-  reached" / "rate limiting" is a transient rate limit (retry with
-  backoff), while "balance"/"quota"/"insufficient" wording means the
-  account balance is exhausted (NOT retryable — top up the balance;
-  there is no free model to switch to). ``_looks_like_quota_exhaustion``
-  implements the split with the transient indicators checked FIRST so
-  "TPM limit reached" can never trip the quota fast-fail on the word
-  "limit" (the same wording-drift class the Cloudflare "limit" bug
-  taught MAINT-28).
+  neurons), SiliconFlow splits by STATUS + BODY wording: account
+  balance exhaustion surfaces as HTTP 402 "Sorry, your account balance
+  is insufficient" (live-observed R07.29, 2026-10-09 smoke run on a
+  balance-emptied account) or as balance/quota wording on a 429 body —
+  both NOT retryable (top up the balance; there is no free model to
+  switch to). A 429 carrying "TPM limit reached" / "rate limiting" is
+  a transient rate limit (retry with backoff).
+  ``_looks_like_quota_exhaustion`` implements the split with the
+  transient indicators checked FIRST so "TPM limit reached" can never
+  trip the quota fast-fail on the word "limit" (the same
+  wording-drift class the Cloudflare "limit" bug taught MAINT-28).
 
 Written by VTSTech — https://www.vts-tech.org
 """
@@ -228,12 +230,16 @@ def _is_non_chat_model(model_name: str) -> bool:
 
 
 def _looks_like_balance_exhaustion(status_code: int, body_text: str) -> bool:
-    """Detect SiliconFlow's paid-balance-exhausted 429.
+    """Detect SiliconFlow's paid-balance exhaustion (402 or 429).
 
-    SiliconFlow returns 429 for both transient rate limits ("TPM limit
-    reached" — retryable) AND account-balance exhaustion (NOT retryable
-    — top up the balance; no free model exists to switch to). The two
-    are distinguished by the error body:
+    Live-observed (R07.29, 2026-10-09 smoke run on a balance-emptied
+    account): balance exhaustion surfaces as HTTP 402 "Sorry, your
+    account balance is insufficient" — 402 Payment Required is the
+    primary balance-billing signal. 429 carries both transient rate
+    limits ("TPM limit reached" — retryable) and balance-exhaustion
+    wording (NOT retryable — top up the balance; no free model exists
+    to switch to). Either way the two are distinguished by the error
+    body:
 
       - Transient rate limit: message contains "rate limiting" / "TPM"
       - Balance exhaustion: message contains "balance" / "quota" /
@@ -247,11 +253,11 @@ def _looks_like_balance_exhaustion(status_code: int, body_text: str) -> bool:
     billing probe), so quota/balance wording is always an
     account-balance condition.
 
-    This helper lets the shared retry loop classify the 429 correctly —
-    transient ones back off and retry, balance-exhaustion surfaces
-    immediately with a clear top-up message.
+    This helper lets the shared retry loop classify the 402/429
+    correctly — transient ones back off and retry, balance-exhaustion
+    surfaces immediately with a clear top-up message.
     """
-    if status_code != 429:
+    if status_code not in (402, 429):
         return False
     if not body_text:
         return False
@@ -748,7 +754,7 @@ class SiliconFlowBackend(CloudBackend):
     # 400 recovery, retryable backoff, 401/404/422 remediation) lives on
     # CloudBackend since MAINT-28 — ``_make_api_request`` and
     # ``_iter_sse_lines`` are the shared drivers; this backend supplies
-    # only the SiliconFlow-specific pieces: the balance-vs-TPM 429
+    # only the SiliconFlow-specific pieces: the balance-vs-TPM 402/429
     # classifier and remediation message, and the per-status
     # remediation texts. No fixed-param 400 or request-body tweak is
     # needed (SiliconFlow accepts the OpenAI body as-is, including
@@ -783,7 +789,7 @@ class SiliconFlowBackend(CloudBackend):
     }
 
     def _looks_like_quota_exhaustion(self, status_code: int, body_text: str) -> bool:
-        """SiliconFlow quota hook: paid-balance exhaustion (MAINT-28)."""
+        """SiliconFlow quota hook: paid-balance exhaustion, 402 or 429 (MAINT-28)."""
         return _looks_like_balance_exhaustion(status_code, body_text)
 
     def _quota_exhaustion_message(self) -> str:

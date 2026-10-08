@@ -57,7 +57,7 @@ but have not been recently verified.
 | **Pollinations** | pollinations.ai (keyless + keyed) | `POLLINATIONS_API_KEY` | Limited | API key beyond limits; maintainer can't test the keyed path. The keyless path works (it's the only keyless backend) but the keyed entitlement-aware fallback filter (ROB-31, still OPEN) is untested. |
 | **OrcaRouter** | orcarouter.com (zero-markup gateway) | `ORCAROUTER_API_KEY` | Limited | API key beyond limits; maintainer can't test the streaming or non-streaming paths. The backend shares the same code path as OpenRouter (its sibling) so it's *likely* functional. |
 | **OpenAI** | openai.com (GPT models) | `OPENAI_API_KEY` | Limited | Maintainer has no active OpenAI account. OpenAI has no free tier (the `--free` listing returns 0 models — known + documented in the smoke test). Bug reports against the OpenAI backend are accepted but the maintainer can't reproduce them without an active key. |
-| **SiliconFlow** | api.siliconflow.com (China-hosted OpenAI-compat aggregator, 79-model live catalog) | `SILICONFLOW_API_KEY` | Limited (new scaffold) | R07.29 scaffold — the FIRST backend scaffolded on the post-R07.28 hardened CloudBackend patterns (shared transport, ROB-42 cache contract, MAINT-28 hooks). 103 mocked unit tests green, but no maintainer end-to-end smoke test has run yet. Promotes to Fully Supported on the first 5/5 `./scripts/smoke_test.sh --backend siliconflow` pass (Cloudflare's R07.27 promotion path). NO free tier — every model bills (Qwen3-8B is the cheapest known, input ≈$0.06/1M tokens, billing-verified Oct 2026; a $0.0000 console row is 4-decimal display rounding, not free). |
+| **SiliconFlow** | api.siliconflow.com (China-hosted OpenAI-compat aggregator, 79-model live catalog) | `SILICONFLOW_API_KEY` | Limited (new scaffold) | R07.29 scaffold — the FIRST backend scaffolded on the post-R07.28 hardened CloudBackend patterns (shared transport, ROB-42 cache contract, MAINT-28 hooks). 106 mocked unit tests green; live catalog probe passed (79 models, R07.29); smoke ATTEMPTED 2026-10-09 — key auth ✓, models ✓ (79 → 58 after the blocklist, parity with the probe), one `--think` generation ✓, then both tool-call steps failed **402 "Sorry, your account balance is insufficient"** (33/35 — the key's balance is exhausted, not a plugin defect; with no free tier there is no path to finish the run). Stays Limited until a topped-up 5/5 `./scripts/smoke_test.sh --backend siliconflow` pass (Cloudflare's R07.27 promotion path). NO free tier — every model bills (Qwen3-8B is the cheapest known, input ≈$0.06/1M tokens, billing-verified Oct 2026; a $0.0000 console row is 4-decimal display rounding, not free). |
 
 ### What "Limited Support" means in practice
 
@@ -113,11 +113,13 @@ of their respective maintainers.
 ## Changelog
 
 - **R07.29** (2026-10-09): SiliconFlow added as the 11th cloud backend
-  (agentkthx/plugins/siliconflow/, ~700 LOC + 103 unit tests) — the
+  (agentkthx/plugins/siliconflow/, ~700 LOC + 106 unit tests) — the
   first scaffold to copy the post-R07.28 hardened CloudBackend patterns
   (shared `_make_api_request`/`_iter_sse_lines` transport inherited
   untouched, ROB-42-hardened list_models, MAINT-28 hook surface:
-  `_STATUS_REMEDIATIONS` + balance-vs-TPM quota classifier).
+  `_STATUS_REMEDIATIONS` + the balance-vs-TPM 402/429 quota classifier
+  — 402 "account balance is insufficient" is the live-observed
+  balance-exhaustion signal, folded in from the 2026-10-09 smoke run).
   SiliconFlow-specific surface: full-prefixed `<author>/<model>` IDs
   (NVIDIA-style `_catalog_model_key`), the ONLY genuinely-filtering
   FREE_ONLY among the four documented providers (per-model pricing →
@@ -129,7 +131,9 @@ of their respective maintainers.
   entries pruned; OCR/VL/Omni/MT/embed filtered), reasoning+vision → REACT
   name-pattern pre-classification, and the documented CN TLD base-URL
   alternative. Tier tables now classify 11 backends (7 Fully + 4
-  Limited — SiliconFlow Limited until the first live smoke test).
+  Limited — SiliconFlow Limited: the 2026-10-09 smoke attempt verified
+  auth/catalog/one `--think` generation before the account balance
+  drained (tool steps → 402); awaiting a topped-up 5/5 run).
 - **R07.28** (2026-10-09): Restored the missing NVIDIA NIM row in the
   Fully Supported table (MAINT-30 — the R07.26 release's own doc update
   was supposed to add the row, but it was lost between the R07.26 and

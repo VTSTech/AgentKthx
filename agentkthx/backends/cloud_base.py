@@ -667,8 +667,12 @@ class CloudBackend(OpenAICompatibleBackend):
 
         Distinguishes a fatal quota 429 (NVIDIA monthly credits,
         Cloudflare daily neurons — NOT retryable) from a transient
-        rate-limit 429 (retryable). Default: never matches (a backend
-        without a quota model treats every 429 as retryable).
+        rate-limit 429 (retryable). R07.29: the shared gate also
+        consults this hook on 402 Payment Required (balance billing —
+        SiliconFlow's live-observed exhaustion signal). Default: never
+        matches (a backend without a quota model treats every 429 as
+        retryable, and every 402 falls to the generic non-retryable
+        raise).
         """
         del status_code, body_text
         return False
@@ -703,13 +707,18 @@ class CloudBackend(OpenAICompatibleBackend):
         err_msg: str,
         exc: Exception,
     ) -> None:
-        """Fast-fail a quota-exhaustion 429 (MAINT-28 shared skeleton).
+        """Fast-fail a quota-exhaustion 402/429 (MAINT-28 shared skeleton).
 
-        Raises ``RuntimeError`` with the backend's
+        The quota family is 429 (rate-limit carriers: NVIDIA credits,
+        Cloudflare neurons) plus 402 Payment Required (balance
+        billing — SiliconFlow's live-observed balance signal, R07.29
+        smoke). The historical ``_429`` in the name is kept; the
+        status alone never classifies — each backend's
+        ``_looks_like_quota_exhaustion()`` wording gate does. Raises
+        ``RuntimeError`` with the backend's
         ``_quota_exhaustion_message()`` when the body matches the
-        backend's ``_looks_like_quota_exhaustion()`` classifier; returns
-        otherwise so the retry loop classifies the 429 normally
-        (transient rate limits retry with backoff).
+        classifier; returns otherwise so the retry loop classifies the
+        429 normally (transient rate limits retry with backoff).
 
         ROB-43 (R07.28 batch 3): the former ``attempt == 0`` gate is
         removed — a quota 429 arriving after ≥1 transient retry now
@@ -720,7 +729,7 @@ class CloudBackend(OpenAICompatibleBackend):
         uses it.
         """
         del attempt  # ROB-43: the attempt == 0 gate is gone (R07.28 batch 3)
-        if status_code == 429 and self._looks_like_quota_exhaustion(status_code, body_text):
+        if status_code in (402, 429) and self._looks_like_quota_exhaustion(status_code, body_text):
             raise RuntimeError(f"{self._quota_exhaustion_message()} Details: {err_msg}") from exc
 
     def _raise_non_retryable_status(
@@ -763,7 +772,7 @@ class CloudBackend(OpenAICompatibleBackend):
         Consolidates the skeleton that was duplicated ×4 across
         nvidia.py + cloudflare.py (``_make_api_request`` /
         ``_iter_sse_lines`` each): envelope parsing, quota-exhaustion
-        429 fast-fail, fixed-param + context-length 400 recovery,
+        402/429 fast-fail, fixed-param + context-length 400 recovery,
         retryable-status backoff (R07.24 helpers), and the
         401/404/422 remediation texts. Callers shrink to their
         genuinely provider-specific logic.
@@ -774,7 +783,7 @@ class CloudBackend(OpenAICompatibleBackend):
         raw body slice):
 
           1. Read the error body + parse the OpenAI-spec envelope
-          2. Quota-exhaustion 429 → raise immediately (never retryable,
+          2. Quota-exhaustion 402/429 → raise immediately (never retryable,
              at ANY attempt — ROB-43 closed R07.28 batch 3)
           3. Fixed-param 400 (backend hook) → maybe retry
           4. Context-length 400 (ARCH-03 shared handler) → maybe retry
@@ -799,7 +808,7 @@ class CloudBackend(OpenAICompatibleBackend):
         # OpenAI-spec error envelope → human-readable message.
         err_msg = self._parse_error_envelope(body_text, status_code)
 
-        # Quota-exhaustion 429 — NOT retryable. Surface the backend's
+        # Quota-exhaustion 402/429 — NOT retryable. Surface the backend's
         # remediation message immediately instead of burning retries.
         self._check_quota_429(status_code, body_text, attempt, err_msg, e)
 

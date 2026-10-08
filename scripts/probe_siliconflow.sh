@@ -32,6 +32,10 @@
 #         bash probe_siliconflow.sh --deep --confirm-billable --filter qwen3
 #         bash probe_siliconflow.sh --caps --confirm-billable        # tools/thinking matrix
 #         bash probe_siliconflow.sh --caps --confirm-billable --cap-models "Qwen/Qwen3-8B,deepseek-ai/DeepSeek-R1"
+# Strict args: an unknown flag aborts (exit 2) with a did-you-mean hint BEFORE
+#              any network request — a typo'd flag must never be silently
+#              ignored (a typo'd --filter under --deep --confirm-billable
+#              would quietly sweep ALL kept models instead of the filtered few).
 # Output: /tmp/agentkthx_probe_siliconflow.json          (raw /v1/models)
 #         /tmp/agentkthx_probe_siliconflow_headers.txt   (response headers)
 #         /tmp/agentkthx_probe_siliconflow_deep.json     (--deep results)
@@ -114,27 +118,82 @@ FILTER=""
 # Other spot-checks via --cap-models; all require --confirm-billable.
 CAP_MODELS="Qwen/Qwen3-8B"
 
+# ── Strict arg parsing ─────────────────────────────────────────────────
+# Unknown flags ABORT (exit 2) before any network request. This script gates
+# BILLABLE POSTs behind --confirm-billable; a silently-ignored typo can widen
+# billable scope (a typo'd --filter under --deep --confirm-billable sweeps ALL
+# kept models instead of the filtered few). Fail fast + did-you-mean hint.
+KNOWN_FLAGS="--deep --caps --confirm-billable --filter --cap-models --help"
+EXPECT_VALUE=""   # flag awaiting its value (--filter / --cap-models)
+
+_probe_arg_hint() {
+    echo "  known flags: --deep | --caps | --confirm-billable | --filter <regex> | --cap-models <list> | -h/--help" >&2
+    echo "  (aborted before any network request)" >&2
+    return 0
+}
+
+_probe_suggest_flag() {
+    # Nearest known flag by common-prefix length; only suggests at >= 4 chars.
+    local given="$1" known best="" n i best_n=0
+    for known in $KNOWN_FLAGS; do
+        n=0; i=0
+        while [ "$i" -lt "${#given}" ] && [ "$i" -lt "${#known}" ] \
+              && [ "${given:i:1}" = "${known:i:1}" ]; do
+            n=$((n + 1)); i=$((i + 1))
+        done
+        if [ "$n" -gt "$best_n" ]; then best_n="$n"; best="$known"; fi
+    done
+    if [ "$best_n" -ge 4 ]; then
+        echo "$best"
+    fi
+    return 0
+}
+
 for arg in "$@"; do
+    # a pending --filter / --cap-models value consumes the next token
+    if [ -n "$EXPECT_VALUE" ]; then
+        case "$arg" in
+            --*)
+                echo "ERROR: flag '${EXPECT_VALUE}' expects a value, got another flag ('${arg}')" >&2
+                _probe_arg_hint
+                exit 2
+                ;;
+            *)
+                if [ "$EXPECT_VALUE" = "--filter" ]; then
+                    FILTER="$arg"
+                else
+                    CAP_MODELS="$arg"
+                fi
+                EXPECT_VALUE=""
+                ;;
+        esac
+        continue
+    fi
     case "$arg" in
         --deep) DEEP=true ;;
         --caps) CAPS=true ;;
         --confirm-billable) BILLABLE=true ;;
-        --filter) EXPECT_FILTER=true ;;
+        --filter) EXPECT_VALUE="--filter" ;;
         --filter=*) FILTER="${arg#--filter=}" ;;
-        --cap-models) EXPECT_CAPS=true ;;
+        --cap-models) EXPECT_VALUE="--cap-models" ;;
         --cap-models=*) CAP_MODELS="${arg#--cap-models=}" ;;
         -h|--help) head -50 "$0" | tail -n +2; exit 0 ;;
         *)
-            if [ "${EXPECT_FILTER:-false}" = "true" ]; then
-                FILTER="$arg"; EXPECT_FILTER=false
-            elif [ "${EXPECT_CAPS:-false}" = "true" ]; then
-                CAP_MODELS="$arg"; EXPECT_CAPS=false
-            else
-                echo "WARN: unknown arg '$arg' (ignored)" >&2
+            GUESS="$(_probe_suggest_flag "$arg")"
+            echo "ERROR: unknown argument '${arg}'" >&2
+            if [ -n "$GUESS" ]; then
+                echo "       did you mean '${GUESS}'?" >&2
             fi
+            _probe_arg_hint
+            exit 2
             ;;
     esac
 done
+if [ -n "$EXPECT_VALUE" ]; then
+    echo "ERROR: flag '${EXPECT_VALUE}' expects a value (nothing followed it)" >&2
+    _probe_arg_hint
+    exit 2
+fi
 
 CYAN='\033[0;36m'; BOLD='\033[1m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; RED='\033[0;31m'; DIM='\033[2m'; NC='\033[0m'
 
@@ -520,9 +579,9 @@ print(f"\n  Free models (seed pricing 0/0):           {len(free)}")
 for k in free:
     print(f"    {GREEN}✓{NC} {k}  (context_length={sf_seed[k].get('context_length', '—')})")
 if not free:
-    print(f"    {YELLOW}(none — every model bills: Qwen/Qwen3-8B input ≈$0.06/1M;${NC}")
-    print(f"    {YELLOW} billing-derived 2026-10-08: 235 input tokens → $0.000014;${NC}")
-    print(f"    {YELLOW} no seed entry carries 0/0 pricing)${NC}")
+    print(f"    {YELLOW}(none — every model bills: Qwen/Qwen3-8B input ≈$0.06/1M;{NC}")
+    print(f"    {YELLOW} billing-derived 2026-10-08: 235 input tokens → $0.000014;{NC}")
+    print(f"    {YELLOW} no seed entry carries 0/0 pricing){NC}")
 print(f"    (matches _is_free_model() — pricing-derived, no ':free' suffix convention)")
 PYEOF
 fi
@@ -634,7 +693,7 @@ elif ! $BILLABLE; then
     echo -e "${CYAN}── 7. Deep probe ──${NC}"
     echo -e "  ${YELLOW}⚡ GATED — --deep POSTs /chat/completions once per kept model, which is${NC}"
     echo -e "  ${YELLOW}   BILLABLE USAGE (every POST logs a usage row — and every model${NC}"
-    echo -e "  ${YELLOW}   bills: Qwen3-8B ≈ $0.000014 per tiny request, ≈$0.06/1M input).${NC}"
+    echo -e "  ${YELLOW}   bills: Qwen3-8B ≈ \$0.000014 per tiny request, ≈\$0.06/1M input).${NC}"
     echo -e "  ${YELLOW}   Re-run with:  --deep --confirm-billable${NC}"
     echo -e "  ${DIM}   (the GET requests above logged zero usage rows on the billing table)${NC}"
 else
@@ -809,8 +868,8 @@ elif ! $BILLABLE; then
     echo -e "${CYAN}── 8. Capability matrix ──${NC}"
     echo -e "  ${YELLOW}⚡ GATED — --caps POSTs /chat/completions 4x per spot-check model,${NC}"
     echo -e "  ${YELLOW}   which is BILLABLE USAGE (NO free models exist — even the cheapest${NC}"
-    echo -e "  ${YELLOW}   Qwen/Qwen3-8B bills real money: ≈$0.000014 per tiny request,${NC}"
-    echo -e "  ${YELLOW}   ≈$0.06/1M input). Re-run with:  --caps --confirm-billable${NC}"
+    echo -e "  ${YELLOW}   Qwen/Qwen3-8B bills real money: ≈\$0.000014 per tiny request,${NC}"
+    echo -e "  ${YELLOW}   ≈\$0.06/1M input). Re-run with:  --caps --confirm-billable${NC}"
 else
     echo ""
     echo -e "${CYAN}── 8. Capability matrix (tools + thinking spot-check) ──${NC}"
@@ -1043,7 +1102,7 @@ print(f"  Capabilities:     {'API-exposed ✓' if cap_ok else 'NOT available via
       f" — tools/think columns are heuristics; run --caps for live verdicts")
 print(f"\n  {CYAN}Next steps:{NC}")
 print(f"    --deep --confirm-billable   per-model 200/429/400 sweep (BILLABLE)")
-print(f"    --caps --confirm-billable   tools + enable_thinking matrix (BILLABLE;)")
+print(f"    --caps --confirm-billable   tools + enable_thinking matrix (BILLABLE;")
 print(f"                                every model bills — the default cap")
 print(f"                                model Qwen/Qwen3-8B is the cheapest, ≈$0.06/1M input)")
 print(f"    Section 6 leaks             add blocklist patterns for media/audio models")

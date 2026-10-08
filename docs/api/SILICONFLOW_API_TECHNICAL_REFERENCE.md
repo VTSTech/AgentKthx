@@ -4,9 +4,10 @@
 > **Generated from**: https://docs.siliconflow.com/en/api-reference/chat-completions/chat-completions.md + https://docs.siliconflow.com/en/userguide/guides/function-calling.md + https://docs.siliconflow.com/llms.txt (verified Oct 2026)
 > **Free-tier verification (SUPERSEDED — billing-corrected 2026-10-09)**: the third-party free-tier claim ("3 permanently-free models: Qwen3-8B, DeepSeek-R1-Distill-Qwen-7B, DeepSeek-OCR — no usage limits", via [pricepertoken.com](https://pricepertoken.com) + [therouter.ai](https://therouter.ai)) is **WRONG for the current API**. SiliconFlow's own billing console shows `Qwen/Qwen3-8B` **BILLS**: meter `qwen/qwen3-8b.online.input-tokens`, 0.235K input tokens → **$0.000014** (≈ **$0.06 per 1M input tokens**). A "0.563K tokens → $0.0000" console row is **4-decimal display rounding** (real ≈ $0.0000338) — never read a $0.0000 row as free. **There is no free tier: every model bills against the account balance.**
 > **R07.29 live-probe update (2026-10-09)**: `GET /v1/models` lists **79 models**; two of the three formerly-documented free models (`deepseek-ai/DeepSeek-R1-Distill-Qwen-7B`, `deepseek-ai/DeepSeek-OCR`) are **no longer served**. `Qwen/Qwen3-8B` survives as the **cheapest known** chat model (input ≈$0.06/1M tokens — BILLS, not free; see the billing correction above). Also probe-verified: `/v1/models` cards carry only `{id, object, created, owned_by}` (no pricing / context / capabilities fields), `GET /v1/user/info` → **410 deprecated**, `GET /v1/user/balance` → **404**, and there is **no `/v1/pricing` endpoint** (pricing lives on the web console). The AgentKthx seed catalog was pruned to the 30 confirmed-live chat models.
+> **R07.29 smoke-run update (2026-10-09)**: the maintainer's end-to-end smoke attempt on a drained account verified auth + the 79 → 58 catalog + one `--think` generation, then surfaced balance exhaustion as **HTTP 402 "Sorry, your account balance is insufficient"** on both tool-call steps. **402 Payment Required is the live balance-exhaustion signal** (429 carries the transient TPM wording); the AgentKthx quota classifier now fast-fails 402 balance bodies with the top-up message. With no free path, the backend rests at Limited Support until a topped-up 5/5 smoke.
 > **Live-behavior notes**: 2026-10-07 (updated 2026-10-09) — SiliconFlow is a China-hosted OpenAI-compatible aggregator. No free tier at all: every model bills the account balance — `Qwen/Qwen3-8B` at ≈$0.06/1M input is the cheapest known option for high-volume agentic workloads.
 > **Primary focus**: OpenAI-compatible Chat Completions endpoint at `https://api.siliconflow.com/v1` (also accessible via the `.cn` TLD at `https://api.siliconflow.cn/v1` for China-domestic traffic).
-> **Last Updated**: 2026-10-09 (R07.29 live-probe reconciliation + billing correction — no free tier)
+> **Last Updated**: 2026-10-09 (R07.29 live-probe reconciliation + billing correction + smoke run — no free tier; 402 balance-exhaustion signal)
 > **Target Audience**: AgentKthx Developers
 
 ## Table of Contents
@@ -675,6 +676,12 @@ class SiliconFlowErrorHandler:
             "actions": ["Check model ID at https://cloud.siliconflow.com/models",
                        "Model may have been removed from catalog"]
         },
+        402: {
+            "message": "Account Balance Exhausted (Payment Required — live-verified R07.29)",
+            "recoverable": False,
+            "actions": ["Top up at cloud.siliconflow.com",
+                       "No free tier exists — every model bills the account balance"]
+        },
         429: {
             "message": "Rate Limit (TPM) OR Account Balance Exhausted",
             "recoverable": True,  # rate limit; balance exhaustion is NOT retryable
@@ -731,7 +738,9 @@ class SiliconFlowErrorHandler:
 
         # Special case: 429 with "TPM" in message is rate limit (transient)
         # 429 with "balance" or "quota" is permanent until top-up
-        if code == 429:
+        # 402 (Payment Required) IS balance exhaustion — live-verified R07.29
+        # ("Sorry, your account balance is insufficient")
+        if code in (402, 429):
             if "tpm" in message.lower() or "rate" in message.lower():
                 info = {**info, "recoverable": True, "message": "TPM rate limit"}
             elif "balance" in message.lower() or "quota" in message.lower():
@@ -957,7 +966,7 @@ Unlike NVIDIA/Cloudflare where FREE_ONLY doesn't filter (because quota is accoun
 ### 4. Existing Patterns That Apply Directly
 
 - **`CloudBackend` base class** (R07.05 MAINT-02): inherits retry helpers, SSE streaming, JSON-endpoint layout for free.
-- **`api_resilience.py`**: 429 classified as transient (TPM rate limit). For paid-model quota exhaustion (message contains "balance"), AgentKthx should mark as permanent — the same special-case pattern used for NVIDIA credit exhaustion.
+- **`api_resilience.py`**: 429 classified as transient (TPM rate limit). For paid-model quota exhaustion (message contains "balance"), AgentKthx should mark as permanent — the same special-case pattern used for NVIDIA credit exhaustion. Live-verified R07.29: balance exhaustion arrives as **402** "Sorry, your account balance is insufficient" (429 carries the TPM wording) — the AgentKthx `_looks_like_balance_exhaustion` classifier catches both statuses via body wording, with the transient indicators vetoing first.
 - **`tool_support.json` cache**: same `<model>` plain-key namespace. Model IDs include the `<author>/` prefix — keep them intact.
 - **`is_local_base_url`**: correctly classifies `api.siliconflow.com` and `api.siliconflow.cn` as remote.
 - **`_close_http_response`** (R07.25 ROB-06): deterministic close applies automatically.
@@ -979,6 +988,7 @@ Unlike NVIDIA/Cloudflare where FREE_ONLY doesn't filter (because quota is accoun
 | `401 "Invalid token"` | Wrong API key, or key revoked | Regenerate at https://cloud.siliconflow.com/account/ak |
 | `404 "404 page not found"` | Wrong endpoint URL | Verify base URL is `https://api.siliconflow.com/v1` (no trailing slash, no path beyond `/v1`) |
 | `400` with `code: 20012` | Bad request — usually model-specific issue | Check `message` field for details; verify model supports requested features |
+| `402` "Sorry, your account balance is insufficient" | Account balance exhausted (live-verified R07.29 smoke run) | Top up at cloud.siliconflow.com — NOT retryable, no free model exists to switch to; AgentKthx fast-fails it with the top-up message |
 | `429` with "TPM limit reached" | Tokens-per-minute rate limit | Backoff with Retry-After; reduce max_tokens |
 | `429` with "balance" or "quota" | Account balance exhausted | Top up balance (no free model exists to switch to — every model bills) |
 | `503` with `code: 50505` | Model service overloaded | Retry with longer backoff; try alternative model in same family |
