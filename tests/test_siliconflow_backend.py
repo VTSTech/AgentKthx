@@ -22,9 +22,11 @@ the post-MAINT-28/ROB-42 patterns) correctly implements:
   - ``_is_non_chat_model()`` blocklist (OCR, VL, Omni, GLM-*V, MT,
     embed, rerank, media)
   - ``_looks_like_balance_exhaustion()`` distinguishes transient TPM
-    429s from permanent balance-exhaustion 429s (with the transient
-    indicators checked FIRST so "TPM limit reached" can never trip on
-    the word "limit" — the Cloudflare "limit" drift lesson)
+    429s from permanent balance exhaustion on 429 AND on 402 (live
+    R07.29 smoke evidence: 402 "Sorry, your account balance is
+    insufficient"), with the transient indicators checked FIRST so
+    "TPM limit reached" can never trip on the word "limit" — the
+    Cloudflare "limit" drift lesson
   - ``test_tool_support()`` returns REACT for reasoning models (R1
     family, *-Thinking) and vision models (VL/Omni/GLM-*V), NATIVE for
     chat models — name-pattern only, no tool_cache interaction
@@ -570,12 +572,33 @@ class TestSiliconflowBalanceExhaustion:
         assert _looks_like_balance_exhaustion(429, "balance exhausted") is True
         assert _looks_like_balance_exhaustion(429, "account is in arrears") is True
 
-    def test_non_429_never_quota(self):
-        """401 'Invalid token' etc. are not quota conditions."""
+    def test_unrelated_statuses_never_quota(self):
+        """401 'Invalid token' etc. are not quota conditions (only
+        402/429 can carry the balance-exhaustion classification)."""
         from agentkthx.plugins.siliconflow.siliconflow import _looks_like_balance_exhaustion
 
         assert _looks_like_balance_exhaustion(401, "Invalid token") is False
         assert _looks_like_balance_exhaustion(400, "insufficient balance in body") is False
+
+    def test_402_balance_exhaustion_live_evidence(self):
+        """R07.29 smoke run (2026-10-09, live): a balance-emptied account
+        surfaces HTTP 402 'Sorry, your account balance is insufficient'
+        — the classifier must catch 402, not just 429."""
+        from agentkthx.plugins.siliconflow.siliconflow import _looks_like_balance_exhaustion
+
+        assert (
+            _looks_like_balance_exhaustion(402, "Sorry, your account balance is insufficient")
+            is True
+        )
+        assert _looks_like_balance_exhaustion(402, "account is in arrears") is True
+
+    def test_402_transient_wording_still_vetoes(self):
+        """The TPM/rate-limit veto applies to 402 bodies too, and an
+        empty 402 body cannot classify (wording-first, status-second)."""
+        from agentkthx.plugins.siliconflow.siliconflow import _looks_like_balance_exhaustion
+
+        assert _looks_like_balance_exhaustion(402, "rate limit exceeded") is False
+        assert _looks_like_balance_exhaustion(402, "") is False
 
     def test_empty_body_is_transient(self):
         """No body → cannot classify → not quota (retry path)."""
@@ -1090,6 +1113,23 @@ class TestSiliconflowRetryDelegation:
 
         with pytest.raises(RuntimeError, match="balance exhausted"):
             backend._make_api_request({"model": "m", "messages": []}, stream=False)
+
+    def test_402_balance_exhaustion_raises_quota_message(self, backend, monkeypatch):
+        """Live R07.29 smoke shape: 402 'account balance is insufficient'
+        raises the top-up remediation immediately — no retry budget
+        burned (the smoke runs failed in ~150-250ms, single attempt)."""
+        _no_sleep(monkeypatch)
+        calls = []
+
+        def fake_urlopen(req, timeout=None):
+            calls.append(1)
+            raise _http_error(402, '{"message": "Sorry, your account balance is insufficient"}')
+
+        monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+        with pytest.raises(RuntimeError, match="balance exhausted"):
+            backend._make_api_request({"model": "m", "messages": []}, stream=False)
+        assert len(calls) == 1  # fast-fail — the 402 never retried
 
     def test_transient_429_retries_then_succeeds(self, backend, monkeypatch):
         """A TPM rate-limit 429 backs off and retries (transient)."""
