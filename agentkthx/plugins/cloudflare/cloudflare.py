@@ -72,8 +72,8 @@ import os
 import re
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
-from typing import Generator
 
 from agentkthx import model_cache
 from agentkthx.backends.cloud_base import CloudBackend
@@ -136,8 +136,18 @@ def _is_free_model(model: str) -> bool:
 
     Returns False only for models NOT in the catalog (unknown models \u2014
     the live /ai/models/search endpoint may surface new models before the
-    seed catalog is updated; those are conservatively treated as paid until
-    added to the catalog).
+    seed catalog is updated).
+
+    MAINT-29 (R07.28) correction: the previous text claimed unknown models
+    are "conservatively treated as paid until added to the catalog" \u2014 that
+    was doc drift. The live-merge path treats uncatalogued live entries as
+    FREE (``free_tier: _is_free_model(name) if meta else True`` in
+    ``_fetch_live_models``), so an unknown model is served with
+    ``free_tier=True``. The function's own False-for-unknown return is only
+    reached by callers that shape seed-catalog entries, where ``model`` is
+    a catalog key by construction. Runtime is safe either way: a model
+    that claims NATIVE but rejects ``tools`` gets a 400 and falls back to
+    ReAct.
 
     NOTE: The seed catalog keys on the FULL prefixed model ID (e.g.
     "@cf/meta/llama-3.3-70b-instruct-fp8-fast") because Cloudflare's API
@@ -501,15 +511,6 @@ class CloudflareBackend(CloudBackend):
                     f"dash.cloudflare.com \u2192 My Profile \u2192 API Tokens."
                 )
 
-    def _extra_auth_headers(self) -> dict:
-        """Cloudflare uses the standard Bearer-token auth \u2014 no extras.
-
-        Unlike OpenRouter (which adds HTTP-Referer + X-Title for attribution)
-        or OrcaRouter (which adds X-OrcaRouter-Include-Cost), Cloudflare
-        Workers AI uses only the standard ``Authorization: Bearer`` header.
-        """
-        return {}
-
     # \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
     # OpenAICompatibleBackend abstract hooks
     # \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
@@ -536,83 +537,68 @@ class CloudflareBackend(CloudBackend):
         ``{object: "list", data: [...]}``. ``_fetch_live_models`` handles
         the parse.
         """
-        # The models endpoint is at the /ai/ level (not /ai/v1/). We
-        # rebuild from the account ID rather than from _base_url.
+        # ROB-44 (R07.28): derive the scheme+host from _base_url so a
+        # CLOUDFLARE_BASE_URL override routes discovery to the SAME host
+        # as chat traffic — previously this hardcoded api.cloudflare.com,
+        # giving split-brain endpoints (chat to the override, discovery
+        # to the official host, or discovery failing outright when the
+        # environment blocks direct egress). The PATH is still rebuilt
+        # from the account ID because the models endpoint lives at the
+        # /ai/ level (account-root), NOT under the /ai/v1 OpenAI-compat
+        # subpath that _base_url ends with — a plain append to _base_url
+        # would produce /ai/v1/ai/models/search.
+        if self._base_url:
+            parsed = urllib.parse.urlsplit(self._base_url)
+            if parsed.scheme and parsed.netloc:
+                return (
+                    f"{parsed.scheme}://{parsed.netloc}"
+                    f"/client/v4/accounts/{self._account_id}/ai/models/search"
+                    "?per_page=100"
+                )
+        # Fallback: the official host (only when _base_url is unset/empty
+        # or not parseable as an absolute URL).
         return (
             f"https://api.cloudflare.com/client/v4/accounts/{self._account_id}/ai/models/search"
             "?per_page=100"
         )
 
-    # \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-    # Catalog lookup overrides \u2014 Cloudflare keys on FULL prefixed IDs
-    # \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+    # ─────────────────────────────────────────────────────────────────────
+    # Catalog lookup — Cloudflare keys on FULL prefixed IDs
+    # ─────────────────────────────────────────────────────────────────────
     #
-    # The CloudBackend base class (cloud_base.py) strips the provider prefix
-    # before catalog lookup (model.split("/")[-1]) because ZAI/OpenRouter
-    # key their catalogs on bare post-slash segments. Cloudflare's API
-    # REQUIRES the full prefixed name in the request body (e.g.
-    # "@cf/meta/llama-3.3-70b-instruct-fp8-fast" \u2014 the @cf/ prefix is
-    # part of the model ID, not a slashable provider marker), so our seed
-    # catalog keys on full names. These overrides skip the prefix-stripping
-    # so lookups match.
+    # The CloudBackend base class (cloud_base.py) normalizes catalog
+    # lookups via _catalog_model_key (default: strip the provider prefix,
+    # "zai/glm-4-flash" → "glm-4-flash") because ZAI/OpenRouter key their
+    # catalogs on bare post-slash segments. Cloudflare's API REQUIRES the
+    # full prefixed name in the request body (e.g.
+    # "@cf/meta/llama-3.3-70b-instruct-fp8-fast" — the @cf/ prefix is part
+    # of the model ID, not a slashable provider marker), so our seed
+    # catalog keys on full names — MAINT-28 batch 2 (R07.28) replaced the
+    # four per-method "does NOT strip the prefix" overrides
+    # (get_model_info / _get_model_defaults / get_model_max_context /
+    # _is_free_model) with this single hook; those methods are inherited
+    # unchanged.
 
-    def get_model_info(self, model: str) -> dict | None:
-        """Look up model in the static catalog by FULL prefixed ID.
+    def _catalog_model_key(self, model: str) -> str:
+        """Cloudflare catalog keys on FULL prefixed IDs — return as-is.
 
-        Override of CloudBackend.get_model_info \u2014 does NOT strip the
-        provider prefix because Cloudflare's catalog keys on the full name
-        (e.g. "@cf/meta/llama-3.3-70b-instruct-fp8-fast").
+        Override of CloudBackend._catalog_model_key. The module-level
+        ``_is_free_model`` helper and ``CLOUDFLARE_MODELS`` both expect
+        the exact catalog key (full "@cf/..." name), so no normalization
+        applies.
         """
-        meta = self.MODELS.get(model, {})
-        if not meta:
-            return None
-        return {
-            "name": model,
-            "size": 0,
-            "details": {
-                "family": self._catalog_family_name(),
-                "backend": self._catalog_backend_name(),
-                "context_length": meta.get("context_length", self._DEFAULT_CONTEXT_FALLBACK),
-                "free_tier": _is_free_model(model),
-            },
-        }
+        return model
 
-    def _get_model_defaults(self, model: str) -> dict:
-        """Return {temperature, max_tokens} from the static catalog.
+    def _tweak_request_body(self, body: dict) -> None:
+        """Cloudflare body quirks: drop ``top_k`` (unsupported on the
+        OpenAI-compat path — the endpoint 400s if it sees it).
 
-        Override of CloudBackend._get_model_defaults \u2014 does NOT strip
-        the provider prefix. Falls back to safe defaults (max_tokens=8192,
-        context_length=128000, temperature=0.7) when the model isn't in
-        the catalog.
+        Override of CloudBackend._tweak_request_body (MAINT-28 batch 2).
+        Fired once per request by the shared ``_make_api_request``, so
+        both the ``generate()`` and JEV paths get the pop without
+        duplicating it.
         """
-        meta = self.MODELS.get(model, {})
-        max_tokens = meta.get("default_max_tokens", 8192)
-        context_length = meta.get("context_length", self._DEFAULT_CONTEXT_FALLBACK)
-        temperature = meta.get("default_temperature", 0.7)
-        return self._apply_max_tokens_cap(max_tokens, context_length, temperature=temperature)
-
-    def get_model_max_context(self, model: str, family: str | None = None) -> int:
-        """Return the model's maximum trained context window size.
-
-        Override of CloudBackend.get_model_max_context \u2014 does NOT strip
-        the provider prefix. Falls back to 128000 when not in catalog.
-        """
-        meta = self.MODELS.get(model, {})
-        if meta:
-            ctx = meta.get("context_length")
-            if ctx and isinstance(ctx, int) and ctx > 0:
-                return ctx
-        # Fall back to live model_info if catalog misses
-        info = self.get_model_info(model)
-        if info and "details" in info:
-            ctx = info["details"].get("context_length")
-            if ctx and isinstance(ctx, int) and ctx > 0:
-                return ctx
-        return self._DEFAULT_CONTEXT_FALLBACK
-
-    def _is_free_model(self, model: str) -> bool:
-        """Override of CloudBackend._is_free_model \u2014 does NOT strip prefix."""
-        return _is_free_model(model)
+        body.pop("top_k", None)
 
     # \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
     # list_models \u2014 query native /ai/models/search, merge with static catalog
@@ -875,16 +861,45 @@ class CloudflareBackend(CloudBackend):
         # entries; stale-stamped so the live fetch below still runs).
         model_cache.ensure_seeded(self.MODEL_CACHE_KEY, self._catalog_fallback_list())
 
-        # Live fetch \u2014 best-effort, falls back to catalog on any failure
+        # Live fetch — ROB-42 (R07.28): narrow the except to the
+        # legitimate discovery-failure modes (the R07.24 ROB-28
+        # catch-narrowing, Mistral pattern) + RuntimeError for the
+        # success=false shape guard. Programming errors from a malformed
+        # response shape now propagate as real bugs instead of being
+        # masked as "discovery failed".
         try:
             models = self._fetch_live_models()
-        except Exception as e:
+        except (
+            urllib.error.HTTPError,
+            urllib.error.URLError,
+            # OSError: bare socket-level failures (read resets, DNS) can
+            # escape urlopen unwrapped; URLError subclasses OSError so the
+            # order is safe. OrcaRouter convention + the R07.20 cache-test
+            # simulation idiom (bare `OSError("network down")`).
+            OSError,
+            json.JSONDecodeError,
+            RuntimeError,
+        ) as e:
             if os.environ.get("AGENTKTHX_DEBUG"):
-                print(f"  [Cloudflare] live /ai/models/search fetch failed ({e}); using catalog")
-            models = self._catalog_fallback_list()
+                print(
+                    f"  [Cloudflare] live /ai/models/search fetch failed "
+                    f"({type(e).__name__}: {e}); using stale/cache catalog"
+                )
+            models = None
 
-        # Persist to L2 cache (shared across processes)
-        model_cache.store_models(self.MODEL_CACHE_KEY, models, source="api")
+        if models is not None:
+            # ROB-42: persist ONLY on the success path — a failed fetch
+            # must never overwrite the persistent cache with the static
+            # seed under a fresh source="api" label (the R07.24
+            # ROB-28/ROB-30 closure class).
+            models = model_cache.store_models(self.MODEL_CACHE_KEY, models)
+        else:
+            # ROB-42: serve the stale last-known-good cache first (live
+            # data from a previous successful fetch — fresher than the
+            # seed), then fall back to the static catalog. Mirrors
+            # Mistral's get_stale_models() service.
+            stale = model_cache.get_stale_models(self.MODEL_CACHE_KEY)
+            models = stale if stale is not None else self._catalog_fallback_list()
 
         # Update L1 cache
         self._model_cache = models
@@ -1000,10 +1015,21 @@ class CloudflareBackend(CloudBackend):
         those as REACT so the agent loop uses the ReAct prompting path
         instead of native function calling.
 
-        Every other model falls through to the inherited CloudBackend
-        default (NATIVE) and is probed on first use via the standard
-        ``test_tool_support`` flow (the probe is cached in
-        ``~/.agentkthx/tool_support.json``).
+        Every other model returns NATIVE immediately from the pattern
+        table. This is a NAME-PATTERN classification only: no live probe
+        is performed, and nothing is read from or written to
+        ``~/.agentkthx/tool_support.json`` \u2014 that cache belongs to the
+        local-backend auto-detection layer, and cloud backends bypass it
+        entirely. The inherited ``CloudBackend.test_tool_support`` that
+        this override shadows also returns NATIVE unconditionally (the
+        same zero-probe aggregator assumption the owner reviewed for
+        OpenRouter \u2014 R07.05, re-reviewed R07.19). The safety net is
+        runtime behavior: a model classified NATIVE that actually rejects
+        ``tools`` gets a 400 and the agent loop falls back to the ReAct
+        prompting path.
+
+        (MAINT-29, R07.28: the previous docstring promised a first-use
+        probe + cache write that never existed.)
         """
         model_lower = model.lower()
         for pattern in self._REACT_NAME_PATTERNS:
@@ -1013,397 +1039,130 @@ class CloudflareBackend(CloudBackend):
         # models in the Cloudflare catalog support OpenAI-spec function calling)
         return ToolSupportLevel.NATIVE
 
-    # \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-    # _make_api_request \u2014 non-streaming POST with retry (mirrors NVIDIA)
-    # \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+    # ─────────────────────────────────────────────────────────────────────
+    # MAINT-28 (R07.28): provider-specific retry-loop hooks
+    # ─────────────────────────────────────────────────────────────────────
+    #
+    # The retry-loop skeleton (envelope parsing, quota-429 fast-fail,
+    # 400 recovery, retryable backoff, 401/403/404/422 remediation) lives
+    # on CloudBackend since MAINT-28 — ``_make_api_request`` and
+    # ``_iter_sse_lines`` below are now thin drivers that supply only the
+    # Cloudflare-specific pieces: the neuron-quota classifier and
+    # remediation message, the 403/5035 paid-plan cache write, and the
+    # per-status remediation texts.
 
-    def _make_api_request(self, body: dict, *, stream: bool = False) -> dict:
-        """POST to ``/chat/completions`` with 429/5xx retry.
+    #: Brand for the shared error strings ("Cloudflare API error 429: …",
+    #: "Cloudflare connection error: …"). MAINT-28 (R07.28).
+    _error_brand: str = "Cloudflare"
 
-        Honors ``Retry-After`` when present (429 rate-limit and 503
-        service-unavailable). Falls back to exponential backoff with
-        full jitter. Max retries determined by ``_max_retries()`` (default
-        4, override via ``AGENTKTHX_MAX_API_RETRIES`` env var).
+    #: Per-status remediation texts (MAINT-28: previously duplicated ×4
+    #: across nvidia.py + cloudflare.py, and missing from the streaming
+    #: path entirely — now one table serves both paths).
+    _STATUS_REMEDIATIONS: dict[int, str] = {
+        401: (
+            "Cloudflare authentication failed. Check your CLOUDFLARE_API_KEY "
+            "environment variable (must be a Workers AI-scoped API token "
+            "with Read + Edit permissions). Create one at dash.cloudflare.com "
+            '→ My Profile → API Tokens → "Create Workers AI API Token".'
+        ),
+        404: (
+            "Cloudflare model not found (or wrong account ID): {err_msg}. "
+            "Verify the model ID at "
+            "https://developers.cloudflare.com/workers-ai/models/ "
+            "(e.g. '@cf/meta/llama-3.3-70b-instruct-fp8-fast'). Also verify "
+            "CLOUDFLARE_ACCOUNT_ID matches the token's account scope — a "
+            "mismatched account ID returns 404 even with a valid token."
+        ),
+        422: (
+            "Cloudflare validation error: {err_msg}. Vision models "
+            "(@cf/meta/llama-3.2-*-vision-instruct) and reasoning distill "
+            "models (@cf/deepseek-ai/deepseek-r1-distill-*) don't support "
+            "tools — use force_react=True. GPT-OSS models require the "
+            "Responses API (/responses, not /chat/completions)."
+        ),
+    }
 
-        Special case for Cloudflare: a 429 whose body indicates daily
-        neuron quota exhaustion (contains "neuron" / "quota" / "daily"
-        / "limit" / "exhausted") is NOT retryable \u2014 the daily quota has
-        been hit and retrying won't help. Such 429s surface immediately
-        as a clear RuntimeError so the user knows to wait for UTC midnight
-        reset.
+    def _looks_like_quota_exhaustion(self, status_code: int, body_text: str) -> bool:
+        """Cloudflare quota hook: daily-neuron exhaustion (MAINT-28)."""
+        return _looks_like_neuron_quota_exhaustion(status_code, body_text)
 
-        On HTTP 200, parses the JSON body via ``_parse_openai_response``
-        (inherited from OpenAICompatibleBackend) which handles the
-        OpenAI-spec error envelope and tool-call shape.
+    def _quota_exhaustion_message(self) -> str:
+        """Daily-neuron remediation text (MAINT-28).
+
+        The quota indicators are "neuron" / "quota" / "daily" /
+        "exhausted" — "limit" alone is deliberately NOT one ("rate limit
+        exceeded" is the canonical transient-rate-limit wording; see
+        ``_looks_like_neuron_quota_exhaustion``). Listing "limit" in this
+        docstring was the R07.27 doc drift MAINT-28 called out; fixed
+        here so the docstring and classifier can never disagree again
+        (single source of truth on CloudBackend).
         """
-        url = self._get_chat_completions_url()
-        headers = self._get_auth_headers()
-        if stream:
-            headers["Accept"] = "text/event-stream"
+        return (
+            "Cloudflare Workers AI daily neuron quota exhausted. Quota "
+            "resets at UTC midnight — wait for the reset, switch to "
+            "another backend for the day, or upgrade to a paid Workers "
+            "plan for paid overage at $0.011/1k neurons beyond the daily cap."
+        )
 
-        max_retries = self._max_retries()
-        last_error_msg = ""
+    def _raise_non_retryable_status(
+        self,
+        exc: Exception,
+        status_code: int,
+        body_text: str,
+        err_msg: str,
+        body: dict,
+    ) -> None:
+        """Cloudflare 403 override: 5035 paid-plan vs token-permission.
 
-        for attempt in range(max_retries + 1):
-            req = urllib.request.Request(
-                url,
-                data=json.dumps(body).encode("utf-8"),
-                headers=headers,
-                method="POST",
-            )
-            try:
-                with urllib.request.urlopen(req, timeout=self.config.timeout) as resp:
-                    raw = json.loads(resp.read().decode("utf-8"))
-                    return self._parse_openai_response(raw)
-
-            except urllib.error.HTTPError as e:
-                status_code = e.code
-                body_bytes = e.read() if e.fp else b""
-                body_text = body_bytes.decode("utf-8", errors="replace") if body_bytes else ""
-
-                # Parse OpenAI-spec error envelope
-                err_data: dict | None = None
+        The 403 handler is side-effectful — the 5035 (paid-plan-only
+        model) branch caches the verdict in the tool_cache so the next
+        ``list_models()`` with CLOUDFLARE_FREE_ONLY=true filters the
+        model out — so it can't be a plain remediation-table entry.
+        Everything else falls through to the shared table.
+        """
+        if status_code == 403:
+            # Cloudflare error code 5035 = "model not available on
+            # Workers Free plan" (paid-tier-only model invoked on a
+            # free account). Different user action than a
+            # token-permission 403: 5035 = upgrade OR switch model,
+            # not "recreate your token". Cache the paid-only verdict
+            # so the next list_models() with CLOUDFLARE_FREE_ONLY=true
+            # filters this model out automatically.
+            err_code = _extract_cloudflare_error_code(body_text)
+            if err_code == _CF_PAID_ONLY_ERROR_CODE:
+                model_name = body.get("model", "?")
+                # Best-effort cache write - never let a cache
+                # failure mask the real error from the user.
                 try:
-                    if body_text:
-                        err_data = json.loads(body_text)
-                except (json.JSONDecodeError, ValueError):
-                    pass
-
-                if isinstance(err_data, dict) and "error" in err_data:
-                    inner = err_data["error"]
-                    if isinstance(inner, dict):
-                        err_msg = inner.get("message", str(inner))
-                    else:
-                        err_msg = str(inner)
-                elif isinstance(err_data, dict) and "message" in err_data:
-                    err_msg = err_data["message"]
-                else:
-                    err_msg = body_text[:500] or f"HTTP {status_code}"
-
-                last_error_msg = err_msg
-
-                # Special case: Cloudflare daily-neuron-quota exhaustion 429
-                # \u2014 NOT retryable. Surface immediately with a clear message
-                # about the UTC midnight reset rather than burning through
-                # retries that won't help.
-                if (
-                    status_code == 429
-                    and _looks_like_neuron_quota_exhaustion(status_code, body_text)
-                    and attempt == 0
-                ):
-                    raise RuntimeError(
-                        f"Cloudflare Workers AI daily neuron quota exhausted. "
-                        f"Quota resets at UTC midnight \u2014 wait for the reset, "
-                        f"switch to another backend for the day, or upgrade to a "
-                        f"paid Workers plan for paid overage at $0.011/1k neurons "
-                        f"beyond the daily cap. Details: {err_msg}"
-                    ) from e
-
-                # ARCH-03: shared context-length 400 handler. Only on
-                # the first attempt (don't loop forever on a 400).
-                if status_code == 400 and attempt == 0:
-                    old_max = body.get("max_tokens", 4096)
-                    if self._handle_context_length_400(body_text, body):
-                        new_max = body["max_tokens"]
-                        if os.environ.get("AGENTKTHX_DEBUG"):
-                            print(
-                                f"  [Cloudflare] Context length exceeded \u2014 "
-                                f"reducing max_tokens {old_max} \u2192 {new_max} and retrying"
-                            )
-                        continue
-
-                # Retryable: 429 (rate limit, NOT quota exhaustion) +
-                # 5xx (transient server errors). R07.24 (MAINT-23/ROB-29):
-                # delegate to the shared _is_retryable_http_status helper.
-                if self._is_retryable_http_status(status_code) and attempt < max_retries:
-                    retry_after = self._compute_retry_after(e.headers, attempt)
-                    if os.environ.get("AGENTKTHX_DEBUG") or attempt < 2:
-                        print(
-                            f"  [Cloudflare] {status_code} \u2014 {err_msg}. "
-                            f"Retrying in {retry_after:.0f}s "
-                            f"(attempt {attempt + 1}/{max_retries + 1})..."
-                        )
-                    time.sleep(retry_after)
-                    continue
-
-                # Non-retryable OR exhausted retries
-                if status_code == 401:
-                    raise RuntimeError(
-                        "Cloudflare authentication failed. Check your "
-                        "CLOUDFLARE_API_KEY environment variable (must be a "
-                        "Workers AI-scoped API token with Read + Edit "
-                        "permissions). Create one at dash.cloudflare.com \u2192 "
-                        'My Profile \u2192 API Tokens \u2192 "Create Workers AI '
-                        'API Token".'
-                    ) from e
-                if status_code == 403:
-                    # Cloudflare error code 5035 = "model not available on
-                    # Workers Free plan" (paid-tier-only model invoked on a
-                    # free account). Different user action than a
-                    # token-permission 403: 5035 = upgrade OR switch model,
-                    # not "recreate your token". Cache the paid-only verdict
-                    # so the next list_models() with CLOUDFLARE_FREE_ONLY=true
-                    # filters this model out automatically.
-                    err_code = _extract_cloudflare_error_code(body_text)
-                    if err_code == _CF_PAID_ONLY_ERROR_CODE:
-                        model_name = body.get("model", "?")
-                        # Best-effort cache write - never let a cache
-                        # failure mask the real error from the user.
-                        try:
-                            cache_cloudflare_paid_only(model_name, paid_only=True)
-                        except Exception as cache_err:
-                            if os.environ.get("AGENTKTHX_DEBUG"):
-                                print(
-                                    f"  [Cloudflare] cache_cloudflare_paid_only "
-                                    f"failed for {model_name}: {cache_err}"
-                                )
-                        raise RuntimeError(
-                            f"Cloudflare model {model_name!r} is on the "
-                            f"Workers Paid plan - your free plan doesn't "
-                            f"include it. Pick a free-tier model with /model, "
-                            f"or upgrade at "
-                            f"https://dash.cloudflare.com/?to=/:account/"
-                            f"workers/plans. (The paid-only verdict has been "
-                            f"cached - subsequent `agentkthx models "
-                            f"--backend cf` runs with CLOUDFLARE_FREE_ONLY=true "
-                            f"will filter this model out automatically.) "
-                            f"Details: {err_msg}"
-                        ) from e
-                    # Plain 403 (no code 5035) - token lacks
-                    # Workers AI:Edit permission. Read alone returns 403;
-                    # Edit is required even for inference.
-                    raise RuntimeError(
-                        "Cloudflare permission denied. The token lacks "
-                        "Workers AI:Edit permission (Edit is required even "
-                        "for inference \u2014 Read alone returns 403). Recreate "
-                        "the token with both Workers AI:Read AND Workers AI:Edit."
-                    ) from e
-                if status_code == 404:
-                    raise RuntimeError(
-                        f"Cloudflare model not found (or wrong account ID): "
-                        f"{err_msg}. Verify the model ID at "
-                        f"https://developers.cloudflare.com/workers-ai/models/ "
-                        f"(e.g. '@cf/meta/llama-3.3-70b-instruct-fp8-fast'). "
-                        f"Also verify CLOUDFLARE_ACCOUNT_ID matches the token's "
-                        f"account scope \u2014 a mismatched account ID returns "
-                        f"404 even with a valid token."
-                    ) from e
-                if status_code == 422:
-                    raise RuntimeError(
-                        f"Cloudflare validation error: {err_msg}. Vision "
-                        f"models (@cf/meta/llama-3.2-*-vision-instruct) and "
-                        f"reasoning distill models (@cf/deepseek-ai/"
-                        f"deepseek-r1-distill-*) don't support tools \u2014 use "
-                        f"force_react=True. GPT-OSS models require the Responses "
-                        f"API (/responses, not /chat/completions)."
-                    ) from e
-
-                raise RuntimeError(f"Cloudflare API error {status_code}: {err_msg}") from e
-
-            except urllib.error.URLError as e:
-                # Network-level error \u2014 retry once with backoff, then surface.
-                # R07.24 (MAINT-23/ROB-29): delegate backoff to the shared
-                # _compute_network_backoff helper on CloudBackend.
-                if attempt < max_retries:
-                    backoff = self._compute_network_backoff(attempt)
+                    cache_cloudflare_paid_only(model_name, paid_only=True)
+                except Exception as cache_err:
                     if os.environ.get("AGENTKTHX_DEBUG"):
                         print(
-                            f"  [Cloudflare] connection error ({e.reason}), "
-                            f"retrying in {backoff:.0f}s"
+                            f"  [Cloudflare] cache_cloudflare_paid_only "
+                            f"failed for {model_name}: {cache_err}"
                         )
-                    time.sleep(backoff)
-                    continue
-                raise RuntimeError(f"Cloudflare connection error: {e.reason}") from e
-
-        # Should not reach here \u2014 the loop either returns or raises
-        raise RuntimeError(f"Cloudflare retries exhausted. Last error: {last_error_msg}")
-
-    # \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-    # _iter_sse_lines \u2014 streaming POST with retry (mirrors NVIDIA)
-    # \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-
-    def _iter_sse_lines(self, url: str, body: dict, headers: dict):
-        """Make a streaming POST to Cloudflare's /chat/completions endpoint.
-
-        Yields raw SSE line bytes for the inherited
-        ``generate_completions_stream()`` to parse.
-
-        Implements:
-          - ARCH-03 context-length 400 recovery (delegates to the shared
-            ``_handle_context_length_400`` helper inherited from
-            ``OpenAICompatibleBackend``; Cloudflare uses the standard
-            OpenAI error wording so no regex override is needed)
-          - 429 / 5xx retry honoring ``Retry-After`` (R07.24 helpers)
-          - Daily-neuron-quota 429 detection (NOT retryable \u2014 surfaces
-            immediately with a clear daily-quota-exhausted message)
-          - ROB-06 deterministic response close on generator abandonment
-        """
-        max_retries = self._max_retries()
-        last_error_msg = ""
-
-        for attempt in range(max_retries + 1):
-            req = urllib.request.Request(
-                url,
-                data=json.dumps(body).encode("utf-8"),
-                headers=headers,
-                method="POST",
-            )
-            try:
-                # Thinking models can take 60-90+ seconds before the first
-                # token. Use a longer timeout for them (300s vs default 120s)
-                # so the connection doesn't timeout mid-reasoning.
-                model_name = body.get("model", "")
-                stream_timeout = (
-                    300 if self._name_matches_thinking(model_name) else self.config.timeout
-                )
-                response = urllib.request.urlopen(req, timeout=stream_timeout)
-            except urllib.error.HTTPError as e:
-                status_code = e.code
-                body_bytes = e.read() if e.fp else b""
-                body_text = body_bytes.decode("utf-8", errors="replace") if body_bytes else ""
-
-                # Special case: Cloudflare daily-neuron-quota exhaustion 429
-                # \u2014 NOT retryable. Surface immediately with a clear message
-                # about the UTC midnight reset rather than burning through
-                # retries that won't help.
-                if (
-                    status_code == 429
-                    and _looks_like_neuron_quota_exhaustion(status_code, body_text)
-                    and attempt == 0
-                ):
-                    raise RuntimeError(
-                        f"Cloudflare Workers AI daily neuron quota exhausted. "
-                        f"Quota resets at UTC midnight \u2014 wait for the reset, "
-                        f"switch to another backend for the day, or upgrade to a "
-                        f"paid Workers plan for paid overage at $0.011/1k neurons "
-                        f"beyond the daily cap. Details: {body_text[:300]}"
-                    ) from e
-
-                # ARCH-03: shared context-length 400 handler. Only on
-                # the first attempt (don't loop forever on a 400).
-                if status_code == 400 and attempt == 0:
-                    old_max = body.get("max_tokens", 4096)
-                    if self._handle_context_length_400(body_text, body):
-                        new_max = body["max_tokens"]
-                        if os.environ.get("AGENTKTHX_DEBUG"):
-                            print(
-                                f"  [Cloudflare-Stream] Context length exceeded \u2014 "
-                                f"reducing max_tokens {old_max} \u2192 {new_max} and retrying"
-                            )
-                        continue
-
-                # Parse error envelope
-                err_msg = body_text[:500] or f"HTTP {status_code}"
-                try:
-                    err_data = json.loads(body_text) if body_text else None
-                    if isinstance(err_data, dict):
-                        if "error" in err_data:
-                            inner = err_data["error"]
-                            if isinstance(inner, dict):
-                                err_msg = inner.get("message", str(inner))
-                            else:
-                                err_msg = str(inner)
-                        elif "message" in err_data:
-                            err_msg = err_data["message"]
-                except (json.JSONDecodeError, ValueError):
-                    pass
-
-                last_error_msg = err_msg
-
-                # Retryable: 429 + 5xx. R07.24 (MAINT-23/ROB-29): delegate
-                # the retryable-classification + Retry-After + backoff
-                # calculation to the shared CloudBackend helpers.
-                if self._is_retryable_http_status(status_code) and attempt < max_retries:
-                    retry_after = self._compute_retry_after(e.headers, attempt)
-                    if os.environ.get("AGENTKTHX_DEBUG") or attempt < 2:
-                        print(
-                            f"  [Cloudflare-Stream] {status_code} \u2014 {err_msg}. "
-                            f"Retrying in {retry_after:.0f}s "
-                            f"(attempt {attempt + 1}/{max_retries + 1})..."
-                        )
-                    time.sleep(retry_after)
-                    continue
-
-                # Non-retryable OR exhausted retries
-                if status_code == 401:
-                    raise RuntimeError(
-                        "Cloudflare authentication failed. Check your "
-                        "CLOUDFLARE_API_KEY environment variable."
-                    ) from e
-                if status_code == 403:
-                    # Same 5035 paid-plan-only special-case as the non-streaming
-                    # path (_make_api_request). Caches the paid-only verdict
-                    # so subsequent list_models() with CLOUDFLARE_FREE_ONLY=true
-                    # filters this model out automatically.
-                    err_code = _extract_cloudflare_error_code(body_text)
-                    if err_code == _CF_PAID_ONLY_ERROR_CODE:
-                        model_name = body.get("model", "?")
-                        try:
-                            cache_cloudflare_paid_only(model_name, paid_only=True)
-                        except Exception as cache_err:
-                            if os.environ.get("AGENTKTHX_DEBUG"):
-                                print(
-                                    f"  [Cloudflare-Stream] cache_cloudflare_paid_only "
-                                    f"failed for {model_name}: {cache_err}"
-                                )
-                        raise RuntimeError(
-                            f"Cloudflare model {model_name!r} is on the "
-                            f"Workers Paid plan - your free plan doesn't "
-                            f"include it. Pick a free-tier model with /model, "
-                            f"or upgrade at "
-                            f"https://dash.cloudflare.com/?to=/:account/"
-                            f"workers/plans. (The paid-only verdict has been "
-                            f"cached - subsequent `agentkthx models "
-                            f"--backend cf` runs with CLOUDFLARE_FREE_ONLY=true "
-                            f"will filter this model out automatically.) "
-                            f"Details: {err_msg}"
-                        ) from e
-                    raise RuntimeError(
-                        "Cloudflare permission denied. The token lacks "
-                        "Workers AI:Edit permission (Edit is required even "
-                        "for inference - Read alone returns 403). Recreate "
-                        "the token with both Workers AI:Read AND Workers AI:Edit."
-                    ) from e
-                raise RuntimeError(f"Cloudflare API error {status_code}: {err_msg}") from e
-
-            except urllib.error.URLError as e:
-                # Network-level error \u2014 retry once with backoff, then surface.
-                # R07.24 (MAINT-23/ROB-29): delegate backoff to the shared
-                # _compute_network_backoff helper on CloudBackend.
-                if attempt < max_retries:
-                    backoff = self._compute_network_backoff(attempt)
-                    if os.environ.get("AGENTKTHX_DEBUG"):
-                        print(
-                            f"  [Cloudflare-Stream] connection error ({e.reason}), "
-                            f"retrying in {backoff:.0f}s"
-                        )
-                    time.sleep(backoff)
-                    continue
-                raise RuntimeError(f"Cloudflare connection error: {e.reason}") from e
-
-            # Success \u2014 yield raw SSE line bytes. The base class's
-            # generate_completions_stream() handles the JSON parsing,
-            # [DONE] detection, and delta/tool_call extraction.
-            #
-            # ROB-06 (R07.25 CLOSED): upgraded to use the deterministic
-            # _close_http_response helper (fp.close() + release_conn() +
-            # close()) so Windows doesn't leak the TCP connection.
-            try:
-                for line in response:
-                    yield line
-            finally:
-                close_helper = getattr(self, "_close_http_response", None)
-                if callable(close_helper):
-                    close_helper(response)
-                else:
-                    try:
-                        response.close()
-                    except Exception:
-                        pass
-            return  # success \u2014 don't retry
-
-        # Should not reach here \u2014 the loop either yields + returns, or raises
-        raise RuntimeError(f"Cloudflare-Stream retries exhausted. Last error: {last_error_msg}")
+                raise RuntimeError(
+                    f"Cloudflare model {model_name!r} is on the "
+                    f"Workers Paid plan - your free plan doesn't "
+                    f"include it. Pick a free-tier model with /model, "
+                    f"or upgrade at "
+                    f"https://dash.cloudflare.com/?to=/:account/"
+                    f"workers/plans. (The paid-only verdict has been "
+                    f"cached - subsequent `agentkthx models "
+                    f"--backend cf` runs with CLOUDFLARE_FREE_ONLY=true "
+                    f"will filter this model out automatically.) "
+                    f"Details: {err_msg}"
+                ) from exc
+            # Plain 403 (no code 5035) - token lacks Workers AI:Edit
+            # permission. Read alone returns 403; Edit is required even
+            # for inference.
+            raise RuntimeError(
+                "Cloudflare permission denied. The token lacks "
+                "Workers AI:Edit permission (Edit is required even "
+                "for inference — Read alone returns 403). Recreate "
+                "the token with both Workers AI:Read AND Workers AI:Edit."
+            ) from exc
+        super()._raise_non_retryable_status(exc, status_code, body_text, err_msg, body)
 
     # \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
     # generate \u2014 non-streaming entry point (mirrors NVIDIA)
@@ -1491,80 +1250,4 @@ class CloudflareBackend(CloudBackend):
         # only when supplied, but Cloudflare 400s if it sees it).
         body.pop("top_k", None)
 
-        return self._make_api_request(body, stream=False)
-
-    # \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-    # generate_stream \u2014 thin text-delta wrapper (parity with NVIDIA/Mistral/OpenRouter)
-    # \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-    #
-    # ARCH-01: delegates to the inherited ``generate_completions_stream``
-    # (from ``OpenAICompatibleBackend``). Yields just the text content
-    # deltas \u2014 the agent loop calls ``generate_completions_stream``
-    # directly to get the full dict-shape (delta + tool_calls +
-    # finish_reason + reasoning_content).
-
-    def generate_stream(
-        self,
-        model: str,
-        messages: list[dict],
-        tools: list | None = None,
-        temperature: float | None = None,
-        max_tokens: int | None = None,
-        **kwargs,
-    ) -> Generator[str, None, None]:
-        """Stream generated text from Cloudflare Workers AI.
-
-        Thin wrapper over the inherited ``generate_completions_stream``
-        (from ``OpenAICompatibleBackend``). Yields just the text content
-        deltas \u2014 the agent loop calls ``generate_completions_stream``
-        directly to get the full dict-shape (delta + tool_calls +
-        finish_reason + reasoning_content).
-
-        The actual HTTP transport + retry/recovery lives in
-        ``_iter_sse_lines`` above.
-        """
-        for chunk in self.generate_completions_stream(
-            model=model,
-            messages=messages,
-            tools=tools,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            **kwargs,
-        ):
-            delta = chunk.get("delta", "")
-            if delta:
-                yield delta
-
-    # \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-    # _jev_call_completions \u2014 JEV hook (mirrors NVIDIA)
-    # \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-
-    def _jev_call_completions(
-        self,
-        model: str,
-        messages: list[dict],
-        temperature: float = 0.1,
-        max_tokens: int = 512,
-        think: bool | None = None,
-        response_format: dict | None = None,
-        **kwargs,
-    ) -> dict:
-        """JEV hook for Cloudflare: route the decision call through
-        Cloudflare's Bearer-authenticated ``/chat/completions`` endpoint.
-
-        The response shape is normalized to match generate():
-        ``{content, tool_calls, usage, latency_ms, raw}``.
-        """
-        body = self._build_openai_body(
-            model=model,
-            messages=messages,
-            tools=None,  # decisions never call tools
-            temperature=temperature,
-            max_tokens=max_tokens,
-            stream=False,
-            response_format=response_format,
-            **kwargs,
-        )
-        # top_k not supported on the OpenAI-compat path
-        body.pop("top_k", None)
         return self._make_api_request(body, stream=False)

@@ -740,7 +740,24 @@ class PollinationsBackend(CloudBackend):
         try:
             live = self._fetch_live_models()
             live_cards = self._model_cards
-        except Exception as e:
+        except (
+            urllib.error.HTTPError,
+            urllib.error.URLError,
+            # OSError: bare socket-level failures (read resets, DNS) can
+            # escape urlopen unwrapped; URLError subclasses OSError so the
+            # order is safe. OrcaRouter convention + the R07.20 cache-test
+            # simulation idiom (bare `OSError("network down")`).
+            OSError,
+            json.JSONDecodeError,
+            RuntimeError,
+        ) as e:
+            # ROB-42 contract (R07.28): narrowed from bare `except Exception`
+            # (the same catch-narrowing Mistral got in R07.24 and nvidia/
+            # cloudflare in R07.28 batch 1). RuntimeError covers the
+            # "pollinations /v1/models unreachable or empty" guard raised
+            # by _fetch_live_models; malformed-shape programming errors
+            # (KeyError/AttributeError/TypeError) now propagate instead of
+            # being masked as "discovery failed".
             if os.environ.get("AGENTKTHX_DEBUG"):
                 print(f"  [Pollinations] Model discovery failed ({e}), using cached/seed catalog")
             live = None

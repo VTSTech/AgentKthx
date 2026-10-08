@@ -57,7 +57,6 @@ import re
 import time
 import urllib.error
 import urllib.request
-from typing import Generator
 
 from agentkthx import model_cache
 from agentkthx.backends.cloud_base import CloudBackend
@@ -328,15 +327,6 @@ class NvidiaBackend(CloudBackend):
                     f"check NVIDIA_API_KEY."
                 )
 
-    def _extra_auth_headers(self) -> dict:
-        """NVIDIA NIM uses the standard Bearer-token auth — no extras.
-
-        Unlike OpenRouter (which adds HTTP-Referer + X-Title for
-        attribution) or OrcaRouter (which adds X-OrcaRouter-Include-Cost),
-        NVIDIA NIM uses only the standard ``Authorization: Bearer`` header.
-        """
-        return {}
-
     # ─────────────────────────────────────────────────────────────────────
     # OpenAICompatibleBackend abstract hooks
     # ─────────────────────────────────────────────────────────────────────
@@ -355,73 +345,30 @@ class NvidiaBackend(CloudBackend):
         return f"{self._base_url.rstrip('/')}/models"
 
     # ─────────────────────────────────────────────────────────────────────
-    # Catalog lookup overrides — NVIDIA keys on FULL prefixed IDs
+    # Catalog lookup — NVIDIA keys on FULL prefixed IDs
     # ─────────────────────────────────────────────────────────────────────
     #
-    # The CloudBackend base class (cloud_base.py) strips the provider prefix
-    # before catalog lookup (model.split("/")[-1]) because ZAI/OpenRouter
-    # key their catalogs on bare post-slash segments. NVIDIA's API REQUIRES
-    # the full prefixed name in the request body (e.g. "meta/llama-3.3-70b-instruct"
-    # not "llama-3.3-70b-instruct"), so our seed catalog keys on full names.
-    # These overrides skip the prefix-stripping so lookups match.
+    # The CloudBackend base class (cloud_base.py) normalizes catalog
+    # lookups via _catalog_model_key (default: strip the provider prefix,
+    # "zai/glm-4-flash" → "glm-4-flash") because ZAI/OpenRouter key their
+    # catalogs on bare post-slash segments. NVIDIA's API REQUIRES the
+    # full prefixed name in the request body (e.g.
+    # "meta/llama-3.3-70b-instruct" not "llama-3.3-70b-instruct"), so our
+    # seed catalog keys on full names — MAINT-28 batch 2 (R07.28) replaced
+    # the four per-method "does NOT strip the prefix" overrides
+    # (get_model_info / _get_model_defaults / get_model_max_context /
+    # _is_free_model) with this single hook; those methods are inherited
+    # unchanged.
 
-    def get_model_info(self, model: str) -> dict | None:
-        """Look up model in the static catalog by FULL prefixed ID.
+    def _catalog_model_key(self, model: str) -> str:
+        """NVIDIA catalog keys on FULL prefixed IDs — return as-is.
 
-        Override of CloudBackend.get_model_info — does NOT strip the
-        provider prefix because NVIDIA's catalog keys on the full name
-        (e.g. "meta/llama-3.3-70b-instruct").
+        Override of CloudBackend._catalog_model_key. The module-level
+        ``_is_free_model`` helper and ``NVIDIA_MODELS`` both expect the
+        exact catalog key (full prefixed name), so no normalization
+        applies.
         """
-        meta = self.MODELS.get(model, {})
-        if not meta:
-            return None
-        return {
-            "name": model,
-            "size": 0,
-            "details": {
-                "family": self._catalog_family_name(),
-                "backend": self._catalog_backend_name(),
-                "context_length": meta.get("context_length", self._DEFAULT_CONTEXT_FALLBACK),
-                "free_tier": _is_free_model(model),
-            },
-        }
-
-    def _get_model_defaults(self, model: str) -> dict:
-        """Return {temperature, max_tokens} from the static catalog.
-
-        Override of CloudBackend._get_model_defaults — does NOT strip
-        the provider prefix. Falls back to safe defaults (max_tokens=8192,
-        context_length=128000, temperature=0.7) when the model isn't in
-        the catalog.
-        """
-        meta = self.MODELS.get(model, {})
-        max_tokens = meta.get("default_max_tokens", 8192)
-        context_length = meta.get("context_length", self._DEFAULT_CONTEXT_FALLBACK)
-        temperature = meta.get("default_temperature", 0.7)
-        return self._apply_max_tokens_cap(max_tokens, context_length, temperature=temperature)
-
-    def get_model_max_context(self, model: str, family: str | None = None) -> int:
-        """Return the model's maximum trained context window size.
-
-        Override of CloudBackend.get_model_max_context — does NOT strip
-        the provider prefix. Falls back to 128000 when not in catalog.
-        """
-        meta = self.MODELS.get(model, {})
-        if meta:
-            ctx = meta.get("context_length")
-            if ctx and isinstance(ctx, int) and ctx > 0:
-                return ctx
-        # Fall back to live model_info if catalog misses
-        info = self.get_model_info(model)
-        if info and "details" in info:
-            ctx = info["details"].get("context_length")
-            if ctx and isinstance(ctx, int) and ctx > 0:
-                return ctx
-        return self._DEFAULT_CONTEXT_FALLBACK
-
-    def _is_free_model(self, model: str) -> bool:
-        """Override of CloudBackend._is_free_model — does NOT strip prefix."""
-        return _is_free_model(model)
+        return model
 
     # ─────────────────────────────────────────────────────────────────────
     # list_models — query GET /v1/models, merge with static catalog
@@ -587,16 +534,46 @@ class NvidiaBackend(CloudBackend):
         # entries; stale-stamped so the live fetch below still runs).
         model_cache.ensure_seeded(self.MODEL_CACHE_KEY, self._catalog_fallback_list())
 
-        # Live fetch — best-effort, falls back to catalog on any failure
+        # Live fetch — ROB-42 (R07.28): narrow the except to the
+        # legitimate discovery-failure modes (the R07.24 ROB-28
+        # catch-narrowing, Mistral pattern) + RuntimeError for the
+        # success=false shape guard. Programming errors from a malformed
+        # response shape (KeyError/AttributeError/TypeError) now
+        # propagate as real bugs instead of being masked as "discovery
+        # failed".
         try:
             models = self._fetch_live_models()
-        except Exception as e:
+        except (
+            urllib.error.HTTPError,
+            urllib.error.URLError,
+            # OSError: bare socket-level failures (read resets, DNS) can
+            # escape urlopen unwrapped; URLError subclasses OSError so the
+            # order is safe. OrcaRouter convention + the R07.20 cache-test
+            # simulation idiom (bare `OSError("network down")`).
+            OSError,
+            json.JSONDecodeError,
+            RuntimeError,
+        ) as e:
             if os.environ.get("AGENTKTHX_DEBUG"):
-                print(f"  [NVIDIA] live /v1/models fetch failed ({e}); using catalog")
-            models = self._catalog_fallback_list()
+                print(
+                    f"  [NVIDIA] live /v1/models fetch failed "
+                    f"({type(e).__name__}: {e}); using stale/cache catalog"
+                )
+            models = None
 
-        # Persist to L2 cache (shared across processes)
-        model_cache.store_models(self.MODEL_CACHE_KEY, models, source="api")
+        if models is not None:
+            # ROB-42: persist ONLY on the success path — a failed fetch
+            # must never overwrite the persistent cache with the static
+            # seed under a fresh source="api" label (the R07.24
+            # ROB-28/ROB-30 closure class).
+            models = model_cache.store_models(self.MODEL_CACHE_KEY, models)
+        else:
+            # ROB-42: serve the stale last-known-good cache first (data
+            # from a previous successful fetch — fresher than the seed),
+            # then fall back to the static catalog. Mirrors Mistral's
+            # get_stale_models() service.
+            stale = model_cache.get_stale_models(self.MODEL_CACHE_KEY)
+            models = stale if stale is not None else self._catalog_fallback_list()
 
         # Update L1 cache
         self._model_cache = models
@@ -666,10 +643,21 @@ class NvidiaBackend(CloudBackend):
         We pre-classify those as REACT so the agent loop uses the ReAct
         prompting path instead of native function calling.
 
-        Every other model falls through to the inherited CloudBackend
-        default (NATIVE) and is probed on first use via the standard
-        ``test_tool_support`` flow (the probe is cached in
-        ``~/.agentkthx/tool_support.json``).
+        Every other model returns NATIVE immediately from the pattern
+        table. This is a NAME-PATTERN classification only: no live probe
+        is performed, and nothing is read from or written to
+        ``~/.agentkthx/tool_support.json`` — that cache belongs to the
+        local-backend auto-detection layer, and cloud backends bypass it
+        entirely. The inherited ``CloudBackend.test_tool_support`` that
+        this override shadows also returns NATIVE unconditionally (the
+        same zero-probe aggregator assumption the owner reviewed for
+        OpenRouter — R07.05, re-reviewed R07.19). The safety net is
+        runtime behavior: a model classified NATIVE that actually
+        rejects ``tools`` gets a 400 and the agent loop falls back to
+        the ReAct prompting path.
+
+        (MAINT-29, R07.28: the previous docstring promised a first-use
+        probe + cache write that never existed.)
         """
         model_segment = model.split("/")[-1] if "/" in model else model
         model_lower = model_segment.lower()
@@ -681,367 +669,85 @@ class NvidiaBackend(CloudBackend):
         return ToolSupportLevel.NATIVE
 
     # ─────────────────────────────────────────────────────────────────────
-    # _make_api_request — non-streaming POST with retry (mirrors Mistral)
+    # MAINT-28 (R07.28): provider-specific retry-loop hooks
     # ─────────────────────────────────────────────────────────────────────
+    #
+    # The retry-loop skeleton (envelope parsing, quota-429 fast-fail,
+    # 400 recovery, retryable backoff, 401/404/422 remediation) lives on
+    # CloudBackend since MAINT-28 — ``_make_api_request`` and
+    # ``_iter_sse_lines`` below are now thin drivers that supply only
+    # the NVIDIA-specific pieces: the credit-exhaustion classifier and
+    # remediation message, the fixed-param 400 recovery (kimi-k3 pins
+    # top_p=0.95), and the per-status remediation texts.
 
-    def _make_api_request(self, body: dict, *, stream: bool = False) -> dict:
-        """POST to ``/chat/completions`` with 429/5xx retry.
+    #: Brand for the shared error strings ("NVIDIA NIM API error 429: …",
+    #: "NVIDIA NIM connection error: …"). MAINT-28 (R07.28).
+    _error_brand: str = "NVIDIA NIM"
 
-        Honors ``Retry-After`` when present (429 rate-limit and 503
-        service-unavailable). Falls back to exponential backoff with
-        full jitter. Max retries determined by ``_max_retries()`` (default
-        4, override via ``AGENTKTHX_MAX_API_RETRIES`` env var).
+    #: Per-status remediation texts (MAINT-28: previously duplicated ×4
+    #: across nvidia.py + cloudflare.py, and inconsistent between the
+    #: streaming and non-streaming copies — now one table serves both
+    #: paths).
+    _STATUS_REMEDIATIONS: dict[int, str] = {
+        401: (
+            "NVIDIA NIM authentication failed. Check your NVIDIA_API_KEY "
+            "environment variable (must start with 'nvapi-'). Get a key at "
+            "https://build.nvidia.com → Account → API Keys."
+        ),
+        404: (
+            "NVIDIA NIM model not found: {err_msg}. Verify the model ID "
+            "at https://build.nvidia.com (e.g. 'meta/llama-3.3-70b-instruct' "
+            "not 'llama-3.3-70b-instruct')."
+        ),
+        422: (
+            "NVIDIA NIM validation error: {err_msg}. Reasoning models "
+            "(DeepSeek-R1, R1-distill, Qwen3-Thinking) don't support "
+            "tools — use force_react=True."
+        ),
+    }
 
-        Special case for NVIDIA NIM: a 429 whose body indicates credit
-        exhaustion (contains "credit" / "quota" / "balance") is NOT
-        retryable — the monthly quota has been hit and retrying won't help.
-        Such 429s surface immediately as a clear RuntimeError so the user
-        knows to wait for the next monthly reset.
+    def _looks_like_quota_exhaustion(self, status_code: int, body_text: str) -> bool:
+        """NVIDIA NIM quota hook: monthly-credit exhaustion (MAINT-28)."""
+        return _looks_like_credit_exhaustion(status_code, body_text)
 
-        On HTTP 200, parses the JSON body via ``_parse_openai_response``
-        (inherited from OpenAICompatibleBackend) which handles the
-        OpenAI-spec error envelope and tool-call shape.
+    def _quota_exhaustion_message(self) -> str:
+        """Monthly-credit remediation text (MAINT-28)."""
+        return (
+            "NVIDIA NIM monthly credit quota exhausted. Credits reset "
+            "monthly — wait for the next reset or request additional "
+            "credits at the NVIDIA developer forums."
+        )
+
+    def _handle_fixed_param_400(self, body_text: str, body: dict, log_prefix: str) -> bool:
+        """Fixed-param 400 recovery (NVIDIA NIM hook, MAINT-28).
+
+        Some NVIDIA NIM models have parameters fixed at specific values
+        (e.g. kimi-k3 fixes top_p=0.95). Detect "fixed at X" in the
+        error, set the offending param to the fixed value, and tell the
+        caller to retry. Returns True when the body was mutated.
         """
-        url = self._get_chat_completions_url()
-        headers = self._get_auth_headers()
-        if stream:
-            headers["Accept"] = "text/event-stream"
-
-        max_retries = self._max_retries()
-        last_error_msg = ""
-
-        for attempt in range(max_retries + 1):
-            req = urllib.request.Request(
-                url,
-                data=json.dumps(body).encode("utf-8"),
-                headers=headers,
-                method="POST",
+        fixed = _extract_fixed_param(body_text)
+        if not fixed:
+            return False
+        param_name, fixed_value = fixed
+        if param_name not in body:
+            return False
+        old_val = body[param_name]
+        # Set to the fixed value (safer than dropping — some models
+        # reject requests that omit the param entirely, others accept
+        # omission. Setting to the fixed value works universally.)
+        try:
+            body[param_name] = type(body[param_name])(fixed_value)
+        except (ValueError, TypeError):
+            body[param_name] = fixed_value
+        if os.environ.get("AGENTKTHX_DEBUG"):
+            print(
+                f"  {log_prefix} {param_name} is fixed at {fixed_value} "
+                f"for this model — overriding {old_val} → "
+                f"{body[param_name]} and retrying"
             )
-            try:
-                with urllib.request.urlopen(req, timeout=self.config.timeout) as resp:
-                    raw = json.loads(resp.read().decode("utf-8"))
-                    return self._parse_openai_response(raw)
+        return True
 
-            except urllib.error.HTTPError as e:
-                status_code = e.code
-                body_bytes = e.read() if e.fp else b""
-                body_text = body_bytes.decode("utf-8", errors="replace") if body_bytes else ""
-
-                # Parse OpenAI-spec error envelope
-                err_data: dict | None = None
-                try:
-                    if body_text:
-                        err_data = json.loads(body_text)
-                except (json.JSONDecodeError, ValueError):
-                    pass
-
-                if isinstance(err_data, dict) and "error" in err_data:
-                    inner = err_data["error"]
-                    if isinstance(inner, dict):
-                        err_msg = inner.get("message", str(inner))
-                    else:
-                        err_msg = str(inner)
-                elif isinstance(err_data, dict) and "message" in err_data:
-                    err_msg = err_data["message"]
-                else:
-                    err_msg = body_text[:500] or f"HTTP {status_code}"
-
-                last_error_msg = err_msg
-
-                # Special case: NVIDIA credit-exhaustion 429 — NOT retryable.
-                # Surface immediately with a clear message about the monthly
-                # reset rather than burning through retries that won't help.
-                if (
-                    status_code == 429
-                    and _looks_like_credit_exhaustion(status_code, body_text)
-                    and attempt == 0
-                ):
-                    raise RuntimeError(
-                        f"NVIDIA NIM monthly credit quota exhausted. "
-                        f"Credits reset monthly — wait for the next reset "
-                        f"or request additional credits at the NVIDIA "
-                        f"developer forums. Details: {err_msg}"
-                    ) from e
-
-                # Fixed-param 400: some NVIDIA NIM models have parameters
-                # fixed at specific values (e.g. kimi-k3 fixes top_p=0.95).
-                # Detect "fixed at X" in the error, drop the offending param
-                # (or set it to the fixed value), and retry.
-                if status_code == 400 and attempt == 0:
-                    fixed = _extract_fixed_param(body_text)
-                    if fixed:
-                        param_name, fixed_value = fixed
-                        if param_name in body:
-                            old_val = body[param_name]
-                            # Set to the fixed value (safer than dropping —
-                            # some models reject requests that omit the param
-                            # entirely, others accept omission. Setting to
-                            # the fixed value works universally.)
-                            try:
-                                body[param_name] = type(body[param_name])(fixed_value)
-                            except (ValueError, TypeError):
-                                body[param_name] = fixed_value
-                            if os.environ.get("AGENTKTHX_DEBUG"):
-                                print(
-                                    f"  [NVIDIA] {param_name} is fixed at "
-                                    f"{fixed_value} for this model — "
-                                    f"overriding {old_val} → {body[param_name]} "
-                                    f"and retrying"
-                                )
-                            continue
-
-                # ARCH-03: shared context-length 400 handler. Only on
-                # the first attempt (don't loop forever on a 400).
-                if status_code == 400 and attempt == 0:
-                    old_max = body.get("max_tokens", 4096)
-                    if self._handle_context_length_400(body_text, body):
-                        new_max = body["max_tokens"]
-                        if os.environ.get("AGENTKTHX_DEBUG"):
-                            print(
-                                f"  [NVIDIA] Context length exceeded — "
-                                f"reducing max_tokens {old_max} → {new_max} and retrying"
-                            )
-                        continue
-
-                # Retryable: 429 (rate limit, NOT credit exhaustion) +
-                # 5xx (transient server errors). R07.24 (MAINT-23/ROB-29):
-                # delegate to the shared _is_retryable_http_status helper.
-                if self._is_retryable_http_status(status_code) and attempt < max_retries:
-                    retry_after = self._compute_retry_after(e.headers, attempt)
-                    if os.environ.get("AGENTKTHX_DEBUG") or attempt < 2:
-                        print(
-                            f"  [NVIDIA] {status_code} — {err_msg}. "
-                            f"Retrying in {retry_after:.0f}s "
-                            f"(attempt {attempt + 1}/{max_retries + 1})..."
-                        )
-                    time.sleep(retry_after)
-                    continue
-
-                # Non-retryable OR exhausted retries
-                if status_code == 401:
-                    raise RuntimeError(
-                        "NVIDIA NIM authentication failed. Check your "
-                        "NVIDIA_API_KEY environment variable (must start "
-                        "with 'nvapi-'). Get a key at "
-                        "https://build.nvidia.com → Account → API Keys."
-                    ) from e
-                if status_code == 404:
-                    raise RuntimeError(
-                        f"NVIDIA NIM model not found: {err_msg}. "
-                        f"Verify the model ID at https://build.nvidia.com "
-                        f"(e.g. 'meta/llama-3.3-70b-instruct' not "
-                        f"'llama-3.3-70b-instruct')."
-                    ) from e
-                if status_code == 422:
-                    raise RuntimeError(
-                        f"NVIDIA NIM validation error: {err_msg}. "
-                        f"Reasoning models (DeepSeek-R1, R1-distill, "
-                        f"Qwen3-Thinking) don't support tools — use "
-                        f"force_react=True."
-                    ) from e
-
-                raise RuntimeError(f"NVIDIA NIM API error {status_code}: {err_msg}") from e
-
-            except urllib.error.URLError as e:
-                # Network-level error — retry once with backoff, then surface.
-                # R07.24 (MAINT-23/ROB-29): delegate backoff to the shared
-                # _compute_network_backoff helper on CloudBackend.
-                if attempt < max_retries:
-                    backoff = self._compute_network_backoff(attempt)
-                    if os.environ.get("AGENTKTHX_DEBUG"):
-                        print(
-                            f"  [NVIDIA] connection error ({e.reason}), "
-                            f"retrying in {backoff:.0f}s"
-                        )
-                    time.sleep(backoff)
-                    continue
-                raise RuntimeError(f"NVIDIA NIM connection error: {e.reason}") from e
-
-        # Should not reach here — the loop either returns or raises
-        raise RuntimeError(f"NVIDIA NIM retries exhausted. Last error: {last_error_msg}")
-
-    # ─────────────────────────────────────────────────────────────────────
-    # _iter_sse_lines — streaming POST with retry (mirrors Mistral)
-    # ─────────────────────────────────────────────────────────────────────
-
-    def _iter_sse_lines(self, url: str, body: dict, headers: dict):
-        """Make a streaming POST to NVIDIA NIM's /chat/completions endpoint.
-
-        Yields raw SSE line bytes for the inherited
-        ``generate_completions_stream()`` to parse.
-
-        Implements:
-          - ARCH-03 context-length 400 recovery (delegates to the shared
-            ``_handle_context_length_400`` helper inherited from
-            ``OpenAICompatibleBackend``; NVIDIA NIM uses the standard
-            OpenAI error wording so no regex override is needed)
-          - 429 / 5xx retry honoring ``Retry-After`` (R07.24 helpers)
-          - Credit-exhaustion 429 detection (NOT retryable — surfaces
-            immediately with a clear monthly-quota-exhausted message)
-          - ROB-06 deterministic response close on generator abandonment
-        """
-        max_retries = self._max_retries()
-        last_error_msg = ""
-
-        for attempt in range(max_retries + 1):
-            req = urllib.request.Request(
-                url,
-                data=json.dumps(body).encode("utf-8"),
-                headers=headers,
-                method="POST",
-            )
-            try:
-                # Thinking models can take 60-90+ seconds before the first
-                # token. Use a longer timeout for them (300s vs default 120s)
-                # so the connection doesn't timeout mid-reasoning.
-                model_name = body.get("model", "")
-                stream_timeout = (
-                    300 if self._name_matches_thinking(model_name) else self.config.timeout
-                )
-                response = urllib.request.urlopen(req, timeout=stream_timeout)
-            except urllib.error.HTTPError as e:
-                status_code = e.code
-                body_bytes = e.read() if e.fp else b""
-                body_text = body_bytes.decode("utf-8", errors="replace") if body_bytes else ""
-
-                # Special case: NVIDIA credit-exhaustion 429 — NOT retryable.
-                if (
-                    status_code == 429
-                    and _looks_like_credit_exhaustion(status_code, body_text)
-                    and attempt == 0
-                ):
-                    raise RuntimeError(
-                        f"NVIDIA NIM monthly credit quota exhausted. "
-                        f"Credits reset monthly — wait for the next reset "
-                        f"or request additional credits at the NVIDIA "
-                        f"developer forums. Details: {body_text[:300]}"
-                    ) from e
-
-                # Fixed-param 400: some NVIDIA NIM models have parameters
-                # fixed at specific values (e.g. kimi-k3 fixes top_p=0.95).
-                # Detect "fixed at X" in the error, set the param to the
-                # fixed value, and retry.
-                if status_code == 400 and attempt == 0:
-                    fixed = _extract_fixed_param(body_text)
-                    if fixed:
-                        param_name, fixed_value = fixed
-                        if param_name in body:
-                            old_val = body[param_name]
-                            try:
-                                body[param_name] = type(body[param_name])(fixed_value)
-                            except (ValueError, TypeError):
-                                body[param_name] = fixed_value
-                            if os.environ.get("AGENTKTHX_DEBUG"):
-                                print(
-                                    f"  [NVIDIA-Stream] {param_name} is fixed "
-                                    f"at {fixed_value} for this model — "
-                                    f"overriding {old_val} → {body[param_name]} "
-                                    f"and retrying"
-                                )
-                            continue
-
-                # ARCH-03: shared context-length 400 handler. Only on
-                # the first attempt (don't loop forever on a 400).
-                if status_code == 400 and attempt == 0:
-                    old_max = body.get("max_tokens", 4096)
-                    if self._handle_context_length_400(body_text, body):
-                        new_max = body["max_tokens"]
-                        if os.environ.get("AGENTKTHX_DEBUG"):
-                            print(
-                                f"  [NVIDIA-Stream] Context length exceeded — "
-                                f"reducing max_tokens {old_max} → {new_max} and retrying"
-                            )
-                        continue
-
-                # Parse error envelope
-                err_msg = body_text[:500] or f"HTTP {status_code}"
-                try:
-                    err_data = json.loads(body_text) if body_text else None
-                    if isinstance(err_data, dict):
-                        if "error" in err_data:
-                            inner = err_data["error"]
-                            if isinstance(inner, dict):
-                                err_msg = inner.get("message", str(inner))
-                            else:
-                                err_msg = str(inner)
-                        elif "message" in err_data:
-                            err_msg = err_data["message"]
-                except (json.JSONDecodeError, ValueError):
-                    pass
-
-                last_error_msg = err_msg
-
-                # Retryable: 429 + 5xx. R07.24 (MAINT-23/ROB-29): delegate
-                # the retryable-classification + Retry-After + backoff
-                # calculation to the shared CloudBackend helpers.
-                if self._is_retryable_http_status(status_code) and attempt < max_retries:
-                    retry_after = self._compute_retry_after(e.headers, attempt)
-                    if os.environ.get("AGENTKTHX_DEBUG") or attempt < 2:
-                        print(
-                            f"  [NVIDIA-Stream] {status_code} — {err_msg}. "
-                            f"Retrying in {retry_after:.0f}s "
-                            f"(attempt {attempt + 1}/{max_retries + 1})..."
-                        )
-                    time.sleep(retry_after)
-                    continue
-
-                # Non-retryable OR exhausted retries
-                if status_code == 401:
-                    raise RuntimeError(
-                        "NVIDIA NIM authentication failed. Check your "
-                        "NVIDIA_API_KEY environment variable."
-                    ) from e
-                raise RuntimeError(f"NVIDIA NIM API error {status_code}: {err_msg}") from e
-
-            except urllib.error.URLError as e:
-                # Network-level error — retry once with backoff, then surface.
-                # R07.24 (MAINT-23/ROB-29): delegate backoff to the shared
-                # _compute_network_backoff helper on CloudBackend.
-                if attempt < max_retries:
-                    backoff = self._compute_network_backoff(attempt)
-                    if os.environ.get("AGENTKTHX_DEBUG"):
-                        print(
-                            f"  [NVIDIA-Stream] connection error ({e.reason}), "
-                            f"retrying in {backoff:.0f}s"
-                        )
-                    time.sleep(backoff)
-                    continue
-                raise RuntimeError(f"NVIDIA NIM connection error: {e.reason}") from e
-
-            # Success — yield raw SSE line bytes. The base class's
-            # generate_completions_stream() handles the JSON parsing,
-            # [DONE] detection, and delta/tool_call extraction.
-            #
-            # Note: the chat.py spinner handles the "thinking..." progress
-            # indicator. Thinking models (GLM-5.3-flash, DeepSeek-V4.1-flash)
-            # can take 60-90+ seconds before the first token — the spinner
-            # runs until agent.run() returns, so it covers that gap.
-            # ROB-06: try/finally so the urllib response is closed
-            # deterministically when the generator is abandoned
-            # mid-iteration (Ctrl+C, consumer exception, or the base
-            # class's break on [DONE]).
-            #
-            # ROB-06 (R07.25 CLOSED): upgraded to use the deterministic
-            # _close_http_response helper (fp.close() + release_conn() +
-            # close()) so Windows doesn't leak the TCP connection.
-            try:
-                for line in response:
-                    yield line
-            finally:
-                close_helper = getattr(self, "_close_http_response", None)
-                if callable(close_helper):
-                    close_helper(response)
-                else:
-                    try:
-                        response.close()
-                    except Exception:
-                        pass
-            return  # success — don't retry
-
-        # Should not reach here — the loop either yields + returns, or raises
-        raise RuntimeError(f"NVIDIA-Stream retries exhausted. Last error: {last_error_msg}")
-
-    # ─────────────────────────────────────────────────────────────────────
     # generate — non-streaming entry point (mirrors Mistral)
     # ─────────────────────────────────────────────────────────────────────
 
@@ -1109,78 +815,4 @@ class NvidiaBackend(CloudBackend):
             **kwargs,
         )
 
-        return self._make_api_request(body, stream=False)
-
-    # ─────────────────────────────────────────────────────────────────────
-    # generate_stream — thin text-delta wrapper (parity with Mistral/OpenRouter)
-    # ─────────────────────────────────────────────────────────────────────
-    #
-    # ARCH-01: delegates to the inherited ``generate_completions_stream``
-    # (from ``OpenAICompatibleBackend``). Yields just the text content
-    # deltas — the agent loop calls ``generate_completions_stream``
-    # directly to get the full dict-shape (delta + tool_calls +
-    # finish_reason + reasoning_content).
-
-    def generate_stream(
-        self,
-        model: str,
-        messages: list[dict],
-        tools: list | None = None,
-        temperature: float | None = None,
-        max_tokens: int | None = None,
-        **kwargs,
-    ) -> Generator[str, None, None]:
-        """Stream generated text from NVIDIA NIM.
-
-        Thin wrapper over the inherited ``generate_completions_stream``
-        (from ``OpenAICompatibleBackend``). Yields just the text content
-        deltas — the agent loop calls ``generate_completions_stream``
-        directly to get the full dict-shape (delta + tool_calls +
-        finish_reason + reasoning_content).
-
-        The actual HTTP transport + retry/recovery lives in
-        ``_iter_sse_lines`` above.
-        """
-        for chunk in self.generate_completions_stream(
-            model=model,
-            messages=messages,
-            tools=tools,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            **kwargs,
-        ):
-            delta = chunk.get("delta", "")
-            if delta:
-                yield delta
-
-    # ─────────────────────────────────────────────────────────────────────
-    # _jev_call_completions — JEV hook (mirrors Mistral)
-    # ─────────────────────────────────────────────────────────────────────
-
-    def _jev_call_completions(
-        self,
-        model: str,
-        messages: list[dict],
-        temperature: float = 0.1,
-        max_tokens: int = 512,
-        think: bool | None = None,
-        response_format: dict | None = None,
-        **kwargs,
-    ) -> dict:
-        """JEV hook for NVIDIA NIM: route the decision call through
-        NVIDIA's Bearer-authenticated ``/chat/completions`` endpoint.
-
-        The response shape is normalized to match generate():
-        ``{content, tool_calls, usage, latency_ms, raw}``.
-        """
-        body = self._build_openai_body(
-            model=model,
-            messages=messages,
-            tools=None,  # decisions never call tools
-            temperature=temperature,
-            max_tokens=max_tokens,
-            stream=False,
-            response_format=response_format,
-            **kwargs,
-        )
         return self._make_api_request(body, stream=False)

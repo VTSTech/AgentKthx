@@ -37,8 +37,12 @@ Written by VTSTech — https://www.vts-tech.org
 
 from __future__ import annotations
 
+import json
 import os
 import random
+import time
+import urllib.error
+from typing import Generator
 
 from ..core.types import ApiMode, BackendType, ToolSupportLevel
 from .base import BackendConfig
@@ -174,6 +178,26 @@ class CloudBackend(OpenAICompatibleBackend):
       - ``_get_model_defaults(model)`` — catalog lookup + cap.
       - ``get_model_info(model)`` — catalog lookup.
       - ``test_tool_support()`` — returns ``NATIVE`` by default.
+
+    R07.28 (MAINT-28 batch 2) additionally implements the full shared
+    HTTP transport so backends scaffolded from the Mistral pattern no
+    longer re-copy it:
+      - ``_make_api_request(body, *, stream)`` — non-streaming POST with
+        the MAINT-28 retry skeleton (``_handle_http_error_for_retry`` /
+        ``_handle_url_error_for_retry``) + a ``_tweak_request_body``
+        hook fired once per request before the first send.
+      - ``_iter_sse_lines(url, body, headers)`` — streaming POST with
+        the same skeleton, thinking-model timeout bump, and the ROB-06
+        deterministic ``_close_http_response`` teardown.
+      - ``generate_stream(...)`` — the thin text-delta wrapper over
+        ``generate_completions_stream`` (ARCH-01 parity).
+      - ``_jev_call_completions(...)`` — JEV decision call routed
+        through ``_make_api_request`` (no tools, ``response_format``
+        passthrough).
+      - ``_catalog_model_key(model)`` — the catalog-lookup normalization
+        hook that replaces the "does NOT strip the provider prefix"
+        override family (get_model_info / _get_model_defaults /
+        get_model_max_context / _is_free_model).
 
     ARCH-06 (R07.13): the OpenAI wire-shape coupling is now explicit
     rather than implicit. ``CloudBackend`` still inherits from
@@ -378,9 +402,49 @@ class CloudBackend(OpenAICompatibleBackend):
         """Hook for additional auth headers beyond the standard Bearer token.
 
         Default: empty dict. Override to add provider-specific headers
-        (e.g. OpenRouter's ``HTTP-Referer`` and ``X-Title``).
+        (e.g. OpenRouter's ``HTTP-Referer`` and ``X-Title``). Backends
+        that use plain Bearer auth (NVIDIA NIM, Cloudflare Workers AI,
+        ZAI, Mistral, Pollinations) inherit this unchanged — R07.28
+        deleted the docstring-only ``return {}`` copies.
         """
         return {}
+
+    def _catalog_model_key(self, model: str) -> str:
+        """Normalize a caller-supplied model name to its catalog key.
+
+        MAINT-28 batch 2 (R07.28): replaces the 4-method "does NOT strip
+        the provider prefix" override family (``get_model_info`` /
+        ``_get_model_defaults`` / ``get_model_max_context`` /
+        ``_is_free_model``) that nvidia.py + cloudflare.py each carried.
+
+        Default: strip the provider prefix — ``"zai/glm-4-flash"`` →
+        ``"glm-4-flash"`` — because ZAI/OpenRouter-style catalogs key on
+        the bare post-slash segment.
+
+        Override to return the name unchanged when the provider's API
+        requires the FULL prefixed ID in the request body and the seed
+        catalog keys on that full name (NVIDIA ``meta/llama-3.3-70b-``
+        ``instruct``, Cloudflare ``@cf/meta/llama-3.3-70b-instruct-fp8-``
+        ``fast`` — the ``@cf/`` prefix is part of the model ID, not a
+        slashable provider marker).
+        """
+        return model.split("/")[-1] if "/" in model else model
+
+    def _tweak_request_body(self, body: dict) -> None:
+        """Per-backend request-body adjustments before the first send.
+
+        MAINT-28 batch 2 (R07.28): single choke point fired by
+        ``_make_api_request`` (so both the ``generate()`` and JEV paths
+        get it). Default: no-op. Override for provider quirks — e.g.
+        Cloudflare pops ``top_k`` (not supported on its OpenAI-compat
+        path; the endpoint 400s if it sees it).
+
+        Mutates ``body`` in place. Called ONCE per request (before the
+        retry loop), not per attempt — param-fixing retries that need
+        per-attempt mutation belong in ``_handle_fixed_param_400``.
+        """
+        del body
+        return
 
     # ─────────────────────────────────────────────────────────────────────
     # R07.24 (MAINT-23/ROB-29): shared HTTP retry helpers
@@ -394,9 +458,17 @@ class CloudBackend(OpenAICompatibleBackend):
     # retryable classification — so concrete backends can call the helpers
     # instead of inlining the same ~30 LOC four times.
     #
-    # The 4xx-specific handlers (401/404/422 + 400-context-length
-    # recovery) stay in each backend's caller because they differ in
-    # error-message wording and recovery strategy.
+    # R07.24 deliberately left the 4xx-specific handlers (401/404/422 +
+    # 400-context-length recovery) in each backend's caller because they
+    # differed in error-message wording and recovery strategy. MAINT-28
+    # (R07.28) reversed that for the post-R07.24 backends after nvidia.py
+    # + cloudflare.py grew four near-identical copies (~100 LOC × 4) of
+    # exactly that skeleton: the block below now carries the shared
+    # _handle_http_error_for_retry / _handle_url_error_for_retry template
+    # with per-backend hooks (remediation table, quota classifier,
+    # fixed-param 400). The older hand-rolled loops (Mistral,
+    # Pollinations, OpenRouter, OrcaRouter, ...) keep their inline
+    # variants — migrating them is optional follow-up, not required.
 
     # Class-level backoff defaults — concrete backends override these
     # to tune their own retry behavior. ROB-16 (R07.07): the cap matters;
@@ -502,6 +574,549 @@ class CloudBackend(OpenAICompatibleBackend):
         return min(max(backoff, 1.0), self._BACKOFF_CAP)
 
     # ─────────────────────────────────────────────────────────────────────
+    # MAINT-28 (R07.28): shared retry-loop skeleton
+    # ─────────────────────────────────────────────────────────────────────
+    #
+    # R07.26/R07.27 scaffolded nvidia.py + cloudflare.py from the Mistral
+    # pattern AFTER the R07.24 split, and each copy pasted the remaining
+    # skeleton between their own two methods AND between the two files:
+    # OpenAI-spec envelope parsing (~15 LOC), the quota-exhaustion 429
+    # fast-fail (~15 LOC), the 400 recovery handlers (~10 LOC), the
+    # retryable-check + user-facing print block (~12 LOC), and the
+    # 401/404/422 remediation texts (~30 LOC) — roughly 100 LOC × 4
+    # copies, differing only in the "[NVIDIA]" / "[NVIDIA-Stream]" /
+    # "[Cloudflare]" / "[Cloudflare-Stream]" log prefixes. The drift that
+    # duplication invites had ALREADY fired once inside R07.27's own
+    # development: cloudflare's _make_api_request docstring listed
+    # "limit" among the quota indicators while
+    # _looks_like_neuron_quota_exhaustion deliberately excludes it (the
+    # function was fixed, the docstring copy wasn't).
+    #
+    # This block collapses the shared skeleton into CloudBackend template
+    # methods (the MAINT-23 precedent, taken one level up). Subclasses
+    # supply the genuinely provider-specific pieces via hooks:
+    #
+    #   _error_brand                 — brand for "{brand} API error {code}" strings
+    #   _STATUS_REMEDIATIONS         — per-status remediation text table
+    #   _looks_like_quota_exhaustion — quota-429 classifier hook
+    #   _quota_exhaustion_message    — quota-429 user-facing remediation text
+    #   _handle_fixed_param_400      — fixed-param 400 recovery hook (NVIDIA)
+    #   _raise_non_retryable_status  — override for side-effectful statuses
+    #                                  (Cloudflare's 403/5035 paid-plan cache write)
+    #
+    # ROB-43 (R07.28 batch 3): the ``attempt == 0`` gate that used to sit
+    # on the quota branch is GONE — a quota-exhaustion 429 now fast-fails
+    # at ANY attempt. The gate was borrowed from the 400-recovery handlers
+    # (where it prevents an infinite loop on a persistent 400 and is still
+    # in place), but the quota branch RAISES, so it can never loop — the
+    # gate only delayed the clear quota message until the retry budget
+    # burned down. Removal pinned by tests/test_r07_28_batch3_quick_wins.py
+    # (the batch-1 pin test was flipped in the same diff).
+
+    #: Brand used in the generic error strings ("{brand} API error 429:
+    #: ...", "{brand} connection error: ..."). Subclasses override
+    #: ("NVIDIA NIM", "Cloudflare", ...).
+    _error_brand: str = "cloud backend"
+
+    #: Per-status remediation texts for non-retryable HTTP errors
+    #: (MAINT-28). Keys are status codes (401/404/422 ...); values are
+    #: str.format templates where ``{err_msg}`` is substituted with the
+    #: parsed error-envelope message. Previously duplicated ×4 across
+    #: nvidia.py + cloudflare.py. Subclasses with side-effectful statuses
+    #: (Cloudflare's 403/5035) override ``_raise_non_retryable_status``
+    #: instead of adding them here.
+    _STATUS_REMEDIATIONS: dict[int, str] = {}
+
+    @staticmethod
+    def _parse_error_envelope(body_text: str, status_code: int) -> str:
+        """Extract a human-readable message from an OpenAI-spec error body.
+
+        MAINT-28 (R07.28): was copy-pasted into all four retry loops of
+        nvidia.py + cloudflare.py (and inline-again in each streaming
+        copy). Handles the three shapes seen in the wild:
+
+          - ``{"error": {"message": ...}}`` — the OpenAI spec envelope
+          - ``{"error": "<string>"}``        — some gateways
+          - ``{"message": ...}``             — plain envelope
+
+        Falls back to the first 500 characters of the raw body (or
+        ``"HTTP <code>"`` when the body is empty). Malformed JSON is not
+        an error — the fallback text is returned, exactly like the
+        pre-dedup copies.
+        """
+        fallback = body_text[:500] or f"HTTP {status_code}"
+        if not body_text:
+            return fallback
+        try:
+            err_data = json.loads(body_text)
+        except (json.JSONDecodeError, ValueError):
+            return fallback
+        if not isinstance(err_data, dict):
+            return fallback
+        if "error" in err_data:
+            inner = err_data["error"]
+            if isinstance(inner, dict):
+                return inner.get("message", str(inner))
+            return str(inner)
+        if "message" in err_data:
+            return err_data["message"]
+        return fallback
+
+    def _looks_like_quota_exhaustion(self, status_code: int, body_text: str) -> bool:
+        """Backend quota-exhaustion classifier hook (MAINT-28).
+
+        Distinguishes a fatal quota 429 (NVIDIA monthly credits,
+        Cloudflare daily neurons — NOT retryable) from a transient
+        rate-limit 429 (retryable). Default: never matches (a backend
+        without a quota model treats every 429 as retryable).
+        """
+        del status_code, body_text
+        return False
+
+    def _quota_exhaustion_message(self) -> str:
+        """User-facing remediation text for a quota-exhausted 429 (MAINT-28).
+
+        The full message ("...quota exhausted. Resets ...") whose whole
+        point is telling the user when the quota resets. ``Details:
+        {err_msg}`` is appended by ``_check_quota_429``.
+        """
+        return f"{self._error_brand} quota exhausted."
+
+    def _handle_fixed_param_400(self, body_text: str, body: dict, log_prefix: str) -> bool:
+        """Fixed-param 400 recovery hook (MAINT-28). Default: no recovery.
+
+        Some providers pin certain parameters per model (e.g. NVIDIA NIM's
+        kimi-k3 fixes ``top_p=0.95``) and reject the request with a 400
+        naming the fixed value. Override to detect the error, mutate
+        ``body``, and return True so the caller retries. The
+        ``attempt == 0`` gate lives in ``_handle_http_error_for_retry``
+        (a persistent 400 must not loop forever).
+        """
+        del body_text, body, log_prefix
+        return False
+
+    def _check_quota_429(
+        self,
+        status_code: int,
+        body_text: str,
+        attempt: int,
+        err_msg: str,
+        exc: Exception,
+    ) -> None:
+        """Fast-fail a quota-exhaustion 429 (MAINT-28 shared skeleton).
+
+        Raises ``RuntimeError`` with the backend's
+        ``_quota_exhaustion_message()`` when the body matches the
+        backend's ``_looks_like_quota_exhaustion()`` classifier; returns
+        otherwise so the retry loop classifies the 429 normally
+        (transient rate limits retry with backoff).
+
+        ROB-43 (R07.28 batch 3): the former ``attempt == 0`` gate is
+        removed — a quota 429 arriving after ≥1 transient retry now
+        raises the clear quota message IMMEDIATELY instead of burning
+        the remaining retry budget against a non-retryable condition.
+        ``attempt`` stays in the signature (callers pass it; subclass
+        overrides may still consult it), but the base gate no longer
+        uses it.
+        """
+        del attempt  # ROB-43: the attempt == 0 gate is gone (R07.28 batch 3)
+        if status_code == 429 and self._looks_like_quota_exhaustion(status_code, body_text):
+            raise RuntimeError(f"{self._quota_exhaustion_message()} Details: {err_msg}") from exc
+
+    def _raise_non_retryable_status(
+        self,
+        exc: Exception,
+        status_code: int,
+        body_text: str,
+        err_msg: str,
+        body: dict,
+    ) -> None:
+        """Raise the user-facing error for a non-retryable status (MAINT-28).
+
+        Consults ``_STATUS_REMEDIATIONS`` first (the 401/404/422 texts
+        that were duplicated ×4), then falls back to the generic
+        ``"{brand} API error {code}: {err_msg}"``. Subclasses with
+        side-effectful statuses override and call ``super()`` on misses
+        — e.g. Cloudflare's 403 handler writes the paid-only verdict to
+        the tool_cache before raising (code 5035 = paid-plan-only model
+        vs token-permission 403 need different user actions).
+
+        Always raises; the return is unreachable but keeps the signature
+        honest for callers.
+        """
+        del body_text, body
+        template = self._STATUS_REMEDIATIONS.get(status_code)
+        if template is not None:
+            raise RuntimeError(template.format(err_msg=err_msg)) from exc
+        raise RuntimeError(f"{self._error_brand} API error {status_code}: {err_msg}") from exc
+
+    def _handle_http_error_for_retry(
+        self,
+        e: urllib.error.HTTPError,
+        body: dict,
+        attempt: int,
+        max_retries: int,
+        log_prefix: str,
+    ) -> str:
+        """Shared HTTPError classifier for the cloud retry loops (MAINT-28).
+
+        Consolidates the skeleton that was duplicated ×4 across
+        nvidia.py + cloudflare.py (``_make_api_request`` /
+        ``_iter_sse_lines`` each): envelope parsing, quota-exhaustion
+        429 fast-fail, fixed-param + context-length 400 recovery,
+        retryable-status backoff (R07.24 helpers), and the
+        401/404/422 remediation texts. Callers shrink to their
+        genuinely provider-specific logic.
+
+        Flow (identical to the pre-dedup loops; the streaming copies
+        now also parse the envelope BEFORE the quota check, so the
+        quota "Details:" line carries the parsed message instead of a
+        raw body slice):
+
+          1. Read the error body + parse the OpenAI-spec envelope
+          2. Quota-exhaustion 429 → raise immediately (never retryable,
+             at ANY attempt — ROB-43 closed R07.28 batch 3)
+          3. Fixed-param 400 (backend hook) → maybe retry
+          4. Context-length 400 (ARCH-03 shared handler) → maybe retry
+          5. Retryable status (R07.24 helpers) → sleep, return "retry"
+          6. Non-retryable → ``_raise_non_retryable_status``
+
+        Args:
+            e: The caught ``urllib.error.HTTPError``.
+            body: The request body dict (400-recovery handlers mutate it).
+            attempt: Zero-indexed attempt number.
+            max_retries: Total retry budget (from ``_max_retries()``).
+            log_prefix: Backend log tag — "[NVIDIA]", "[Cloudflare-Stream]", ...
+
+        Returns:
+            "retry" — the backoff sleep is already done; the caller just
+            continues its loop. Any non-retryable outcome raises instead.
+        """
+        status_code = e.code
+        body_bytes = e.read() if e.fp else b""
+        body_text = body_bytes.decode("utf-8", errors="replace") if body_bytes else ""
+
+        # OpenAI-spec error envelope → human-readable message.
+        err_msg = self._parse_error_envelope(body_text, status_code)
+
+        # Quota-exhaustion 429 — NOT retryable. Surface the backend's
+        # remediation message immediately instead of burning retries.
+        self._check_quota_429(status_code, body_text, attempt, err_msg, e)
+
+        # Fixed-param 400 (backend hook, e.g. kimi-k3's fixed top_p) —
+        # first attempt only so a persistent 400 can't loop forever.
+        if (
+            status_code == 400
+            and attempt == 0
+            and self._handle_fixed_param_400(body_text, body, log_prefix)
+        ):
+            return "retry"
+
+        # ARCH-03: shared context-length 400 handler. Only on the first
+        # attempt (don't loop forever on a 400).
+        if status_code == 400 and attempt == 0:
+            old_max = body.get("max_tokens", 4096)
+            if self._handle_context_length_400(body_text, body):
+                new_max = body["max_tokens"]
+                if os.environ.get("AGENTKTHX_DEBUG"):
+                    print(
+                        f"  {log_prefix} Context length exceeded — "
+                        f"reducing max_tokens {old_max} → {new_max} and retrying"
+                    )
+                return "retry"
+
+        # Retryable: 429 (rate limit, NOT quota exhaustion) + 5xx
+        # (transient server errors). R07.24 (MAINT-23/ROB-29): delegate
+        # to the shared _is_retryable_http_status / _compute_retry_after
+        # helpers.
+        if self._is_retryable_http_status(status_code) and attempt < max_retries:
+            retry_after = self._compute_retry_after(e.headers, attempt)
+            if os.environ.get("AGENTKTHX_DEBUG") or attempt < 2:
+                print(
+                    f"  {log_prefix} {status_code} — {err_msg}. "
+                    f"Retrying in {retry_after:.0f}s "
+                    f"(attempt {attempt + 1}/{max_retries + 1})..."
+                )
+            time.sleep(retry_after)
+            return "retry"
+
+        # Non-retryable OR exhausted retries → remediation table /
+        # backend override / generic raise.
+        self._raise_non_retryable_status(e, status_code, body_text, err_msg, body)
+
+    def _handle_url_error_for_retry(
+        self,
+        e: urllib.error.URLError,
+        attempt: int,
+        max_retries: int,
+        log_prefix: str,
+    ) -> None:
+        """Shared URLError classifier for the cloud retry loops (MAINT-28).
+
+        Network-level errors (DNS failure, connection refused, socket
+        timeout) retry with the R07.24 ``_compute_network_backoff``
+        helper (no Retry-After header to honor), then surface as
+        ``"{brand} connection error"`` when the budget is exhausted.
+        Was duplicated ×4 across nvidia.py + cloudflare.py.
+        """
+        if attempt < max_retries:
+            backoff = self._compute_network_backoff(attempt)
+            if os.environ.get("AGENTKTHX_DEBUG"):
+                print(
+                    f"  {log_prefix} connection error ({e.reason}), " f"retrying in {backoff:.0f}s"
+                )
+            time.sleep(backoff)
+            return
+        raise RuntimeError(f"{self._error_brand} connection error: {e.reason}") from e
+
+    # ─────────────────────────────────────────────────────────────────────
+    # MAINT-28 batch 2 (R07.28): shared HTTP transport
+    # ─────────────────────────────────────────────────────────────────────
+    #
+    # Batch 1 extracted the ERROR-CLASSIFICATION half of the retry loops
+    # (``_handle_http_error_for_retry`` / ``_handle_url_error_for_retry``)
+    # but deliberately left the request loops themselves per-backend.
+    # The post-lift nvidia.py + cloudflare.py loops turned out to be
+    # line-for-line identical — the only per-backend residue was the
+    # ``[NVIDIA]`` / ``[Cloudflare]`` log prefix (already available as
+    # ``_provider_label``) and the brand in the "retries exhausted"
+    # RuntimeError (already available as ``_error_brand``). This block
+    # moves the loops themselves onto CloudBackend:
+    #
+    #   _make_api_request      — non-streaming POST + retry loop
+    #   _iter_sse_lines        — streaming POST + retry loop (+ ROB-06
+    #                            deterministic close, thinking-model
+    #                            300s timeout bump)
+    #   generate_stream        — thin text-delta wrapper (ARCH-01)
+    #   _jev_call_completions  — JEV decision call via _make_api_request
+    #   _tweak_request_body    — per-backend body quirks (single choke
+    #                            point, fired once per request)
+    #
+    # Backends with genuinely different request paths (Mistral's
+    # ``_parse_mistral_response``, Pollinations' card pipeline, ZAI's
+    # own loop, OrcaRouter's endpoint_types filtering, and the four
+    # OpenAICompatibleBackend-direct siblings) keep their overrides —
+    # migrating them is the MAINT-31 follow-up, not this pass.
+
+    def _make_api_request(self, body: dict, *, stream: bool = False) -> dict:
+        """POST to ``/chat/completions`` with the shared 429/5xx retry loop.
+
+        R07.28 (MAINT-28 batch 2): the shared implementation. The loop
+        fires ``_tweak_request_body`` once (per-backend body quirks),
+        then per attempt:
+
+          1. ``urlopen`` → ``_parse_openai_response`` on HTTP 200
+          2. ``HTTPError`` → ``_handle_http_error_for_retry`` (the
+             MAINT-28 shared classifier: envelope parse → quota-429
+             fast-fail → fixed-param 400 hook → context-length 400 →
+             retryable backoff → remediation raise). The quota
+             classifier + remediation texts live on the backend hooks —
+             they are the single source of truth for what a fatal 429
+             looks like (Cloudflare deliberately does NOT treat "limit" as a
+             quota indicator).
+          3. ``URLError`` → ``_handle_url_error_for_retry`` (network
+             backoff, then ``"{brand} connection error"``).
+
+        Honors ``Retry-After`` when present; falls back to exponential
+        backoff with full jitter (R07.24 helpers). Retry budget from
+        ``_max_retries()`` (default 4, ``AGENTKTHX_MAX_API_RETRIES``
+        override). Log prefix is ``[{self._provider_label}]``.
+
+        Returns:
+            The parsed response dict (``_parse_openai_response`` shape).
+
+        Raises:
+            RuntimeError: on non-retryable statuses (via the remediation
+                table / backend override) or when retries are exhausted
+                (``"{brand} retries exhausted"`` — unreachable in
+                practice because the classifier raises first).
+        """
+        self._tweak_request_body(body)
+
+        url = self._get_chat_completions_url()
+        headers = self._get_auth_headers()
+        if stream:
+            headers["Accept"] = "text/event-stream"
+
+        max_retries = self._max_retries()
+        log_prefix = f"[{self._provider_label}]"
+
+        for attempt in range(max_retries + 1):
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(body).encode("utf-8"),
+                headers=headers,
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=self.config.timeout) as resp:
+                    raw = json.loads(resp.read().decode("utf-8"))
+                    return self._parse_openai_response(raw)
+
+            except urllib.error.HTTPError as e:
+                # Shared MAINT-28 classifier — sleeps + returns "retry"
+                # for a retryable status, raises the remediation
+                # RuntimeError otherwise. Either way the loop advances
+                # only via this handler's decision.
+                self._handle_http_error_for_retry(e, body, attempt, max_retries, log_prefix)
+
+            except urllib.error.URLError as e:
+                # Network-level error — retry with backoff, then surface.
+                self._handle_url_error_for_retry(e, attempt, max_retries, log_prefix)
+
+        # Should not reach here — every iteration returns, retries
+        # (loop continues), or raises.
+        raise RuntimeError(f"{self._error_brand} retries exhausted")
+
+    def _iter_sse_lines(self, url: str, body: dict, headers: dict):
+        """Make a streaming POST and yield raw SSE line bytes.
+
+        R07.28 (MAINT-28 batch 2): the shared streaming implementation.
+        Same shared classifier as ``_make_api_request`` via
+        ``_handle_http_error_for_retry`` / ``_handle_url_error_for_retry``
+        (with the ``[{label}-Stream]`` prefix), plus two transport
+        details every streaming backend shared:
+
+          - Thinking models can take 60-90+ seconds before the first
+            token — the urlopen timeout bumps to 300s when
+            ``_name_matches_thinking`` matches the body's model (vs the
+            configured timeout otherwise). The chat.py spinner covers
+            the user-facing progress gap.
+          - ROB-06 (R07.25 CLOSED): the response is closed
+            deterministically via ``_close_http_response`` in a
+            ``finally`` so Windows doesn't leak the TCP connection when
+            the generator is abandoned mid-iteration (Ctrl+C, consumer
+            exception, or the base class's break on [DONE]).
+
+        Yields:
+            Raw SSE line bytes for ``generate_completions_stream`` to
+            parse (JSON parsing, [DONE] detection, delta/tool_call
+            extraction all live there).
+
+        Raises:
+            RuntimeError: non-retryable statuses or exhausted retries
+                (``"{brand}-Stream retries exhausted"``).
+        """
+        max_retries = self._max_retries()
+        log_prefix = f"[{self._provider_label}-Stream]"
+
+        for attempt in range(max_retries + 1):
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(body).encode("utf-8"),
+                headers=headers,
+                method="POST",
+            )
+            try:
+                # Thinking models can take 60-90+ seconds before the first
+                # token. Use a longer timeout for them (300s vs default 120s)
+                # so the connection doesn't timeout mid-reasoning.
+                model_name = body.get("model", "")
+                stream_timeout = (
+                    300 if self._name_matches_thinking(model_name) else self.config.timeout
+                )
+                response = urllib.request.urlopen(req, timeout=stream_timeout)
+            except urllib.error.HTTPError as e:
+                # Shared MAINT-28 classifier — sleeps + returns "retry"
+                # for a retryable status, raises the remediation
+                # RuntimeError otherwise. The continue only runs on the
+                # "retry" return; a raise skips it. (Batch-2 fix: the
+                # per-backend copies this loop replaces fell through to
+                # ``for line in response`` with ``response`` unbound — an
+                # UnboundLocalError masking the retry — because they
+                # omitted the continue; pinned by
+                # test_streaming_uses_log_prefix_via_provider_label.)
+                self._handle_http_error_for_retry(e, body, attempt, max_retries, log_prefix)
+                continue
+            except urllib.error.URLError as e:
+                # Network-level error — retry with backoff, then surface.
+                self._handle_url_error_for_retry(e, attempt, max_retries, log_prefix)
+                continue
+
+            # Success — yield raw SSE line bytes. The base class's
+            # generate_completions_stream() handles the JSON parsing,
+            # [DONE] detection, and delta/tool_call extraction.
+            try:
+                for line in response:
+                    yield line
+            finally:
+                self._close_http_response(response)
+            return  # success — don't retry
+
+        # Should not reach here — every iteration yields + returns,
+        # retries (loop continues), or raises.
+        raise RuntimeError(f"{self._error_brand}-Stream retries exhausted")
+
+    def generate_stream(
+        self,
+        model: str,
+        messages: list[dict],
+        tools: list | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        **kwargs,
+    ) -> Generator[str, None, None]:
+        """Stream generated text as text deltas (shared thin wrapper).
+
+        R07.28 (MAINT-28 batch 2): ARCH-01 parity wrapper — delegates to
+        the inherited ``generate_completions_stream`` and yields just the
+        text ``delta`` strings. The agent loop calls
+        ``generate_completions_stream`` directly when it needs the full
+        dict shape (delta + tool_calls + finish_reason +
+        reasoning_content). The HTTP transport + retry/recovery lives in
+        ``_iter_sse_lines``.
+        """
+        for chunk in self.generate_completions_stream(
+            model=model,
+            messages=messages,
+            tools=tools,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **kwargs,
+        ):
+            delta = chunk.get("delta", "")
+            if delta:
+                yield delta
+
+    def _jev_call_completions(
+        self,
+        model: str,
+        messages: list[dict],
+        temperature: float = 0.1,
+        max_tokens: int = 512,
+        think: bool | None = None,
+        response_format: dict | None = None,
+        **kwargs,
+    ) -> dict:
+        """JEV decision call routed through the shared request path.
+
+        R07.28 (MAINT-28 batch 2): shared implementation for
+        OpenAI-compat cloud backends — builds the body with
+        ``_build_openai_body`` (no tools — decisions never call tools,
+        ``response_format`` passthrough for constrained decision
+        prompts), applies ``_tweak_request_body`` via
+        ``_make_api_request``, and returns the normalized response
+        (``{content, tool_calls, usage, latency_ms, raw}``).
+
+        The ``think`` parameter is accepted (signature parity with
+        ``generate_decision``'s dispatch) but not forwarded — thinking
+        is controlled via ``reasoning_effort`` in ``**kwargs`` where the
+        provider supports it.
+        """
+        del think
+        body = self._build_openai_body(
+            model=model,
+            messages=messages,
+            tools=None,  # decisions never call tools
+            temperature=temperature,
+            max_tokens=max_tokens,
+            stream=False,
+            response_format=response_format,
+            **kwargs,
+        )
+        return self._make_api_request(body, stream=False)
+
+    # ─────────────────────────────────────────────────────────────────────
     # HTTP response cleanup (ROB-06 R07.25)
     # ─────────────────────────────────────────────────────────────────────
 
@@ -592,11 +1207,12 @@ class CloudBackend(OpenAICompatibleBackend):
     def get_model_info(self, model: str) -> dict | None:
         """Look up model in the static catalog.
 
-        Strips provider prefix (e.g. ``zai/glm-4-flash`` → ``glm-4-flash``)
-        before catalog lookup. Returns ``None`` if not found.
+        Normalizes the model name via ``_catalog_model_key`` (default:
+        strip provider prefix, e.g. ``zai/glm-4-flash`` → ``glm-4-flash``;
+        NVIDIA/Cloudflare return the full prefixed ID unchanged).
+        Returns ``None`` if not found.
         """
-        # Normalize: strip provider prefix if present (e.g., "zai/glm-4-plus")
-        model_key = model.split("/")[-1] if "/" in model else model
+        model_key = self._catalog_model_key(model)
         meta = self.MODELS.get(model_key, {})
 
         if not meta:
@@ -635,7 +1251,7 @@ class CloudBackend(OpenAICompatibleBackend):
         ARCH-03 (R06.57): the cap + persisted-safe-value logic is
         inherited from ``OpenAICompatibleBackend._apply_max_tokens_cap``.
         """
-        model_key = model.split("/")[-1] if "/" in model else model
+        model_key = self._catalog_model_key(model)
         meta = self.MODELS.get(model_key, {})
 
         max_tokens = meta.get("default_max_tokens", 8192)
@@ -694,7 +1310,7 @@ class CloudBackend(OpenAICompatibleBackend):
             Maximum context window size in tokens (default: 128000).
         """
         # Try the static catalog first (CloudBackend.MODELS)
-        model_key = model.split("/")[-1] if "/" in model else model
+        model_key = self._catalog_model_key(model)
         meta = self.MODELS.get(model_key, {})
         if meta:
             ctx = meta.get("context_length")
@@ -807,7 +1423,7 @@ class CloudBackend(OpenAICompatibleBackend):
         uses a separate ``FREE_TIER_LIMITS`` table; OpenAI uses a
         hard-coded whitelist).
         """
-        model_key = model.split("/")[-1] if "/" in model else model
+        model_key = self._catalog_model_key(model)
         meta = self.MODELS.get(model_key)
         if not meta:
             return False

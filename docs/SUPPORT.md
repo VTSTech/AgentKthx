@@ -35,6 +35,7 @@ before every release. Bug reports against them are prioritized.
 | **HuggingFace** | huggingface.co (inference endpoints) | `HF_TOKEN` | Yes (`HF_FREE_ONLY=1`) |
 | **Gemini** | Google AI Studio (Gemini + Gemma) | `GEMINI_API_KEY` | Yes (`GEMINI_FREE_ONLY=1`) |
 | **Mistral** | mistral.ai (La Plateforme) | `MISTRAL_API_KEY` | Yes (`MISTRAL_FREE_ONLY=1`) |
+| **NVIDIA NIM** | build.nvidia.com (NVIDIA-hosted open models) | `NVIDIA_API_KEY` | Yes (`NVIDIA_FREE_ONLY=1`) — monthly credit allowance, resets monthly |
 | **Cloudflare** | Cloudflare Workers AI (20+ open models) | `CLOUDFLARE_API_KEY` + `CLOUDFLARE_ACCOUNT_ID` | Yes (`CLOUDFLARE_FREE_ONLY=1`) — 10,000 neurons/day, UTC reset |
 
 Plus the local backends:
@@ -64,7 +65,7 @@ but have not been recently verified.
   will get fast turnaround; users who report bugs without a
   reproducer may wait until the maintainer has key access again.
 - **Smoke test coverage**: the smoke test (`scripts/smoke_test.sh`)
-  exercises all 9 cloud backends, but Limited Support backends are
+  exercises all 10 cloud backends, but Limited Support backends are
   expected to skip with "no API key" on the maintainer's machine. A
   user with a working key can run `./scripts/smoke_test.sh
   --backend pollinations` to verify their own setup.
@@ -110,6 +111,16 @@ of their respective maintainers.
 
 ## Changelog
 
+- **R07.28** (2026-10-09): Restored the missing NVIDIA NIM row in the
+  Fully Supported table (MAINT-30 — the R07.26 release's own doc update
+  was supposed to add the row, but it was lost between the R07.26 and
+  R07.27 edits to this file; only the R07.27 Cloudflare edit survived).
+  NVIDIA matches the Fully Supported criteria: the maintainer rebuilt
+  the seed catalog from the live `/v1/models` endpoint with 45/45
+  drift-free verification and ships a dedicated deep-probe script
+  (`scripts/probe_nvidia.sh`). The cloud-backend tier tables now
+  classify all 10 backends (7 Fully Supported + 3 Limited Support).
+  No tier changes — doc restoration only.
 - **R07.27** (2026-10-08): Cloudflare Workers AI added as a new cloud
   backend and **promoted straight to Fully Supported** after the
   maintainer's end-to-end smoke test passed 5/5 (`./scripts/smoke_test.sh
