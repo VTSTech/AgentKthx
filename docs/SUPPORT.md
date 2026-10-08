@@ -1,7 +1,7 @@
 # Backend Support Tiers
 
-AgentKthx ships 10 cloud backends plus TurboQuant (local llama.cpp) and
-Ollama (local). As of R07.27, the cloud backends are split into two
+AgentKthx ships 11 cloud backends plus TurboQuant (local llama.cpp) and
+Ollama (local). As of R07.29, the cloud backends are split into two
 support tiers based on **owner testing coverage** — not on code
 quality, completeness, or feature surface.
 
@@ -16,7 +16,7 @@ in the foreseeable future. Rather than ship those backends with the
 implicit "fully tested" promise the other backends carry, this file
 makes the distinction explicit so users know what to expect.
 
-**This is not a code-quality judgment.** All 10 cloud backends share
+**This is not a code-quality judgment.** All 11 cloud backends share
 the same `CloudBackend` base class (R07.05 MAINT-02), the same
 retry-loop helpers (R07.24 MAINT-23), the same SSE streaming pattern,
 the same tool-support detection, and the same JSON-endpoint layout.
@@ -57,6 +57,7 @@ but have not been recently verified.
 | **Pollinations** | pollinations.ai (keyless + keyed) | `POLLINATIONS_API_KEY` | Limited | API key beyond limits; maintainer can't test the keyed path. The keyless path works (it's the only keyless backend) but the keyed entitlement-aware fallback filter (ROB-31, still OPEN) is untested. |
 | **OrcaRouter** | orcarouter.com (zero-markup gateway) | `ORCAROUTER_API_KEY` | Limited | API key beyond limits; maintainer can't test the streaming or non-streaming paths. The backend shares the same code path as OpenRouter (its sibling) so it's *likely* functional. |
 | **OpenAI** | openai.com (GPT models) | `OPENAI_API_KEY` | Limited | Maintainer has no active OpenAI account. OpenAI has no free tier (the `--free` listing returns 0 models — known + documented in the smoke test). Bug reports against the OpenAI backend are accepted but the maintainer can't reproduce them without an active key. |
+| **SiliconFlow** | api.siliconflow.com (China-hosted OpenAI-compat aggregator, 200+ models) | `SILICONFLOW_API_KEY` | Limited (new scaffold) | R07.29 scaffold — the FIRST backend scaffolded on the post-R07.28 hardened CloudBackend patterns (shared transport, ROB-42 cache contract, MAINT-28 hooks). 100 mocked unit tests green, but no maintainer end-to-end smoke test has run yet. Promotes to Fully Supported on the first 5/5 `./scripts/smoke_test.sh --backend siliconflow` pass (Cloudflare's R07.27 promotion path). Free tier: Qwen3-8B + DeepSeek-R1-Distill-Qwen-7B, no quota, no credit card. |
 
 ### What "Limited Support" means in practice
 
@@ -65,7 +66,7 @@ but have not been recently verified.
   will get fast turnaround; users who report bugs without a
   reproducer may wait until the maintainer has key access again.
 - **Smoke test coverage**: the smoke test (`scripts/smoke_test.sh`)
-  exercises all 10 cloud backends, but Limited Support backends are
+  exercises all 11 cloud backends, but Limited Support backends are
   expected to skip with "no API key" on the maintainer's machine. A
   user with a working key can run `./scripts/smoke_test.sh
   --backend pollinations` to verify their own setup.
@@ -111,6 +112,20 @@ of their respective maintainers.
 
 ## Changelog
 
+- **R07.29** (2026-10-09): SiliconFlow added as the 11th cloud backend
+  (agentkthx/plugins/siliconflow/, ~700 LOC + 100 unit tests) — the
+  first scaffold to copy the post-R07.28 hardened CloudBackend patterns
+  (shared `_make_api_request`/`_iter_sse_lines` transport inherited
+  untouched, ROB-42-hardened list_models, MAINT-28 hook surface:
+  `_STATUS_REMEDIATIONS` + balance-vs-TPM quota classifier).
+  SiliconFlow-specific surface: full-prefixed `<author>/<model>` IDs
+  (NVIDIA-style `_catalog_model_key`), the ONLY genuinely-filtering
+  FREE_ONLY among the four documented providers (per-model pricing →
+  `_apply_free_only` + generate-time paid→free swap), a 57-model chat
+  seed (OCR/VL/Omni/MT/embed filtered), reasoning+vision → REACT
+  name-pattern pre-classification, and the documented CN TLD base-URL
+  alternative. Tier tables now classify 11 backends (7 Fully + 4
+  Limited — SiliconFlow Limited until the first live smoke test).
 - **R07.28** (2026-10-09): Restored the missing NVIDIA NIM row in the
   Fully Supported table (MAINT-30 — the R07.26 release's own doc update
   was supposed to add the row, but it was lost between the R07.26 and

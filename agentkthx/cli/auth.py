@@ -110,6 +110,7 @@ AUTH_BACKENDS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("Pollinations", "POLLINATIONS_API_KEY", "POLLINATIONS_FREE_ONLY", ()),
     ("NVIDIA", "NVIDIA_API_KEY", "NVIDIA_FREE_ONLY", ()),
     ("Cloudflare", "CLOUDFLARE_API_KEY", "CLOUDFLARE_FREE_ONLY", ()),
+    ("SiliconFlow", "SILICONFLOW_API_KEY", "SILICONFLOW_FREE_ONLY", ()),
 )
 
 # Canonical API-key env var -> BackendType.slug, used to patch the LIVE
@@ -127,6 +128,7 @@ _KEY_VAR_TO_SLUG: dict[str, str] = {
     "POLLINATIONS_API_KEY": "pollinations",
     "NVIDIA_API_KEY": "nvidia",
     "CLOUDFLARE_API_KEY": "cloudflare",
+    "SILICONFLOW_API_KEY": "siliconflow",
 }
 
 # Cloudflare is unique among AgentKthx cloud backends: it requires BOTH an

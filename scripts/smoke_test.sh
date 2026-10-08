@@ -46,7 +46,7 @@ set -u
 # ─── config ──────────────────────────────────────────────────────────────
 # Backends to test, in order. Skip any by passing --skip "openai mistral"
 # (the SKIP env var is no longer supported — use --skip).
-DEFAULT_BACKENDS="zai openrouter orcarouter gemini huggingface openai mistral pollinations nvidia cloudflare"
+DEFAULT_BACKENDS="zai openrouter orcarouter gemini huggingface openai mistral pollinations nvidia cloudflare siliconflow"
 # SKIP + BACKENDS are populated by the arg parser below (deferred so --skip
 # can override before the filter loop runs).
 SKIP=""
@@ -105,6 +105,7 @@ has_key() {
     pollinations) envvar="POLLINATIONS_API_KEY" ;;
     nvidia)       envvar="NVIDIA_API_KEY" ;;
     cloudflare)   envvar="CLOUDFLARE_API_KEY" ;;
+    siliconflow)  envvar="SILICONFLOW_API_KEY" ;;
   esac
   # Empty envvar (unknown backend) → no key. Guard against the
   # `${!envvar:-}` indirect-expansion error on empty var names.
@@ -135,6 +136,7 @@ free_only_var() {
     pollinations) echo "POLLINATIONS_FREE_ONLY" ;;
     nvidia)       echo "NVIDIA_FREE_ONLY" ;;
     cloudflare)   echo "CLOUDFLARE_FREE_ONLY" ;;
+    siliconflow)  echo "SILICONFLOW_FREE_ONLY" ;;
     *)           echo "" ;;
   esac
 }
@@ -163,6 +165,13 @@ default_model_for_backend() {
     # Oct 2026 — supports tools, streaming, JSON mode, 128K context, FP8
     # quantization for ~3x throughput vs the fp16 variant.
     cloudflare)   echo "@cf/meta/llama-3.3-70b-instruct-fp8-fast" ;;
+    # SiliconFlow: hardcode the free tier's tool-capable chat model —
+    # Qwen/Qwen3-8B is permanently free (no quota, no credit card),
+    # supports tools + streaming, and is the SILICONFLOW_DEFAULT_MODEL.
+    # (The other free model, deepseek-ai/DeepSeek-R1-Distill-Qwen-7B,
+    # has NO tools support — the ReAct path would diverge from the
+    # other backends' native-tools smoke steps.)
+    siliconflow)  echo "Qwen/Qwen3-8B" ;;
     *)           echo "" ;;
   esac
 }

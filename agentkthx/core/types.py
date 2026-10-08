@@ -184,6 +184,21 @@ class BackendType(Enum):
     # docs/api/CLOUDFLARE_API_TECHNICAL_REFERENCE.md.
     CLOUDFLARE = "cloudflare"
 
+    # SiliconFlow — China-hosted OpenAI-compatible aggregator at
+    # https://api.siliconflow.com/v1 (api.siliconflow.cn/v1 for
+    # China-domestic traffic). Catalog: 200+ models (DeepSeek, Qwen,
+    # GLM, Llama, Kimi, MiniMax, ERNIE, Hunyuan, Gemma, gpt-oss) keyed
+    # on full <author>/<model> IDs. Free tier: 3 permanently-free
+    # models (Qwen3-8B, DeepSeek-R1-Distill-Qwen-7B, DeepSeek-OCR), NO
+    # daily/monthly quota, no credit card. 429 splits by body wording:
+    # "TPM limit reached" transient, "balance"/"quota" permanent.
+    # Reasoning (R1 family, Kimi-K2-Thinking) + vision models reject
+    # `tools` with 400 — ReAct fallback applies. Supports top_k,
+    # repetition_penalty, enable_thinking, reasoning_content.
+    # See agentkthx/plugins/siliconflow/ and
+    # docs/api/SILICONFLOW_API_TECHNICAL_REFERENCE.md.
+    SILICONFLOW = "siliconflow"
+
 
 class ApiMode(Enum):
     """API mode for backend communication.

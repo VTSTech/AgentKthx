@@ -283,7 +283,10 @@ FULLY_SUPPORTED = (
     "NVIDIA NIM",
     "Cloudflare",
 )
-LIMITED = ("Pollinations", "OrcaRouter", "OpenAI")
+# R07.29: SiliconFlow added as Limited (scaffold — pending the first
+# live smoke test). Count-pins updated in the same diff, the conscious
+# MAINT-30 path (a tier change is a diff, not an accident).
+LIMITED = ("Pollinations", "OrcaRouter", "OpenAI", "SiliconFlow")
 
 
 class TestMaint30SupportMdCompleteness:
@@ -304,6 +307,9 @@ class TestMaint30SupportMdCompleteness:
         assert "build.nvidia.com" in fully
 
     def test_all_ten_cloud_backends_classified(self):
+        """R07.29: 11 cloud backends classified (7 Fully + 4 Limited —
+        SiliconFlow joined Limited as a new scaffold). Historical name
+        retained."""
         text = self._support_md()
         fully = self._section(text, "## Fully Supported", "## Limited Support")
         limited = self._section(text, "## Limited Support", "### ")
@@ -312,10 +318,21 @@ class TestMaint30SupportMdCompleteness:
         for name in LIMITED:
             assert name in limited, f"missing from Limited Support: {name}"
 
+    def test_siliconflow_row_is_limited_with_promotion_path(self):
+        """R07.29: the SiliconFlow scaffold row carries the honest
+        status (Limited until the first live smoke test) + the
+        documented promotion path (Cloudflare's R07.27 precedent)."""
+        text = self._support_md()
+        limited = self._section(text, "## Limited Support", "### ")
+        assert "**SiliconFlow**" in limited
+        assert "SILICONFLOW_API_KEY" in limited
+        assert "smoke_test.sh --backend siliconflow" in limited
+
     def test_no_stale_backend_count(self):
         text = self._support_md()
         assert "all 9 cloud backends" not in text
-        assert "all 10 cloud backends" in text
+        assert "all 10 cloud backends" not in text
+        assert "all 11 cloud backends" in text
 
     def test_r0728_changelog_note_present(self):
         text = self._support_md()

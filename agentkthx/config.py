@@ -394,6 +394,41 @@ CLOUDFLARE_FREE_ONLY = os.environ.get("CLOUDFLARE_FREE_ONLY", "").lower() in (
 )
 
 
+# SiliconFlow plugin (agentkthx/plugins/siliconflow/)
+# China-hosted OpenAI-compatible aggregator at api.siliconflow.com/v1
+# (api.siliconflow.cn/v1 for China-domestic traffic — same API, lower
+# latency from inside China). Catalog: 200+ models (DeepSeek, Qwen, GLM,
+# Llama, Kimi, MiniMax, ERNIE, Hunyuan, Gemma, gpt-oss). Free tier: 3
+# permanently-free models (Qwen3-8B, DeepSeek-R1-Distill-Qwen-7B,
+# DeepSeek-OCR), no daily/monthly quota, no credit card. See
+# docs/api/SILICONFLOW_API_TECHNICAL_REFERENCE.md.
+SILICONFLOW_BASE_URL = os.environ.get("SILICONFLOW_BASE_URL", "https://api.siliconflow.com/v1")
+# SiliconFlow API key. Issued at https://cloud.siliconflow.com/account/ak
+# (single sk- prefixed key per account; sub-account keys for team
+# isolation). A key without the sk- prefix draws a debug-mode warning in
+# the backend (same-loose-validation pattern as NVIDIA's nvapi-).
+SILICONFLOW_API_KEY = os.environ.get("SILICONFLOW_API_KEY", "")
+# Default model — Qwen/Qwen3-8B, the free tier's only tool-capable chat
+# model (32K context, permanently free, no quota). The verified free
+# reasoning model (DeepSeek-R1-Distill-Qwen-7B) has NO tools support.
+# Override via SILICONFLOW_DEFAULT_MODEL env var.
+SILICONFLOW_DEFAULT_MODEL = os.environ.get("SILICONFLOW_DEFAULT_MODEL", "Qwen/Qwen3-8B")
+# Strict free-tier enforcement: when true, list_models() filters to the
+# permanently-free models and generate() swaps paid models to the free
+# fallback. SiliconFlow is the only one of the four documented providers
+# whose FREE_ONLY genuinely filters (per-model pricing, not an
+# account-wide quota). Default false.
+SILICONFLOW_FREE_ONLY = os.environ.get("SILICONFLOW_FREE_ONLY", "").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+# Used when SILICONFLOW_FREE_ONLY=true and a paid model is requested —
+# the backend swaps to this model and retries (Mistral
+# MISTRAL_FREE_FALLBACK_MODEL pattern). Defaults to the free default.
+SILICONFLOW_FREE_FALLBACK_MODEL = os.environ.get("SILICONFLOW_FREE_FALLBACK_MODEL", "Qwen/Qwen3-8B")
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # BACKEND SELECTION
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -429,6 +464,8 @@ elif AGENTKTHX_BACKEND == "nvidia":
     DEFAULT_MODEL = os.environ.get("AGENTKTHX_MODEL", "nvidia/llama-3.1-nemotron-70b-instruct")
 elif AGENTKTHX_BACKEND == "cloudflare" or AGENTKTHX_BACKEND == "cf":
     DEFAULT_MODEL = os.environ.get("AGENTKTHX_MODEL", "@cf/meta/llama-3.3-70b-instruct-fp8-fast")
+elif AGENTKTHX_BACKEND == "siliconflow" or AGENTKTHX_BACKEND == "sf":
+    DEFAULT_MODEL = os.environ.get("AGENTKTHX_MODEL", "Qwen/Qwen3-8B")
 else:
     DEFAULT_MODEL = os.environ.get("AGENTKTHX_MODEL", "qwen2.5:0.5b")
 
