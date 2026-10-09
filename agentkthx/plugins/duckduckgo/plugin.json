@@ -1,0 +1,44 @@
+{
+  "$schema": "https://raw.githubusercontent.com/VTSTech/AgentKthx/main/schemas/v0.2/plugin.schema.json",
+  "name": "duckduckgo",
+  "version": "0.2.0",
+  "description": "DuckDuckGo AI Chat (duck.ai) backend — keyless, anonymous, zero-cost frontier models (GPT-6 Luna, GPT-5.6 Luna, GPT-5.4 Nano/Mini, Claude Haiku 4.5, Mistral Small 4, Tinfoil-hosted gpt-oss-120b / Gemma 4 31B) via the NON-OpenAI /duckchat/v1 protocol — now CHALLENGE-BASED: the retired x-vqd-4 token was replaced by the x-vqd-hash-1 JS proof (solved by the bundled Node helper), per-turn challenge rotation, role-based SSE, durableStream RSA keypair, no /models endpoint, no sampling params, tools stripped — ReAct only. The only cloud backend that subclasses BaseBackend directly instead of CloudBackend",
+  "author": {
+    "name": "VTSTech",
+    "url": "https://www.vts-tech.org"
+  },
+  "license": "MIT",
+  "extensions": {
+    "org.vts-tech.agentkthx": {
+      "display_name": "DuckDuckGo AI Chat Backend",
+      "type": "backend",
+      "entrypoint": "__init__",
+      "depends": [],
+      "optional_depends": [],
+      "config": {
+        "env_prefix": "DUCKDUCKGO",
+        "defaults": {
+          "DUCKDUCKGO_BASE_URL": "https://duck.ai",
+          "DUCKDUCKGO_USER_AGENT": "",
+          "DUCKDUCKGO_DEFAULT_MODEL": "gpt-6-luna"
+        }
+      },
+      "provides": {
+        "backends": {
+          "duckduckgo": "duckduckgo.DuckDuckGoBackend",
+          "ddg": "duckduckgo.DuckDuckGoBackend"
+        },
+        "cli_commands": [],
+        "cli_flags": {
+          "--backend": [
+            "duckduckgo",
+            "ddg"
+          ]
+        }
+      },
+      "compatibility": {
+        "agentkthx": ">=0.7.29"
+      }
+    }
+  }
+}

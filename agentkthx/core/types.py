@@ -199,6 +199,20 @@ class BackendType(Enum):
     # docs/api/SILICONFLOW_API_TECHNICAL_REFERENCE.md.
     SILICONFLOW = "siliconflow"
 
+    # DuckDuckGo AI Chat — the keyless, anonymous, zero-cost LLM
+    # surface at duckduckgo.com/duckchat/v1 (fronting duck.ai). NOT
+    # OpenAI-compatible: custom x-vqd-4 header-token handshake
+    # (bootstrap via GET /status, rotate on every /chat response),
+    # own SSE shape, no /models endpoint, no sampling params, tools
+    # stripped (ReAct only), ~20-turn conversation limit. Catalog:
+    # GPT-4o mini, o3-mini, Claude Haiku, Llama 3.3 70B, Mistral
+    # Small 3 24B — the upstream frontier set, IP-stripped by DDG's
+    # privacy layer. The ONLY cloud backend that subclasses
+    # BaseBackend directly instead of CloudBackend.
+    # See agentkthx/plugins/duckduckgo/ and
+    # docs/api/DUCKDUCKGO_API_TECHNICAL_REFERENCE.md.
+    DUCKDUCKGO = "duckduckgo"
+
 
 class ApiMode(Enum):
     """API mode for backend communication.

@@ -436,6 +436,34 @@ SILICONFLOW_FREE_FALLBACK_MODEL = os.environ.get("SILICONFLOW_FREE_FALLBACK_MODE
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# DuckDuckGo plugin (agentkthx/plugins/duckduckgo/)
+# DuckDuckGo AI Chat (duck.ai) — the keyless, anonymous, zero-cost LLM
+# surface via the NON-OpenAI /duckchat/v1 protocol. NO API KEY EXISTS —
+# "authentication" is the x-vqd-hash-1 CHALLENGE PROOF (the retired
+# x-vqd-4 opaque token is gone): GET /status issues an obfuscated JS
+# challenge, the bundled Node solver executes it against a clean-browser
+# environment, and the solved result rides the X-Vqd-Hash-1 request
+# header. Each /chat response carries the NEXT challenge (per-turn
+# rotation). Held in-memory per backend instance, never persisted. See
+# docs/api/DUCKDUCKGO_API_TECHNICAL_REFERENCE.md.
+# ═══════════════════════════════════════════════════════════════════════════════
+DUCKDUCKGO_BASE_URL = os.environ.get("DUCKDUCKGO_BASE_URL", "https://duck.ai")
+# Browser User-Agent — DDG's anti-bot layer returns 403 for
+# non-browser UAs. Empty string falls back to the backend's built-in
+# Chrome 136 UA (the default). The challenge solver is fed the SAME
+# UA (a mismatch invalidates the proof). Only set this if DDG starts
+# rejecting the built-in one (UA rotation is an anti-fingerprinting
+# last resort, not a routine knob).
+DUCKDUCKGO_USER_AGENT = os.environ.get("DUCKDUCKGO_USER_AGENT", "")
+# Default model — gpt-6-luna is DuckDuckGo's own default pick. The
+# catalog: gpt-6-luna, gpt-5.6-luna, gpt-5.4-nano, gpt-5.4-mini,
+# claude-haiku-4-5, mistral-small-2603, tinfoil/gpt-oss-120b,
+# tinfoil/gemma4-31b (legacy aliases gpt-4o-mini, claude-3-haiku,
+# llama, mixtral, o3-mini resolve forward to their successors).
+DUCKDUCKGO_DEFAULT_MODEL = os.environ.get("DUCKDUCKGO_DEFAULT_MODEL", "gpt-6-luna")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # BACKEND SELECTION
 # ═══════════════════════════════════════════════════════════════════════════════
 # Set AGENTKTHX_BACKEND to select a backend.
