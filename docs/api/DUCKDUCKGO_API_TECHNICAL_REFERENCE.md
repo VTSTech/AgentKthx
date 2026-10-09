@@ -236,13 +236,12 @@ Field notes (all mirror the live frontend):
 
 ### Message Shaping (Pre-Wire Translation)
 
-The backend translates the house message list into DDG's wire shape before building the body (`_collapse_system_into_user`):
+The backend translates the house message list into DDG's wire shape before building the body (`_strip_system_messages`):
 
-- **No `system` role** — DDG strips system messages. System content is folded into the FIRST user turn (multiple system messages concatenate with blank lines, in order)
-- **`tool` / `function` roles are folded into `user`** — DDG only understands `user`/`assistant`; the ReAct loop's tool outputs ride as user turns (a folded tool turn can also host pending system content)
+- **No `system` role — and the system prompt is NEVER transmitted** — DDG strips system messages server-side, and live testing (2026-10-09, claude-haiku-4-5 via duck.ai) showed the upstream models read a forwarded harness/system prompt as a jailbreak attempt: they refuse, lecture about social engineering, and derail the session. The backend therefore DROPS all `system` messages instead of folding them into user turns — the AgentKthx system prompt (ReAct scaffolding included) never reaches DDG (decision: VTSTech, R07.30)
+- **`tool` / `function` roles are folded into `user`** — DDG only understands `user`/`assistant`; the ReAct loop's tool outputs ride as user turns
 - **Leading `assistant` turn gets a primer** — if the conversation starts with an assistant message, `{"role": "user", "content": "Hello"}` is inserted ahead of it (DDG requires a leading user message)
-- **Trailing system content with no user host is dropped**
-- **Empty translation raises `ValueError`** ("no messages after system collapse")
+- **Empty translation raises `ValueError`** ("no sendable messages") — a system-only conversation has nothing to send
 - Message content that arrives as an OpenAI-style part-list is flattened to its text parts (see Multimodal)
 
 ### Chat Response (Role-Based SSE Stream — Current Grammar)
@@ -287,7 +286,7 @@ The response's `x-vqd-hash-1` header carries the next turn's challenge — store
 
 ### Differences from OpenAI Chat Completions
 
-- **No `system` role** — stripped by DDG; the backend folds system content into the first user turn automatically (`_collapse_system_into_user`), and folds `tool`/`function` roles into `user`. No caller code change needed.
+- **No `system` role — dropped, not folded** — DDG strips system messages, and duck.ai models treat a forwarded harness prompt as a jailbreak attempt (live-verified 2026-10-09), so `_strip_system_messages` DROPS all `system` content: the AgentKthx system prompt never reaches DDG. `tool`/`function` roles are folded into `user`. No caller code change needed.
 - **No sampling params** — `temperature` / `max_tokens` / `top_p` / `stop` / `seed` are accepted at the interface for parity and **silently dropped** (a debug-mode notice fires for `temperature`). Upstream defaults apply. The seed's `default_temperature: 0.7` is informational only.
 - **No native function calling from AgentKthx** — `canUseTools` ships `false`; ReAct prompting is the tool path (see Function Calling). `tool_calls` in the house response shape is always `[]`.
 - **No `stream` field** — responses are ALWAYS SSE. There is no non-streaming mode; `generate()` buffers the stream internally.
@@ -604,9 +603,9 @@ Not applicable — DuckDuckGo AI Chat is entirely free. Every seed entry carries
 | `RuntimeError: DuckDuckGo backend needs Node.js …` | `node` not on PATH | Install Node >= 18 and make sure it is on PATH |
 | Solver subprocess fails (rc != 0) | Challenge format rotated, or the Node environment is broken | Run with `AGENTKTHX_DEBUG=1`; verify `node --version` >= 18; check the solver stderr surfaced in the error |
 | Tool calls silently ignored | `canUseTools` ships `false` by design | Use ReAct (automatic — `test_tool_support()` returns REACT for every DDG model) |
-| System prompt not applied | Trailing system content with no user turn is dropped; otherwise folding is automatic | Ensure a user turn follows system content in the message list |
+| System prompt not applied | BY DESIGN — the DDG backend drops all `system` messages (duck.ai reads forwarded prompts as jailbreak attempts) | None — DDG sessions run prompt-less; use another backend if you need a system prompt |
 | Image input rejected / vanished | DDG is text-only; part-lists flatten to text | Use a different backend for vision tasks |
-| `ValueError: no messages after system collapse` | Message list reduced to empty under wire translation | Send at least one user (or foldable) message |
+| `ValueError: no sendable messages` | Message list reduced to empty under wire translation (system-only conversation, or empty input) | Send at least one user (or foldable tool) message |
 
 ---
 

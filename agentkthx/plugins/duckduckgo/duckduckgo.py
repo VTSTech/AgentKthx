@@ -57,8 +57,14 @@ DuckDuckGo's own /duckchat/v1/* wire format, and as of the
   has flipped event shapes before without notice.
 
 Protocol constraints honored here:
-  - No ``system`` role — DDG strips it. ``_collapse_system_into_user``
-    prepends system content to the first user message.
+  - No ``system`` role — DDG strips it, and live testing (2026-10-09,
+    claude-haiku-4-5 via duck.ai) showed the upstream models read a
+    forwarded harness/system prompt as a JAILBREAK ATTEMPT: they refuse,
+    lecture about social engineering, and break the session.
+    ``_strip_system_messages`` therefore DROPS system content instead of
+    smuggling it into user turns — the AgentKthx system prompt (ReAct
+    scaffolding included) never reaches DDG; the backend transmits the
+    user/assistant conversation only.
   - No native function calling from AgentKthx yet — the wire now
     HAS a native tools surface (canUseTools + metadata.toolChoice
     with WebSearch / GenerateImage / NewsSearch / VideosSearch /
@@ -781,7 +787,9 @@ class DuckDuckGoBackend(BaseBackend):
         return json.dumps(body, separators=(",", ":")).encode("utf-8")
 
     # ─────────────────────────────────────────────────────────────────────
-    # Message shaping (the protocol strips system + tool fields)
+    # Message shaping (the protocol strips system + tool fields;
+    # the harness system prompt is NEVER forwarded — see
+    # _strip_system_messages)
     # ─────────────────────────────────────────────────────────────────────
 
     @staticmethod
@@ -799,16 +807,28 @@ class DuckDuckGoBackend(BaseBackend):
             return "\n".join(parts)
         return "" if content is None else str(content)
 
-    def _collapse_system_into_user(self, messages: list[dict]) -> list[dict]:
-        """DDG strips the system role — fold it into the first user turn.
+    def _strip_system_messages(self, messages: list[dict]) -> list[dict]:
+        """DDG never sees the system prompt — system messages are DROPPED.
 
-        Preserves order for user/assistant turns; multiple system
-        messages concatenate with blank lines. Returns [] when there
-        is no user turn to host the system content (DDG requires a
-        leading user message).
+        Two reasons stack here:
+
+        1. The wire has no ``system`` role — DDG strips it server-side.
+        2. Live testing (2026-10-09, claude-haiku-4-5 via duck.ai) showed
+           that folding harness/system content into the first user turn
+           reads as a jailbreak attempt to the upstream models: they
+           refuse, lecture about social engineering, and derail the
+           session. Decision (VTSTech, R07.30): the AgentKthx system
+           prompt — ReAct scaffolding included — is never transmitted
+           to DDG. The backend forwards the user/assistant conversation
+           only; tool/function outputs still fold into user turns
+           (DDG rejects foreign roles, and the ReAct loop's tool
+           results depend on that folding).
+
+        Preserves order for user/assistant turns. Returns [] when
+        nothing sendable remains (system-only conversation) — the
+        generate() paths refuse that with ``ValueError``.
         """
         convo: list[dict] = []
-        pending_system: list[str] = []
 
         def _content(m: dict) -> str:
             return self._coerce_content(m.get("content", ""))
@@ -816,8 +836,7 @@ class DuckDuckGoBackend(BaseBackend):
         for msg in messages:
             role = (msg.get("role") or "user").lower()
             if role == "system":
-                if _content(msg):
-                    pending_system.append(_content(msg))
+                # Dropped, never forwarded (see docstring).
                 continue
             if role not in ("user", "assistant"):
                 # tool / function results — DDG only understands
@@ -825,15 +844,9 @@ class DuckDuckGoBackend(BaseBackend):
                 # ReAct loop's tool outputs ride as user turns).
                 role = "user"
             content = _content(msg)
-            if role == "user" and pending_system:
-                merged = "\n\n".join(pending_system)
-                content = f"{merged}\n\n{content}" if content else merged
-                pending_system = []
             if content or role == "user":
                 convo.append({"role": role, "content": content})
 
-        if pending_system:  # trailing system with no user host — drop
-            pass
         if convo and convo[0].get("role") != "user":
             convo.insert(0, {"role": "user", "content": "Hello"})
         return convo
@@ -915,9 +928,13 @@ class DuckDuckGoBackend(BaseBackend):
         ``"estimated": True``.
         """
         wire_model = _resolve_model(model)
-        convo = self._collapse_system_into_user(messages)
+        convo = self._strip_system_messages(messages)
         if not convo:
-            raise ValueError("DuckDuckGo generate(): no messages after system collapse")
+            raise ValueError(
+                "DuckDuckGo generate(): no sendable messages "
+                "(system-only conversations are dropped — DDG never "
+                "receives the system prompt)"
+            )
         if temperature is not None and os.environ.get("AGENTKTHX_DEBUG"):
             print(
                 "  [duckduckgo] 'temperature' ignored — DDG uses upstream "
@@ -1129,9 +1146,13 @@ class DuckDuckGoBackend(BaseBackend):
         buffered path does.
         """
         wire_model = _resolve_model(model)
-        convo = self._collapse_system_into_user(messages)
+        convo = self._strip_system_messages(messages)
         if not convo:
-            raise ValueError("DuckDuckGo generate_stream(): no messages after system collapse")
+            raise ValueError(
+                "DuckDuckGo generate_stream(): no sendable messages "
+                "(system-only conversations are dropped — DDG never "
+                "receives the system prompt)"
+            )
 
         attempt = 0
         duration_floor = 0

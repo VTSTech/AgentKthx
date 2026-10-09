@@ -36,9 +36,9 @@ CHALLENGE-BASED protocol that replaced the retired x-vqd-4 token
   - Capability verdicts as PROTOCOL FACTS: REACT tools / NO thinking
   - Alias resolution (2025-era wire IDs + short aliases → the
     current catalog)
-  - _collapse_system_into_user (system folds into the first user
-    turn; tool/function roles fold to user — DDG only understands
-    user/assistant)
+  - _strip_system_messages (system messages are DROPPED — the
+    harness prompt is never transmitted; tool/function roles fold
+    to user — DDG only understands user/assistant)
   - Node dependency: fail-fast remediation when node is missing;
     bundled .js helpers ship with the plugin
   - Plugin manifest + register()/unregister() contract
@@ -548,11 +548,13 @@ class TestSSEGrammar:
 
 
 class TestMessageShaping:
-    """_collapse_system_into_user — DDG strips the system role and
-    only understands user/assistant."""
+    """_strip_system_messages — the system prompt is NEVER transmitted
+    (DDG strips the system role, and live testing showed duck.ai reads
+    a forwarded harness prompt as a jailbreak attempt); tool/function
+    roles fold to user because DDG only understands user/assistant."""
 
-    def test_system_prepended_to_first_user(self, backend):
-        convo = backend._collapse_system_into_user(
+    def test_system_dropped_not_forwarded(self, backend):
+        convo = backend._strip_system_messages(
             [
                 {"role": "system", "content": "Be terse."},
                 {"role": "user", "content": "Hi"},
@@ -560,29 +562,32 @@ class TestMessageShaping:
                 {"role": "user", "content": "Bye"},
             ]
         )
-        assert convo[0] == {"role": "user", "content": "Be terse.\n\nHi"}
-        assert convo[1] == {"role": "assistant", "content": "Hello"}
-        assert convo[2] == {"role": "user", "content": "Bye"}
+        assert convo == [
+            {"role": "user", "content": "Hi"},
+            {"role": "assistant", "content": "Hello"},
+            {"role": "user", "content": "Bye"},
+        ]
+        assert "Be terse." not in json.dumps(convo)
 
-    def test_multiple_systems_join(self, backend):
-        convo = backend._collapse_system_into_user(
+    def test_multiple_systems_all_dropped(self, backend):
+        convo = backend._strip_system_messages(
             [
                 {"role": "system", "content": "Rule A."},
                 {"role": "system", "content": "Rule B."},
                 {"role": "user", "content": "Hi"},
             ]
         )
-        assert convo == [{"role": "user", "content": "Rule A.\n\nRule B.\n\nHi"}]
+        assert convo == [{"role": "user", "content": "Hi"}]
 
     def test_system_only_dropped(self, backend):
-        """No user turn to host the system content → empty convo →
+        """System-only conversation → nothing sendable → empty convo →
         generate() refuses (ValueError) rather than sending nothing."""
-        assert backend._collapse_system_into_user([{"role": "system", "content": "X"}]) == []
+        assert backend._strip_system_messages([{"role": "system", "content": "X"}]) == []
 
     def test_tool_role_folded_as_user(self, backend):
         """Tool/function outputs ride as user turns — the ReAct loop
         depends on this (DDG rejects foreign roles)."""
-        convo = backend._collapse_system_into_user(
+        convo = backend._strip_system_messages(
             [
                 {"role": "user", "content": "Search for X"},
                 {"role": "assistant", "content": "Thought: I will act"},
@@ -592,17 +597,17 @@ class TestMessageShaping:
         assert [m["role"] for m in convo] == ["user", "assistant", "user"]
         assert convo[2]["content"] == "result payload"
 
-    def test_tool_role_can_host_pending_system(self, backend):
-        convo = backend._collapse_system_into_user(
+    def test_tool_role_survives_dropped_system(self, backend):
+        convo = backend._strip_system_messages(
             [
                 {"role": "system", "content": "S"},
                 {"role": "tool", "content": "r"},
             ]
         )
-        assert convo == [{"role": "user", "content": "S\n\nr"}]
+        assert convo == [{"role": "user", "content": "r"}]
 
     def test_leading_assistant_gets_user_primer(self, backend):
-        convo = backend._collapse_system_into_user(
+        convo = backend._strip_system_messages(
             [{"role": "assistant", "content": "Hi"}, {"role": "user", "content": "OK"}]
         )
         # a synthetic "Hello" user turn primes the conversation (DDG
@@ -614,7 +619,7 @@ class TestMessageShaping:
         ]
 
     def test_content_part_list_coerced(self, backend):
-        convo = backend._collapse_system_into_user(
+        convo = backend._strip_system_messages(
             [
                 {
                     "role": "user",
@@ -628,9 +633,9 @@ class TestMessageShaping:
         assert convo[0]["content"] == "part1\npart2"
 
     def test_empty_messages_refused(self, backend):
-        with pytest.raises(ValueError, match="no messages after system collapse"):
+        with pytest.raises(ValueError, match="no sendable messages"):
             backend.generate("gpt-6-luna", [])
-        with pytest.raises(ValueError, match="no messages after system collapse"):
+        with pytest.raises(ValueError, match="no sendable messages"):
             backend.generate("gpt-6-luna", [{"role": "system", "content": "X"}])
 
 
@@ -727,7 +732,7 @@ class TestGenerateHappyPath:
         backend.generate("llama", [{"role": "user", "content": "Hi"}])
         assert recorder.chat_body(1)["model"] == "tinfoil/gpt-oss-120b"
 
-    def test_system_and_tools_collapsed_into_body(self, backend, recorder, monkeypatch):
+    def test_system_never_reaches_body(self, backend, recorder, monkeypatch):
         _wire(monkeypatch, recorder)
         backend.generate(
             "gpt-6-luna",
@@ -740,10 +745,11 @@ class TestGenerateHappyPath:
         )
         body = recorder.chat_body(0)
         assert body["messages"] == [
-            {"role": "user", "content": "Be terse.\n\nHi"},
+            {"role": "user", "content": "Hi"},
             {"role": "assistant", "content": "Hello"},
             {"role": "user", "content": "tool output"},
         ]
+        assert "Be terse." not in json.dumps(body)
 
     def test_non_text_events_do_not_pollute_content(self, backend, recorder, monkeypatch):
         """sources / pings / state frames / titles are parsed but only
@@ -970,7 +976,7 @@ class TestGenerateStream:
         list(backend.generate_stream("gpt-6-luna", [{"role": "user", "content": "B"}]))
         assert len(recorder.status_requests) == 1
 
-    def test_stream_system_and_tool_roles_collapsed(self, backend, recorder, monkeypatch):
+    def test_stream_system_dropped(self, backend, recorder, monkeypatch):
         _wire(monkeypatch, recorder)
         list(
             backend.generate_stream(
@@ -984,7 +990,8 @@ class TestGenerateStream:
         )
         body = recorder.chat_body(0)
         assert [m["role"] for m in body["messages"]] == ["user", "user"]
-        assert body["messages"][0]["content"] == "S\n\nHi"
+        assert body["messages"][0]["content"] == "Hi"
+        assert "S" not in json.dumps(body["messages"])
 
     def test_stream_body_and_proof_match_buffered_path(self, backend, recorder, monkeypatch):
         _wire(monkeypatch, recorder)
@@ -1107,7 +1114,7 @@ class TestGenerateStream:
             list(backend.generate_stream("gpt-6-luna", [{"role": "user", "content": "Hi"}]))
 
     def test_stream_empty_messages_refused(self, backend):
-        with pytest.raises(ValueError, match="no messages after system collapse"):
+        with pytest.raises(ValueError, match="no sendable messages"):
             list(backend.generate_stream("gpt-6-luna", []))
 
 
