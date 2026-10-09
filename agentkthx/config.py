@@ -69,6 +69,25 @@ LLAMA_SERVER_BASE_URL = TURBOQUANT_BASE_URL
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# STABLE DIFFUSION CONFIGURATION (sd.cpp server backend)
+# ═══════════════════════════════════════════════════════════════════════════════
+# Local sd.cpp image-generation server (leejet/stable-diffusion.cpp), started
+# EXTERNALLY (notebook serve cell / user shell) — AgentKthx never manages the
+# process, it only talks HTTP to the server's OpenAI-shaped image surface.
+# Ollama-pattern backend; see docs/STABLE_DIFFUSION_BACKEND_PLAN.md.
+SD_BASE_URL = "http://127.0.0.1:1234"
+
+# Override via environment variable (takes precedence if set)
+_sd_env = os.environ.get("SD_BASE_URL")
+if _sd_env:
+    SD_BASE_URL = _sd_env
+
+# Where generated images are written (Stable Diffusion backend artifacts).
+# Created on demand; filename pattern sd_<utc YYYYmmdd-HHMMSS>_<counter>.png.
+AGENTKTHX_ARTIFACTS_DIR = os.environ.get("AGENTKTHX_ARTIFACTS_DIR") or "./generated"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # PLUGIN-OWNED CONFIGURATION
 # ═══════════════════════════════════════════════════════════════════════════════
 # The following config variables are owned by their respective plugins

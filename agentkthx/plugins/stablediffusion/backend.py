@@ -1,0 +1,362 @@
+"""
+⚛️ AgentKthx — Stable Diffusion Backend (sd.cpp)
+
+Image-generation backend for an externally-managed sd.cpp server
+(leejet/stable-diffusion.cpp). Follows the Ollama pattern exactly:
+
+- The server process is NOT managed by AgentKthx. It is started outside
+  (notebook serve cell / user shell: ``sd-server -m <model> --listen-port 1234``)
+  and this backend only interacts with the resulting HTTP endpoints.
+- Extends ``OpenAICompatibleBackend`` so the shared transport / debug
+  conventions are inherited from one place (ARCH-01 parity with Ollama).
+- ``is_cloud = False`` (R06.57 MAINT-05 precedent): local server — no rate
+  limits, no billing, no cloud column layout, buffered output by default.
+
+Wire facts (verified against sd.cpp master + live Colab server, 2026-10-10):
+
+- ``GET  /v1/models``            → ``{"data": [{"id": "sd-cpp-local", ...}]}``
+  ONE fixed pseudo-model id regardless of loaded weights.
+- ``POST /v1/images/generations`` → ``{"prompt", "n", "size", "output_format"}``.
+  NO ``model`` field on the wire — the server serves its loaded pool, so
+  ``--model`` here is advisory only (warned, never sent).
+- Response: ``{"created", "output_format", "data": [{"b64_json"}]}``.
+
+See docs/STABLE_DIFFUSION_BACKEND_PLAN.md for the full design (D1–D5).
+
+Written by VTSTech — https://www.vts-tech.org
+"""
+
+from __future__ import annotations
+
+import base64
+import json
+import os
+import urllib.error
+import urllib.request
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Generator
+
+from agentkthx.backends.base import BackendConfig
+from agentkthx.backends.openai_compat import OpenAICompatibleBackend
+from agentkthx.config import SD_BASE_URL
+from agentkthx.core.types import ApiMode, BackendType, ToolSupportLevel
+
+
+class StableDiffusionBackend(OpenAICompatibleBackend):
+    """
+    Backend for a local sd.cpp image-generation server.
+
+    Every chat turn becomes ONE image: the house messages are flattened
+    into a single prompt, POSTed to ``/v1/images/generations``, and the
+    returned base64 PNG is decoded (size-capped) into the artifacts dir
+    (``AGENTKTHX_ARTIFACTS_DIR``, default ``./generated``). The response
+    carries ``content = "[image saved: <path>]"`` plus an
+    ``images: [{"path": ...}]`` extension field (extra_content precedent,
+    core/memory.py) so callers can retrieve the artifact path.
+    """
+
+    #: R06.57 (MAINT-05) precedent — local server, overrides
+    #: OpenAICompatibleBackend's True.
+    is_cloud: bool = False
+
+    #: Debug/monitoring label (like ZAI / OLLAMA).
+    _provider_label: str = "SD"
+
+    #: CPU generation on sd-server takes MINUTES (plan §D5: sd-turbo 1–4
+    #: steps ≈ 1–2 min on Colab's 2 vCPU; SD1.5 at 20 steps ≈ 4–8 min).
+    #: The 120 s BackendConfig default would abort mid-diffusion — 15 min
+    #: covers the worst CPU case. Override via get_backend(timeout=...).
+    GENERATION_TIMEOUT: int = 900
+
+    #: Security (plan §5): reject data[] entries whose decoded size exceeds
+    #: this cap BEFORE writing to disk.
+    MAX_B64_DECODED_BYTES: int = 32 * 1024 * 1024
+
+    def __init__(
+        self,
+        base_url: str | None = None,
+        host: str | None = None,
+        port: int | None = None,
+        config: BackendConfig | None = None,
+        api_mode: ApiMode | str = ApiMode.OPENAI,
+    ):
+        # Resolve base URL — priority: base_url > host/port > config default
+        if base_url:
+            resolved_url = base_url.rstrip("/")
+        elif host and port:
+            resolved_url = f"http://{host}:{port}"
+        else:
+            resolved_url = SD_BASE_URL.rstrip("/")
+
+        if isinstance(api_mode, str):
+            api_mode = ApiMode(api_mode.lower())
+
+        # CPU image generation needs the long timeout; only apply the
+        # backend default when the caller didn't supply a config.
+        if config is None:
+            config = BackendConfig(timeout=self.GENERATION_TIMEOUT)
+
+        super().__init__(config=config, base_url=resolved_url, api_mode=api_mode)
+
+    @property
+    def backend_type(self) -> BackendType:
+        return BackendType.STABLE_DIFFUSION
+
+    @property
+    def base_url(self) -> str:
+        return self._base_url
+
+    # ------------------------------------------------------------------
+    # Model discovery
+    # ------------------------------------------------------------------
+
+    def list_models(self) -> list[dict]:
+        """List the server's loaded pool via GET /v1/models.
+
+        The sd.cpp server reports ONE fixed pseudo-model id
+        ("sd-cpp-local") regardless of which weights are loaded — it is
+        surfaced verbatim as the catalog entry's ``name``. Transient
+        failures return [] (house convention, like OllamaBackend).
+        """
+        url = f"{self.base_url}/v1/models"
+        try:
+            req = urllib.request.Request(url, method="GET")
+            with urllib.request.urlopen(req, timeout=10) as response:
+                result = json.loads(response.read().decode("utf-8"))
+        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError):
+            return []
+
+        entries = []
+        for item in result.get("data", []) or []:
+            model_id = item.get("id", "sd-cpp-local")
+            entries.append(
+                {
+                    "name": model_id,
+                    "size": 0,
+                    "details": {
+                        "family": "stable-diffusion",
+                        "backend": "stable-diffusion",
+                        "object": item.get("object", "model"),
+                        "owned_by": item.get("owned_by", "local"),
+                    },
+                }
+            )
+        return entries
+
+    # ------------------------------------------------------------------
+    # Generation
+    # ------------------------------------------------------------------
+
+    def generate(
+        self,
+        model: str,
+        messages: list[dict],
+        tools: list | None = None,
+        temperature: float = 0.7,
+        max_tokens: int = 2048,
+        **kwargs,
+    ) -> dict:
+        """Generate ONE image from the conversation.
+
+        Args:
+            model: Advisory only — the wire has NO model field (the server
+                serves its loaded pool). Never transmitted.
+            messages: House messages; all non-empty contents are flattened
+                (in order) into a single image prompt.
+            tools / temperature / max_tokens: Chat-style parameters with no
+                meaning on the image surface — silently dropped (a debug
+                notice lists what was dropped, mirroring the DDG sampling
+                parity note).
+            **kwargs: ``width`` / ``height`` (default 512x512) are carried
+                on the wire via ``size``. ``sd_cpp_extra_args`` passthrough
+                is deferred until its encoding is pinned from sd.cpp's
+                api.md (plan §8, P0 test 8).
+
+        Returns:
+            House response dict with ``content`` ("[image saved: <path>]"),
+            ``images: [{"path": ...}]``, and the ``{"estimated": True}``
+            usage convention (the API reports none — DDG precedent).
+        """
+        # Advisory-model notice (never sent — no model field on the wire).
+        if model and os.environ.get("AGENTKTHX_DEBUG"):
+            print(
+                f"  [{self._provider_label}] --model '{model}' is advisory on this "
+                "backend (no model field on the wire); the server serves its "
+                "loaded pool"
+            )
+
+        # Chat-style kwargs have no meaning here — drop with a debug notice.
+        dropped = [
+            k
+            for k in ("tools", "temperature", "max_tokens", "think", "stop", "top_p")
+            if (k in kwargs or (k == "tools" and tools))
+        ]
+        # tools/temperature/max_tokens arrive as named params; normalize.
+        named_present = [
+            k
+            for k, v in (("tools", tools), ("temperature", temperature), ("max_tokens", max_tokens))
+            if v not in (None, 0.7, 2048)
+        ]
+        dropped = sorted(set(dropped) | set(named_present))
+        if dropped and os.environ.get("AGENTKTHX_DEBUG"):
+            print(
+                f"  [{self._provider_label}] dropped chat-only parameters (no image "
+                f"surface equivalent): {', '.join(dropped)}"
+            )
+
+        prompt = self._flatten_messages(messages)
+        if not prompt.strip():
+            raise ValueError("no prompt content in messages — nothing to generate an image from")
+
+        width = kwargs.pop("width", 512)
+        height = kwargs.pop("height", 512)
+        body = {
+            "prompt": prompt,
+            "n": 1,
+            "size": f"{width}x{height}",
+            "output_format": "png",
+        }
+
+        url = f"{self.base_url}/v1/images/generations"
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(body).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+
+        if os.environ.get("AGENTKTHX_DEBUG"):
+            print(f"  [{self._provider_label}] POST {url} size={body['size']}")
+
+        try:
+            with urllib.request.urlopen(req, timeout=self.config.timeout) as response:
+                result = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            error_body = e.read().decode("utf-8", errors="replace") if e.fp else ""
+            raise RuntimeError(
+                f"[{self._provider_label}] image generation failed "
+                f"(HTTP {e.code}): {error_body[:300]}"
+            ) from e
+        except urllib.error.URLError as e:
+            raise RuntimeError(
+                f"[{self._provider_label}] connection error — is sd-server running? "
+                "(notebook serve cell, or: sd-server -m <model> --listen-port 1234)"
+            ) from e
+        except TimeoutError as e:
+            raise RuntimeError(
+                f"[{self._provider_label}] request timed out after "
+                f"{self.config.timeout}s — CPU generation can take minutes; "
+                "use fewer steps or a longer timeout"
+            ) from e
+
+        data = result.get("data") or []
+        if not data or not data[0].get("b64_json"):
+            raise RuntimeError(
+                f"[{self._provider_label}] response contained no image data "
+                f"(keys: {sorted(result.keys())})"
+            )
+
+        png_bytes = self._decode_image(data[0]["b64_json"])
+        path = self._write_artifact(png_bytes)
+
+        return {
+            "content": f"[image saved: {path}]",
+            "tool_calls": [],
+            "finish_reason": "stop",
+            "usage": {"estimated": True},
+            "reasoning_content": "",
+            "images": [{"path": str(path)}],
+            "raw": result,
+        }
+
+    def generate_stream(
+        self,
+        model: str,
+        messages: list[dict],
+        tools: list | None = None,
+        temperature: float = 0.7,
+        max_tokens: int = 2048,
+        **kwargs,
+    ) -> Generator[str, None, None]:
+        """Buffered streaming: run generate(), yield the final content once.
+
+        No fake token streaming — sd-server has no incremental image
+        surface, and house ``is_cloud=False`` behavior already prefers
+        buffered output for local backends.
+        """
+        result = self.generate(
+            model, messages, tools=tools, temperature=temperature, max_tokens=max_tokens, **kwargs
+        )
+        yield result.get("content", "")
+
+    # ------------------------------------------------------------------
+    # Capability surfaces
+    # ------------------------------------------------------------------
+
+    def test_tool_support(
+        self, model: str, family: str | None = None, force_test: bool = False
+    ) -> ToolSupportLevel:
+        """The image API has no native tool-calling surface.
+
+        R07.19 (follow-up #10): NONE is legacy-only — the produced verdict
+        for "no native tools" is REACT (the ReAct fallback), so that is
+        what this backend reports. Note for operators: with ReAct the tool
+        scaffolding text becomes part of the image prompt.
+        """
+        return ToolSupportLevel.REACT
+
+    # ------------------------------------------------------------------
+    # Internals
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _flatten_messages(messages: list[dict]) -> str:
+        """Flatten house messages into a single image prompt.
+
+        All non-empty message contents are joined in conversation order
+        (system included — there is no system role on an image surface).
+        Part-list contents (IMAGE_SUPPORT_PLAN D1 shape) are tolerated by
+        extracting their text parts, mirroring DDG's _coerce_content.
+        """
+        parts: list[str] = []
+        for msg in messages or []:
+            content = msg.get("content") or ""
+            if isinstance(content, list):
+                content = " ".join(p.get("text", "") for p in content if isinstance(p, dict))
+            if isinstance(content, str) and content.strip():
+                parts.append(content.strip())
+        return "\n".join(parts)
+
+    def _decode_image(self, b64_json: str) -> bytes:
+        """Size-capped base64 decode (plan §5).
+
+        Decoded size is ~len(b64) * 3/4 — checked BEFORE decoding so a
+        pathological response can't allocate hundreds of MB of string
+        before we reject it.
+        """
+        if len(b64_json) * 3 // 4 > self.MAX_B64_DECODED_BYTES:
+            raise RuntimeError(
+                f"[{self._provider_label}] image exceeds the "
+                f"{self.MAX_B64_DECODED_BYTES // (1024 * 1024)} MB decoded-size "
+                "cap; refusing to write"
+            )
+        try:
+            return base64.b64decode(b64_json)
+        except Exception as e:
+            raise RuntimeError(f"[{self._provider_label}] invalid base64 image data: {e}") from e
+
+    def _write_artifact(self, png_bytes: bytes) -> Path:
+        """Write the PNG to the artifacts dir with a generated filename.
+
+        The backend NEVER opens paths from the model (untrusted-input
+        discipline, plan §5) — the filename is fully generated here.
+        """
+        artifacts_dir = Path(os.environ.get("AGENTKTHX_ARTIFACTS_DIR") or "./generated")
+        artifacts_dir.mkdir(parents=True, exist_ok=True)
+        counter = getattr(self, "_artifact_counter", 0) + 1
+        self._artifact_counter = counter
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        path = artifacts_dir / f"sd_{stamp}_{counter:03d}.png"
+        path.write_bytes(png_bytes)
+        return path

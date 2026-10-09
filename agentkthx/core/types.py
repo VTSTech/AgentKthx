@@ -213,6 +213,19 @@ class BackendType(Enum):
     # docs/api/DUCKDUCKGO_API_TECHNICAL_REFERENCE.md.
     DUCKDUCKGO = "duckduckgo"
 
+    # Stable Diffusion — local sd.cpp server (leejet/stable-diffusion.cpp)
+    # at http://127.0.0.1:1234 (SD_BASE_URL). Follows the Ollama pattern:
+    # an EXTERNAL process AgentKthx never manages — the backend only talks
+    # HTTP to the server's OpenAI-shaped image surface (POST
+    # /v1/images/generations, GET /v1/models). The wire has NO model field —
+    # the server serves its loaded pool under the fixed pseudo-model id
+    # "sd-cpp-local", so --model is advisory only. generate() flattens the
+    # house messages into a single image prompt, decodes data[0].b64_json
+    # (size-capped) and writes it to AGENTKTHX_ARTIFACTS_DIR.
+    # See agentkthx/plugins/stablediffusion/ and
+    # docs/STABLE_DIFFUSION_BACKEND_PLAN.md.
+    STABLE_DIFFUSION = "stable-diffusion"
+
 
 class ApiMode(Enum):
     """API mode for backend communication.

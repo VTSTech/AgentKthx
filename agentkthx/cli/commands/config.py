@@ -286,6 +286,12 @@ _ENV_REFERENCE = [
     ("TURBOQUANT_SERVER_PATH", "Path to llama-server binary"),
     ("TURBOQUANT_PORT", "TurboQuant server port (default: 8764)"),
     ("TURBOQUANT_CTX", "TurboQuant context window (default: 8192)"),
+    # ── Stable Diffusion (sd.cpp) ──
+    ("SD_BASE_URL", "sd.cpp image server URL (stable-diffusion backend)"),
+    (
+        "AGENTKTHX_ARTIFACTS_DIR",
+        "Directory for generated images (stable-diffusion backend; default: ./generated)",
+    ),
     # ── Display / platform ──
     ("NO_COLOR", "Disable all ANSI color output (any non-empty value)"),
     ("CLICOLOR", "Set to 0 to disable colors (standard convention)"),
@@ -312,6 +318,7 @@ def cmd_config(args: argparse.Namespace) -> int:
         ACP_BASE_URL,
         ACP_PASS,
         ACP_USER,
+        AGENTKTHX_ARTIFACTS_DIR,
         AGENTKTHX_BACKEND,
         BITNET_BASE_URL,
         CLOUDFLARE_ACCOUNT_ID,
@@ -379,6 +386,7 @@ def cmd_config(args: argparse.Namespace) -> int:
         POLLINATIONS_FREE_ONLY,
         POLLINATIONS_SAFE,
         RETRY_ON_ERROR,
+        SD_BASE_URL,
         SILICONFLOW_API_KEY,
         SILICONFLOW_BASE_URL,
         SILICONFLOW_DEFAULT_MODEL,
@@ -401,6 +409,7 @@ def cmd_config(args: argparse.Namespace) -> int:
             ("OLLAMA_BASE_URL", OLLAMA_BASE_URL),
             ("BITNET_BASE_URL", BITNET_BASE_URL),
             ("TURBOQUANT_BASE_URL", TURBOQUANT_BASE_URL),
+            ("SD_BASE_URL", SD_BASE_URL),
             ("ZAI_BASE_URL", ZAI_BASE_URL),
             ("OPENROUTER_BASE_URL", OPENROUTER_BASE_URL),
             ("GEMINI_BASE_URL", GEMINI_BASE_URL),
@@ -536,6 +545,10 @@ def cmd_config(args: argparse.Namespace) -> int:
                 ("TURBOQUANT_SERVER_PATH", TURBOQUANT_SERVER_PATH),
                 ("TURBOQUANT_PORT", str(TURBOQUANT_PORT)),
                 ("TURBOQUANT_CTX", str(TURBOQUANT_CTX)),
+            ],
+            "Stable Diffusion": [
+                ("SD_BASE_URL", SD_BASE_URL),
+                ("AGENTKTHX_ARTIFACTS_DIR", AGENTKTHX_ARTIFACTS_DIR),
             ],
             "Agent": [
                 ("MAX_STEPS", str(MAX_STEPS)),

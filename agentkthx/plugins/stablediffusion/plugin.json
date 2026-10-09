@@ -1,0 +1,42 @@
+{
+  "$schema": "https://raw.githubusercontent.com/VTSTech/AgentKthx/main/schemas/v0.2/plugin.schema.json",
+  "name": "stablediffusion",
+  "version": "0.1.0",
+  "description": "Stable Diffusion image generation via an external sd.cpp server (Ollama pattern: AgentKthx talks HTTP only, never manages the server process)",
+  "author": {
+    "name": "VTSTech",
+    "url": "https://www.vts-tech.org"
+  },
+  "license": "MIT",
+  "extensions": {
+    "org.vts-tech.agentkthx": {
+      "display_name": "Stable Diffusion (sd.cpp) Backend",
+      "type": "backend",
+      "entrypoint": "__init__",
+      "depends": [],
+      "optional_depends": [],
+      "config": {
+        "env_prefix": "SD",
+        "defaults": {
+          "SD_BASE_URL": "http://127.0.0.1:1234",
+          "AGENTKTHX_ARTIFACTS_DIR": "./generated"
+        }
+      },
+      "provides": {
+        "backends": {
+          "stable-diffusion": "backend.StableDiffusionBackend"
+        },
+        "cli_commands": [],
+        "cli_flags": {
+          "--backend": [
+            "stable-diffusion",
+            "sd"
+          ]
+        }
+      },
+      "compatibility": {
+        "agentkthx": ">=0.4.0"
+      }
+    }
+  }
+}

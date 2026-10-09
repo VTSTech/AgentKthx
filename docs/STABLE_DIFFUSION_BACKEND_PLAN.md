@@ -43,13 +43,14 @@ standard the DDG reference holds:
 | Logging | `--log-level debug|verbose|info|warn|error` (default `info`) |
 | Model loading | classic single checkpoint `-m/--model <file>` (SD1.x/SDXL/turbo safetensors or GGUF); modular `--diffusion-model` + `--vae` + `--llm`/`--clip`/`--t5xxl` for modern pipelines (Z-Image etc.) |
 | Server-side defaults | e.g. `--cfg-scale`, and friends are settable at LAUNCH (become per-request defaults) |
-| **OpenAI-compatible surface** | `POST /v1/images/generations`, `POST /v1/images/edits`, `GET /v1/models` |
+| **OpenAI-compatible surface** | `POST /v1/images/generations`, `POST /v1/images/edits`, `GET /v1/models` — **live-verified 2026-10-10 (Colab CPU, sd_turbo)**: `GET /v1/models` → `{"data":[{"id":"sd-cpp-local","object":"model","owned_by":"local"}]}` — ONE fixed pseudo-model id regardless of loaded weights; `list_models()` must surface it verbatim and never require a model-name match |
 | generations request fields | `prompt` (required), `n`, `size` (`WIDTHxHEIGHT`), `output_format` (`png`/`jpeg`/`webp`), `output_compression` (0..100). NOTE: **no `model` field** — the server serves its loaded pool |
 | generations response | `{created, output_format, data: [{b64_json}]}` — base64 image bytes |
 | Native extension | `sdcpp API` fields ride inside `prompt` via `sd_cpp_extra_args` (exact wire encoding pinned in P0 from api.md §OpenAI API) |
 | Other APIs (not used by the backend) | `/sdapi/v1/*` (WebUI-style: txt2img, `GET /sdapi/v1/progress`…), `/sdcpp/v1/*` (async jobs, cancel, upscale, vid_gen) |
 | `<lora:...>` prompt tags | intentionally unsupported on all three API families; LoRA via structured fields only |
 | Verified model URLs | SD1.5: `huggingface.co/stable-diffusion-v1-5/stable-diffusion-v1-5/resolve/main/v1-5-pruned-emaonly.safetensors` (4.27 GB, HTTP 206 verified); sd-turbo: `huggingface.co/stabilityai/sd-turbo/resolve/main/sd_turbo.safetensors` (underscore filename — verified via HF API listing) |
+| Release binary (fast path) | tag `master-948-228c707`, asset `sd-master-228c707-bin-Linux-Ubuntu-24.04-x86_64.zip` (25 MB): `sd-server` + `sd-cli` + bundled ggml per-microarch dispatch `.so`s (sse42…zen4) + webp encoders; `RUNPATH=$ORIGIN` (binaries find their bundled libs in their own dir — keep files together, no env vars); **requires GLIBC ≥ 2.38** (Ubuntu 24.04 build). Verified 2026-10-10 by download + execution (`--help` runs, commit matches tag) |
 
 ## 3. Pattern Alignment (what "the Ollama pattern" means here)
 
@@ -116,16 +117,25 @@ free from `OpenAICompatibleBackend`/`cloud_base.py`.
 
 ### D4 — Notebooks (the rollout vehicle)
 
-Three new cells appended to `AgentKthx.ipynb` beside the Ollama/BitNet/TurboQuant
+New cells appended to `AgentKthx.ipynb` beside the Ollama/BitNet/TurboQuant
 cells, matching house cell conventions (`Popen`+nohup+log, `pkill` first, `0.0.0.0`
 bind for tunnels, Drive backups, `%cd /content`):
 
-1. **Compile cell** — clone `--depth 1`, CPU-only CMake (no CUDA toolkit needed),
-   build the `sd-server` target only, verify `build/bin/sd-server`, copy to Drive.
-2. **Model cell** — download `sd_turbo.safetensors` (default; 1–4 steps ⇒ the only
+1. **Binary cell (primary; ~25 MB download, no compile)** — fetch the pinned
+   release zip (`master-948-228c707`, see §2 fast-path row), unzip straight into
+   the canonical path `stable-diffusion.cpp/build/bin/` so Model/Serve cells are
+   path-identical to a source build; self-check `./sd-server --help`; on failure
+   (host glibc < 2.38 — the asset is an Ubuntu 24.04 build) print a pointer to
+   the compile fallback.
+2. **Compile cell (fallback; ~10–20 min)** — clone `--depth 1 --recursive`
+   (ggml is a git submodule; a plain `--depth 1` clone leaves `ggml/` empty and
+   CMake configure fails with "does not contain a CMakeLists.txt file"),
+   CPU-only CMake (no CUDA toolkit needed), build the `sd-server` target only,
+   verify `build/bin/sd-server`, copy to Drive.
+3. **Model cell** — download `sd_turbo.safetensors` (default; 1–4 steps ⇒ the only
    sane latency on Colab CPU) or `v1-5-pruned-emaonly.safetensors` (lighter RAM,
    more steps); Drive backup/restore pair like the Ollama model cells.
-3. **Serve cell** — `pkill sd-server`; `subprocess.Popen` with
+4. **Serve cell** — `pkill sd-server`; `subprocess.Popen` with
    `--listen-ip 0.0.0.0 --listen-port 1234 --threads <nproc>`; log to
    `sd_server.log`; poll `GET /v1/models` until it answers; print the pool.
 
@@ -189,7 +199,9 @@ challenge ladder, no SSE grammar).
 
 - **No `model` field on the wire** — server pool selection semantics need a P0
   pin-down (api.md's `/v1/models` response shape + multi-model pool behavior with
-  LRU eviction observed in third-party docs).
+  LRU eviction observed in third-party docs). **Partially resolved live
+  2026-10-10**: single loaded model reports fixed id `sd-cpp-local`; the
+  request-side no-`model`-field fact stands confirmed by the working generation.
 - **CPU latency** — minutes per image on free Colab; manage user expectations in the
   notebook markdown (sd-turbo default exists precisely for this).
 - **`sd_cpp_extra_args` encoding** — api.md says fields ride *inside* `prompt`; the
@@ -199,10 +211,13 @@ challenge ladder, no SSE grammar).
 - **Frontend build requirement** — the server README mentions an embedded web UI built
   with Node/pnpm when building from source; P0 must confirm whether the default CMake
   build produces a working `sd-server` without the frontend toolchain (expected yes —
-  the UI is optional — verify in the notebook cell).
+  the UI is optional — verify in the notebook cell). The release-binary fast path
+  (D4 cell 1) sidesteps the build-side question entirely; whether the embedded UI
+  ships inside the release binary is unverified (irrelevant for the API-only P0 path).
 
 ## Appendix — Notebook Cells (paste-ready, CPU-only Colab)
 
-See the companion cells delivered with this plan (Compile / Model / Serve), written to
-match the existing Ollama/BitNet/TurboQuant cell conventions in `AgentKthx.ipynb`.
+See the companion cells delivered with this plan (Binary / Compile / Model / Serve),
+written to match the existing Ollama/BitNet/TurboQuant cell conventions in
+`AgentKthx.ipynb`.
 They are the authoritative copy for P0.
