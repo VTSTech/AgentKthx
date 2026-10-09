@@ -44,7 +44,7 @@ standard the DDG reference holds:
 | Model loading | classic single checkpoint `-m/--model <file>` (SD1.x/SDXL/turbo safetensors or GGUF); modular `--diffusion-model` + `--vae` + `--llm`/`--clip`/`--t5xxl` for modern pipelines (Z-Image etc.) |
 | Server-side defaults | e.g. `--cfg-scale`, and friends are settable at LAUNCH (become per-request defaults) |
 | **OpenAI-compatible surface** | `POST /v1/images/generations`, `POST /v1/images/edits`, `GET /v1/models` — **live-verified 2026-10-10 (Colab CPU, sd_turbo)**: `GET /v1/models` → `{"data":[{"id":"sd-cpp-local","object":"model","owned_by":"local"}]}` — ONE fixed pseudo-model id, **hardcoded in routes_openai.cpp** (source-verified at 228c707), never reflects the loaded weights; `list_models()` must never require a model-name match |
-| **Loaded-model discovery (source-verified at 228c707)** | `GET /sdcpp/v1/capabilities` → `model: {name, stem, path}` = the REAL weights (resolver: `-m/--model` path, else `--diffusion-model` path, else all empty strings when started without either); also exposes `defaults` (steps/cfg/scheduler/sample_method), `limits` (64–4096 px, batch ≤ 8), `samplers`, `schedulers`, `output_formats`, `supported_modes`. A1111-compat alternates: `GET /sdapi/v1/sd-models` (title/model_name/filename — hash & sha256 are **hardcoded dummies** `8888888888…`) and `GET /sdapi/v1/options` (`sd_model_checkpoint` = stem). `list_models()` prefers capabilities → falls back to the `/v1/models` pseudo id |
+| **Loaded-model discovery (source-verified at 228c707)** | `GET /sdcpp/v1/capabilities` → `model: {name, stem, path}` = the REAL weights (resolver: `-m/--model` path, else `--diffusion-model` path, else all empty strings when started without either); also exposes `defaults` (steps/cfg/scheduler/sample_method), `limits` (64–4096 px, batch ≤ 8), `samplers`, `schedulers`, `output_formats`, `supported_modes`. A1111-compat alternates: `GET /sdapi/v1/sd-models` (title/model_name/filename — hash & sha256 are **hardcoded dummies** `8888888888…`) and `GET /sdapi/v1/options` (`sd_model_checkpoint` = stem). `list_models()` prefers capabilities → falls back to the `/v1/models` pseudo id; `is_running()` uses the same chain (base `/api/version` probe is Ollama-only, sd-server 404s it) |
 | generations request fields | `prompt` (required), `n`, `size` (`WIDTHxHEIGHT`), `output_format` (`png`/`jpeg`/`webp`), `output_compression` (0..100). NOTE: **no `model` field** — the server serves its loaded pool |
 | generations response | `{created, output_format, data: [{b64_json}]}` — base64 image bytes |
 | Native extension | `sdcpp API` fields ride inside `prompt` via `sd_cpp_extra_args` (exact wire encoding pinned in P0 from api.md §OpenAI API) |
@@ -83,10 +83,15 @@ free from `OpenAICompatibleBackend`/`cloud_base.py`.
 
 ### D2 — Endpoint mapping
 
-- `list_models()` → `GET /v1/models`; the response's model list (server pool)
-  becomes the catalog. `--model` is **advisory only** on this backend (the wire has no
-  model field — §2); when the user passes a model that isn't in the pool, warn and
-  proceed (server uses its loaded model), matching "no `model` field" reality.
+- `list_models()` → `GET /sdcpp/v1/capabilities` first (real loaded weights, `model.stem`);
+  falls back to `GET /v1/models` (fixed pseudo id, hardcoded server-side). `--model` is
+  **advisory only** on this backend (the wire has no model field — §2); when the user
+  passes a model that isn't loaded, warn and proceed (server uses its loaded model),
+  matching "no `model` field" reality.
+- `is_running()` → capabilities probe, then `/v1/models` fallback. The BaseBackend
+  `/api/version` probe is Ollama-only — sd-server 404s it (and has no `/health`),
+  which made `agentkthx models --backend sd` report "not running" against a live
+  server (observed on Colab, 2026-10-10).
 - `generate(model, messages, …)` → concatenate/flatten the house messages to a single
   prompt (system content included, subject to §6), then
   `POST /v1/images/generations {prompt, n:1, size, output_format:"png"}`.

@@ -219,6 +219,26 @@ class StableDiffusionBackend(OpenAICompatibleBackend):
         }
         return info
 
+    def is_running(self) -> bool:
+        """Health check via the server's own discovery surfaces.
+
+        sd-server serves neither ``/api/version`` (the BaseBackend probe —
+        Ollama-only, 404s here) nor ``/health`` (llama-server). Probe
+        capabilities first (richest, always present on 228c707+), then
+        fall back to ``/v1/models`` (exists on every build). A 200 from
+        either means the server is up — an empty capabilities model
+        block still counts as running (the server answers, it just
+        started without ``-m``).
+        """
+        if self._fetch_capabilities() is not None:
+            return True
+        try:
+            req = urllib.request.Request(f"{self.base_url}/v1/models", method="GET")
+            with urllib.request.urlopen(req, timeout=5) as response:
+                return response.status == 200
+        except Exception:
+            return False
+
     # ------------------------------------------------------------------
     # Generation
     # ------------------------------------------------------------------

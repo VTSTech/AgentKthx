@@ -49,6 +49,7 @@ def _ok_response(payload: dict) -> MagicMock:
     resp = MagicMock()
     resp.__enter__ = MagicMock(return_value=resp)
     resp.__exit__ = MagicMock(return_value=False)
+    resp.status = 200  # is_running() health checks read .status
     resp.read = MagicMock(return_value=json.dumps(payload).encode("utf-8"))
     return resp
 
@@ -305,6 +306,39 @@ class TestCapabilitiesDiscovery(unittest.TestCase):
             backend.get_model_info("b")
         # One probe total — the second call hits the instance cache.
         self.assertEqual(mock_urlopen.call_count, 1)
+
+
+class TestIsRunning(unittest.TestCase):
+    """BaseBackend.is_running() probes /api/version — Ollama-only.
+
+    sd-server 404s that (no /health either), so the models CLI reported
+    "Sd is not running" against a live server (observed on Colab,
+    2026-10-10). The override probes capabilities → /v1/models.
+    """
+
+    def test_capabilities_reachable_means_running(self):
+        backend = _make_backend()
+        caps = TestCapabilitiesDiscovery()._caps_payload()
+        handler = TestCapabilitiesDiscovery._routing_urlopen(
+            {"http://127.0.0.1:1234/sdcpp/v1/capabilities": _ok_response(caps)}
+        )
+        with patch("urllib.request.urlopen", side_effect=handler):
+            self.assertTrue(backend.is_running())
+
+    def test_capabilities_404_falls_back_to_v1_models(self):
+        # Older build: capabilities missing, but /v1/models answers.
+        backend = _make_backend()
+        handler = TestCapabilitiesDiscovery._routing_urlopen({})
+        with patch("urllib.request.urlopen", side_effect=handler):
+            self.assertTrue(backend.is_running())
+
+    def test_unreachable_server_reports_not_running(self):
+        backend = _make_backend()
+        with patch(
+            "urllib.request.urlopen",
+            side_effect=urllib.error.URLError("connection refused"),
+        ):
+            self.assertFalse(backend.is_running())
 
 
 # ---------------------------------------------------------------------------
