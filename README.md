@@ -2,7 +2,7 @@
 
 **Status: Alpha**
 
-A minimal, modular, python stdlib, agentic framework for tool calling AI agents. Runs **locally** with [BitNet](https://github.com/microsoft/BitNet), [Ollama](https://ollama.com), [TurboQuant](https://github.com/TheTom/llama-cpp-turboquant), **in the cloud** with [Cloudflare](https://developers.cloudflare.com/workers-ai/), [Google](https://ai.google.dev/gemini-api/docs), [HuggingFace](https://huggingface.co/), [Mistral](https://mistral.ai), [NVIDIA](https://build.nvidia.com), [OpenAI](https://openai.com), [OpenRouter](https://openrouter.ai), [OrcaRouter](https://www.orcarouter.ai), [Pollinations](https://enter.pollinations.ai), [SiliconFlow](https://www.siliconflow.com) and [ZAI](https://api.z.ai). Extensible via a manifest-based **plugin system** for additional backends and features.
+A minimal, modular, python stdlib, agentic framework for tool calling AI agents. Runs **locally** with [BitNet](https://github.com/microsoft/BitNet), [Ollama](https://ollama.com), [TurboQuant](https://github.com/TheTom/llama-cpp-turboquant), and [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp) (image generation), **in the cloud** with [Cloudflare](https://developers.cloudflare.com/workers-ai/), [Google](https://ai.google.dev/gemini-api/docs), [HuggingFace](https://huggingface.co/), [Mistral](https://mistral.ai), [NVIDIA](https://build.nvidia.com), [OpenAI](https://openai.com), [OpenRouter](https://openrouter.ai), [OrcaRouter](https://www.orcarouter.ai), [Pollinations](https://enter.pollinations.ai), [SiliconFlow](https://www.siliconflow.com) and [ZAI](https://api.z.ai). Extensible via a manifest-based **plugin system** for additional backends and features.
 
 Inspired by the architecture of OpenClaw, rebuilt from scratch for local-first operation.
 
@@ -39,6 +39,7 @@ Inspired by the architecture of OpenClaw, rebuilt from scratch for local-first o
 | [JEV_API_MODE.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/JEV_API_MODE.md) | JEV API mode — System-One decisions via any free LLM (Jev-compatible shape) |
 | [mcp/ROADMAP.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/mcp/ROADMAP.md) | **MCP support** — Phase 1 (client mode, stdio) status + Phase 2 (`kthx-audit` MCP server) + Phase 3 (generic `mcp serve`) plan |
 | [PLUGIN_SPEC_v0.2.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/PLUGIN_SPEC_v0.2.md) | Plugin spec v0.2 — lifecycle hooks, plugin tools API, external plugin roots, dual-form manifests, migration guide from v0.1 |
+| [STABLE_DIFFUSION_BACKEND_PLAN.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/STABLE_DIFFUSION_BACKEND_PLAN.md) | Stable Diffusion backend design (D1–D5) — sd.cpp wire facts pinned at source commit 228c707, capabilities discovery, image-artifact pipeline, test plan |
 | [SUPPORT.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/SUPPORT.md) | Backend support tiers — Fully Supported vs Limited Support per-backend policy (R07.25) |
 | [USAGE.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/USAGE.md) | **Usage guide** — CLI commands, backend configurations (OpenRouter/Gemini/HuggingFace/ZAI/TurboQuant), Python API, persistent memory, security modes, environment variables, MCP client setup, full CLI options table |
 | [TESTS.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/TESTS.md) | Example scripts, test categories, benchmark results, and per-test deep-dive results |
@@ -47,8 +48,9 @@ Inspired by the architecture of OpenClaw, rebuilt from scratch for local-first o
 
 - **Zero dependencies** — Uses Python stdlib only (urllib for HTTP)
 - **Plugin system** — Manifest-based plugin discovery, lazy loading, dependency resolution (R05.0), plugin spec v0.2 lifecycle hooks (`on_init`/`on_run_start`/`on_run_end`/`on_error`/`on_shutdown`), plugin-provided tools, external plugin roots (`~/.agentkthx/plugins/`, `$AGENTKTHX_PLUGIN_PATH`), optional `sha256` content pinning (R07.05 SEC-06), `plugins --load/--unload/--reload/--json/--verbose` management
-- **Native + plugin backends** — Ollama + TurboQuant built-in; Cloudflare, NVIDIA, OpenRouter, BitNet, ZAI, ACP, Gemini, OrcaRouter, Mistral, HuggingFace, OpenAI, Pollinations, SiliconFlow as plugins. (The TurboQuant backend uses llama.cpp's `llama-server` binary under the hood — `--backend turboquant` is the primary name; `--backend llama-server` remains as a backward-compat alias.)
-- **Backend support tiers** (R07.25) — ZAI, OpenRouter, HuggingFace, Gemini, Mistral, NVIDIA NIM, Cloudflare Workers AI are Fully Supported (maintainer-tested before every release — Cloudflare promoted R07.27 after a 5/5 end-to-end smoke test); Pollinations, OrcaRouter, OpenAI, and the R07.29 SiliconFlow scaffold are Limited Support (code-quality identical, but the maintainer's API key access has been unavailable for an extended period — SiliconFlow passed its live catalog probe (79 models, R07.29) and its 2026-10-09 smoke attempt verified auth, the catalog, and one `--think` generation before the account balance drained; both tool-call steps returned 402 insufficient-balance, so it awaits a topped-up 5/5 run). See [docs/SUPPORT.md](docs/SUPPORT.md) for the full policy + what "Limited Support" means in practice. Local backends (TurboQuant, Ollama, BitNet) are always Fully Supported (no external API key needed).
+- **Native + plugin backends** — Ollama + TurboQuant built-in; Cloudflare, NVIDIA, OpenRouter, BitNet, ZAI, ACP, Gemini, OrcaRouter, Mistral, HuggingFace, OpenAI, Pollinations, SiliconFlow, and Stable Diffusion (image generation) as plugins. (The TurboQuant backend uses llama.cpp's `llama-server` binary under the hood — `--backend turboquant` is the primary name; `--backend llama-server` remains as a backward-compat alias. Stable Diffusion follows the same pattern: `--backend stable-diffusion` is the primary name, `--backend sd` the alias.)
+- **Image generation** (R07.31) — `--backend sd` turns each chat turn into ONE image via an external [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp) server (`sd-server -m <model> --listen-port 1234` — Ollama pattern: AgentKthx never manages the process). The flattened conversation becomes the prompt (harness system prompt suppressed, DDG-style), and the returned PNG is written to the artifacts dir (`AGENTKTHX_ARTIFACTS_DIR`, default `./generated/`) — the reply carries `[image saved: <path>]`. R07.32: `--max-steps N --backend sd` remaps to diffusion **sample steps** (validated 1–100, applied per request via the server's `sd_cpp_extra_args` — no restart) and the session header shows **Sample Steps** instead of Max Steps.
+- **Backend support tiers** (R07.25) — ZAI, OpenRouter, HuggingFace, Gemini, Mistral, NVIDIA NIM, Cloudflare Workers AI are Fully Supported (maintainer-tested before every release — Cloudflare promoted R07.27 after a 5/5 end-to-end smoke test); Pollinations, OrcaRouter, OpenAI, and the R07.29 SiliconFlow scaffold are Limited Support (code-quality identical, but the maintainer's API key access has been unavailable for an extended period — SiliconFlow passed its live catalog probe (79 models, R07.29) and its 2026-10-09 smoke attempt verified auth, the catalog, and one `--think` generation before the account balance drained; both tool-call steps returned 402 insufficient-balance, so it awaits a topped-up 5/5 run). See [docs/SUPPORT.md](docs/SUPPORT.md) for the full policy + what "Limited Support" means in practice. Local backends (TurboQuant, Ollama, BitNet, Stable Diffusion) are always Fully Supported (no external API key needed).
 - **Multi-cloud support** — Access to 500+ models from OpenRouter, OpenAI, Anthropic, Google (Gemini + Gemma), Cohere, plus 80+ models from NVIDIA NIM, 20+ open models (Llama, Mistral, Qwen, DeepSeek, Phi, Gemma, GPT-OSS) from Cloudflare Workers AI, 80+ live models (DeepSeek, Qwen, GLM, Kimi, MiniMax, Hunyuan, Gemma, gpt-oss) from SiliconFlow, and 11 upstream providers via OrcaRouter's zero-markup gateway
 - **Dual API support** — OpenResponses (`--api openre`) and OpenAI Chat-Completions (`--api openai`)
 - **JEV decision mode** — System-One decisions via any free LLM (`--api jev`) — Jev-compatible shape, no TypeSafe API key required
@@ -105,6 +107,9 @@ agentkthx chat
 # Autonomous agent mode
 agentkthx agent "Research the latest AgentKthx release"
 
+# Image generation (requires a local sd-server: sd-server -m <model> --listen-port 1234)
+agentkthx run "a lovely cat" --backend sd
+
 # Set API keys (interactive picker, persists to ~/.agentkthx/.env)
 agentkthx auth
 
@@ -134,7 +139,7 @@ scripts covering reasoning, knowledge, and tool usage. See
 categories, and benchmark results.
 
 ```bash
-# Regression test suite (3055 passed / 20 skipped in ~21s)
+# Regression test suite (3498 passed / 20 skipped in ~26s)
 pytest
 
 # Quick 5-question diagnostic example
@@ -147,7 +152,7 @@ python -m agentkthx.examples.01_quick_diagnostic
 # Install dev dependencies
 pip install -e ".[dev]"
 
-# Run unit tests (3055 passed / 20 skipped in ~21s)
+# Run unit tests (3498 passed / 20 skipped in ~26s)
 pytest
 
 # Format code (CI gates on ruff + black over agentkthx/ and tests/)
