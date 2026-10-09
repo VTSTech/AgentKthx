@@ -204,7 +204,17 @@ def _build_agent(args: argparse.Namespace, config) -> Agent:
         model = config.default_model
 
     # Initialize backend with proper API mode
-    backend = get_backend(backend_name, timeout=timeout, api_mode=api_mode)
+    # R07.32: on the sd backend --max-steps is REMAPPED to diffusion
+    # sample steps (1-100) instead of the agent reasoning-loop ceiling.
+    # args.max_steps parses with default=None (shared_args), so "flag not
+    # given" is distinguishable — when absent, NO sample_steps is passed
+    # and the server's own --steps default applies untouched. Every other
+    # backend's --max-steps behavior is unchanged: the Agent() call below
+    # still receives the same max_steps it always did.
+    backend_kwargs: dict = {}
+    if backend_name in ("stable-diffusion", "sd") and getattr(args, "max_steps", None) is not None:
+        backend_kwargs["sample_steps"] = getattr(args, "max_steps")
+    backend = get_backend(backend_name, timeout=timeout, api_mode=api_mode, **backend_kwargs)
 
     # Default API mode: cloud providers use OpenAI, local providers use OpenResponses
     # R06.57 (MAINT-05): replaced hardcoded [OPENROUTER, ZAI, GEMINI] list with
@@ -213,6 +223,14 @@ def _build_agent(args: argparse.Namespace, config) -> Agent:
         api_mode = getattr(args, "api_mode", "openai")
         # Re-initialize backend with correct API mode for cloud providers
         backend = get_backend(backend_name, timeout=timeout, api_mode=api_mode)
+
+    if backend_name in ("stable-diffusion", "sd"):
+        # R07.32: warm the capabilities cache once so the session header
+        # can show the EFFECTIVE sample steps (the server's --steps
+        # default when --max-steps was not given). get_model_info returns
+        # None quietly when the server is unreachable — the header's
+        # display helper then falls back to "?" without any IO.
+        backend.get_model_info(model)
 
     # Handle truncation configuration
     truncation = getattr(args, "truncation", "auto")

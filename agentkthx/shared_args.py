@@ -281,7 +281,9 @@ def add_agent_args(
         type=int,
         default=None,
         dest="max_steps",
-        help="Maximum reasoning steps (default: 25)",
+        help="Maximum reasoning steps (default: 25). On the sd backend "
+        "this sets the diffusion sample steps instead (1-100; omitted = "
+        "server default)",
     )
     parser.add_argument(
         "--soul",

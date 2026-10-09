@@ -1534,7 +1534,15 @@ def cmd_chat(args: argparse.Namespace) -> int:
                 print(f"Tools: {yellow(str(agent.tools.names()))}")
                 print(f"Tool choice: {yellow(agent.tool_choice.type.value)}")
                 print(f"Security: {green('max') if get_security_mode() == 'max' else red('off')}")
-                print(f"Max steps: {yellow(str(agent.max_steps))}")
+                # R07.32: on the sd backend --max-steps is remapped to
+                # diffusion sample steps — show the effective value (the
+                # loop ceiling is decorative for a one-shot image backend).
+                from ...core.types import BackendType
+
+                if getattr(agent.backend, "backend_type", None) == BackendType.STABLE_DIFFUSION:
+                    print(f"Sample steps: {yellow(agent.backend.sample_steps_display())}")
+                else:
+                    print(f"Max steps: {yellow(str(agent.max_steps))}")
                 print(f"Memory turns: {yellow(str(len(agent.memory)))}")
                 # Show loaded skills (R06.2+)
                 loaded_skills = getattr(agent, "_loaded_skills", [])

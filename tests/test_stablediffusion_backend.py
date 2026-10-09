@@ -4,7 +4,9 @@ pattern contract (is_cloud=False, backend_type, 'sd' alias registration),
 /v1/models → house catalog mapping, the /v1/images/generations wire body
 (NO model field), message flattening (system+user, multi-turn), the
 size-capped b64 → PNG artifact pipeline, connection-refused remediation,
-the single-delta stream wrapper, and constructor URL resolution.
+the single-delta stream wrapper, constructor URL resolution, and the
+R07.32 --max-steps → sample_steps remap (sd_cpp_extra_args override +
+session-header relabel).
 
 Plan: docs/STABLE_DIFFUSION_BACKEND_PLAN.md (§6 test plan, tests 1–8).
 Live server facts pinned 2026-10-10 on Colab CPU (sd_turbo).
@@ -14,7 +16,9 @@ Written by VTSTech — https://www.vts-tech.org
 
 from __future__ import annotations
 
+import argparse
 import base64
+import contextlib
 import io
 import json
 import sys
@@ -576,3 +580,261 @@ class TestAliasRegistration(unittest.TestCase):
         # R07.19: NONE is legacy-only; no native tools → REACT verdict.
         backend = _make_backend()
         self.assertIs(backend.test_tool_support("sd-cpp-local"), ToolSupportLevel.REACT)
+
+
+# ---------------------------------------------------------------------------
+# R07.32: --max-steps → sample_steps remap (sd backend only)
+# ---------------------------------------------------------------------------
+
+
+def _capture_body(backend, messages, **kwargs) -> dict:
+    """Run generate() against a capturing urlopen; return the wire body."""
+    captured = {}
+
+    def capturing_urlopen(req, timeout=None):
+        captured["body"] = json.loads(req.data.decode("utf-8"))
+        return _ok_response(_generations_payload())
+
+    with patch("urllib.request.urlopen", side_effect=capturing_urlopen):
+        backend.generate("sd_turbo", messages, **kwargs)
+    return captured["body"]
+
+
+class TestSampleStepsOverride(unittest.TestCase):
+    """--max-steps (factory-remapped) drives the sd_cpp_extra_args block."""
+
+    def test_default_is_none_and_setter_validates(self):
+        backend = _make_backend()
+        self.assertIsNone(backend.sample_steps)
+        for bad in (0, -1, 101, 1000, "4", 4.0, True):
+            with self.assertRaises(ValueError):
+                backend.sample_steps = bad
+        for good in (1, 4, 25, 100):
+            backend.sample_steps = good
+            self.assertEqual(backend.sample_steps, good)
+        backend.sample_steps = None
+        self.assertIsNone(backend.sample_steps)
+
+    def test_constructor_kwarg_and_rejection(self):
+        backend = StableDiffusionBackend(base_url="http://127.0.0.1:1234", sample_steps=4)
+        self.assertEqual(backend.sample_steps, 4)
+        with self.assertRaises(ValueError):
+            StableDiffusionBackend(base_url="http://127.0.0.1:1234", sample_steps=0)
+
+    def test_generate_appends_single_line_marker(self):
+        backend = _make_backend()
+        backend.sample_steps = 4
+        body = _capture_body(backend, [{"role": "user", "content": "a lovely cat"}])
+        # Exact block from api.md §sd_cpp_extra_args (pinned at 228c707):
+        # single-line JSON, server regex `.` cannot span newlines.
+        self.assertEqual(
+            body["prompt"],
+            'a lovely cat <sd_cpp_extra_args>{"sample_params":{"sample_steps":4}}</sd_cpp_extra_args>',
+        )
+        self.assertNotIn("\n", body["prompt"])
+        self.assertNotIn("model", body)  # still advisory-model-free
+        self.assertEqual(body["n"], 1)
+
+    def test_generate_without_override_leaves_prompt_bare(self):
+        backend = _make_backend()  # sample_steps None → server --steps default
+        body = _capture_body(backend, [{"role": "user", "content": "a lovely cat"}])
+        self.assertEqual(body["prompt"], "a lovely cat")
+        self.assertNotIn("<sd_cpp_extra_args>", body["prompt"])
+
+    def test_generate_caller_marker_wins_no_double_append(self):
+        backend = _make_backend()
+        backend.sample_steps = 4
+        caller_block = (
+            '<sd_cpp_extra_args>{"sample_params":{"sample_steps":28}}' "</sd_cpp_extra_args>"
+        )
+        body = _capture_body(backend, [{"role": "user", "content": f"a lovely cat {caller_block}"}])
+        self.assertEqual(body["prompt"], f"a lovely cat {caller_block}")
+        self.assertEqual(body["prompt"].count("<sd_cpp_extra_args>"), 1)
+
+    def test_display_precedence_explicit_then_caps_then_unknown(self):
+        backend = _make_backend()
+        self.assertEqual(backend.sample_steps_display(), "?")  # cold cache, no override
+        backend._capabilities_cache = {"defaults": {"sample_params": {"sample_steps": 25}}}
+        backend._capabilities_fetched = True
+        self.assertEqual(backend.sample_steps_display(), "25")  # warm cache → server default
+        backend.sample_steps = 4
+        self.assertEqual(backend.sample_steps_display(), "4")  # explicit override wins
+
+    def test_display_tolerates_malformed_caps(self):
+        backend = _make_backend()
+        backend._capabilities_cache = {"defaults": {}}
+        backend._capabilities_fetched = True
+        self.assertEqual(backend.sample_steps_display(), "?")
+
+
+class TestSessionHeaderSampleSteps(unittest.TestCase):
+    """The session header relabels the steps line for the sd backend."""
+
+    def _render(self, backend) -> str:
+        from agentkthx.cli import headers as headers_mod
+
+        class _FakeAgent:
+            def __init__(self):
+                self.model = "sd_turbo"
+                self.backend = backend
+                self.soul = None
+                self.num_ctx = None
+                self.max_steps = 25
+                self._response_format = None
+                self._is_persistent = False
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            headers_mod._print_session_header(
+                _FakeAgent(),
+                argparse.Namespace(backend="sd"),
+                argparse.Namespace(backend="sd"),
+                "Chat",
+            )
+        return buf.getvalue()
+
+    def test_sd_backend_shows_sample_steps(self):
+        backend = _make_backend()
+        backend.sample_steps = 4
+        out = self._render(backend)
+        self.assertIn("Sample Steps: 4", out)
+        self.assertNotIn("Max Steps:", out)
+
+    def test_sd_backend_falls_back_to_server_default(self):
+        backend = _make_backend()
+        backend._capabilities_cache = {"defaults": {"sample_params": {"sample_steps": 25}}}
+        backend._capabilities_fetched = True
+        out = self._render(backend)
+        self.assertIn("Sample Steps: 25", out)
+
+    def test_other_backends_keep_max_steps_label(self):
+        class _PlainBackend:
+            backend_type = None
+            base_url = "http://localhost:11434"
+
+        out = self._render(_PlainBackend())
+        self.assertIn("Max Steps: 25", out)
+        self.assertNotIn("Sample Steps:", out)
+
+
+class TestFactorySampleStepsMapping:
+    """agent_factory remaps --max-steps to sample_steps for sd ONLY."""
+
+    def _args(self, max_steps) -> argparse.Namespace:
+        # Key set mirrors the test_num_batch factory harness; backend/model
+        # switched to the sd discovery path.
+        return argparse.Namespace(
+            backend="sd",
+            model=None,
+            api_mode="openre",
+            debug=False,
+            tools="",
+            soul=None,
+            soul_level=2,
+            num_ctx=None,
+            num_predict=None,
+            num_batch=None,
+            temperature=None,
+            top_p=None,
+            timeout=None,
+            force_react=False,
+            max_steps=max_steps,
+            response_format="text",
+            truncation="auto",
+            compaction="auto",
+            thinking_level="auto",
+            show_reasoning=False,
+            skills=None,
+            session=None,
+            no_retry=False,
+            max_tool_retries=None,
+            confirm_dangerous=False,
+            acp=False,
+            acp_url=None,
+            security="max",
+        )
+
+    def _install_fakes(self, monkeypatch, backend_kwargs: dict, agent_kwargs: dict) -> None:
+        from agentkthx.cli import agent_factory
+
+        class _FakeAgent:
+            def __init__(self, **kwargs):
+                agent_kwargs.update(kwargs)
+
+        class _FakeSDBackend:
+            is_cloud = False
+            backend_type = BackendType.STABLE_DIFFUSION
+            base_url = "http://127.0.0.1:1234"
+
+            def __init__(self, **kwargs):
+                # Mimic the real constructor contract: sample_steps is
+                # validated 1..100 by the StableDiffusionBackend property
+                # setter — the fake must reject out-of-range values too so
+                # the factory's error path stays honest under test.
+                steps = kwargs.get("sample_steps")
+                if steps is not None and (
+                    isinstance(steps, bool) or not isinstance(steps, int) or not 1 <= steps <= 100
+                ):
+                    raise ValueError(
+                        "sample_steps must be an integer in 1..100 "
+                        f"(sd-server clamp range), got {steps!r}"
+                    )
+                backend_kwargs.update(kwargs)
+
+            def list_models(self):
+                return [{"name": "sd_turbo", "size": 0, "details": {"family": "stable-diffusion"}}]
+
+            def get_model_info(self, model):
+                return {"details": {}}
+
+            def test_tool_support(self, *a, **k):
+                return ToolSupportLevel.REACT
+
+        monkeypatch.setattr(agent_factory, "Agent", _FakeAgent)
+        monkeypatch.setattr(agent_factory, "get_backend", lambda name, **kw: _FakeSDBackend(**kw))
+
+    def _config(self):
+        class _Cfg:
+            backend = "sd"
+            default_model = "qwen2.5:0.5b"
+            num_ctx = 8192
+            max_tool_retries = 2
+
+        return _Cfg()
+
+    def test_explicit_max_steps_becomes_sample_steps(self, monkeypatch):
+        from agentkthx.cli import agent_factory
+
+        backend_kwargs: dict = {}
+        agent_kwargs: dict = {}
+        self._install_fakes(monkeypatch, backend_kwargs, agent_kwargs)
+
+        agent_factory._build_agent(self._args(max_steps=4), self._config())
+        assert backend_kwargs.get("sample_steps") == 4
+        # The Agent() loop ceiling still receives --max-steps unchanged —
+        # other backends' semantics are untouched by construction.
+        assert agent_kwargs.get("max_steps") == 4
+
+    def test_omitted_max_steps_passes_no_sample_steps(self, monkeypatch):
+        from agentkthx.cli import agent_factory
+
+        backend_kwargs: dict = {}
+        agent_kwargs: dict = {}
+        self._install_fakes(monkeypatch, backend_kwargs, agent_kwargs)
+
+        agent_factory._build_agent(self._args(max_steps=None), self._config())
+        assert "sample_steps" not in backend_kwargs  # server default applies
+        # The factory passes args.max_steps verbatim (None here); the REAL
+        # Agent constructor's defensive fix (agent_setup) resolves None → 25
+        # downstream — pre-existing behavior, unchanged for every backend.
+        assert agent_kwargs.get("max_steps") is None
+
+    def test_validation_error_propagates_for_out_of_range(self, monkeypatch):
+        from agentkthx.cli import agent_factory
+
+        backend_kwargs: dict = {}
+        agent_kwargs: dict = {}
+        self._install_fakes(monkeypatch, backend_kwargs, agent_kwargs)
+
+        with pytest.raises(ValueError, match="1..100"):
+            agent_factory._build_agent(self._args(max_steps=150), self._config())

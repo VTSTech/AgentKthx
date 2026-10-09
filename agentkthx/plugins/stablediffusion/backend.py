@@ -31,6 +31,16 @@ master-948-228c707 / commit 228c707 + live Colab server, 2026-10-10):
 - ``POST /v1/images/generations`` → ``{"prompt", "n", "size", "output_format"}``.
   NO ``model`` field on the wire — the server serves its loaded pool, so
   ``--model`` here is advisory only (warned, never sent).
+- Per-request sample steps (R07.32): the OpenAI route has NO ``steps``
+  field, but the server regex-extracts a ``<sd_cpp_extra_args>{...}
+  </sd_cpp_extra_args>`` block from the prompt (routes_openai.cpp:11) and
+  applies it via the native schema — ``{"sample_params":
+  {"sample_steps": N}}``. The block MUST stay on ONE line (the extraction
+  regex's ``.`` does not match newlines). Server clamps to 1–100 steps
+  (strict resolve, common.cpp:2482). ``/sdapi/v1/options`` is GET-only,
+  so the server DEFAULT (``--steps``) only changes on restart — but any
+  request can override it. The A1111 surface (``/sdapi/v1/txt2img``)
+  also takes ``steps`` directly as a body field.
 - Response: ``{"created", "output_format", "data": [{"b64_json"}]}``.
 
 See docs/STABLE_DIFFUSION_BACKEND_PLAN.md for the full design (D1–D5).
@@ -92,6 +102,7 @@ class StableDiffusionBackend(OpenAICompatibleBackend):
         port: int | None = None,
         config: BackendConfig | None = None,
         api_mode: ApiMode | str = ApiMode.OPENAI,
+        sample_steps: int | None = None,
     ):
         # Resolve base URL — priority: base_url > host/port > config default
         if base_url:
@@ -111,6 +122,11 @@ class StableDiffusionBackend(OpenAICompatibleBackend):
 
         super().__init__(config=config, base_url=resolved_url, api_mode=api_mode)
 
+        # R07.32: --max-steps (remapped by agent_factory for this backend
+        # ONLY) lands here as the diffusion sample steps. None = no
+        # override — the server's own --steps default applies untouched.
+        self.sample_steps = sample_steps
+
     @property
     def backend_type(self) -> BackendType:
         return BackendType.STABLE_DIFFUSION
@@ -118,6 +134,55 @@ class StableDiffusionBackend(OpenAICompatibleBackend):
     @property
     def base_url(self) -> str:
         return self._base_url
+
+    _sample_steps: int | None = None
+
+    @property
+    def sample_steps(self) -> int | None:
+        """Per-request diffusion sample steps override (None = server default).
+
+        Set by agent_factory from ``--max-steps`` when the backend is sd
+        (every other backend keeps the reasoning-loop semantics). The
+        value rides the wire as an ``sd_cpp_extra_args`` block appended
+        to the prompt — see ``generate()`` for the exact encoding.
+        """
+        return self._sample_steps
+
+    @sample_steps.setter
+    def sample_steps(self, value: int | None) -> None:
+        # Validate 1..100 — the server's strict resolve clamps to the same
+        # range (common.cpp:2482 at 228c707). Failing fast keeps the
+        # operator's number honest instead of silently generating at a
+        # clamped value they never asked for.
+        if value is None:
+            self._sample_steps = None
+            return
+        if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 100:
+            raise ValueError(
+                f"sample_steps must be an integer in 1..100 (sd-server clamp range), got {value!r}"
+            )
+        self._sample_steps = value
+
+    def sample_steps_display(self) -> str:
+        """The sample-steps value worth showing an operator, as a string.
+
+        Precedence: the explicit ``--max-steps`` override, then the
+        server's reported default from the CACHED capabilities payload
+        (``defaults.sample_params.sample_steps`` — the factory warms the
+        cache during model discovery), then ``?`` (house unknown
+        convention). NEVER performs network IO — this is a display
+        helper called from session-header render paths; a cold cache
+        simply yields "?".
+        """
+        if self._sample_steps is not None:
+            return str(self._sample_steps)
+        caps = getattr(self, "_capabilities_cache", None)
+        if caps:
+            try:
+                return str(caps["defaults"]["sample_params"]["sample_steps"])
+            except (KeyError, TypeError):
+                return "?"
+        return "?"
 
     # ------------------------------------------------------------------
     # Model discovery
@@ -282,9 +347,12 @@ class StableDiffusionBackend(OpenAICompatibleBackend):
                 notice lists what was dropped, mirroring the DDG sampling
                 parity note).
             **kwargs: ``width`` / ``height`` (default 512x512) are carried
-                on the wire via ``size``. ``sd_cpp_extra_args`` passthrough
-                is deferred until its encoding is pinned from sd.cpp's
-                api.md (plan §8, P0 test 8).
+                on the wire via ``size``. The ``sd_cpp_extra_args`` encoding
+                is now PINNED (api.md §sd_cpp_extra_args, source-verified
+                at 228c707 — plan §8 / P0 test 8 resolved): the backend
+                itself uses it for the ``--max-steps`` → sample_steps
+                remap. A caller-supplied block in the prompt wins — the
+                backend never double-appends.
 
         Returns:
             House response dict with ``content`` ("[image saved: <path>]"),
@@ -321,6 +389,34 @@ class StableDiffusionBackend(OpenAICompatibleBackend):
         prompt = self._flatten_messages(messages)
         if not prompt.strip():
             raise ValueError("no prompt content in messages — nothing to generate an image from")
+
+        # R07.32: an explicit --max-steps (factory-remapped to
+        # sample_steps) overrides the server's --steps default per
+        # request. The OpenAI image route has no steps field, so the
+        # value rides the server's sd_cpp_extra_args extension: a JSON
+        # block embedded in the prompt, regex-extracted and stripped
+        # server-side (routes_openai.cpp:11 at 228c707). The block MUST
+        # stay on ONE line — the extraction regex's `.` does not match
+        # newlines, so a pretty-printed block would be left in the prompt
+        # verbatim. A caller-supplied marker wins: never double-append.
+        if self.sample_steps is not None:
+            if "<sd_cpp_extra_args>" in prompt:
+                if os.environ.get("AGENTKTHX_DEBUG"):
+                    print(
+                        f"  [{self._provider_label}] prompt already carries an sd_cpp_extra_args "
+                        "block — leaving it to the caller (sample_steps override not appended)"
+                    )
+            else:
+                prompt = (
+                    f"{prompt} <sd_cpp_extra_args>"
+                    f'{{"sample_params":{{"sample_steps":{self.sample_steps}}}}}'
+                    "</sd_cpp_extra_args>"
+                )
+                if os.environ.get("AGENTKTHX_DEBUG"):
+                    print(
+                        f"  [{self._provider_label}] sample_steps={self.sample_steps} "
+                        "(--max-steps remap, sd_cpp_extra_args override)"
+                    )
 
         width = kwargs.pop("width", 512)
         height = kwargs.pop("height", 512)

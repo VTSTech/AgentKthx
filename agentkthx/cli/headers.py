@@ -8,6 +8,7 @@ import argparse
 
 from ..agent import Agent
 from ..colors import bright_magenta, cyan, dim, green, yellow
+from ..core.types import BackendType
 from .banner import print_banner
 
 
@@ -32,7 +33,14 @@ def _print_session_header(agent: Agent, args: argparse.Namespace, config, label:
     # "N steps" count is completed iterations, not the limit — without
     # this line, a fatal API error on step 25 looks identical to hitting
     # the default 25-step ceiling.
-    print(f"{dim('Max Steps:')} {yellow(str(agent.max_steps))}")
+    # R07.32: on the sd backend --max-steps is REMAPPED to diffusion
+    # sample steps — relabel the line so it names the value that
+    # actually governs generation (agent.max_steps, the ReAct loop
+    # ceiling, is decorative for a one-shot image backend).
+    if getattr(agent.backend, "backend_type", None) == BackendType.STABLE_DIFFUSION:
+        print(f"{dim('Sample Steps:')} {yellow(agent.backend.sample_steps_display())}")
+    else:
+        print(f"{dim('Max Steps:')} {yellow(str(agent.max_steps))}")
     if timeout:
         print(f"{dim('Timeout:')} {yellow(str(timeout) + 's')}")
     acp = getattr(args, "_acp", None)

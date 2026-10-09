@@ -47,7 +47,8 @@ standard the DDG reference holds:
 | **Loaded-model discovery (source-verified at 228c707)** | `GET /sdcpp/v1/capabilities` → `model: {name, stem, path}` = the REAL weights (resolver: `-m/--model` path, else `--diffusion-model` path, else all empty strings when started without either); also exposes `defaults` (steps/cfg/scheduler/sample_method), `limits` (64–4096 px, batch ≤ 8), `samplers`, `schedulers`, `output_formats`, `supported_modes`. A1111-compat alternates: `GET /sdapi/v1/sd-models` (title/model_name/filename — hash & sha256 are **hardcoded dummies** `8888888888…`) and `GET /sdapi/v1/options` (`sd_model_checkpoint` = stem). `list_models()` prefers capabilities → falls back to the `/v1/models` pseudo id; `is_running()` uses the same chain (base `/api/version` probe is Ollama-only, sd-server 404s it) |
 | generations request fields | `prompt` (required), `n`, `size` (`WIDTHxHEIGHT`), `output_format` (`png`/`jpeg`/`webp`), `output_compression` (0..100). NOTE: **no `model` field** — the server serves its loaded pool |
 | generations response | `{created, output_format, data: [{b64_json}]}` — base64 image bytes |
-| Native extension | `sdcpp API` fields ride inside `prompt` via `sd_cpp_extra_args` (exact wire encoding pinned in P0 from api.md §OpenAI API) |
+| Native extension | `sdcpp API` fields ride inside `prompt` via `sd_cpp_extra_args` — **encoding PINNED 2026-10-10 (source-verified at 228c707, api.md §sd_cpp_extra_args)**: `prompt text <sd_cpp_extra_args>{"sample_params":{"sample_steps":4}}</sd_cpp_extra_args>`; the server regex-extracts `(.*?)` and strips the block server-side (routes_openai.cpp:11). The JSON MUST stay on ONE line (the regex's `.` does not match newlines); malformed JSON rejects the request; a caller-supplied block wins (backend never double-appends). Supported on the OpenAI AND sdapi routes |
+| Runtime sample-steps override (R07.32) | Per-request `steps` works WITHOUT restart: A1111 route takes `"steps": N` directly (routes_sdapi.cpp:92, falls back to the `--steps` default); OpenAI route carries it via the `sd_cpp_extra_args` block above. Server clamps to **1–100** steps + batch 1–8 on the strict resolve path (common.cpp:2482). `/sdapi/v1/options` is GET-only — the server DEFAULT can only change on restart; read it live from capabilities `defaults.sample_params.sample_steps`. AgentKthx mapping: `--max-steps N --backend sd` → `StableDiffusionBackend(sample_steps=N)` → block appended to the flattened prompt; other backends keep the reasoning-loop semantics |
 | Other APIs | `/sdapi/v1/*` (WebUI-style: txt2img, img2img, samplers, schedulers, sd-models, options, progress — hash fields dummy), `/sdcpp/v1/*` (capabilities, async jobs + cancel, upscale, img_gen, vid_gen) |
 | `<lora:...>` prompt tags | intentionally unsupported on all three API families; LoRA via structured fields only |
 | Verified model URLs | SD1.5: `huggingface.co/stable-diffusion-v1-5/stable-diffusion-v1-5/resolve/main/v1-5-pruned-emaonly.safetensors` (4.27 GB, HTTP 206 verified); sd-turbo: `huggingface.co/stabilityai/sd-turbo/resolve/main/sd_turbo.safetensors` (underscore filename — verified via HF API listing) |
@@ -97,9 +98,9 @@ free from `OpenAICompatibleBackend`/`cloud_base.py`.
   `POST /v1/images/generations {prompt, n:1, size, output_format:"png"}`.
   Generation params: `steps` / `cfg_scale` / `seed` / `width` / `height` accepted as
   backend kwargs; whatever the OpenAI field set can't carry goes through
-  `sd_cpp_extra_args` (encoding pinned in P0). Sample-params parity note: like DDG's
-  temperature notice, unsupported chat-style kwargs are silently dropped with a
-  debug-mode notice.
+  `sd_cpp_extra_args` (encoding now pinned — see the §2 Runtime row). Sample-params
+  parity note: like DDG's temperature notice, unsupported chat-style kwargs are
+  silently dropped with a debug-mode notice.
 - Response handling: decode `data[0].b64_json` → write PNG to the artifacts dir
   (`AGENTKTHX_ARTIFACTS_DIR`, default `./generated/`, created on demand; filename
   `sd_<utc YYYYmmdd-HHMMSS>_<seed? or counter>.png`) → return the house shape with
@@ -184,7 +185,10 @@ modeled on the DDG suite's recorder pattern but with OpenAI-shaped bodies):
 6. Alias: `get_backend("sd")` resolves the same class as `"stable-diffusion"`
    (loader `_backend_aliases` contract test).
 7. `generate_stream()` yields exactly one delta equal to `generate().content`.
-8. `sd_cpp_extra_args` encoding test (pinned against api.md in P0).
+8. `sd_cpp_extra_args` encoding test (pinned against api.md in P0). — **RESOLVED
+   R07.32**: encoding pinned from source (228c707) and live-wired via the
+   `--max-steps` → `sample_steps` remap; `TestSampleStepsOverride` pins the
+   single-line block, the no-double-append rule, and the 1–100 validation.
 
 Live test: run the notebook's serve cell, then `agentkthx run "a lovely cat" --backend sd`
 against `http://127.0.0.1:1234` — expect a PNG in `./generated/`. This is the
@@ -212,6 +216,10 @@ challenge ladder, no SSE grammar).
   notebook markdown (sd-turbo default exists precisely for this).
 - **`sd_cpp_extra_args` encoding** — api.md says fields ride *inside* `prompt`; the
   exact syntax must be pinned from api.md §OpenAI API before P0 merges (test 8).
+  **RESOLVED 2026-10-10**: syntax pinned from source at 228c707 (see §2 Runtime
+  sample-steps row) — `<sd_cpp_extra_args>{"sample_params":{"sample_steps":N}}
+  </sd_cpp_extra_args>`, single-line JSON, server clamps 1–100, A1111 route also
+  takes `steps` directly; wired into the plugin via the R07.32 `--max-steps` remap.
 - **Artifact dir growth** — PNGs accumulate; P1 may add a retention knob
   (`AGENTKTHX_ARTIFACTS_KEEP`, default keep-all).
 - **Frontend build requirement** — the server README mentions an embedded web UI built
