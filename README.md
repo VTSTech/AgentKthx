@@ -25,6 +25,7 @@ Inspired by the architecture of OpenClaw, rebuilt from scratch for local-first o
 <img width="1042" height="650" alt="image" src="https://github.com/user-attachments/assets/7743850a-634b-4fe6-96ea-977a96c26572" />
 <img width="672" height="617" alt="image" src="https://github.com/user-attachments/assets/59b4a074-fd8a-4970-8289-5ec671324a94" />
 <img width="1553" height="648" alt="image" src="https://github.com/user-attachments/assets/aeeb37b8-8f80-429b-b0e3-a31f8b3a482d" />
+<img width="1311" height="668" alt="image" src="https://github.com/user-attachments/assets/b813736c-4944-4b11-96c1-27aeda70b9e8" />
 
 
 
