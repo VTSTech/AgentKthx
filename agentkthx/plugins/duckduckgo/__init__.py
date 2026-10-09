@@ -2,10 +2,13 @@
 AgentKthx Plugin — DuckDuckGo AI Chat Backend
 
 DuckDuckGo AI Chat (duck.ai) backend — the keyless, anonymous,
-zero-cost LLM surface: no API key, no signup, no quota. Frontier
-upstream models (GPT-4o mini, o3-mini, Claude Haiku, Llama 3.3 70B,
-Mistral Small 3 24B) proxied through DuckDuckGo's privacy layer via
-the NON-OpenAI /duckchat/v1 protocol (x-vqd-4 token handshake).
+zero-cost LLM surface: no API key, no signup, no quota. Current
+lineup (GPT-6 Luna, GPT-5.6 Luna, GPT-5.4 Nano/Mini, Claude
+Haiku 4.5, Mistral Small 4, and the Tinfoil-hosted gpt-oss-120b /
+Gemma 4 31B) proxied through DuckDuckGo's privacy layer via the
+NON-OpenAI /duckchat/v1 protocol — now CHALLENGE-BASED (the
+x-vqd-hash-1 JS proof replaced the retired x-vqd-4 token; solved
+by the bundled Node helper).
 
 The only AgentKthx cloud backend that subclasses BaseBackend
 directly instead of CloudBackend — see duckduckgo.py for the

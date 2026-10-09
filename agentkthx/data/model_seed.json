@@ -1925,50 +1925,77 @@
     }
   },
   "duckduckgo": {
-    "gpt-4o-mini": {
+    "gpt-6-luna": {
       "context_length": 128000,
       "default_temperature": 0.7,
       "default_max_tokens": 16384,
       "family": "gpt",
       "free_tier": true,
-      "upstream": "OpenAI GPT-4o mini",
-      "note": "DuckDuckGo's own default model"
+      "upstream": "OpenAI GPT-6 Luna (via DDG proxy)",
+      "note": "DuckDuckGo's own default model ('Best for everyday use'); verified against the live dropdown + benoitpetit/duckduckgo-chat-cli models.go, 2026-10-09"
     },
-    "claude-3-haiku-20240307": {
+    "gpt-5.6-luna": {
+      "context_length": 128000,
+      "default_temperature": 0.7,
+      "default_max_tokens": 16384,
+      "family": "gpt",
+      "free_tier": true,
+      "upstream": "OpenAI GPT-5.6 Luna (via DDG proxy)",
+      "note": "Previous Luna model; legacy alias gpt-4o-mini resolves here (duckduckgo-chat-cli compat map)"
+    },
+    "gpt-5.4-nano": {
+      "context_length": 128000,
+      "default_temperature": 0.7,
+      "default_max_tokens": 16384,
+      "family": "gpt",
+      "free_tier": true,
+      "upstream": "OpenAI GPT-5.4 Nano (via DDG proxy)",
+      "note": "Fast, lightweight tier; alias 'nano' resolves here"
+    },
+    "gpt-5.4-mini": {
+      "context_length": 128000,
+      "default_temperature": 0.7,
+      "default_max_tokens": 16384,
+      "family": "gpt",
+      "free_tier": true,
+      "upstream": "OpenAI GPT-5.4 Mini (via DDG proxy)",
+      "note": "'Solid but hits limits sooner'; legacy aliases o3-mini / o4mini resolve here"
+    },
+    "claude-haiku-4-5": {
       "context_length": 200000,
       "default_temperature": 0.7,
       "default_max_tokens": 8192,
       "family": "claude",
       "free_tier": true,
-      "upstream": "Anthropic Claude Haiku",
-      "note": "Help page lists 'Claude 4.5 Haiku' — DDG fronts the upgraded upstream behind the same claude-3-haiku wire ID (verified: the mumu-lhl v3.3.0 client still sends this ID); alias 'claude-3-haiku' resolves here"
+      "upstream": "Anthropic Claude Haiku 4.5",
+      "note": "Alias 'claude' resolves here; legacy claude-3-haiku / claude-3-haiku-20240307 IDs rotated out (now 404 ERR_MODEL_UNAVAILABLE)"
     },
-    "meta-llama/Llama-3.3-70B-Instruct-Turbo": {
+    "mistral-small-2603": {
       "context_length": 128000,
       "default_temperature": 0.7,
-      "default_max_tokens": 4096,
-      "family": "llama",
-      "free_tier": true,
-      "upstream": "Meta Llama 3.3 70B (via Together)",
-      "note": "Largest free model; alias 'llama' resolves here; replaced the Llama 3.1 70B Turbo slot"
-    },
-    "mistralai/Mistral-Small-24B-Instruct-2501": {
-      "context_length": 32768,
-      "default_temperature": 0.7,
-      "default_max_tokens": 4096,
+      "default_max_tokens": 8192,
       "family": "mistral",
       "free_tier": true,
-      "upstream": "Mistral Small 3 24B",
-      "note": "Alias 'mixtral' resolves here — the Mixtral-8x7B slot was replaced by Mistral Small 3 (mumu-lhl mapping)"
+      "upstream": "Mistral Small 4",
+      "note": "Display name 'Mistral Small 4'; wire ID is mistral-small-2603 (NOT mistral-small-4); alias 'mixtral' resolves here"
     },
-    "o3-mini": {
-      "context_length": 200000,
+    "tinfoil/gpt-oss-120b": {
+      "context_length": 128000,
       "default_temperature": 0.7,
-      "default_max_tokens": 100000,
-      "family": "o3",
+      "default_max_tokens": 16384,
+      "family": "gpt-oss",
       "free_tier": true,
-      "upstream": "OpenAI o3-mini (reasoning)",
-      "note": "Reasoning model — but DDG's privacy layer never surfaces chain-of-thought, so think shows no (see test_thinking_support)"
+      "upstream": "OpenAI gpt-oss-120b on Tinfoil (zero provider visibility)",
+      "note": "Open-weight reasoning model served with reasoningEffort 'low'; alias 'llama' resolves here (the open-weights slot)"
+    },
+    "tinfoil/gemma4-31b": {
+      "context_length": 128000,
+      "default_temperature": 0.7,
+      "default_max_tokens": 8192,
+      "family": "gemma",
+      "free_tier": true,
+      "upstream": "Google Gemma 4 31B on Tinfoil (zero provider visibility)",
+      "note": "BETA in the dropdown; served with reasoningEffort 'low'; alias 'gemma' resolves here"
     }
   }
 }
