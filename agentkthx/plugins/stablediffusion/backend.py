@@ -12,10 +12,22 @@ Image-generation backend for an externally-managed sd.cpp server
 - ``is_cloud = False`` (R06.57 MAINT-05 precedent): local server — no rate
   limits, no billing, no cloud column layout, buffered output by default.
 
-Wire facts (verified against sd.cpp master + live Colab server, 2026-10-10):
+Wire facts (verified against sd.cpp source at the release tag
+master-948-228c707 / commit 228c707 + live Colab server, 2026-10-10):
 
-- ``GET  /v1/models``            → ``{"data": [{"id": "sd-cpp-local", ...}]}``
-  ONE fixed pseudo-model id regardless of loaded weights.
+- ``GET /v1/models`` → ``{"data": [{"id": "sd-cpp-local", ...}]}``.
+  ONE fixed pseudo-model id — hardcoded in routes_openai.cpp, NEVER
+  reflects the loaded weights.
+- ``GET /sdcpp/v1/capabilities`` → the REAL loaded weights:
+  ``{"model": {"name": "sd_turbo.safetensors", "stem": "sd_turbo",
+  "path": "/content/sd_models/sd_turbo.safetensors"}, ...}`` plus defaults
+  (steps/cfg/scheduler), limits (64–4096 px, batch ≤ 8), samplers,
+  schedulers, output_formats. All fields are empty strings when the
+  server was started without ``-m`` / ``--diffusion-model``.
+  A1111-compat alternates: ``GET /sdapi/v1/sd-models`` and
+  ``GET /sdapi/v1/options`` (``sd_model_checkpoint``) — their hash and
+  sha256 fields are hardcoded dummy values ("8888888888…"), so
+  capabilities is the only worthwhile discovery surface.
 - ``POST /v1/images/generations`` → ``{"prompt", "n", "size", "output_format"}``.
   NO ``model`` field on the wire — the server serves its loaded pool, so
   ``--model`` here is advisory only (warned, never sent).
@@ -112,13 +124,45 @@ class StableDiffusionBackend(OpenAICompatibleBackend):
     # ------------------------------------------------------------------
 
     def list_models(self) -> list[dict]:
-        """List the server's loaded pool via GET /v1/models.
+        """List the server's loaded model.
 
-        The sd.cpp server reports ONE fixed pseudo-model id
-        ("sd-cpp-local") regardless of which weights are loaded — it is
-        surfaced verbatim as the catalog entry's ``name``. Transient
+        Precedence:
+
+        1. ``GET /sdcpp/v1/capabilities`` — reports the REAL loaded
+           weights (``model.stem``, e.g. "sd_turbo"). Used as the
+           catalog ``name`` so ``--model sd_turbo`` and the CLI banner
+           reflect the actual checkpoint.
+        2. ``GET /v1/models`` fallback — ONE fixed pseudo-model id
+           ("sd-cpp-local"), hardcoded server-side. Covers servers
+           started without ``-m`` (empty capabilities model block) and
+           builds older than the capabilities endpoint.
+
+        Neither the pseudo id nor the real stem is ever used to gate
+        generation — ``generate()`` transmits no model field. Transient
         failures return [] (house convention, like OllamaBackend).
         """
+        # Preferred discovery surface — real loaded weights.
+        caps = self._fetch_capabilities()
+        if caps is not None:
+            model_block = caps.get("model") or {}
+            stem = (model_block.get("stem") or model_block.get("name") or "").strip()
+            if stem:
+                return [
+                    {
+                        "name": stem,
+                        "size": 0,
+                        "details": {
+                            "family": "stable-diffusion",
+                            "backend": "stable-diffusion",
+                            "filename": model_block.get("name"),
+                            "path": model_block.get("path"),
+                            "supported_modes": caps.get("supported_modes"),
+                            "owned_by": "local",
+                        },
+                    }
+                ]
+
+        # Fallback — OpenAI-compat pseudo id (never reflects the weights).
         url = f"{self.base_url}/v1/models"
         try:
             req = urllib.request.Request(url, method="GET")
@@ -143,6 +187,37 @@ class StableDiffusionBackend(OpenAICompatibleBackend):
                 }
             )
         return entries
+
+    def get_model_info(self, model: str) -> dict | None:
+        """Model metadata via GET /sdcpp/v1/capabilities (cached).
+
+        ``model`` is advisory here too — capabilities describes whatever
+        weights the server loaded, regardless of the name passed. The
+        raw capabilities payload is returned with a house-shaped
+        ``details`` block merged in (Ollama get_model_info precedent),
+        so consumers like _detect_weight_quant find ``details.family``.
+        Returns None when the server is unreachable (house convention).
+        """
+        if not hasattr(self, "_capabilities_cache"):
+            self._capabilities_cache: dict | None = None
+            self._capabilities_fetched = False
+        if not self._capabilities_fetched:
+            self._capabilities_cache = self._fetch_capabilities()
+            self._capabilities_fetched = True
+        caps = self._capabilities_cache
+        if caps is None:
+            return None
+
+        info = dict(caps)
+        model_block = caps.get("model") or {}
+        info["details"] = {
+            "family": "stable-diffusion",
+            "backend": "stable-diffusion",
+            "name": model_block.get("stem") or model,
+            "filename": model_block.get("name"),
+            "path": model_block.get("path"),
+        }
+        return info
 
     # ------------------------------------------------------------------
     # Generation
@@ -309,6 +384,28 @@ class StableDiffusionBackend(OpenAICompatibleBackend):
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------
+
+    def _fetch_capabilities(self) -> dict | None:
+        """GET /sdcpp/v1/capabilities with a short probe timeout.
+
+        Returns the parsed JSON, or None on ANY failure (unreachable,
+        non-2xx, malformed body) — callers fall back to the /v1/models
+        pseudo id. The 10 s probe matches list_models()'s transport
+        budget and keeps CLI startup snappy when the server is down.
+        """
+        url = f"{self.base_url}/sdcpp/v1/capabilities"
+        try:
+            req = urllib.request.Request(url, method="GET")
+            with urllib.request.urlopen(req, timeout=10) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except (
+            urllib.error.HTTPError,
+            urllib.error.URLError,
+            TimeoutError,
+            OSError,
+            ValueError,
+        ):
+            return None
 
     @staticmethod
     def _flatten_messages(messages: list[dict]) -> str:

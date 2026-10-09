@@ -181,6 +181,132 @@ class TestListModels(unittest.TestCase):
             self.assertEqual(backend.list_models(), [])
 
 
+class TestCapabilitiesDiscovery(unittest.TestCase):
+    """§2 wire facts — /sdcpp/v1/capabilities exposes the REAL loaded weights.
+
+    Source-verified at the release tag master-948-228c707 (commit 228c707):
+    routes_sdcpp.cpp builds result["model"] = {name, stem, path} from
+    resolve_display_model_path() — -m/--model first, else
+    --diffusion-model, else all-empty strings. /v1/models stays a
+    hardcoded "sd-cpp-local" pseudo id (routes_openai.cpp).
+    """
+
+    def _caps_payload(self) -> dict:
+        """Shape of /sdcpp/v1/capabilities (routes_sdcpp.cpp, 228c707)."""
+        return {
+            "model": {
+                "name": "sd_turbo.safetensors",
+                "stem": "sd_turbo",
+                "path": "/content/sd_models/sd_turbo.safetensors",
+            },
+            "current_mode": "img_gen",
+            "supported_modes": ["img_gen"],
+            "limits": {"max_batch_count": 8, "max_width": 4096},
+        }
+
+    @staticmethod
+    def _routing_urlopen(responses: dict, capabilities_first: bool = True):
+        """Route mock urlopen by request URL.
+
+        `responses` maps full_url → response/exception. Any URL not in
+        the map that ends with /capabilities raises HTTPError 404; any
+        other unrouted URL maps through _models_payload() behavior only
+        when explicitly provided — otherwise URLError.
+        """
+
+        def handler(req, timeout=None):
+            url = req.full_url
+            if url in responses:
+                entry = responses[url]
+                if isinstance(entry, Exception):
+                    raise entry
+                return entry
+            if url.endswith("/sdcpp/v1/capabilities"):
+                raise urllib.error.HTTPError(url, 404, "not found", {}, io.BytesIO(b"{}"))
+            if url.endswith("/v1/models"):
+                return _ok_response(_models_payload())
+            raise urllib.error.URLError(f"unrouted url in test: {url}")
+
+        return handler
+
+    def test_list_models_prefers_capabilities_stem(self):
+        backend = _make_backend()
+        handler = self._routing_urlopen(
+            {"http://127.0.0.1:1234/sdcpp/v1/capabilities": _ok_response(self._caps_payload())}
+        )
+        with patch("urllib.request.urlopen", side_effect=handler):
+            models = backend.list_models()
+
+        self.assertEqual(len(models), 1)
+        entry = models[0]
+        self.assertEqual(entry["name"], "sd_turbo")
+        self.assertEqual(entry["details"]["filename"], "sd_turbo.safetensors")
+        self.assertEqual(entry["details"]["path"], "/content/sd_models/sd_turbo.safetensors")
+        self.assertEqual(entry["details"]["family"], "stable-diffusion")
+        self.assertEqual(entry["details"]["owned_by"], "local")
+
+    def test_list_models_falls_back_when_capabilities_model_block_empty(self):
+        # Server started WITHOUT -m / --diffusion-model: all fields "".
+        empty_caps = {"model": {"name": "", "stem": "", "path": ""}}
+        backend = _make_backend()
+        handler = self._routing_urlopen(
+            {"http://127.0.0.1:1234/sdcpp/v1/capabilities": _ok_response(empty_caps)}
+        )
+        with patch("urllib.request.urlopen", side_effect=handler):
+            models = backend.list_models()
+        self.assertEqual(models[0]["name"], "sd-cpp-local")
+
+    def test_list_models_falls_back_when_capabilities_404(self):
+        # Older server build without the capabilities endpoint.
+        backend = _make_backend()
+        with patch("urllib.request.urlopen", side_effect=self._routing_urlopen({})):
+            models = backend.list_models()
+        self.assertEqual(models[0]["name"], "sd-cpp-local")
+
+    def test_list_models_returns_empty_when_both_surfaces_fail(self):
+        backend = _make_backend()
+        with patch(
+            "urllib.request.urlopen",
+            side_effect=urllib.error.URLError("connection refused"),
+        ):
+            self.assertEqual(backend.list_models(), [])
+
+    def test_get_model_info_merges_house_details_block(self):
+        backend = _make_backend()
+        handler = self._routing_urlopen(
+            {"http://127.0.0.1:1234/sdcpp/v1/capabilities": _ok_response(self._caps_payload())}
+        )
+        with patch("urllib.request.urlopen", side_effect=handler):
+            info = backend.get_model_info("anything-advisory")
+
+        self.assertIsNotNone(info)
+        self.assertEqual(info["details"]["family"], "stable-diffusion")
+        # Real stem wins over the advisory name.
+        self.assertEqual(info["details"]["name"], "sd_turbo")
+        self.assertEqual(info["details"]["filename"], "sd_turbo.safetensors")
+        # Raw capabilities keys survive the merge.
+        self.assertEqual(info["current_mode"], "img_gen")
+
+    def test_get_model_info_none_when_unreachable(self):
+        backend = _make_backend()
+        with patch(
+            "urllib.request.urlopen",
+            side_effect=urllib.error.URLError("connection refused"),
+        ):
+            self.assertIsNone(backend.get_model_info("sd_turbo"))
+
+    def test_get_model_info_caches_capabilities_probe(self):
+        backend = _make_backend()
+        handler = self._routing_urlopen(
+            {"http://127.0.0.1:1234/sdcpp/v1/capabilities": _ok_response(self._caps_payload())}
+        )
+        with patch("urllib.request.urlopen", side_effect=handler) as mock_urlopen:
+            backend.get_model_info("a")
+            backend.get_model_info("b")
+        # One probe total — the second call hits the instance cache.
+        self.assertEqual(mock_urlopen.call_count, 1)
+
+
 # ---------------------------------------------------------------------------
 # §6 tests 2+3 — generate(): wire body, flattening, artifact pipeline
 # ---------------------------------------------------------------------------

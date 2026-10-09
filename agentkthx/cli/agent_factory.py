@@ -184,6 +184,22 @@ def _build_agent(args: argparse.Namespace, config) -> Agent:
                 print(f"  [bitnet] Discovered model: {model}")
         else:
             model = "bitnet"
+    elif backend_name in ("stable-diffusion", "sd"):
+        # sd.cpp reports the REAL loaded weights on /sdcpp/v1/capabilities
+        # (model.stem, e.g. "sd_turbo") and a fixed pseudo id on /v1/models
+        # ("sd-cpp-local", hardcoded server-side). Never inherit
+        # config.default_model — that names the DEFAULT backend's LLM
+        # (an Ollama tag like qwen2.5:0.5b), meaningless on an image
+        # backend. Model names are advisory here regardless: generate()
+        # transmits no model field.
+        temp_backend = get_backend(backend_name, timeout=timeout, api_mode=api_mode)
+        discovered = temp_backend.list_models()
+        if discovered and discovered[0].get("name"):
+            model = discovered[0]["name"]
+            if os.environ.get("AGENTKTHX_DEBUG"):
+                print(f"  [{backend_name}] Discovered model: {model}")
+        else:
+            model = "sd-cpp-local"
     else:
         model = config.default_model
 
