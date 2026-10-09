@@ -76,7 +76,13 @@ ollama = "agentkthx.backends.ollama:OllamaBackend"
 include = ["agentkthx", "agentkthx.*", "agentnova", "localclaw"]
 
 [tool.setuptools.package-data]
-agentkthx = ["py.typed", "skills/*/SKILL.md", "souls/*/soul.json", "souls/*/*.md", "plugins/*/plugin.json", "schemas/v0.2/plugin.schema.json", "data/*.json"]
+# plugins/*/*.js — the duckduckgo plugin's Node helpers (ddg_vqd.js /
+# ddg_durable.js / ddg_capture.js). Without this line a `pip install .`
+# copies the plugin's .py files but DROPS the .js helpers, and every
+# generate() dies with "Cannot find module .../ddg_durable.js" at
+# runtime (found live 2026-10-09 — the site-packages install had no
+# .js files at all).
+agentkthx = ["py.typed", "skills/*/SKILL.md", "souls/*/soul.json", "souls/*/*.md", "plugins/*/plugin.json", "plugins/*/*.js", "schemas/v0.2/plugin.schema.json", "data/*.json"]
 
 [tool.black]
 line-length = 100

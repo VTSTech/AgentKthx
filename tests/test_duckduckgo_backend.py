@@ -172,9 +172,12 @@ def _chat_sse_error(err_type: str, status: int = 401, fresh: str = "CHAL-C1") ->
     return _FakeResponse(body, {"x-vqd-hash-1": fresh})
 
 
-def _http_error(code: int, body: bytes = b"", url: str = CHAT_URL) -> urllib.error.HTTPError:
-    """A raisable HTTPError with a drainable body."""
-    return urllib.error.HTTPError(url, code, "boom", {}, io.BytesIO(body))
+def _http_error(
+    code: int, body: bytes = b"", url: str = CHAT_URL, headers: dict | None = None
+) -> urllib.error.HTTPError:
+    """A raisable HTTPError with a drainable body (+ optional headers
+    — e.g. the x-vqd-hash-1 ladder challenge a 418 teapot carries)."""
+    return urllib.error.HTTPError(url, code, "boom", headers or {}, io.BytesIO(body))
 
 
 class _Recorder:
@@ -253,6 +256,8 @@ def backend():
     b._node_ok = True  # solver/keygen faked below — node never spawns
     b._solve_challenge = lambda ch: json.loads(json.dumps(_RAW_SOLUTION))
     b._mint_durable = lambda: json.loads(json.dumps(_DURABLE))
+    b._MIN_CHAT_INTERVAL_S = 0  # pacing off — the suite never waits
+    DuckDuckGoBackend._last_chat_monotonic = 0.0  # no cross-test pace leaks
     return b
 
 
@@ -871,6 +876,73 @@ class TestGenerateErrorTaxonomy:
         with pytest.raises(RuntimeError, match="persisted"):
             backend.generate("gpt-6-luna", [{"role": "user", "content": "Hi"}])
 
+    # -- HTTP 418 teapot: proof rejected / challenge ladder escalation --
+
+    def test_418_ladder_reproof_then_success(self, backend, recorder, monkeypatch):
+        """A 418 carrying x-vqd-hash-1 hands us the NEXT challenge — the
+        retry must solve THAT, not re-bootstrap from /status."""
+        monkeypatch.setattr("time.sleep", lambda s: None)
+        detail = json.dumps(
+            {
+                "action": "error",
+                "status": 418,
+                "type": "ERR_CHALLENGE",
+                "overrideCode": "d78d",
+                "cd": {"i": "3"},
+            }
+        ).encode()
+        recorder.chat_errors = [_http_error(418, detail, headers={"x-vqd-hash-1": "CHAL-LADDER"})]
+        _wire(monkeypatch, recorder)
+        out = backend.generate("gpt-6-luna", [{"role": "user", "content": "Hi"}])
+        assert out["content"] == "Hello world"
+        assert len(recorder.chat_requests) == 2
+        # the ladder was used — exactly ONE /status (the first bootstrap)
+        assert len(recorder.status_requests) == 1
+
+    def test_418_without_ladder_rebootstraps_from_status(self, backend, recorder, monkeypatch):
+        """No challenge on the 418 → fall back to a fresh /status."""
+        monkeypatch.setattr("time.sleep", lambda s: None)
+        recorder.chat_errors = [_http_error(418, b'{"type":"ERR_CHALLENGE"}')]
+        _wire(monkeypatch, recorder)
+        out = backend.generate("gpt-6-luna", [{"role": "user", "content": "Hi"}])
+        assert out["content"] == "Hello world"
+        assert len(recorder.status_requests) == 2
+
+    def test_418_retry_applies_duration_floor(self, backend, recorder, monkeypatch):
+        """Retried proofs report a plausible solve duration (>= the
+        floor) — strict routes flag sub-100ms solves. The FIRST
+        attempt stays honest."""
+        monkeypatch.setattr("time.sleep", lambda s: None)
+        recorder.chat_errors = [_http_error(418, b"teapot")]
+        _wire(monkeypatch, recorder)
+        backend.generate("gpt-6-luna", [{"role": "user", "content": "Hi"}])
+        first = json.loads(base64.b64decode(recorder.chat_header(0, "X-Vqd-Hash-1")))
+        assert int(first["meta"]["duration"]) >= 1  # honest, unfloored
+        retried = json.loads(base64.b64decode(recorder.chat_header(1, "X-Vqd-Hash-1")))
+        assert int(retried["meta"]["duration"]) >= ddg._PROOF_DURATION_FLOOR_MS
+
+    def test_418_persisted_after_budget_raises(self, backend, recorder, monkeypatch):
+        """1 initial + _CHALLENGE_RETRIES re-solves, then a RuntimeError
+        carrying the 418 body for diagnosis."""
+        monkeypatch.setattr("time.sleep", lambda s: None)
+        recorder.chat_errors = [_http_error(418, b'teapot {"type":"ERR_CHALLENGE"}')] * 4
+        _wire(monkeypatch, recorder)
+        with pytest.raises(RuntimeError, match="418"):
+            backend.generate("gpt-6-luna", [{"role": "user", "content": "Hi"}])
+        assert len(recorder.chat_requests) == 4
+
+    def test_anti_bot_cookies_and_client_hints_present(self, backend, recorder, monkeypatch):
+        """The minimum cookie set (5=1; dcm=3; dcs=1) + Chromium client
+        hints ride on EVERY request — the anti-bot contract the strict
+        routes enforce (mirrors benoitpetit/duckduckgo-chat-cli)."""
+        _wire(monkeypatch, recorder)
+        backend.generate("gpt-6-luna", [{"role": "user", "content": "Hi"}])
+        for req in (recorder.status_requests[0], recorder.chat_requests[0]):
+            assert recorder.header(req, "Cookie") == "5=1; dcm=3; dcs=1"
+            assert recorder.header(req, "sec-ch-ua") == ddg._SEC_CH_UA
+            assert recorder.header(req, "sec-ch-ua-mobile") == "?0"
+            assert recorder.header(req, "sec-ch-ua-platform") == '"Linux"'
+
     def test_generic_sse_error_surfaces(self, backend, recorder, monkeypatch):
         recorder.chat_responses = [_chat_sse_error("ERR_SOMETHING_ELSE", 500)]
         _wire(monkeypatch, recorder)
@@ -976,6 +1048,31 @@ class TestGenerateStream:
         with pytest.raises(RuntimeError, match="persisted"):
             list(backend.generate_stream("gpt-6-luna", [{"role": "user", "content": "Hi"}]))
 
+    def test_stream_418_ladder_reproof_then_success(self, backend, recorder, monkeypatch):
+        """Stream path climbs the 418 ladder: the response-header
+        challenge is solved for the retry (no /status re-bootstrap)."""
+        monkeypatch.setattr("time.sleep", lambda s: None)
+        recorder.chat_errors = [
+            _http_error(
+                418,
+                b'{"type":"ERR_CHALLENGE"}',
+                headers={"x-vqd-hash-1": "CHAL-L2"},
+            )
+        ]
+        _wire(monkeypatch, recorder)
+        chunks = list(backend.generate_stream("gpt-6-luna", [{"role": "user", "content": "Hi"}]))
+        assert chunks == ["Hello", " world"]
+        assert len(recorder.chat_requests) == 2
+        assert len(recorder.status_requests) == 1
+
+    def test_stream_418_persisted_after_budget_raises(self, backend, recorder, monkeypatch):
+        monkeypatch.setattr("time.sleep", lambda s: None)
+        recorder.chat_errors = [_http_error(418, b"teapot")] * 4
+        _wire(monkeypatch, recorder)
+        with pytest.raises(RuntimeError, match="418"):
+            list(backend.generate_stream("gpt-6-luna", [{"role": "user", "content": "Hi"}]))
+        assert len(recorder.chat_requests) == 4
+
     def test_stream_404_mentions_catalog_rotation(self, backend, recorder, monkeypatch):
         detail = json.dumps({"action": "error", "status": 404, "type": "ERR_MODEL_UNAVAILABLE"})
         recorder.chat_errors = [_http_error(404, detail.encode())]
@@ -1012,6 +1109,41 @@ class TestGenerateStream:
     def test_stream_empty_messages_refused(self, backend):
         with pytest.raises(ValueError, match="no messages after system collapse"):
             list(backend.generate_stream("gpt-6-luna", []))
+
+
+# ---------------------------------------------------------------------------
+# Chat pacing — DUCKDUCKGO_MIN_INTERVAL wiring (anti-429 courtesy)
+# ---------------------------------------------------------------------------
+
+
+class TestChatPacing:
+    """The minimum /chat POST gap — declared in v0.2.0 but only wired
+    after the 2026-10-09 429 storm + 418 escalation session."""
+
+    def test_second_post_waits_out_the_interval(self, backend, recorder, monkeypatch):
+        sleeps: list[float] = []
+        monkeypatch.setattr("time.sleep", lambda s: sleeps.append(s))
+        backend._MIN_CHAT_INTERVAL_S = 5.0
+        _wire(monkeypatch, recorder)
+        backend.generate("gpt-6-luna", [{"role": "user", "content": "A"}])
+        assert sleeps == []  # no prior chat — the first POST is immediate
+        backend.generate("gpt-6-luna", [{"role": "user", "content": "B"}])
+        assert sleeps and 0 < sleeps[0] <= 5.0
+
+    def test_interval_zero_disables_pacing(self, backend, recorder, monkeypatch):
+        sleeps: list[float] = []
+        monkeypatch.setattr("time.sleep", lambda s: sleeps.append(s))
+        backend._MIN_CHAT_INTERVAL_S = 0
+        _wire(monkeypatch, recorder)
+        backend.generate("gpt-6-luna", [{"role": "user", "content": "A"}])
+        backend.generate("gpt-6-luna", [{"role": "user", "content": "B"}])
+        assert sleeps == []
+
+    def test_env_override_sets_interval(self, monkeypatch):
+        monkeypatch.setenv("DUCKDUCKGO_MIN_INTERVAL", "0")
+        assert DuckDuckGoBackend()._MIN_CHAT_INTERVAL_S == 0
+        monkeypatch.setenv("DUCKDUCKGO_MIN_INTERVAL", "7.5")
+        assert DuckDuckGoBackend()._MIN_CHAT_INTERVAL_S == 7.5
 
 
 # ---------------------------------------------------------------------------

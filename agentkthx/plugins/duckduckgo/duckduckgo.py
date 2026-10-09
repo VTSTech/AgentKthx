@@ -74,7 +74,32 @@ Protocol constraints honored here:
     as they arrive (FEAT-10 — CLOSED by this rotation).
   - Node is a runtime dependency for the challenge solver and the
     durableStream keypair (subprocess, no npm packages). Without
-    node on PATH this backend fails fast with a clear message.
+    node on PATH this backend fails fast with a clear message; the
+    same fail-fast applies when the bundled .js helpers are missing
+    from the installed package (pip builds predating the package-data
+    fix dropped them — the remediation says how to fix the install).
+  - Anti-bot contract v3 (2026-10-09 hardening, learned from the
+    429 storm, the 418 teapot escalation, and the maintained Go
+    client): minimum cookie set (``5=1; dcm=3; dcs=1``) + Chromium
+    client hints on every request; HTTP 418 (the teapot — proof
+    rejected or the challenge ladder escalated; observed 2026-10-09
+    on the strict routes gpt-6-luna, claude-haiku-4-5,
+    tinfoil/gemma4-31b) joins 401/SSE-ERR_CHALLENGE as a retryable
+    proof failure: up to ``_CHALLENGE_RETRIES`` re-solves,
+    preferring the challenge carried on the 418's own
+    ``x-vqd-hash-1`` response header (the ladder), falling back to
+    /status, and escalating the proof's reported solve duration to
+    a plausible floor (strict routes flag sub-100ms solves); 429
+    surfaces the server's Retry-After when present; /chat POSTs
+    are paced to DUCKDUCKGO_MIN_INTERVAL (default 3s) so agentic
+    loops don't rate-limit themselves.
+  - Proof modes: ``synth`` (default — /status challenge solved by
+    the bundled Node helper) or DUCKDUCKGO_PROOF_MODE=capture (a
+    real headless-Chromium session loads duck.ai, the PAGE builds
+    its own proof, and the outgoing /chat request is intercepted +
+    aborted before it consumes quota — the exact design the
+    maintained Go client ships; needs a local Chrome/Chromium and
+    Node >= 22).
 
 Model catalog (wire IDs — the 2025-era IDs now 404 with
 ERR_MODEL_UNAVAILABLE; verified 2026-10-09):
@@ -130,11 +155,46 @@ _DEFAULT_UA = (
     "(KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"
 )
 
-#: Bundled Node helpers (challenge solver + durableStream keygen).
-#: Shipped inside the plugin package so the backend is self-contained.
+#: Bundled Node helpers (challenge solver + durableStream keygen +
+#: optional browser proof-capture). Shipped inside the plugin package
+#: so the backend is self-contained — pyproject package-data MUST
+#: include plugins/*/*.js or pip installs silently drop them (live
+#: finding 2026-10-09: the site-packages install had no .js at all).
 _PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
 _SOLVER_JS = os.path.join(_PLUGIN_DIR, "ddg_vqd.js")
 _DURABLE_JS = os.path.join(_PLUGIN_DIR, "ddg_durable.js")
+_CAPTURE_JS = os.path.join(_PLUGIN_DIR, "ddg_capture.js")
+
+#: Minimum cookie contract (mirrors benoitpetit/duckduckgo-chat-cli,
+#: which sets exactly these three on every request). Cheap to send,
+#: plausibly checked by the anti-bot layer on /chat.
+_MIN_COOKIES = "5=1; dcm=3; dcs=1"
+
+#: Client hints consistent with the default UA (Chrome 136 / Linux).
+#: The challenge's client_hashes[0] binds the proof to the UA header;
+#: these hints ride along the way a real Chromium sends them.
+_SEC_CH_UA = '"Chromium";v="136", "Not.A/Brand";v="99", "Google Chrome";v="136"'
+_SEC_CH_UA_PLATFORM = '"Linux"'
+
+#: Proof duration plausibility floor (ms). The Node solver finishes
+#: a challenge in 60-90ms — faster than any real browser could run
+#: the obfuscated bundle. The strict model routes (2026-10-09: the
+#: ones answering HTTP 418 ERR_CHALLENGE) plausibility-check
+#: ``meta.duration``; 418 retries re-solve with this floor applied
+#: (the first attempt stays honest).
+_PROOF_DURATION_FLOOR_MS = 250
+
+#: Pause between 418 re-solve rounds — the teapot ladder is climbed
+#: politely, not hammered.
+_CHALLENGE_RETRY_SLEEP_S = 1.0
+
+#: Proof acquisition mode. "synth" (default) = fetch challenge ->
+#: Node solve -> build header. "capture" = make a real headless
+#: Chromium load duck.ai and lift the proof off its aborted /chat
+#: request (the approach the maintained Go client shipped after the
+#: 2026-10 hardening — immune to proof-validation tightening, needs
+#: a local Chrome/Chromium + Node >= 22). Set DUCKDUCKGO_PROOF_MODE.
+_PROOF_MODE = (os.environ.get("DUCKDUCKGO_PROOF_MODE") or "synth").strip().lower()
 
 #: Frontend metadata fallbacks (user capture, 2026-10-08 build).
 #: Best-effort refreshed from the homepage HTML at runtime — the
@@ -302,6 +362,16 @@ class DuckDuckGoBackend(BaseBackend):
 
     #: Catalog cache TTL for list_models() (house: 1h).
     _MODEL_CACHE_TTL_SECONDS = 3600
+
+    #: Minimum wall-clock gap between /chat POSTs (per-IP courtesy —
+    #: DDG's anonymous limit is strict and undocumented, and agentic
+    #: loops fire turns back-to-back). Override or disable via
+    #: DUCKDUCKGO_MIN_INTERVAL (seconds; 0 disables). Tests zero the
+    #: class attribute on the fixture.
+    _MIN_CHAT_INTERVAL_S = 3.0
+    _last_chat_monotonic: float = 0.0
+    #: 418 ERR_CHALLENGE re-solve budget (teapot ladder climbing).
+    _CHALLENGE_RETRIES: int = 3
     #: model_cache namespace (unchanged — same key as pre-rotation).
     MODEL_CACHE_KEY = "duckduckgo"
 
@@ -327,6 +397,16 @@ class DuckDuckGoBackend(BaseBackend):
         #: solved probes and the request headers invalidates the
         #: proof). Precedence: kwarg > DUCKDUCKGO_USER_AGENT > Chrome 136.
         self._user_agent = user_agent or DUCKDUCKGO_USER_AGENT or _DEFAULT_UA
+
+        #: /chat pacing override — DUCKDUCKGO_MIN_INTERVAL (seconds,
+        #: 0 disables). Read here (not config.py) to keep the plugin
+        #: self-contained; garbage values keep the class default.
+        try:
+            self._MIN_CHAT_INTERVAL_S = float(
+                os.environ.get("DUCKDUCKGO_MIN_INTERVAL") or self._MIN_CHAT_INTERVAL_S
+            )
+        except ValueError:
+            pass
 
         #: Proof state — the NEXT challenge (base64), carried on the
         #: previous /chat response header. When None, _fetch_challenge
@@ -380,6 +460,29 @@ class DuckDuckGoBackend(BaseBackend):
                 "x-vqd-hash-1 challenge solver / durableStream keygen "
                 "ship as bundled .js helpers). Install node >= 18 and "
                 "make sure it is on PATH."
+            )
+
+    def _require_helper(self, path: str, what: str) -> None:
+        """Fail fast with the reinstall remediation when a bundled
+        .js helper is missing from the installed package.
+
+        Live finding 2026-10-09: pip builds predating the package-data
+        fix ship the plugin's .py files but silently drop the .js
+        helpers — every generate() then dies with a cryptic Node
+        MODULE_NOT_FOUND naming a site-packages path. This check
+        turns that into the actual fix.
+        """
+        self._require_node(what)
+        if not os.path.isfile(path):
+            raise RuntimeError(
+                f"DuckDuckGo backend helper {os.path.basename(path)} is "
+                f"missing from the installed plugin directory "
+                f"({os.path.dirname(path)}). The installed package was "
+                "built without the plugin's .js helpers — fix with "
+                "`pip install -e /path/to/AgentKthx` (editable install) "
+                "or copy ddg_vqd.js + ddg_durable.js (+ ddg_capture.js "
+                "if you use capture mode) from the repo's "
+                "agentkthx/plugins/duckduckgo/ into that directory."
             )
 
     def _solve_challenge(self, challenge_b64: str) -> dict:
@@ -511,11 +614,21 @@ class DuckDuckGoBackend(BaseBackend):
             "utf-8"
         )
 
-    def _acquire_proof(self) -> str:
-        """Fresh solved X-Vqd-Hash-1 (fetch → solve → build)."""
+    def _acquire_proof(self, min_duration_ms: int = 0) -> str:
+        """Fresh solved X-Vqd-Hash-1 (fetch → solve → build).
+
+        ``min_duration_ms`` pads the reported solve time up to a
+        plausible floor: the Node solver finishes in 60-90ms, faster
+        than any real browser could execute the obfuscated bundle,
+        and the strict model routes (the 2026-10-09 418 crowd)
+        plausibility-check ``meta.duration``. The first attempt stays
+        honest (floor 0); 418 retries escalate to the floor.
+        """
         t0 = time.monotonic()
         raw = self._solve_challenge(self._fetch_challenge())
         elapsed_ms = (time.monotonic() - t0) * 1000
+        if min_duration_ms and elapsed_ms < min_duration_ms:
+            elapsed_ms = min_duration_ms + random.randint(0, 150)
         return self._build_proof_header(raw, elapsed_ms)
 
     # ─────────────────────────────────────────────────────────────────────
@@ -535,6 +648,10 @@ class DuckDuckGoBackend(BaseBackend):
             "Accept": "*/*",
             "Accept-Language": "en-US,en;q=0.9",
             "Referer": f"{self.base_url}/",
+            "Cookie": _MIN_COOKIES,
+            "sec-ch-ua": _SEC_CH_UA,
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": _SEC_CH_UA_PLATFORM,
             "Cache-Control": "no-store",
             "x-vqd-accept": "1",
             "x-ddg-journey-id": _rand_id(),
@@ -558,6 +675,10 @@ class DuckDuckGoBackend(BaseBackend):
             "Accept": "text/event-stream",
             "Accept-Language": "en-US,en;q=0.9",
             "Referer": f"{self.base_url}/",
+            "Cookie": _MIN_COOKIES,
+            "sec-ch-ua": _SEC_CH_UA,
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": _SEC_CH_UA_PLATFORM,
             "Content-Type": "application/json",
             "Origin": self.base_url,
             "x-fe-version": self._fe_meta.get("fe_version", _FE_VERSION_FALLBACK),
@@ -721,6 +842,45 @@ class DuckDuckGoBackend(BaseBackend):
     # Generation — buffered (generate) + incremental (generate_stream)
     # ─────────────────────────────────────────────────────────────────────
 
+    def _pace_chat(self) -> None:
+        """Enforce the minimum /chat POST interval (anti-429 courtesy).
+
+        DDG's anonymous per-IP limit is strict and undocumented, and
+        the 2026-10-09 429 storm showed back-to-back ReAct turns can
+        trip it single-handedly. The timestamp is CLASS-level — one
+        pace across every backend instance in this process. No-op
+        when ``_MIN_CHAT_INTERVAL_S`` <= 0 (tests zero it on the
+        fixture; DUCKDUCKGO_MIN_INTERVAL=0 disables at runtime).
+        """
+        interval = self._MIN_CHAT_INTERVAL_S
+        if not interval or interval <= 0:
+            return
+        now = time.monotonic()
+        wait = interval - (now - DuckDuckGoBackend._last_chat_monotonic)
+        if wait > 0:
+            time.sleep(wait)
+            now = time.monotonic()
+        DuckDuckGoBackend._last_chat_monotonic = now
+
+    def _log_418(self, attempt: int, detail: str, ladder: str | None) -> None:
+        """AGENTKTHX_DEBUG trace for one 418 teapot round."""
+        if not os.environ.get("AGENTKTHX_DEBUG"):
+            return
+        try:
+            parsed = json.loads(detail)
+            cd = parsed.get("cd") or {}
+            info = (
+                f"type={parsed.get('type')} round={cd.get('i')} "
+                f"override={parsed.get('overrideCode')}"
+            )
+        except (json.JSONDecodeError, AttributeError):
+            info = detail[:120]
+        source = "response-header ladder challenge" if ladder else "/status re-bootstrap"
+        print(
+            f"  [duckduckgo] HTTP 418 ({info}) — re-solving from {source} "
+            f"[attempt {attempt}/{self._CHALLENGE_RETRIES}]"
+        )
+
     def generate(
         self,
         model: str,
@@ -741,7 +901,13 @@ class DuckDuckGoBackend(BaseBackend):
 
         Proof-expiry recovery: a 401 or an SSE ``ERR_CHALLENGE`` error
         triggers ONE automatic re-solve (fresh challenge + proof) and
-        a single retry of the /chat call.
+        a single retry of the /chat call. An HTTP 418 teapot
+        (``ERR_CHALLENGE`` at the HTTP layer — proof rejected or the
+        anti-bot challenge ladder escalated) gets up to
+        ``_CHALLENGE_RETRIES`` re-solves, preferring the challenge
+        carried on the 418's own ``x-vqd-hash-1`` response header and
+        escalating the proof's reported duration to a plausible floor
+        (strict routes flag sub-100ms solves).
 
         Returns the house response shape (content / tool_calls /
         usage / finish_reason). ``usage`` is an ~4-chars/token
@@ -762,9 +928,11 @@ class DuckDuckGoBackend(BaseBackend):
         body = self._build_chat_body(wire_model, convo)
 
         attempt = 0
+        duration_floor = 0
         while True:
             attempt += 1
-            proof = self._acquire_proof()
+            self._pace_chat()
+            proof = self._acquire_proof(min_duration_ms=duration_floor)
             req = urllib.request.Request(
                 f"{self.base_url}/duckchat/v1/chat",
                 data=body,
@@ -774,6 +942,28 @@ class DuckDuckGoBackend(BaseBackend):
             try:
                 content, _sources, next_chal = self._consume_sse(req)
             except urllib.error.HTTPError as e:
+                if e.code == 418:
+                    # Teapot = ERR_CHALLENGE at the HTTP layer: the proof
+                    # was rejected (expired / shape-flagged) or the route
+                    # demands a harder challenge round. Climb the ladder:
+                    # prefer the challenge carried on THIS response's
+                    # x-vqd-hash-1 header, else re-bootstrap /status.
+                    detail = e.read()[:2000].decode("utf-8", "replace")
+                    ladder = (e.headers.get("x-vqd-hash-1") or None) if e.headers else None
+                    if attempt <= self._CHALLENGE_RETRIES:
+                        self._next_challenge_b64 = ladder
+                        duration_floor = _PROOF_DURATION_FLOOR_MS
+                        self._log_418(attempt, detail, ladder)
+                        time.sleep(_CHALLENGE_RETRY_SLEEP_S)
+                        continue
+                    raise RuntimeError(
+                        f"DuckDuckGo ERR_CHALLENGE (HTTP 418) persisted after "
+                        f"{self._CHALLENGE_RETRIES} proof re-solves — the "
+                        "anti-bot layer is rejecting the proof shape for "
+                        "this model/route. Try another model or wait a "
+                        "minute (proofs expire); body: "
+                        f"{detail[:200]}"
+                    ) from e
                 if e.code == 401 and attempt == 1:
                     if os.environ.get("AGENTKTHX_DEBUG"):
                         print("  [duckduckgo] 401 proof rejected — re-solving")
@@ -796,11 +986,13 @@ class DuckDuckGoBackend(BaseBackend):
                         "Accept headers are fixed by the backend."
                     ) from e
                 if e.code == 429:
+                    retry_after = (e.headers.get("Retry-After") or "").strip() if e.headers else ""
+                    suffix = f" Server Retry-After: {retry_after}s." if retry_after else ""
                     raise RuntimeError(
                         "DuckDuckGo rate limit (429) — per-IP throttling, "
                         "undocumented limits. Back off 5-10s between "
                         "requests; if this persists, reduce request "
-                        "frequency or route through a different network."
+                        f"frequency or route through a different network.{suffix}"
                     ) from e
                 if e.code >= 500:
                     raise RuntimeError(
@@ -841,14 +1033,17 @@ class DuckDuckGoBackend(BaseBackend):
                 "model": wire_model,
             }
 
-    def _open_chat_stream(self, wire_model: str, convo: list[dict]) -> urllib.request.Request:
+    def _open_chat_stream(
+        self, wire_model: str, convo: list[dict], min_duration_ms: int = 0
+    ) -> urllib.request.Request:
         """Build the POST /chat request (proof acquired, meta scraped)."""
         self._scrape_fe_meta()
         body = self._build_chat_body(wire_model, convo)
+        proof = self._acquire_proof(min_duration_ms=min_duration_ms)
         return urllib.request.Request(
             f"{self.base_url}/duckchat/v1/chat",
             data=body,
-            headers=self._build_chat_headers(self._acquire_proof()),
+            headers=self._build_chat_headers(proof),
             method="POST",
         )
 
@@ -923,12 +1118,15 @@ class DuckDuckGoBackend(BaseBackend):
         proof lifecycle is identical to ``generate()`` (acquire →
         POST → next-challenge rotation); challenge errors mid-stream
         re-solve ONCE and replay the request (already-yielded text
-        is NOT re-yielded — the retry restarts the turn). Error
+        is NOT re-yielded — the retry restarts the turn), and HTTP
+        418 teapots climb the challenge ladder (up to
+        ``_CHALLENGE_RETRIES`` re-solves, the 418's response-header
+        challenge preferred over a /status re-bootstrap). Error
         taxonomy mirrors ``generate()`` exactly (404 catalog rotation,
-        403 anti-bot, 429 rate limit, 5xx upstream, conversation
-        limit) — the streaming path is FEAT-10's whole point, so it
-        must surface the same remediation messages the buffered path
-        does.
+        403 anti-bot, 418 teapot, 429 rate limit, 5xx upstream,
+        conversation limit) — the streaming path is FEAT-10's whole
+        point, so it must surface the same remediation messages the
+        buffered path does.
         """
         wire_model = _resolve_model(model)
         convo = self._collapse_system_into_user(messages)
@@ -936,10 +1134,13 @@ class DuckDuckGoBackend(BaseBackend):
             raise ValueError("DuckDuckGo generate_stream(): no messages after system collapse")
 
         attempt = 0
+        duration_floor = 0
         while True:
             attempt += 1
-            req = self._open_chat_stream(wire_model, convo)
+            self._pace_chat()
+            req = self._open_chat_stream(wire_model, convo, min_duration_ms=duration_floor)
             retryable = False
+            reset_challenge = True
             try:
                 with urllib.request.urlopen(req, timeout=180) as resp:
                     self._next_challenge_b64 = resp.headers.get("x-vqd-hash-1")
@@ -978,7 +1179,29 @@ class DuckDuckGoBackend(BaseBackend):
                                     f"(status={ev['status']})"
                                 )
             except urllib.error.HTTPError as e:
-                if e.code == 401 and attempt == 1:
+                if e.code == 418:
+                    # Teapot ladder — mirror of the buffered path: prefer
+                    # the challenge on THIS response's x-vqd-hash-1 header,
+                    # else re-bootstrap from /status, duration floor on.
+                    detail = e.read()[:2000].decode("utf-8", "replace")
+                    ladder = (e.headers.get("x-vqd-hash-1") or None) if e.headers else None
+                    if attempt <= self._CHALLENGE_RETRIES:
+                        self._next_challenge_b64 = ladder
+                        reset_challenge = False
+                        duration_floor = _PROOF_DURATION_FLOOR_MS
+                        self._log_418(attempt, detail, ladder)
+                        time.sleep(_CHALLENGE_RETRY_SLEEP_S)
+                        retryable = True
+                    else:
+                        raise RuntimeError(
+                            f"DuckDuckGo ERR_CHALLENGE (HTTP 418) persisted "
+                            f"after {self._CHALLENGE_RETRIES} proof "
+                            "re-solves — the anti-bot layer is rejecting "
+                            "the proof shape for this model/route. Try "
+                            "another model or wait a minute (proofs "
+                            f"expire); body: {detail[:200]}"
+                        ) from e
+                elif e.code == 401 and attempt == 1:
                     retryable = True
                 elif e.code == 404:
                     detail = e.read()[:200].decode("utf-8", "replace")
@@ -995,11 +1218,13 @@ class DuckDuckGoBackend(BaseBackend):
                         "Accept headers are fixed by the backend."
                     ) from e
                 elif e.code == 429:
+                    retry_after = (e.headers.get("Retry-After") or "").strip() if e.headers else ""
+                    suffix = f" Server Retry-After: {retry_after}s." if retry_after else ""
                     raise RuntimeError(
                         "DuckDuckGo rate limit (429) — per-IP throttling, "
                         "undocumented limits. Back off 5-10s between "
                         "requests; if this persists, reduce request "
-                        "frequency or route through a different network."
+                        f"frequency or route through a different network.{suffix}"
                     ) from e
                 elif e.code >= 500:
                     raise RuntimeError(
@@ -1024,7 +1249,8 @@ class DuckDuckGoBackend(BaseBackend):
                     "(/clear in chat) or restart the session."
                 )
             if retryable:
-                self._next_challenge_b64 = None
+                if reset_challenge:
+                    self._next_challenge_b64 = None
                 continue
 
     # ─────────────────────────────────────────────────────────────────────

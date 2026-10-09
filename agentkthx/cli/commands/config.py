@@ -249,20 +249,35 @@ _ENV_REFERENCE = [
     # ── DuckDuckGo AI Chat ──
     (
         "DUCKDUCKGO_BASE_URL",
-        "DuckDuckGo AI Chat URL (default: https://duckduckgo.com — the "
+        "DuckDuckGo AI Chat URL (default: https://duck.ai — the "
         "protocol lives under /duckchat/v1)",
     ),
     (
         "DUCKDUCKGO_USER_AGENT",
         "Browser User-Agent override — DDG 403s non-browser UAs; empty = "
-        "built-in Chrome 120 UA (only set if DDG rejects the built-in one)",
+        "built-in Chrome 136 UA (only set if DDG rejects the built-in one; "
+        "the challenge solver is fed the SAME UA — a mismatch invalidates "
+        "the proof)",
     ),
     (
         "DUCKDUCKGO_DEFAULT_MODEL",
-        "Default model (default: gpt-4o-mini; catalog: gpt-4o-mini, "
-        "claude-3-haiku-20240307, meta-llama/Llama-3.3-70B-Instruct-Turbo, "
-        "mistralai/Mistral-Small-24B-Instruct-2501, o3-mini — no API key "
-        "needed, the backend is keyless and anonymous)",
+        "Default model (default: gpt-6-luna; catalog: gpt-6-luna, "
+        "gpt-5.6-luna, gpt-5.4-nano, gpt-5.4-mini, claude-haiku-4-5, "
+        "mistral-small-2603, tinfoil/gpt-oss-120b, tinfoil/gemma4-31b — "
+        "no API key needed, the backend is keyless and anonymous)",
+    ),
+    (
+        "DUCKDUCKGO_MIN_INTERVAL",
+        "Minimum seconds between /chat POSTs — anti-429 pacing so "
+        "agentic loops don't trip the anonymous per-IP limit "
+        "(default: 3; 0 disables)",
+    ),
+    (
+        "DUCKDUCKGO_PROOF_MODE",
+        "RESERVED — x-vqd-hash-1 proof acquisition mode: synth (default, "
+        "active — /status challenge solved by the bundled Node helper) or "
+        "capture (headless-Chromium proof lift, NOT YET IMPLEMENTED; will "
+        "need local Chrome + Node >= 22)",
     ),
     # ── ACP / TurboQuant ──
     ("ACP_BASE_URL", "ACP server URL"),
