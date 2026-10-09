@@ -12,6 +12,26 @@ register for the dashboard. The dashboard, JSON endpoints, and reconcile
 checker all see the complete picture (open + closed + wontfix); audit.md
 itself stays small and focused.
 
+v3 — delta blockquote handling fixed. v2's matcher required the exact
+canonical title `> **Rxx.xx delta …`, but real titles drifted long ago
+("feature delta", "re-audit delta", "closure batch N", "batch 2", …) —
+v2 matched 0 of the 17 stacked blockquotes, so audit.md's header
+accumulated deltas unbounded and deltas.md's `## Release Delta Log`
+was never created. v3 detects any `> **Rxx.xx …` blockquote in the
+header zone (above the first '## ' heading) and moves ALL of them;
+v2 also kept only the first blockquote per release via a per-release
+dedupe that would have silently dropped split closure batches.
+
+v3 — delta blockquote handling fixed. v2's matcher required the exact
+canonical title `> **Rxx.xx delta …`, but real titles drifted long ago
+("feature delta", "re-audit delta", "closure batch N", "batch 2", …) —
+v2 matched 0 of the 17 stacked blockquotes, so audit.md's header
+accumulated deltas unbounded and deltas.md's `## Release Delta Log`
+was never created. v3 detects any `> **Rxx.xx …` blockquote in the
+header zone (above the first '## ' heading) and moves ALL of them;
+v2 also kept only the first blockquote per release via a per-release
+dedupe that would have silently dropped split closure batches.
+
 v2 — SURGICAL split. The earlier version regenerated both files from parsed
 finding dicts, which flattened hand-curated content (File(s) rows, WONTFIX
 rationale prose, per-release status text like "(R07.12, owner decision)",
@@ -32,10 +52,16 @@ surgery instead:
       breaks reconcile). Still-open members ride along with the table.
       They land before deltas.md's `## Release Delta Log` when present,
       else at EOF.
-    - `> **Rxx.xx delta (...):**` header blockquotes — the per-release
-      delta notes move verbatim into deltas.md's `## Release Delta Log`
-      (release order; releases already logged are skipped). audit.md's
-      header keeps only the metadata block and the `> **Split:**` note.
+    - `> **Rxx.xx …:**` header blockquotes — the per-release delta notes
+      move verbatim into deltas.md's `## Release Delta Log`. Detection is
+      positional, not title-based: any blockquote bold-starting with the
+      release token in the header zone (above the first '## ' heading)
+      is a delta entry — the wording after the release is free-form
+      ("delta", "feature delta", "re-audit delta", "closure batch N", …).
+      ALL blocks move (several per release is normal — split closure
+      batches); they land in release order, oldest first, and releases
+      already logged are skipped. audit.md's header keeps only the
+      metadata block and the `> **Split:**` note.
   DROPS (the Closure Timeline is retired — the Findings Summary +
   Detailed Findings archive is the historical record):
     - `## Rxx.xx Closures` sections still present in audit.md. The closure
@@ -97,7 +123,13 @@ DETAIL_HEADING_RE = re.compile(r"^####\s+([A-Z]+-\d+):\s*(.*)$")
 HEADING_RE = re.compile(r"^#{1,4}\s")
 NEW_FINDINGS_HEADING_RE = re.compile(r"^##\s+(R[\d.]+)\s+New Findings\s*$")
 CLOSURES_HEADING_RE = re.compile(r"^##\s+(R[\d.]+)\s+Closures")
-DELTA_BLOCK_RE = re.compile(r"^>\s*\*\*(R[\d.]+)\s+delta\b", re.IGNORECASE)
+# Delta blockquote entry: any blockquote whose bold text starts with the
+# release token. The wording after the release is free-form — v2's
+# `\s+delta\b` suffix required the canonical title (`Rxx.xx delta`) that
+# no real entry ever used ("feature delta", "re-audit delta", "closure
+# batch N" …), so the mover silently matched nothing and the header
+# stack grew unbounded.
+DELTA_BLOCK_RE = re.compile(r"^>\s*\*\*(R[\d.]+)", re.IGNORECASE)
 RELEASE_RE = re.compile(r"R(\d+)\.(\d+)")
 
 SPLIT_LINE = (
@@ -399,21 +431,32 @@ def scan_closures_sections(lines):
 
 
 def scan_delta_blocks(lines):
-    """Per-release delta blockquotes (``> **Rxx.xx delta (...):** …``) in
-    audit.md. Returns a list of {'release', 'start_idx', 'end_idx',
-    'block'} in file order; 'block' is the verbatim line list including
-    multi-line '> ' continuations (a new delta start terminates the run)."""
+    """Per-release delta blockquotes in audit.md's HEADER ZONE — the
+    region above the first '## ' heading. An entry is any blockquote
+    whose first line bold-starts with the release token
+    (``> **Rxx.xx …``); the wording after the release is free-form
+    ("delta", "feature delta", "re-audit delta", "closure batch N", …).
+    Scoping to the header zone keeps body blockquotes (quoted notes
+    inside detail sections) out of the move.
+
+    Returns a list of {'release', 'start_idx', 'end_idx', 'block'} in
+    file order; 'block' is the verbatim line list including multi-line
+    '> ' continuations (a new delta start terminates the run)."""
     out = []
-    n = len(lines)
+    zone_end = len(lines)
+    for i, line in enumerate(lines):
+        if line.startswith("## "):
+            zone_end = i
+            break
     i = 0
-    while i < n:
+    while i < zone_end:
         m = DELTA_BLOCK_RE.match(lines[i])
         if not m:
             i += 1
             continue
         end = i
         j = i + 1
-        while (j < n and lines[j].lstrip().startswith(">")
+        while (j < zone_end and lines[j].lstrip().startswith(">")
                and not DELTA_BLOCK_RE.match(lines[j])):
             end = j
             j += 1
@@ -427,16 +470,16 @@ def plan_delta_log_insertions(de, deltas_lines, delta_blocks):
     """Insert delta blockquotes into deltas.md's '## Release Delta Log'
     section, creating the section at the end of the file when absent.
 
-    Blocks land in release order (oldest first). Releases already logged
-    are skipped, so the move is idempotent and never duplicates
-    hand-curated notes.
+    ALL blocks move — several blockquotes per release are normal (split
+    closure batches) and v2's per-release dedupe silently dropped all
+    but the first. Blocks land in release order (oldest first); blocks
+    of the same release keep their audit.md in-file order (stable sort).
+    Releases already logged are skipped, so the move is idempotent and
+    never duplicates hand-curated notes.
     """
     if not delta_blocks:
         return []
-    by_release = {}
-    for d in delta_blocks:
-        by_release.setdefault(d["release"], d)
-    new_blocks = sorted(by_release.values(),
+    new_blocks = sorted(delta_blocks,
                         key=lambda d: version_tuple(d["release"]))
     anchor = find_heading_idx(deltas_lines, r"^##\s+Release Delta Log")
     if anchor is None:
