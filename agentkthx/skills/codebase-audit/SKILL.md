@@ -12,7 +12,7 @@ description: Audit, analyze, and produce a condensed intelligence brief for any 
   comprehensive audit artifact with bugs, security findings, and recommendations.
 metadata:
   author: VTSTech
-  version: "0.2.0"
+  version: "0.2.1"
 ---
 
 # Codebase Audit & Intelligence Brief
@@ -104,13 +104,17 @@ python3 audit/split-audit.py
 # → moves CLOSED + WONTFIX findings from audit.md to deltas.md
 # → audit.md becomes open-only (small, focused)
 # → deltas.md accumulates the closed/wontfix archive + closure timeline
+# → header delta blockquotes move to deltas.md's `## Release Delta Log`
+#   (ALL of them — any `> **Rxx.xx …` blockquote in the header zone,
+#   regardless of title wording)
 # → --dry-run previews without writing
 # → idempotent: re-running on an already-split audit.md is a no-op
 ```
 
-The script preserves the closure timeline sections (`## Rxx.xx Closures`) by
-moving them to `deltas.md` — they're about closed findings, so they belong
-there. The dashboard's closure-timeline cards continue to render.
+The script DROPS any `## Rxx.xx Closures` sections still in audit.md (the
+Closure Timeline is retired as of script v2 — author the closure narrative
+into the archived findings' `**Detail:**` prose BEFORE splitting; the
+script warns with a list of what was discarded).
 
 ### Step 2: Re-audit the code
 
@@ -232,6 +236,14 @@ This file is the archive of CLOSED and WONTFIX findings moved out of
 Suite 1506 → 1567 passed.
 
 ---
+
+## Release Delta Log
+
+<!-- Per-release delta notes, moved verbatim from audit.md's header at
+     split time. ALL header blockquotes move here, oldest release first;
+     several notes per release (split closure batches) is normal. -->
+
+> **R07.08 delta (...):** one-sentence summary per closed/wontfixed finding + the test-suite delta
 ```
 
 The split script (`audit/split-audit.py`) generates this structure automatically.
@@ -401,11 +413,21 @@ generate **must** conform to these format rules:
    *why* the fix would make things worse or what existing mechanism
    already covers the use case.
 
-6. **Release delta blockquotes.** Prepend a `> **Rxx.xx delta (...):**`
-   blockquote per release at the top of the file (newest first, below
-   the header counts line). One-sentence summary per closed/wontfixed
-   finding + the test-suite delta. The full closure detail lives in
-   the `**FIXED (Rxx.xx):**` paragraph under each finding.
+6. **Release delta blockquotes.** Prepend a `> **Rxx.xx …:**` blockquote
+   per release at the top of the file (newest first, below the header
+   counts line). The wording after the release token is free-form —
+   `delta`, `feature delta`, `re-audit delta`, `closure batch N` all
+   parse; the one hard rule is that the bold text starts with the
+   release token (`> **Rxx.xx`). One-sentence summary per
+   closed/wontfixed finding + the test-suite delta. The full closure
+   detail lives in the `**FIXED (Rxx.xx):**` paragraph under each
+   finding. **Retirement:** these blockquotes are transient, not
+   permanent residents — `split-audit.py` moves every header-zone
+   blockquote verbatim into deltas.md's `## Release Delta Log` at
+   split time, so the header only ever holds deltas released since the
+   last split. (Historical note: v2 of the script required the exact
+   title `Rxx.xx delta` and matched none of the real titles — that
+   drift is why the header stack once grew unbounded.)
 
 7. **Categories must be exact.** The parser only recognises these 7
    category strings: `Security`, `Robustness`, `Maintainability`,
@@ -474,8 +496,3 @@ renamed since the brief was generated, it's time for a refresh.
 This skill makes NO network requests. It only accesses local files and the user's codebase.
 
 ## Security & Privacy
-
-All analysis is local. The brief and audit report contain only structural, architectural,
-and quality information about the codebase — no credentials, no secrets, no sensitive
-runtime data. The audit report may reference code patterns that resemble security issues
-but will not expose actual secrets or credentials found in the code.
