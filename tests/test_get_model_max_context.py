@@ -226,3 +226,60 @@ class TestZaiCatalogContextLengths:
 
         b = ZaiBackend()
         assert b.get_model_max_context("nonexistent-glm") == 128000
+
+
+class TestOpenAICompatRuntimeContextWithoutMaxContext:
+    """R07.31 — the R07.05 bug class recurring on the NON-cloud path.
+
+    StableDiffusionBackend (OpenAICompatibleBackend, NOT CloudBackend)
+    reaches the ``agentkthx models`` table without any
+    ``get_model_max_context`` — an image backend has no token context,
+    and the class hierarchy only guarantees that method on CloudBackend
+    / OllamaBackend / LlamaServerBackend. The direct delegation in
+    ``OpenAICompatibleBackend.get_model_runtime_context`` crashed the
+    table with AttributeError (live-observed on Colab 2026-10-10). The
+    delegation is now defensive: subclasses without context info yield
+    None → "?" in the Context column instead of a traceback.
+    """
+
+    @staticmethod
+    def _stub_cls():
+        """Minimal concrete OpenAICompatibleBackend subclass (ABC surface)."""
+        from agentkthx.backends.openai_compat import OpenAICompatibleBackend
+
+        class _Stub(OpenAICompatibleBackend):
+            @property
+            def backend_type(self):
+                return None
+
+            @property
+            def base_url(self):
+                return self._base_url
+
+            def generate(self, model, messages, **kwargs):
+                raise NotImplementedError
+
+            def generate_stream(self, model, messages, **kwargs):
+                yield ""
+
+            def list_models(self):
+                return []
+
+            def test_tool_support(self, model, family=None, force_test=False):
+                raise NotImplementedError
+
+        return _Stub
+
+    def test_bare_subclass_returns_none_instead_of_raising(self):
+        backend = self._stub_cls()(base_url="http://127.0.0.1:1")
+        assert backend.get_model_runtime_context("anything") is None
+
+    def test_subclass_with_max_context_still_delegates(self):
+        stub_cls = self._stub_cls()
+
+        class _WithCtx(stub_cls):
+            def get_model_max_context(self, model, family=None):
+                return 4096
+
+        backend = _WithCtx(base_url="http://127.0.0.1:1")
+        assert backend.get_model_runtime_context("m") == 4096

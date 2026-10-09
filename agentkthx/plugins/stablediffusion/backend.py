@@ -239,6 +239,24 @@ class StableDiffusionBackend(OpenAICompatibleBackend):
         except Exception:
             return False
 
+    def get_model_max_context(self, model: str, family: str | None = None) -> int | None:
+        """An image backend has NO token context — report None ("?" cell).
+
+        Capabilities exposes PIXEL limits (min/max width/height 64–4096),
+        which are not token context and must not masquerade as one in
+        the ``agentkthx models`` Context column. Returning None renders
+        "?" (the cli/footer.fmt_token_size contract). Without this
+        override the models table crashed with AttributeError — SD is
+        the first OpenAICompatibleBackend subclass to reach that table
+        without cloud_base's get_model_max_context (live-observed on
+        Colab, 2026-10-10).
+        """
+        return None
+
+    def get_model_runtime_context(self, model: str) -> int | None:
+        """No runtime context either — see get_model_max_context()."""
+        return None
+
     # ------------------------------------------------------------------
     # Generation
     # ------------------------------------------------------------------

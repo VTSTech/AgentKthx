@@ -194,7 +194,7 @@ class OpenAICompatibleBackend(BaseBackend):
                 return ctx
         return None
 
-    def get_model_runtime_context(self, model: str) -> int:
+    def get_model_runtime_context(self, model: str) -> int | None:
         """Get the runtime context window size for a model.
 
         For cloud providers (ZAI, OpenRouter), there's no separate
@@ -203,8 +203,18 @@ class OpenAICompatibleBackend(BaseBackend):
 
         OllamaBackend overrides this to return the actual ``num_ctx``
         from the Modelfile (defaults to 2048).
+
+        R07.31 (SD lesson): the delegation is now defensive — SD is the
+        first OpenAICompatibleBackend subclass with NO
+        ``get_model_max_context`` (an image backend has no token
+        context; the class hierarchy only guarantees it on CloudBackend
+        / Ollama / LlamaServer). The previous direct delegation crashed
+        the ``agentkthx models`` table with AttributeError. Subclasses
+        without context info now yield None → "?" in the Context
+        column.
         """
-        return self.get_model_max_context(model)
+        max_ctx_fn = getattr(self, "get_model_max_context", None)
+        return max_ctx_fn(model) if max_ctx_fn is not None else None
 
     # ─────────────────────────────────────────────────────────────────────
     # JEV System-One Decision Mode

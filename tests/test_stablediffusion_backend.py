@@ -341,6 +341,32 @@ class TestIsRunning(unittest.TestCase):
             self.assertFalse(backend.is_running())
 
 
+class TestModelContextPlaceholders(unittest.TestCase):
+    """An image backend has NO token context — None → "?" in the models table.
+
+    Live-observed crash on Colab 2026-10-10: agentkthx models --backend sd
+    hit AttributeError at OpenAICompatibleBackend.get_model_runtime_context
+    → get_model_max_context (SD is the first OpenAICompatibleBackend
+    subclass to reach that table without cloud_base's implementation).
+    The plugin now implements both methods; cli/footer.fmt_token_size
+    renders None as "?".
+    """
+
+    def test_get_model_max_context_returns_none(self):
+        backend = _make_backend()
+        self.assertIsNone(backend.get_model_max_context("sd_turbo"))
+        self.assertIsNone(backend.get_model_max_context("sd_turbo", family="stable-diffusion"))
+
+    def test_get_model_runtime_context_returns_none(self):
+        backend = _make_backend()
+        self.assertIsNone(backend.get_model_runtime_context("sd_turbo"))
+
+    def test_none_renders_as_question_mark(self):
+        from agentkthx.cli.footer import fmt_token_size
+
+        self.assertEqual(fmt_token_size(None), "?")
+
+
 # ---------------------------------------------------------------------------
 # §6 tests 2+3 — generate(): wire body, flattening, artifact pipeline
 # ---------------------------------------------------------------------------
