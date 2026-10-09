@@ -70,8 +70,9 @@ class StableDiffusionBackend(OpenAICompatibleBackend):
     Backend for a local sd.cpp image-generation server.
 
     Every chat turn becomes ONE image: the house messages are flattened
-    into a single prompt, POSTed to ``/v1/images/generations``, and the
-    returned base64 PNG is decoded (size-capped) into the artifacts dir
+    into a single prompt (system prompt suppressed — DDG precedent),
+    POSTed to ``/v1/images/generations``, and the returned base64 PNG is
+    decoded (size-capped) into the artifacts dir
     (``AGENTKTHX_ARTIFACTS_DIR``, default ``./generated``). The response
     carries ``content = "[image saved: <path>]"`` plus an
     ``images: [{"path": ...}]`` extension field (extra_content precedent,
@@ -340,8 +341,10 @@ class StableDiffusionBackend(OpenAICompatibleBackend):
         Args:
             model: Advisory only — the wire has NO model field (the server
                 serves its loaded pool). Never transmitted.
-            messages: House messages; all non-empty contents are flattened
-                (in order) into a single image prompt.
+            messages: House messages; non-empty user/assistant/tool
+                contents are flattened (in order) into a single image
+                prompt. The system prompt is SUPPRESSED — never
+                transmitted (DDG precedent, see ``_flatten_messages``).
             tools / temperature / max_tokens: Chat-style parameters with no
                 meaning on the image surface — silently dropped (a debug
                 notice lists what was dropped, mirroring the DDG sampling
@@ -384,6 +387,16 @@ class StableDiffusionBackend(OpenAICompatibleBackend):
             print(
                 f"  [{self._provider_label}] dropped chat-only parameters (no image "
                 f"surface equivalent): {', '.join(dropped)}"
+            )
+
+        # System-prompt suppression (DDG R07.30 precedent) — the harness
+        # prompt never rides the image wire. Debug notice only when a
+        # system message was actually present and dropped.
+        has_system = any((m.get("role") or "").lower() == "system" for m in messages or [])
+        if has_system and os.environ.get("AGENTKTHX_DEBUG"):
+            print(
+                f"  [{self._provider_label}] system prompt suppressed (image surface has "
+                "no system role — DDG precedent); user/assistant/tool content only"
             )
 
         prompt = self._flatten_messages(messages)
@@ -510,8 +523,10 @@ class StableDiffusionBackend(OpenAICompatibleBackend):
 
         R07.19 (follow-up #10): NONE is legacy-only — the produced verdict
         for "no native tools" is REACT (the ReAct fallback), so that is
-        what this backend reports. Note for operators: with ReAct the tool
-        scaffolding text becomes part of the image prompt.
+        what this backend reports. Note for operators: with ReAct, tool
+        RESULT messages still fold into the image prompt (the loop
+        depends on it); the scaffolding itself lives in the system
+        prompt, which is suppressed — never transmitted (DDG precedent).
         """
         return ToolSupportLevel.REACT
 
@@ -545,13 +560,26 @@ class StableDiffusionBackend(OpenAICompatibleBackend):
     def _flatten_messages(messages: list[dict]) -> str:
         """Flatten house messages into a single image prompt.
 
-        All non-empty message contents are joined in conversation order
-        (system included — there is no system role on an image surface).
+        The system prompt is DROPPED, never flattened (DDG precedent,
+        R07.30): there is no system role on an image surface, and the
+        harness prompt — ReAct scaffolding, personality, tool schemas —
+        is chat plumbing, not image content. Forwarding it would have
+        the diffusion model render scaffolding tokens into the picture
+        or dilute the user's actual request. Tool outputs and the full
+        user/assistant history still flatten (the ReAct loop depends on
+        tool results riding the prompt, as on DDG).
+
         Part-list contents (IMAGE_SUPPORT_PLAN D1 shape) are tolerated by
         extracting their text parts, mirroring DDG's _coerce_content.
+        Returns "" when nothing sendable remains (system-only
+        conversation) — generate() refuses that with ``ValueError``.
         """
         parts: list[str] = []
         for msg in messages or []:
+            role = (msg.get("role") or "").lower()
+            if role == "system":
+                # Suppressed, never forwarded (see docstring).
+                continue
             content = msg.get("content") or ""
             if isinstance(content, list):
                 content = " ".join(p.get("text", "") for p in content if isinstance(p, dict))

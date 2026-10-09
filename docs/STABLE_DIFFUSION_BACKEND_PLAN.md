@@ -94,7 +94,8 @@ free from `OpenAICompatibleBackend`/`cloud_base.py`.
   which made `agentkthx models --backend sd` report "not running" against a live
   server (observed on Colab, 2026-10-10).
 - `generate(model, messages, …)` → concatenate/flatten the house messages to a single
-  prompt (system content included, subject to §6), then
+  prompt (system prompt SUPPRESSED — DDG R07.30 precedent; user/assistant/tool
+  content only), then
   `POST /v1/images/generations {prompt, n:1, size, output_format:"png"}`.
   Generation params: `steps` / `cfg_scale` / `seed` / `width` / `height` accepted as
   backend kwargs; whatever the OpenAI field set can't carry goes through
@@ -177,7 +178,8 @@ modeled on the DDG suite's recorder pattern but with OpenAI-shaped bodies):
 
 1. `list_models()` maps `/v1/models` → catalog.
 2. `generate()` posts `{prompt, n:1, size:"512x512", output_format:"png"}`; message
-   flattening covers system+user and multi-turn history.
+   flattening covers user/assistant/tool turns and multi-turn history; the
+   system prompt is suppressed, never transmitted (DDG R07.30 precedent).
 3. b64 decode → PNG written to artifacts dir; house shape asserted (`content`,
    `images[0].path` exists on disk).
 4. Oversized b64 → clean error, no file written.

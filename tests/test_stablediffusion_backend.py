@@ -2,11 +2,11 @@
 Tests for StableDiffusionBackend — manifest v0.2 compliance, the Ollama-
 pattern contract (is_cloud=False, backend_type, 'sd' alias registration),
 /v1/models → house catalog mapping, the /v1/images/generations wire body
-(NO model field), message flattening (system+user, multi-turn), the
-size-capped b64 → PNG artifact pipeline, connection-refused remediation,
-the single-delta stream wrapper, constructor URL resolution, and the
-R07.32 --max-steps → sample_steps remap (sd_cpp_extra_args override +
-session-header relabel).
+(NO model field), message flattening (system suppressed DDG-style,
+user/assistant/tool multi-turn), the size-capped b64 → PNG artifact
+pipeline, connection-refused remediation, the single-delta stream
+wrapper, constructor URL resolution, and the R07.32 --max-steps →
+sample_steps remap (sd_cpp_extra_args override + session-header relabel).
 
 Plan: docs/STABLE_DIFFUSION_BACKEND_PLAN.md (§6 test plan, tests 1–8).
 Live server facts pinned 2026-10-10 on Colab CPU (sd_turbo).
@@ -403,10 +403,13 @@ class TestGenerate(unittest.TestCase):
         self.assertEqual(captured["url"], "http://127.0.0.1:1234/v1/images/generations")
         self.assertEqual(captured["method"], "POST")
         # The sd.cpp wire has NO model field — --model is advisory only.
+        # Exact-equality also pins system-prompt suppression: the harness
+        # prompt is in the input above but must not appear anywhere in
+        # the body (no model field, no system field, not in the prompt).
         self.assertEqual(
             captured["body"],
             {
-                "prompt": "You are AgentKthx.\na lovely cat",
+                "prompt": "a lovely cat",
                 "n": 1,
                 "size": "512x512",
                 "output_format": "png",
@@ -470,6 +473,78 @@ class TestGenerate(unittest.TestCase):
         )
         # generate() received model="whatever" (test helper) — not in body.
         self.assertNotIn("model", captured["body"])
+
+
+# ---------------------------------------------------------------------------
+# R07.32 — system-prompt suppression (DDG R07.30 precedent): the harness
+# prompt never reaches the image wire
+# ---------------------------------------------------------------------------
+
+
+class TestSystemPromptSuppression(unittest.TestCase):
+    """The system prompt is DROPPED from the flattened image prompt.
+
+    Mirrors the DDG contract (_strip_system_messages, R07.30): the
+    harness prompt — ReAct scaffolding, personality, tool schemas — is
+    chat plumbing, not image content. User/assistant/tool content still
+    flattens in full.
+    """
+
+    def test_system_dropped_from_wire_prompt(self):
+        backend = _make_backend()
+        body = _capture_body(
+            backend,
+            [
+                {"role": "system", "content": "You are AgentKthx, a ReAct agent."},
+                {"role": "user", "content": "a lovely cat"},
+            ],
+        )
+        self.assertEqual(body["prompt"], "a lovely cat")
+        self.assertNotIn("AgentKthx", body["prompt"])
+
+    def test_multiple_system_messages_all_dropped(self):
+        backend = _make_backend()
+        body = _capture_body(
+            backend,
+            [
+                {"role": "system", "content": "Rule A."},
+                {"role": "system", "content": "Rule B."},
+                {"role": "user", "content": "a red house"},
+            ],
+        )
+        self.assertEqual(body["prompt"], "a red house")
+
+    def test_system_only_conversation_raises(self):
+        """System-only → nothing sendable → generate() refuses
+        (ValueError), matching DDG's empty-convo refusal."""
+        backend = _make_backend()
+        with pytest.raises(ValueError, match="no prompt content"):
+            backend.generate("sd-cpp-local", [{"role": "system", "content": "Be terse."}])
+
+    def test_tool_output_still_flattens(self):
+        """Suppression is system-SCOPED — tool results still ride the
+        prompt (the ReAct loop depends on it, as on DDG)."""
+        backend = _make_backend()
+        body = _capture_body(
+            backend,
+            [
+                {"role": "system", "content": "You are AgentKthx."},
+                {"role": "user", "content": "draw the result"},
+                {"role": "tool", "content": "weather: sunny, 22C"},
+            ],
+        )
+        self.assertEqual(body["prompt"], "draw the result\nweather: sunny, 22C")
+
+    def test_flatten_skips_system_directly(self):
+        """Unit-level pin on _flatten_messages (DDG-style direct test)."""
+        prompt = StableDiffusionBackend._flatten_messages(
+            [
+                {"role": "system", "content": "Be terse."},
+                {"role": "user", "content": "Hi"},
+                {"role": "assistant", "content": "Hello"},
+            ]
+        )
+        self.assertEqual(prompt, "Hi\nHello")
 
 
 # ---------------------------------------------------------------------------
