@@ -73,10 +73,33 @@ def test_user_home_posix_falls_back_to_expanduser():
 
 @pytest.fixture
 def fake_windows():
-    """Force the Windows code path regardless of host platform."""
+    """Force the Windows code path regardless of host platform.
+
+    R07.32 (py311 CI fix): patching only ``os.name``/``sys.platform`` made
+    ``_user_home()``'s ``Path(val)`` dispatch to a concrete ``WindowsPath``.
+    pathlib 3.12+ tolerates instantiating that on POSIX (the tests passed
+    there by luck), but 3.11 refuses (``NotImplementedError: cannot
+    instantiate 'WindowsPath' on your system`` — the flavour check is
+    import-time there). Worse: pytest formats a failure report BEFORE
+    fixture teardown, so with ``os.name`` still ``"nt"`` its own
+    ``Path(os.getcwd())`` in ``nodes.py`` hit the same refusal and the
+    session died with INTERNALERROR instead of a clean test failure.
+
+    Fix: also patch the ``Path`` symbol the loader module references to
+    ``PureWindowsPath`` — no concrete-path dispatch happens on any
+    version, on any host. ``_user_home()``'s Windows branch only builds
+    paths and calls ``str()`` on them (no ``.home()``/syscalls), so pure
+    paths are sufficient. This is the same technique
+    ``test_plugin_data_dir_windows_uses_LOCALAPPDATA`` below already uses.
+    """
+    from pathlib import PureWindowsPath
+
+    import agentkthx.plugins._loader as loader_mod
+
     with (
         patch("agentkthx.plugins._loader.os.name", "nt"),
         patch("agentkthx.plugins._loader.sys.platform", "win32"),
+        patch.object(loader_mod, "Path", PureWindowsPath),
     ):
         yield
 
