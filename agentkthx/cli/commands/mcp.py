@@ -725,14 +725,11 @@ def _check_launch_command(command: str, *, as_json: bool = False) -> None:
     if shutil.which(command) is not None:
         return  # found, no warning needed
 
-    install_hints = {
-        "uvx": "pip install uv   # or: curl -LsSf https://astral.sh/uv/install.sh | sh",
-        "uv": "pip install uv   # or: curl -LsSf https://astral.sh/uv/install.sh | sh",
-        "npx": "install Node.js (includes npx): https://nodejs.org/",
-        "pipx": "pip install pipx",
-        "python3": "install Python 3.12+ from https://python.org/",
-    }
-    hint = install_hints.get(command, f"install '{command}' and ensure it's on your $PATH")
+    # R07.32: hints now come from agentkthx.mcp.config so `mcp install`
+    # and the runtime launch path give identical guidance.
+    from ...mcp.config import command_install_hint
+
+    hint = command_install_hint(command)
     print(
         yellow(f"  \u26a0  Launch command {command!r} not found on $PATH"),
         file=sys.stderr,

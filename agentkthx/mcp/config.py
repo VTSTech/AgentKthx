@@ -80,6 +80,44 @@ class MCPConfigError(ValueError):
     """Raised when the MCP config file is missing, malformed, or unsafe."""
 
 
+# R07.32: actionable install hints for the common MCP launcher commands.
+# Shared by MCPServerConfig.resolve_command() (runtime launch path) and
+# `agentkthx mcp install` (cli/commands/mcp.py) so both surfaces give the
+# same guidance.
+_INSTALL_HINTS: dict[str, str] = {
+    "npx": (
+        "npx ships with Node.js/npm. Install Node.js:\n"
+        "      Debian/Ubuntu: sudo apt install nodejs npm\n"
+        "      Fedora: sudo dnf install nodejs npm\n"
+        "      Arch: sudo pacman -S nodejs npm\n"
+        "      macOS: brew install node\n"
+        "      Windows: winget install OpenJS.NodeJS.LTS\n"
+        "      (or grab an installer from https://nodejs.org/)"
+    ),
+    "node": (
+        "Node.js is not installed. See the npx hints above, or\n"
+        "      grab an installer from https://nodejs.org/"
+    ),
+    "npm": "npm ships with Node.js. Install Node.js (see https://nodejs.org/)",
+    "uvx": (
+        "uvx is part of uv. Install it:\n"
+        "      pip install uv   # or: curl -LsSf https://astral.sh/uv/install.sh | sh"
+    ),
+    "uv": (
+        "uv is not installed. Install it:\n"
+        "      pip install uv   # or: curl -LsSf https://astral.sh/uv/install.sh | sh"
+    ),
+    "pipx": "pipx is not installed. Install it: pip install pipx",
+    "python3": "python3 should be on $PATH already — check your environment",
+    "docker": "Docker is not installed. See https://docs.docker.com/get-docker/",
+}
+
+
+def command_install_hint(command: str) -> str:
+    """Return a human-readable install hint for a missing launcher command."""
+    return _INSTALL_HINTS.get(command, f"install '{command}' and ensure it's on your $PATH")
+
+
 @dataclass
 class MCPServerConfig:
     """Declarative configuration for a single MCP server subprocess."""
@@ -120,9 +158,12 @@ class MCPServerConfig:
             return self.command
         resolved = shutil.which(self.command)
         if resolved is None:
+            # R07.32: include an actionable install hint for known launchers
+            # (npx/uvx/…) — "not found on $PATH" alone sends users hunting.
             raise MCPConfigError(
                 f"Server '{self.name}': command '{self.command}' not found "
-                f"on $PATH (use an absolute path if intentional)"
+                f"on $PATH (use an absolute path if intentional). "
+                f"{command_install_hint(self.command)}"
             )
         return resolved
 

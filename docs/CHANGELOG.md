@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Missing-binary resilience (`agentkthx update` without git, MCP launchers with hints)
+
+- **`agentkthx update` now works without git installed**: pip needs the `git` binary for `git+https://` URLs, which broke self-update on minimal systems (fresh Debian/Ubuntu containers, Bookworm netinstall). `cmd_update` pre-checks `shutil.which("git")` — when git is absent it falls back to the GitHub source tarball (`pip install https://github.com/VTSTech/AgentKthx/archive/refs/heads/main.tar.gz --force-reinstall`), which pip downloads and builds without git. Safe because the project uses a plain setuptools backend (no setuptools-scm), so tarball builds resolve the version identically. The PEP 668 `--break-system-packages` y/n retry applies to both paths unchanged.
+- **MCP launch failures now say how to fix it**: `MCPServerConfig.resolve_command()` (the runtime choke point for `chat --mcp`, `run --mcp`, `mcp list --connect`, …) was raising a bare `command 'npx' not found on $PATH (use an absolute path if intentional)`. It now appends a per-command install hint from the new shared `agentkthx.mcp.config.command_install_hint()` — e.g. for `npx`: "ships with Node.js/npm" + `sudo apt install nodejs npm` (Debian/Ubuntu) / `dnf` / `pacman` / `brew` / `winget` / nodejs.org. Hints cover `npx`, `node`, `npm`, `uvx`, `uv`, `pipx`, `python3`, `docker`, with a generic fallback; `agentkthx mcp install` now sources its existing warning from the same helper so both surfaces give identical guidance.
+
 ### Built-in file tools removed → MCP filesystem server
 
 - **The 6 built-in file tools are gone**: `read_file`, `write_file`, `list_directory`, `read_file_lines`, `find_files`, `edit_file`. File operations now come from the MCP filesystem server — configure `@modelcontextprotocol/server-filesystem` in `~/.agentkthx/mcp.json` (`agentkthx mcp install @modelcontextprotocol/server-filesystem`) and run `agentkthx chat --mcp filesystem` / `agentkthx run "<task>" --mcp filesystem`; tools arrive namespaced as `filesystem__<tool>`.

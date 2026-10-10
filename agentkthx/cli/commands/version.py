@@ -5,6 +5,7 @@ Extracted verbatim from cli.py in R07.00 Phase 8."""
 from __future__ import annotations
 
 import argparse
+import shutil
 import sys
 
 from ...colors import bright_cyan, bright_green, cyan, dim, green, red, yellow
@@ -80,12 +81,25 @@ def cmd_update(args: argparse.Namespace) -> int:
     always has to opt in after seeing the failure.
     """
     print(f"{bright_cyan('⚖ AgentKthx')} - Updating from GitHub...")
+    # R07.32: pip needs the git binary to install from a git+https URL. On
+    # minimal systems (fresh Debian/Ubuntu containers, Bookworm netinstall)
+    # git isn't present — fall back to the GitHub source tarball, which pip
+    # can download and build without git (the project has a plain setuptools
+    # backend, no setuptools-scm, so a tarball build resolves the version
+    # the same way).
+    if shutil.which("git") is not None:
+        source = "git+https://github.com/VTSTech/AgentKthx.git"
+    else:
+        source = "https://github.com/VTSTech/AgentKthx/archive/refs/heads/main.tar.gz"
+        print(
+            f"{dim('git not found — installing from the GitHub source tarball instead (no git needed).')}"
+        )
     base_cmd = [
         sys.executable,
         "-m",
         "pip",
         "install",
-        "git+https://github.com/VTSTech/AgentKthx.git",
+        source,
         "--force-reinstall",
     ]
     print(f"{dim('Running:')} {' '.join(base_cmd[1:])}")
