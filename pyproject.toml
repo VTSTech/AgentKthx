@@ -34,11 +34,12 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 # Zero dependencies! Uses Python stdlib only.
 dependencies = []
 

@@ -32,7 +32,7 @@ We don't have a separate `CODE_OF_CONDUCT.md` because the above is the whole pol
 
 ### Prerequisites
 
-- Python **3.12 or 3.13** (CI matrix; 3.14 not yet tested)
+- Python **3.11+** (CI matrix covers 3.11, 3.12, 3.13, 3.14)
 - `git`
 - An editor that won't fight you on line endings (`.gitattributes` enforces LF)
 
@@ -67,7 +67,7 @@ If any of these fail locally, they will fail in CI. Fix before pushing.
 
 | Aspect | Convention |
 |--------|-----------|
-| Python version | 3.12+ (use `match`/`case`, PEP 695 type aliases, `|` union syntax freely) |
+| Python version | 3.11+ — `match`/`case` and `\|` unions OK; **no** PEP 695 generics/`type` aliases, no backslash/multi-line f-string expressions (PEP 701, 3.12-only) |
 | Formatter | `black` (defaults; line length 88) |
 | Linter | `ruff` (config in `pyproject.toml`) |
 | Imports | stdlib only at runtime; `pytest` / `black` / `ruff` are dev-only |
@@ -80,7 +80,7 @@ If any of these fail locally, they will fail in CI. Fix before pushing.
 
 Before adding an `import` statement, ask:
 
-- **`import foo`** — is `foo` in the standard library for Python 3.12+? If yes, fine.
+- **`import foo`** — is `foo` in the standard library for Python 3.11+? If yes, fine.
 - **`from foo import bar`** where `foo` is a third-party package — **no.** Either find a stdlib equivalent, or move the code into a plugin (plugins may declare their own dependencies in their manifest, but the core package stays pure).
 - **`__import__("foo")`** or `importlib.import_module("foo")` for an optional dep — **acceptable** if wrapped in `try/except ImportError` and the failure path degrades gracefully (see `agentkthx/__init__.py` for the pattern: `PersistentMemory`, `ACPPlugin`, `Soul` are all optional-import).
 
