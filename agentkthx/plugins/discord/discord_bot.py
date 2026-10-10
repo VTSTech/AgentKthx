@@ -125,6 +125,13 @@ class BotConfig:
 def setup_parser(parser) -> None:
     """Plugin CLI hook — adds the `agentkthx discord` arguments."""
     parser.add_argument(
+        "subcommand",
+        nargs="?",
+        default=None,
+        metavar="SUBCOMMAND",
+        help="optional: setup — interactive wizard writing ~/.agentkthx/.env",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Connect, log policy decisions, skip agent runs and message sends",
@@ -139,6 +146,22 @@ def setup_parser(parser) -> None:
 def cmd_discord(args) -> int:
     """Entry point for `agentkthx discord`."""
     global _ACTIVE_GATEWAY
+    sub = getattr(args, "subcommand", None)
+    if sub == "setup":
+        from .setup import run_setup  # lazy import per plugin spec
+
+        return run_setup()
+    if sub is not None:
+        print(f"[discord] unknown subcommand {sub!r} — try 'agentkthx discord setup'")
+        return 2
+    # Secrets/config file support: ~/.agentkthx/.env (written by `discord setup`)
+    # is loaded with setdefault semantics — exported env vars always win.
+    from .setup import default_env_path, load_env_file  # lazy import per plugin spec
+
+    _env_path = default_env_path()
+    _loaded = load_env_file(_env_path)
+    if _loaded:
+        print(f"[discord] loaded {_loaded} setting(s) from {_env_path}")
     cfg = BotConfig.from_env(
         overrides={
             "dry_run": getattr(args, "dry_run", False),
@@ -150,7 +173,8 @@ def cmd_discord(args) -> int:
     if not cfg.token:
         print(
             "[discord] DISCORD_BOT_TOKEN is not set.\n"
-            "  Fix: export DISCORD_BOT_TOKEN=<token from the Developer Portal>\n"
+            "  Fix: run 'agentkthx discord setup' (writes ~/.agentkthx/.env), or\n"
+            "  export DISCORD_BOT_TOKEN=<token from the Developer Portal>\n"
             "  Also enable the MESSAGE CONTENT INTENT toggle (Bot settings ->\n"
             "  Privileged Gateway Intents) or the gateway will close with 4014."
         )
