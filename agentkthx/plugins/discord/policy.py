@@ -11,6 +11,7 @@ Written by VTSTech — https://www.vts-tech.org
 
 from __future__ import annotations
 
+import threading
 import time
 from dataclasses import dataclass, field
 
@@ -124,6 +125,7 @@ class Policy:
         self.max_prompt_chars = int(max_prompt_chars)
         self.max_reply_msgs = int(max_reply_msgs)
         self._last_run: dict[str, float] = {}   # user_id -> monotonic ts
+        self._rate_lock = threading.Lock()  # concurrent workers must not race
 
     # -- event gate -----------------------------------------------------------
 
@@ -158,19 +160,25 @@ class Policy:
     # -- rate gate --------------------------------------------------------------
 
     def check_rate(self, user_id: str, *, now: float | None = None) -> Decision:
-        """Per-user cooldown. On allow, records this run's timestamp."""
+        """Per-user cooldown. On allow, records this run's timestamp.
+
+        Lock-guarded: with multiple workers pulling from the dispatch
+        queue, two near-simultaneous mentions must not both pass the
+        bucket (M1 AC: rapid double-mention -> second held by cooldown).
+        """
         now = time.monotonic() if now is None else now
-        last = self._last_run.get(user_id)
-        if last is not None:
-            elapsed = now - last
-            if elapsed < self.cooldown_s:
-                return Decision(
-                    False,
-                    "cooldown",
-                    retry_after=round(self.cooldown_s - elapsed, 3),
-                )
-        self._last_run[user_id] = now
-        return Decision(True, "ok")
+        with self._rate_lock:
+            last = self._last_run.get(user_id)
+            if last is not None:
+                elapsed = now - last
+                if elapsed < self.cooldown_s:
+                    return Decision(
+                        False,
+                        "cooldown",
+                        retry_after=round(self.cooldown_s - elapsed, 3),
+                    )
+            self._last_run[user_id] = now
+            return Decision(True, "ok")
 
     # -- prompt hygiene -----------------------------------------------------------
 

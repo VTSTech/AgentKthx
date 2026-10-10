@@ -212,6 +212,11 @@ class DiscordRest:
         """POST /channels/{id}/trigger-typing — 10s "Bot is typing…" state."""
         self._request("POST", f"/channels/{channel_id}/trigger-typing")
 
+    def get_channel(self, channel_id: str) -> dict:
+        """GET /channels/{id} — resolves the #name used in prompt envelopes."""
+        data = self._request("GET", f"/channels/{channel_id}")
+        return data or {}
+
     # -- core request path ------------------------------------------------------
 
     def _request(self, method: str, path: str, *, json_body: dict | None = None) -> dict | None:
