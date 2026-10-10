@@ -31,7 +31,7 @@
           "DISCORD_MAX_PROMPT_CHARS": "1500",
           "DISCORD_MAX_REPLY_MSGS": "3",
           "DISCORD_MAX_STEPS": "5",
-          "DISCORD_TOOLS": "calculator,parse_json,todo,web_search,http_get",
+          "DISCORD_TOOLS": "",
           "DISCORD_UNSAFE_TOOLS": "false",
           "DISCORD_REGISTER_SLASH": "false",
           "DISCORD_ENABLE_SEND_TOOL": "false",

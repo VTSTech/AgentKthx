@@ -33,6 +33,7 @@ from agentkthx.plugins.discord.discord_bot import (  # noqa: E402
 from agentkthx.plugins.discord.policy import MessageContext, Policy  # noqa: E402
 from agentkthx.plugins.discord.rest import DiscordRestError  # noqa: E402
 from agentkthx.plugins.discord.sessions import (  # noqa: E402
+    ChannelConfig,
     channel_id_from_key,
     is_discord_session,
     prune_discord_sessions,
@@ -619,6 +620,111 @@ class TestBuildAgent:
         pool = ResponderPool(cfg, make_policy(), FakeRest())
         job = Job(make_ev(), "hello", "k", resolve_channel_config(CHANNEL, None))
         assert pool._build_agent.__self__.cfg.tools == "todo"
+
+    def test_no_tools_by_default(self, monkeypatch):
+        """R07.33: the default config carries no tools — the responder
+        answers chat directly instead of burning the step budget on tool
+        rounds ('maximum steps reached')."""
+        monkeypatch.setattr("agentkthx.agent.Agent", AgentCapture)
+        AgentCapture.instances.clear()
+        pool = ResponderPool(make_cfg(tools=""), make_policy(), FakeRest())
+        job = Job(
+            make_ev(), "hello", f"discord-g{GUILD}-c{CHANNEL}", resolve_channel_config(CHANNEL, None)
+        )
+        pool._build_agent(job)
+        kw = AgentCapture.instances[-1]
+        assert kw["tools"] == []
+        assert kw["soul"] is None
+
+    def test_soul_does_not_grant_tools(self, monkeypatch, tmp_path):
+        """A soul's allowedTools never re-enables tools on its own — an
+        explicit DISCORD_TOOLS / channel 'tools' opt-in is required too."""
+        monkeypatch.setattr("agentkthx.agent.Agent", AgentCapture)
+        AgentCapture.instances.clear()
+        path = tmp_path / "discord.json"
+        path.write_text(
+            '{"channels": {"%s": {"soul": "kthx-helper"}}}' % CHANNEL,
+            encoding="utf-8",
+        )
+        pool = ResponderPool(make_cfg(tools="", discord_json=str(path)), make_policy(), FakeRest())
+        job = Job(make_ev(), "hello", "k", resolve_channel_config(CHANNEL, str(path)))
+        pool._build_agent(job)
+        kw = AgentCapture.instances[-1]
+        assert kw["soul"] == "kthx-helper"
+        assert kw["tools"] == []
+
+    def test_channel_tools_override_opts_in(self, monkeypatch, tmp_path):
+        """A per-channel 'tools' override is itself the opt-in — it works
+        even though the global default is no-tools."""
+        monkeypatch.setattr("agentkthx.agent.Agent", AgentCapture)
+        AgentCapture.instances.clear()
+        path = tmp_path / "discord.json"
+        path.write_text(
+            '{"channels": {"%s": {"tools": ["calculator", "todo"]}}}' % CHANNEL,
+            encoding="utf-8",
+        )
+        pool = ResponderPool(make_cfg(tools="", discord_json=str(path)), make_policy(), FakeRest())
+        job = Job(make_ev(), "hello", "k", resolve_channel_config(CHANNEL, str(path)))
+        pool._build_agent(job)
+        assert AgentCapture.instances[-1]["tools"] == ["calculator", "todo"]
+
+    def test_from_env_defaults_to_no_tools(self, monkeypatch):
+        """BotConfig.from_env: DISCORD_TOOLS unset resolves to '' (manifest
+        default), and 'none' is honored when set."""
+        monkeypatch.delenv("DISCORD_TOOLS", raising=False)
+        assert BotConfig.from_env().tools == ""
+        monkeypatch.setenv("DISCORD_TOOLS", "none")
+        assert BotConfig.from_env().tools == "none"
+
+
+class TestToolsDisplay:
+    """Banner //status rendering helper."""
+
+    def test_falsy_and_off_variants_render_none(self):
+        assert db_mod._tools_display(None) == "none"
+        assert db_mod._tools_display("") == "none"
+        assert db_mod._tools_display("none") == "none"
+        assert db_mod._tools_display(" OFF ") == "none"
+
+    def test_enabled_list_renders_verbatim(self):
+        assert db_mod._tools_display("calculator,web_search") == "calculator,web_search"
+        assert db_mod._tools_display(["todo", "calculator"]) == "todo, calculator"
+
+
+class TestStatusToolsDisplay:
+    """/status reflects the effective tool setting, not the raw string."""
+
+    def test_status_shows_none_when_disabled(self):
+        pool = ResponderPool(make_cfg(tools=""), make_policy(), FakeRest())
+        inter = db_mod.Interaction(
+            interaction_id="i1",
+            token="itok-x",
+            app_id="app1",
+            guild_id=GUILD,
+            channel_id=CHANNEL,
+            user_id=USER,
+            username="vtstech",
+            command="status",
+        )
+        content, ephemeral = pool._run_status(inter)
+        assert "tools: none" in content
+        assert ephemeral is True
+
+    def test_status_shows_channel_opt_in(self):
+        pool = ResponderPool(make_cfg(tools=""), make_policy(), FakeRest())
+        pool._channel_overrides[CHANNEL] = ChannelConfig(tools=["todo"])
+        inter = db_mod.Interaction(
+            interaction_id="i2",
+            token="itok-x",
+            app_id="app1",
+            guild_id=GUILD,
+            channel_id=CHANNEL,
+            user_id=USER,
+            username="vtstech",
+            command="status",
+        )
+        content, _ = pool._run_status(inter)
+        assert "tools: todo" in content
 
 
 # ---------------------------------------------------------------------------

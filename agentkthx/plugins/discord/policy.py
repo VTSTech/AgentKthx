@@ -219,12 +219,21 @@ class Policy:
         """
         Resolve the effective tool allowlist.
 
-        `requested`: DISCORD_TOOLS string or list. `soul_allowed` (optional):
-        the soul's allowedTools list — the stricter set wins (intersection).
-        Discord default excludes `shell`/`python_repl`; `unsafe=True` lifts
+        `requested`: DISCORD_TOOLS string or list. **No tools is the Discord
+        default (R07.33)** — `''` / `'none'` / `'off'` (and `[]`) all resolve
+        to an empty list; tools only run when explicitly opted in.
+        `soul_allowed` (optional): the soul's allowedTools list — the stricter
+        set wins (intersection), and a soul never grants tools on its own.
+        Discord always excludes `shell`/`python_repl`; `unsafe=True` lifts
         the built-in exclusion (caller must gate that on DISCORD_UNSAFE_TOOLS
         + owner check).
         """
+        if isinstance(requested, str) and requested.strip().lower() in (
+            "",
+            "none",
+            "off",
+        ):
+            return []
         items = (
             requested.replace(";", ",").split(",")
             if isinstance(requested, str)

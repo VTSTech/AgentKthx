@@ -69,6 +69,8 @@ class TestManifest:
         assert defaults["DISCORD_BOT_TOKEN"] == ""
         assert defaults["DISCORD_USER_COOLDOWN_S"] == "10"
         assert defaults["DISCORD_MAX_REPLY_MSGS"] == "3"
+        # R07.33: tools are OFF by default on Discord
+        assert defaults["DISCORD_TOOLS"] == ""
 
     def test_no_backends_provided(self):
         """Discord is a feature plugin — it must not register inference."""

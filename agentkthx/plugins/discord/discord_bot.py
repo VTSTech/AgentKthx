@@ -14,7 +14,8 @@ answered via webhook followups; quick commands answer in the callback.
 /model + /soul are owner-gated and apply per-channel runtime overrides.
 
 Safety posture (plan §12): deny-by-default allowlists, per-user cooldowns,
-tool policy excluding `shell`/`python_repl`, `confirm_dangerous` denies
+**no tools by default** (opt in via DISCORD_TOOLS / --tools / channel
+override; shell/python_repl always excluded), `confirm_dangerous` denies
 everything (no human at the terminal to approve), secrets redacted.
 
 The prompt envelope is a normal user message — the agentic loop, ReAct
@@ -76,10 +77,16 @@ DISCORD_INTENTS = (
     INTENT_GUILDS | INTENT_GUILD_MESSAGES | INTENT_DIRECT_MESSAGES | INTENT_MESSAGE_CONTENT
 )
 
-DEFAULT_TOOLS = "calculator,parse_json,todo,web_search,http_get"
+# No tools by default (R07.33): the Discord responder answers chat directly.
+# Tool use on a chat surface burned the whole step budget (the observed
+# "maximum steps reached" loop) and nothing on Discord needs tools yet.
+# Opt in explicitly: DISCORD_TOOLS=calculator,web_search / --tools /
+# per-channel discord.json "tools". `none`/`off`/empty all mean no tools.
+DEFAULT_TOOLS = ""
 # No soul by default (R07.33): `--soul` / DISCORD_SOUL / per-channel
 # discord.json / /soul opt into one; Agent(soul=None) uses the built-in
-# no-soul fallback system prompt.
+# no-soul fallback system prompt. A soul no longer grants tools on its own —
+# DISCORD_TOOLS (or a channel override) must opt in too.
 
 TYPING_REFRESH_S = 8.0   # Discord typing state expires after 10s (plan §8)
 SMALL_REPLY_GAP_S = 10.0  # per-channel cap for one-line notices (plan §8.6)
@@ -117,6 +124,19 @@ def _split_ids(value: str) -> list[str]:
 
 def _as_bool(value: str) -> bool:
     return value.strip().lower() in ("1", "true", "yes", "on")
+
+
+def _tools_display(raw) -> str:
+    """Banner/status rendering: '' / 'none' / 'off' / empty list -> 'none';
+    a channel override list renders comma-joined."""
+    if raw is None:
+        return "none"
+    if isinstance(raw, str):
+        text = raw.strip()
+        if not text or text.lower() in ("none", "off"):
+            return "none"
+        return text
+    return ", ".join(str(t) for t in raw) or "none"
 
 
 def _default_model() -> str:
@@ -168,7 +188,7 @@ class BotConfig:
             max_prompt_chars=int(_cfg("DISCORD_MAX_PROMPT_CHARS", "1500") or 1500),
             max_reply_msgs=int(_cfg("DISCORD_MAX_REPLY_MSGS", "3") or 3),
             max_steps=int(_cfg("DISCORD_MAX_STEPS", "5") or 5),
-            tools=_cfg("DISCORD_TOOLS", DEFAULT_TOOLS),
+            tools=_cfg("DISCORD_TOOLS", DEFAULT_TOOLS) or "",  # no tools by default
             queue_max=max(1, int(_cfg("DISCORD_QUEUE_MAX", "8") or 8)),
             max_workers=max(1, int(_cfg("DISCORD_MAX_WORKERS", "2") or 2)),
             session_ttl_days=int(_cfg("DISCORD_SESSION_TTL_DAYS", "30") or 30),
@@ -274,7 +294,7 @@ def cmd_discord(args) -> int:
     )
     print(
         f"[discord] backend={cfg.backend or 'default'} model={cfg.model or 'default'} "
-        f"tools={cfg.tools} soul={cfg.soul or 'none'}"
+        f"tools={_tools_display(cfg.tools)} soul={cfg.soul or 'none'}"
     )
     if cfg.register_slash:
         print(f"[discord] slash: register on startup (app={cfg.app_id or 'auto'})")
@@ -627,7 +647,7 @@ class ResponderPool:
             backend=self.cfg.backend or "default",
             model=ch.model or self.cfg.model or _default_model(),
             soul=ch.soul or self.cfg.soul or "none",
-            tools=self.cfg.tools,
+            tools=_tools_display(ch.tools if ch.tools is not None else self.cfg.tools),
             max_steps=self.cfg.max_steps,
             cooldown_s=self.cfg.cooldown_s,
             uptime_s=time.monotonic() - (self._started_at or time.monotonic()),

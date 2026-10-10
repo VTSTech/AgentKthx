@@ -2,8 +2,9 @@
 
 Run AgentKthx as a Discord bot: pure-stdlib Gateway v10 WebSocket client + REST v10,
 zero third-party dependencies. The bot answers @mentions, replies-to-bot, and DMs
-through the same `Agent` agentic loop the CLI uses — sessions persist per channel,
-tool calls are policy-gated, and slash commands manage the conversation.
+through the same `Agent` loop the CLI uses — sessions persist per channel, **tools
+are off by default** (the bot answers chat directly; opt in via `DISCORD_TOOLS`),
+and slash commands manage the conversation.
 
 ```
 agentkthx discord setup        # one-time wizard -> ~/.agentkthx/.env (0600)
@@ -55,8 +56,8 @@ comments and unknown keys preserved). It asks for:
 | `DISCORD_USER_COOLDOWN_S` | `10` | Per-user cooldown between agent runs |
 | `DISCORD_MAX_PROMPT_CHARS` | `1500` | Prompt cap after sanitization |
 | `DISCORD_MAX_REPLY_MSGS` | `3` | Max 2000-char chunks per answer |
-| `DISCORD_MAX_STEPS` | `5` | Agent step cap (marked "(incomplete)" when hit) |
-| `DISCORD_TOOLS` | `calculator,parse_json,todo,web_search,http_get` | Tool allowlist (`shell`/`python_repl` always excluded here) |
+| `DISCORD_MAX_STEPS` | `5` | Agent step cap (Discord has its **own** knob — the CLI/`AGENTKTHX_MAX_STEPS` setting does not apply here) |
+| `DISCORD_TOOLS` | *(none)* | **No tools by default (R07.33)** — opt in with a comma list, e.g. `calculator,web_search`; `none`/`off`/empty all mean off; `shell`/`python_repl` always excluded |
 | `DISCORD_UNSAFE_TOOLS` | `false` | Lifts the shell exclusion (banner warns) |
 | `DISCORD_QUEUE_MAX` | `8` | Bounded dispatch queue; overflow gets a one-liner |
 | `DISCORD_MAX_WORKERS` | `2` | Worker threads (agent runs serialize on a semaphore) |
@@ -82,9 +83,11 @@ CLI flags: `--backend` `--model` `--api` `--soul` `--tools` `--max-steps`
 }
 ```
 
-Only narrows: tools intersect with `DISCORD_TOOLS`, and a soul's `allowedTools`
-intersects again (stricter wins). `/model` + `/soul` write runtime overrides for
-the current process; the file wins on restart.
+Semantics (R07.33): the global default is **no tools**. A channel `tools` entry
+opts that channel in; tools then intersect with the soul's `allowedTools`
+(stricter wins). A soul alone never grants tools — set `DISCORD_TOOLS` (or the
+channel entry) too. `/model` + `/soul` write runtime overrides for the current
+process; the file wins on restart.
 
 ## 4. Triggers and sessions
 
@@ -145,6 +148,7 @@ User=youruser   # ~/.agentkthx/.env is 0600 — run as the owner
 | `user-not-allowed` in log | Sender not in `DISCORD_ALLOW_USERS` | Add their ID (comma-separated) |
 | `cooldown` reply | 10s per-user cooldown | Wait, or raise `DISCORD_USER_COOLDOWN_S` |
 | `typing unavailable (404)` | Fresh-session race or channel type without typing | Cosmetic; logged once per channel, replies unaffected |
+| `(incomplete — maximum steps reached)` | Step budget exhausted — only possible when tools were opted in (each tool round burns a step) | Tools are off by default now; if you enabled them, raise `DISCORD_MAX_STEPS` or drop them again. Note Discord has its own `DISCORD_MAX_STEPS` (default 5) — the CLI max-steps setting does not apply |
 | Slash commands missing | Never registered | `agentkthx discord --register-commands`, restart the client |
 | `insufficient permission` on `/model` | Not in `DISCORD_OWNER_IDS` | Add your user ID |
 | 429 rate-limit loop | Discord REST bucket | Handled internally (single retry + global pause); slow down bulk tests |
@@ -152,8 +156,11 @@ User=youruser   # ~/.agentkthx/.env is 0600 — run as the owner
 ## 8. Security posture (plan §12)
 
 - Deny-by-default: empty allowlist = silent bot; nothing is queued before the gate.
-- `shell` / `python_repl` are excluded from the Discord tool surface; dangerous
-  tools are confirmed by a callback that **always denies** (nobody at the terminal).
+- **No tools by default (R07.33)** — the Discord surface answers chat; tool use
+  requires an explicit `DISCORD_TOOLS` / `--tools` / channel opt-in.
+- `shell` / `python_repl` are excluded from the Discord tool surface even when
+  opted in; dangerous tools are confirmed by a callback that **always denies**
+  (nobody at the terminal).
 - Prompt hygiene: bot's own mention stripped, `@everyone`/`@here` neutralized,
   prompts capped at `DISCORD_MAX_PROMPT_CHARS`.
 - Secrets: the env file is 0600, tokens are redacted on every log/error path,

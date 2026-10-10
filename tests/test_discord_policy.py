@@ -315,3 +315,17 @@ class TestFilterTools:
             "crypto-quotes",
             "calculator",
         ]
+
+    def test_no_tools_values_resolve_empty(self):
+        """R07.33: tools are OFF by default — '', 'none', 'off' all mean none."""
+        policy = make_policy()
+        assert policy.filter_tools("") == []
+        assert policy.filter_tools("none") == []
+        assert policy.filter_tools("off") == []
+        assert policy.filter_tools("  NONE  ") == []
+        assert policy.filter_tools([]) == []
+
+    def test_opt_in_still_excludes_dangerous(self):
+        """Opting back in keeps the shell/python_repl exclusion."""
+        policy = make_policy()
+        assert policy.filter_tools("calculator,shell,python_repl") == ["calculator"]

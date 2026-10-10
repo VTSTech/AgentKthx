@@ -49,6 +49,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`docs/DISCORD.md` (new)**: portal setup + invite URL, wizard guide, full env-var reference, `discord.json` guide, slash-command table, run cookbook (ZAI/Ollama/systemd), troubleshooting matrix (4014/4004/silent-bot/cooldown/typing-404), security posture. README docs table updated.
 - Tests: 97 new offline tests across the Discord battery — gateway codec + seam, policy matrix (incl. plain-DM trigger, user-allowlist DM gate), REST client against a localhost stub (auth headers, 429 retry, chunk fence integrity, no-auth webhook calls), setup wizard flows (44), responder pipeline e2e with stubbed Agent (cooldown race, queue-full, chunking, overrides, model override), M2 interaction wiring (parse/gate/handlers/defer/followup/owner gates/typing). Full suite: **3,735 passed / 20 skipped**.
 
+### No tools on Discord by default (R07.33 revision)
+
+- **The Discord responder now runs tool-free by default**: `DISCORD_TOOLS` defaults to *(none)* and `filter_tools` treats `''` / `none` / `off` as an empty allowlist. The bot answers chat directly instead of entering the ReAct tool loop — which is what produced the observed "(incomplete — maximum steps reached)" replies: every tool round burns a step, and the Discord step cap is its **own** `DISCORD_MAX_STEPS` (default 5), independent of the CLI/`AGENTKTHX_MAX_STEPS` setting, so raising the cap outside Discord never applied. With no tools the loop answers in a single step.
+- **Opt-in paths preserved** for when tools are wanted later: `DISCORD_TOOLS=calculator,web_search`, `--tools`, or a per-channel `discord.json` `"tools"` entry (each channel entry is itself the opt-in). `shell`/`python_repl` stay excluded even when opted in, and **a soul never grants tools on its own** — the soul `allowedTools` intersection only narrows an explicit opt-in.
+- Banner + `/status` render the effective setting (`tools=none` when off, comma-joined list when a channel opts in) instead of the raw config string.
+
 ## [R07.32] - 2026-10-10 1:08:09 PM
 
 ### Date/time built-ins removed → MCP time server (@infoinlet/mcp-time)
