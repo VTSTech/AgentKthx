@@ -4,15 +4,22 @@ AgentKthx Plugin — Discord Session Identity & Channel Overrides (M1)
 Maps Discord channels to PersistentMemory session keys and resolves
 per-channel overrides from ~/.agentkthx/discord.json:
 
-    session_key  =  discord-g{guild_id}-c{channel_id}   (guild channels)
-                    discord-dm-{user_id}                (DMs)
+    session_key  =  discord-g{guild_id}-c{channel_id}[-p{prefix}][-r{run}]
+                    discord-dm-{user_id}[-p{prefix}][-r{run}]
 
 Keys are chosen to be visible and greppable in `agentkthx sessions` output
 and the ~/.agentkthx/ SQLite store. Passing the key to Agent(session_id=...)
-makes conversation history resume across bot restarts automatically.
+restores that conversation.
 
-Also owns DISCORD_SESSION_TTL_DAYS pruning (default 30) so stale Discord
-sessions don't accumulate forever, and the soul -> allowedTools resolution
+Fresh sessions by default (R07.33): the bot stamps every key with its run
+id (`-r<unix-start>`), so each restart starts new conversations per channel.
+`--keep` / DISCORD_KEEP_SESSIONS=true drops the stamp and restores the old
+stable keys (history resumes across restarts). DISCORD_SESSION_TTL_DAYS
+(default 7) is independent: it only garbage-collects sessions from the
+SQLite store after that many days of inactivity — it never affects whether
+a restart resumes.
+
+Also owns the TTL pruning and the soul -> allowedTools resolution
 used by the Discord tool policy (plan §9, §12).
 
 Pure stdlib. No network. See docs/DISCORD_PLUGIN_PLAN.md §7.4, §9.
@@ -24,12 +31,21 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
 SESSION_PREFIX = "discord-"
-DEFAULT_SESSION_TTL_DAYS = 30
+# R07.33: lowered 30 -> 7. Fresh-on-restart is now the default, so every bot
+# run leaves its own discord-* session rows behind; a week of inactivity is
+# plenty before the store self-cleans. DISCORD_SESSION_TTL_DAYS overrides
+# (set 0 to disable pruning entirely).
+DEFAULT_SESSION_TTL_DAYS = 7
+
+# Guild session keys start with discord-g<digits>-c<digits>; anything after
+# that (session prefix, run stamp) is decoration as far as identity goes.
+_GUILD_KEY_RE = re.compile(r"^discord-g(\d+)-c(\d+)")
 
 
 # ---------------------------------------------------------------------------
@@ -45,10 +61,27 @@ def session_key_for(guild_id: str | None, channel_id: str, user_id: str) -> str:
 
 
 def channel_id_from_key(key: str) -> str | None:
-    """Extract the channel id from a guild session key (None for DM keys)."""
-    if key.startswith("discord-g") and "-c" in key:
-        return key.rsplit("-c", 1)[1]
-    return None
+    """Extract the channel id from a guild session key (None for DM keys).
+
+    Tolerates suffixed keys — ``discord-g1-c2-psupport-r1700000000`` still
+    yields ``2`` (the old rsplit('-c') approach would have returned the
+    whole tail).
+    """
+    match = _GUILD_KEY_RE.match(key)
+    return match.group(2) if match else None
+
+
+def session_key_with_run_stamp(base_key: str, run_stamp: str | None) -> str:
+    """Scope a session key to one bot run (fresh-sessions default, R07.33).
+
+    ``run_stamp`` is the bot's start time as a unix-seconds string. With a
+    stamp the key becomes ``<base>-r<stamp>`` — a restart produces a new
+    stamp, hence a new empty conversation per channel. ``run_stamp=None``
+    is the --keep mode: the stable key resumes history across restarts.
+    """
+    if not run_stamp:
+        return base_key
+    return f"{base_key}-r{run_stamp}"
 
 
 def is_discord_session(session_id: str) -> bool:
@@ -67,16 +100,14 @@ class ChannelConfig:
     soul: str | None = None
     tools: list[str] | None = None
     session_prefix: str | None = None
-    model: str | None = None   # /model slash command or discord.json override
+    model: str | None = None  # /model slash command or discord.json override
 
 
 def default_discord_json_path() -> str:
     return os.path.expanduser("~/.agentkthx/discord.json")
 
 
-def resolve_channel_config(
-    channel_id: str | None, cfg_path: str | None = None
-) -> ChannelConfig:
+def resolve_channel_config(channel_id: str | None, cfg_path: str | None = None) -> ChannelConfig:
     """
     Merge the channel's entry from ~/.agentkthx/discord.json over defaults:
 
@@ -102,16 +133,12 @@ def resolve_channel_config(
     return ChannelConfig(
         soul=str(entry["soul"]) if entry.get("soul") else None,
         tools=[str(t) for t in tools] if isinstance(tools, list) else None,
-        session_prefix=(
-            str(entry["session_prefix"]) if entry.get("session_prefix") else None
-        ),
+        session_prefix=(str(entry["session_prefix"]) if entry.get("session_prefix") else None),
         model=str(entry["model"]) if entry.get("model") else None,
     )
 
 
-def session_key_with_prefix(
-    base_key: str, channel_cfg: ChannelConfig
-) -> str:
+def session_key_with_prefix(base_key: str, channel_cfg: ChannelConfig) -> str:
     """Apply an optional per-channel session_prefix (plan §9 example:
     "support" prefix for a support channel's separate history thread)."""
     prefix = channel_cfg.session_prefix

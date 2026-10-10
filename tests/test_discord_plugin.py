@@ -71,6 +71,9 @@ class TestManifest:
         assert defaults["DISCORD_MAX_REPLY_MSGS"] == "3"
         # R07.33: tools are OFF by default on Discord
         assert defaults["DISCORD_TOOLS"] == ""
+        # R07.33: fresh sessions per restart; TTL lowered 30 -> 7 days
+        assert defaults["DISCORD_KEEP_SESSIONS"] == "false"
+        assert defaults["DISCORD_SESSION_TTL_DAYS"] == "7"
 
     def test_no_backends_provided(self):
         """Discord is a feature plugin — it must not register inference."""
@@ -136,6 +139,7 @@ class TestCliWiring:
         assert "--dry-run" in out
         assert "--backend" in out
         assert "--debug" in out
+        assert "--keep" in out
 
     def test_discord_without_token_fails_cleanly(self, monkeypatch, capsys, clean_env):
         monkeypatch.setattr(CLI_MAIN_MODULE, "_run_update_check", lambda: None)

@@ -26,12 +26,12 @@ class MessageContext:
 
     message_id: str
     channel_id: str
-    guild_id: str | None          # None for DMs
+    guild_id: str | None  # None for DMs
     user_id: str
     username: str
     content: str
-    mentions: tuple[str, ...] = ()            # user ids mentioned in the message
-    reference_author_id: str | None = None    # author of the replied-to message
+    mentions: tuple[str, ...] = ()  # user ids mentioned in the message
+    reference_author_id: str | None = None  # author of the replied-to message
     author_bot: bool = False
     is_dm: bool = False
 
@@ -42,7 +42,7 @@ class Decision:
 
     allowed: bool
     reason: str = ""
-    retry_after: float | None = None   # populated on cooldown denials
+    retry_after: float | None = None  # populated on cooldown denials
 
 
 # ---------------------------------------------------------------------------
@@ -124,7 +124,7 @@ class Policy:
         self.cooldown_s = float(cooldown_s)
         self.max_prompt_chars = int(max_prompt_chars)
         self.max_reply_msgs = int(max_reply_msgs)
-        self._last_run: dict[str, float] = {}   # user_id -> monotonic ts
+        self._last_run: dict[str, float] = {}  # user_id -> monotonic ts
         self._rate_lock = threading.Lock()  # concurrent workers must not race
 
     # -- event gate -----------------------------------------------------------
@@ -199,13 +199,9 @@ class Policy:
         bot_id = bot_user_id or self.bot_user_id
         for mention in (f"<@{bot_id}>", f"<@!{bot_id}>"):
             text = text.replace(mention, " ")
-        text = text.replace("@everyone", "@\u200beveryone").replace(
-            "@here", "@\u200bhere"
-        )
+        text = text.replace("@everyone", "@\u200beveryone").replace("@here", "@\u200bhere")
         # collapse horizontal whitespace only — newlines are meaningful prompts
-        text = "\n".join(
-            " ".join(line.split()) for line in text.split("\n")
-        ).strip()
+        text = "\n".join(" ".join(line.split()) for line in text.split("\n")).strip()
         cap = self.max_prompt_chars
         if cap and len(text) > cap:
             text = text[:cap]
@@ -213,9 +209,7 @@ class Policy:
 
     # -- tool policy ---------------------------------------------------------------
 
-    def filter_tools(
-        self, requested, *, soul_allowed=None, unsafe: bool = False
-    ) -> list[str]:
+    def filter_tools(self, requested, *, soul_allowed=None, unsafe: bool = False) -> list[str]:
         """
         Resolve the effective tool allowlist.
 

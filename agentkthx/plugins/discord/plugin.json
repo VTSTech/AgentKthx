@@ -36,7 +36,8 @@
           "DISCORD_REGISTER_SLASH": "false",
           "DISCORD_DEBUG": "false",
           "DISCORD_ENABLE_SEND_TOOL": "false",
-          "DISCORD_SESSION_TTL_DAYS": "30",
+          "DISCORD_SESSION_TTL_DAYS": "7",
+          "DISCORD_KEEP_SESSIONS": "false",
           "DISCORD_CONFIG": "~/.agentkthx/discord.json"
         }
       },

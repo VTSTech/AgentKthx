@@ -31,6 +31,7 @@ from agentkthx.plugins.discord.discord_bot import (  # noqa: E402
 from agentkthx.plugins.discord.policy import MessageContext, Policy  # noqa: E402
 from agentkthx.plugins.discord.rest import DiscordRestError  # noqa: E402
 from agentkthx.plugins.discord.sessions import (  # noqa: E402
+    DEFAULT_SESSION_TTL_DAYS,
     ChannelConfig,
     channel_id_from_key,
     is_discord_session,
@@ -39,6 +40,7 @@ from agentkthx.plugins.discord.sessions import (  # noqa: E402
     resolve_soul_allowed_tools,
     session_key_for,
     session_key_with_prefix,
+    session_key_with_run_stamp,
 )
 
 BOT_ID = "999000111222333444"
@@ -62,8 +64,8 @@ class FakeRest:
         self.sent: list[tuple[str, str]] = []
         self.typings: list[str] = []
         self.channels_queried: list[str] = []
-        self.callbacks: list[tuple[str, dict]] = []   # (interaction_id, payload)
-        self.followups: list[tuple[str, dict]] = []   # (token, payload)
+        self.callbacks: list[tuple[str, dict]] = []  # (interaction_id, payload)
+        self.followups: list[tuple[str, dict]] = []  # (token, payload)
         self._fail_channel = fail_channel
 
     def send_message(self, channel_id: str, content: str):
@@ -164,12 +166,12 @@ def make_ev(content=f"<@{BOT_ID}> hello", **kw) -> MessageContext:
     return MessageContext(**base)
 
 
-def make_pool(cfg=None, policy=None, rest=None, agent=None):
+def make_pool(cfg=None, policy=None, rest=None, agent=None, run_stamp=None):
     cfg = cfg or make_cfg()
     policy = policy or make_policy()
     rest = rest or FakeRest()
     agent = agent or FakeAgent()
-    pool = ResponderPool(cfg, policy, rest)
+    pool = ResponderPool(cfg, policy, rest, run_stamp=run_stamp)
     built: list[Job] = []
     pool._build_agent = lambda job: (built.append(job), agent)[1]  # shadows method
     return pool, rest, agent, built
@@ -200,6 +202,22 @@ class TestSessionKeys:
         assert channel_id_from_key(f"discord-g{GUILD}-c{CHANNEL}") == CHANNEL
         assert channel_id_from_key(f"discord-dm-{USER}") is None
 
+    def test_channel_id_from_key_tolerates_suffixes(self):
+        """Run stamp / prefix decorations don't break channel extraction."""
+        key = f"discord-g{GUILD}-c{CHANNEL}-psupport-r1791675399"
+        assert channel_id_from_key(key) == CHANNEL
+
+    def test_run_stamp_helper(self):
+        base = f"discord-g{GUILD}-c{CHANNEL}"
+        assert session_key_with_run_stamp(base, "1791675399") == base + "-r1791675399"
+        assert session_key_with_run_stamp(base, None) == base
+        assert session_key_with_run_stamp(base, "") == base  # falsy = --keep
+
+    def test_default_ttl_lowered_to_seven_days(self):
+        """R07.33: 30d was 'a lot' — fresh-on-restart leaves one row per run
+        behind, so the store self-cleans after a week of inactivity."""
+        assert DEFAULT_SESSION_TTL_DAYS == 7
+
     def test_is_discord_session(self):
         assert is_discord_session("discord-g1-c2")
         assert is_discord_session("discord-dm-5")
@@ -218,10 +236,36 @@ class TestSessionKeys:
             encoding="utf-8",
         )
         cfg = make_cfg(discord_json=str(path))
-        pool = ResponderPool(cfg, make_policy(), FakeRest())
+        pool = ResponderPool(cfg, make_policy(), FakeRest(), run_stamp="1700000000")
         pool.submit_event(make_ev())
         job = pool._queue.get_nowait()
-        assert job.session_key.endswith("-psupport")
+        assert job.session_key.endswith("-psupport-r1700000000")
+
+    def test_fresh_default_scopes_keys_to_the_run(self):
+        """R07.33 default: each pool (bot run) gets its own session keys, so a
+        restart starts new conversations per channel."""
+        base = f"discord-g{GUILD}-c{CHANNEL}"
+        pool_a, _ra, _aa, _ba = make_pool(run_stamp="1111111111")
+        pool_b, _rb, _ab, _bb = make_pool(run_stamp="2222222222")
+        pool_a.submit_event(make_ev(message_id="a1"))
+        pool_b.submit_event(make_ev(message_id="b1"))
+        key_a = pool_a._queue.get_nowait().session_key
+        key_b = pool_b._queue.get_nowait().session_key
+        assert key_a == base + "-r1111111111"
+        assert key_b == base + "-r2222222222"
+        assert key_a != key_b
+
+    def test_keep_mode_restores_stable_keys(self):
+        """--keep / DISCORD_KEEP_SESSIONS=true: no run stamp, history resumes
+        across restarts (pre-R07.33 behavior)."""
+        base = f"discord-g{GUILD}-c{CHANNEL}"
+        pool, _r, _a, _b = make_pool(cfg=make_cfg(keep_sessions=True))
+        pool.submit_event(make_ev())
+        assert pool._run_stamp is None
+        assert pool._queue.get_nowait().session_key == base
+        # an explicit run_stamp is ignored in keep mode
+        pool_k = ResponderPool(make_cfg(keep_sessions=True), make_policy(), FakeRest())
+        assert pool_k._run_stamp is None
 
 
 class ChannelConfigFix:
@@ -270,10 +314,10 @@ class TestPruneSessions:
         sqlite3.connect(db_path).close()  # touch file so _init_db runs
         PersistentMemory.list_sessions(db_path)  # ensures schema exists
         rows = [
-            ("discord-g1-c1", "2020-01-01 00:00:00"),   # stale -> pruned
-            ("discord-g1-c2", "2100-01-01 00:00:00"),   # fresh -> kept
-            ("cli-local-1", "2020-01-01 00:00:00"),     # not ours -> kept
-            ("discord-dm-9", "garbage-ts"),             # unparseable -> kept
+            ("discord-g1-c1", "2020-01-01 00:00:00"),  # stale -> pruned
+            ("discord-g1-c2", "2100-01-01 00:00:00"),  # fresh -> kept
+            ("cli-local-1", "2020-01-01 00:00:00"),  # not ours -> kept
+            ("discord-dm-9", "garbage-ts"),  # unparseable -> kept
         ]
         conn = sqlite3.connect(db_path)
         try:
@@ -357,7 +401,12 @@ class TestEnvelope:
 
     def test_guild_envelope(self):
         pool, rest = self._pool_with_cache()
-        job = Job(make_ev(), "hello", f"discord-g{GUILD}-c{CHANNEL}", resolve_channel_config(CHANNEL, None))
+        job = Job(
+            make_ev(),
+            "hello",
+            f"discord-g{GUILD}-c{CHANNEL}",
+            resolve_channel_config(CHANNEL, None),
+        )
         assert pool._build_envelope(job) == (
             f"[Discord] guild={GUILD} channel=#general user=vtstech\nhello"
         )
@@ -381,9 +430,7 @@ class TestEnvelope:
             f"discord-dm-{USER}",
             resolve_channel_config(DM_CHANNEL, None),
         )
-        assert pool._build_envelope(job).startswith(
-            "[Discord] guild=dm channel=dm user=vtstech\n"
-        )
+        assert pool._build_envelope(job).startswith("[Discord] guild=dm channel=dm user=vtstech\n")
         assert rest.channels_queried == []  # DMs skip the REST name lookup
 
 
@@ -394,7 +441,7 @@ class TestEnvelope:
 
 class TestResponderEndToEnd:
     def test_mention_gets_answer(self):
-        pool, rest, agent, built = make_pool()
+        pool, rest, agent, built = make_pool(run_stamp="1700000000")
         pool.start()
         try:
             pool.submit_event(make_ev())
@@ -404,7 +451,7 @@ class TestResponderEndToEnd:
             assert text == "the answer"
             assert rest.typings, "typing indicator never triggered"
             assert len(built) == 1
-            assert built[0].session_key == f"discord-g{GUILD}-c{CHANNEL}"
+            assert built[0].session_key == f"discord-g{GUILD}-c{CHANNEL}-r1700000000"
             assert agent.prompts[0].startswith("[Discord] guild=")
             assert "hello" in agent.prompts[0]
             assert pool.agent_runs == 1
@@ -455,7 +502,9 @@ class TestResponderEndToEnd:
     def test_queue_full_path(self):
         cfg = make_cfg(queue_max=1)
         pool, rest, _, _ = make_pool(cfg=cfg)
-        pool._queue.put_nowait(Job(make_ev(message_id="m0"), "x", "k", resolve_channel_config(CHANNEL, None)))
+        pool._queue.put_nowait(
+            Job(make_ev(message_id="m0"), "x", "k", resolve_channel_config(CHANNEL, None))
+        )
         pool.submit_event(make_ev())  # queue already at maxsize
         assert any("Queue is full" in t for _, t in rest.sent)
 
@@ -550,7 +599,10 @@ class TestBuildAgent:
         AgentCapture.instances.clear()
         pool = ResponderPool(make_cfg(), make_policy(), FakeRest())
         job = Job(
-            make_ev(), "hello", f"discord-g{GUILD}-c{CHANNEL}", resolve_channel_config(CHANNEL, None)
+            make_ev(),
+            "hello",
+            f"discord-g{GUILD}-c{CHANNEL}",
+            resolve_channel_config(CHANNEL, None),
         )
         agent = pool._build_agent(job)
         kw = agent.kwargs
@@ -651,7 +703,10 @@ class TestBuildAgent:
         AgentCapture.instances.clear()
         pool = ResponderPool(make_cfg(tools=""), make_policy(), FakeRest())
         job = Job(
-            make_ev(), "hello", f"discord-g{GUILD}-c{CHANNEL}", resolve_channel_config(CHANNEL, None)
+            make_ev(),
+            "hello",
+            f"discord-g{GUILD}-c{CHANNEL}",
+            resolve_channel_config(CHANNEL, None),
         )
         pool._build_agent(job)
         kw = AgentCapture.instances[-1]
@@ -722,6 +777,32 @@ class TestBuildAgent:
         monkeypatch.setenv("DISCORD_DEBUG", "false")
         assert BotConfig.from_env(overrides={"debug": True}).debug is True
         assert BotConfig.from_env().debug is False
+
+    def test_from_env_fresh_sessions_by_default(self, monkeypatch):
+        """R07.33: keep_sessions defaults False (fresh conversations on every
+        restart); DISCORD_KEEP_SESSIONS=true opts back into history resume;
+        session TTL default dropped 30 -> 7 days."""
+        monkeypatch.delenv("DISCORD_KEEP_SESSIONS", raising=False)
+        monkeypatch.delenv("DISCORD_SESSION_TTL_DAYS", raising=False)
+        cfg = BotConfig.from_env()
+        assert cfg.keep_sessions is False
+        assert cfg.session_ttl_days == 7
+        monkeypatch.setenv("DISCORD_KEEP_SESSIONS", "true")
+        assert BotConfig.from_env().keep_sessions is True
+        monkeypatch.setenv("DISCORD_KEEP_SESSIONS", "false")
+        assert BotConfig.from_env().keep_sessions is False
+        monkeypatch.setenv("DISCORD_SESSION_TTL_DAYS", "30")
+        assert BotConfig.from_env().session_ttl_days == 30
+
+    def test_keep_flag_and_override_semantics(self, monkeypatch):
+        """--keep flows through overrides with the same None-skip semantics as
+        --debug: the flag wins only when raised, env alone works."""
+        monkeypatch.delenv("DISCORD_KEEP_SESSIONS", raising=False)
+        assert BotConfig.from_env().keep_sessions is False
+        assert BotConfig.from_env(overrides={"keep_sessions": None}).keep_sessions is False
+        assert BotConfig.from_env(overrides={"keep_sessions": True}).keep_sessions is True
+        monkeypatch.setenv("DISCORD_KEEP_SESSIONS", "true")
+        assert BotConfig.from_env(overrides={"keep_sessions": None}).keep_sessions is True
 
 
 class TestToolsDisplay:

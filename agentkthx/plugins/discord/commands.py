@@ -20,9 +20,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 # Interaction callback types (Discord API)
-CALLBACK_MESSAGE = 4   # CHANNEL_MESSAGE_WITH_SOURCE — immediate reply
-CALLBACK_DEFER = 5     # DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE — "thinking…"
-EPHEMERAL = 64         # message flag: visible only to the invoker
+CALLBACK_MESSAGE = 4  # CHANNEL_MESSAGE_WITH_SOURCE — immediate reply
+CALLBACK_DEFER = 5  # DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE — "thinking…"
+EPHEMERAL = 64  # message flag: visible only to the invoker
 
 
 @dataclass(frozen=True)
@@ -30,9 +30,9 @@ class Interaction:
     """Normalized view of one INTERACTION_CREATE dispatch (chat input)."""
 
     interaction_id: str
-    token: str                      # per-interaction webhook token (never log)
+    token: str  # per-interaction webhook token (never log)
     app_id: str
-    guild_id: str | None            # None for DM interactions
+    guild_id: str | None  # None for DM interactions
     channel_id: str
     user_id: str
     username: str

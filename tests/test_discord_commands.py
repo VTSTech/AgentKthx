@@ -48,8 +48,9 @@ USER = "403985188666867712"
 DM_CHANNEL = "333444555666777888"
 
 
-def inter_payload(command="status", *, guild=GUILD, channel=CHANNEL, user=USER,
-                  options=None, iid="i1", app="app1"):
+def inter_payload(
+    command="status", *, guild=GUILD, channel=CHANNEL, user=USER, options=None, iid="i1", app="app1"
+):
     d = {
         "id": iid,
         "token": f"itok-{iid}",
@@ -57,9 +58,7 @@ def inter_payload(command="status", *, guild=GUILD, channel=CHANNEL, user=USER,
         "channel_id": channel,
         "data": {
             "name": command,
-            "options": [
-                {"name": k, "value": v} for k, v in (options or {}).items()
-            ],
+            "options": [{"name": k, "value": v} for k, v in (options or {}).items()],
         },
     }
     if guild is None:
@@ -237,9 +236,7 @@ class TestQuickHandlers:
 
     def test_model_show_and_set(self):
         inter = make_inter(command="model")
-        content, _ = handle_model(
-            inter, current_model="glm-4.5-flash", owner=True, name=""
-        )
+        content, _ = handle_model(inter, current_model="glm-4.5-flash", owner=True, name="")
         assert "glm-4.5-flash" in content
         content, _ = handle_model(
             make_inter(command="model", options={"name": "qwen3:8b"}),
@@ -259,9 +256,7 @@ class TestQuickHandlers:
         assert "owners" in content and eph
 
     def test_soul_show_and_set(self):
-        content, _ = handle_soul(
-            make_inter(command="soul"), current_soul=None, owner=True, name=""
-        )
+        content, _ = handle_soul(make_inter(command="soul"), current_soul=None, owner=True, name="")
         assert "none" in content
         content, _ = handle_soul(
             make_inter(command="soul", options={"name": "kthx-trading"}),
@@ -312,12 +307,12 @@ class FakeRest:
     """Same recording surface as the responder tests, minimal here."""
 
     def __init__(self):
-        self.fail_typing = 0   # 0 = succeed; otherwise a REST status int
+        self.fail_typing = 0  # 0 = succeed; otherwise a REST status int
         self.sent = []
         self.typings = []
         self.channels_queried = []
-        self.callbacks = []    # (interaction_id, payload)
-        self.followups = []    # (token, payload)
+        self.callbacks = []  # (interaction_id, payload)
+        self.followups = []  # (token, payload)
 
     def send_message(self, channel_id, content):
         self.sent.append((channel_id, content))
@@ -341,6 +336,7 @@ class FakeRest:
 
 
 def make_pool(**cfg_kw):
+    run_stamp = cfg_kw.pop("run_stamp", None)
     base = dict(
         token="tok",
         app_id="app1",
@@ -364,7 +360,7 @@ def make_pool(**cfg_kw):
         cooldown_s=cfg.cooldown_s,
     )
     rest = FakeRest()
-    return ResponderPool(cfg, policy, rest), rest
+    return ResponderPool(cfg, policy, rest, run_stamp=run_stamp), rest
 
 
 class TestSubmitInteractionWiring:
@@ -381,7 +377,7 @@ class TestSubmitInteractionWiring:
         assert "unknown command" in capsys.readouterr().out
 
     def test_ask_defers_then_enqueues(self):
-        pool, rest = make_pool()
+        pool, rest = make_pool(run_stamp="1700000000")
         pool._inter_defer_and_enqueue(make_inter(command="ask", options={"prompt": "hi bot"}))
         assert rest.callbacks[0][1]["type"] == CALLBACK_DEFER
         assert rest.callbacks[0][1]["data"] == {}  # not ephemeral
@@ -390,7 +386,8 @@ class TestSubmitInteractionWiring:
         assert job.want_think is False
         assert job.interaction is not None
         assert job.ev.is_dm is False
-        assert job.session_key == f"discord-g{GUILD}-c{CHANNEL}"
+        # fresh mode (default): slash-triggered jobs share the run-stamped key
+        assert job.session_key == f"discord-g{GUILD}-c{CHANNEL}-r1700000000"
 
     def test_ask_ephemeral_defers_with_flag(self):
         pool, rest = make_pool()
@@ -408,9 +405,9 @@ class TestSubmitInteractionWiring:
 
     def test_ask_queue_full_follows_up(self):
         pool, rest = make_pool(queue_max=1)
-        pool._queue.put_nowait(Job(
-            make_ev_placeholder(), "x", "k", db_mod.resolve_channel_config(CHANNEL, None)
-        ))
+        pool._queue.put_nowait(
+            Job(make_ev_placeholder(), "x", "k", db_mod.resolve_channel_config(CHANNEL, None))
+        )
         pool._inter_defer_and_enqueue(make_inter(command="ask", options={"prompt": "hi"}))
         assert any("Queue is full" in p["content"] for _, p in rest.followups)
 
@@ -421,12 +418,12 @@ class TestSubmitInteractionWiring:
         assert job.want_think is True
 
     def test_dm_ask_session_key(self):
-        pool, rest = make_pool(allow_dms=True)
+        pool, rest = make_pool(run_stamp="1700000000", allow_dms=True)
         pool._inter_defer_and_enqueue(
             make_inter(command="ask", guild=None, channel=DM_CHANNEL, options={"prompt": "yo"})
         )
         job = pool._queue.get_nowait()
-        assert job.session_key == f"discord-dm-{USER}"
+        assert job.session_key == f"discord-dm-{USER}-r1700000000"
         assert job.ev.is_dm is True
 
     def test_status_replies_type4_ephemeral(self):
@@ -443,16 +440,18 @@ class TestSubmitInteractionWiring:
 
     def test_model_non_owner_denied_no_override(self, capsys):
         pool, rest = make_pool()
-        pool._inter_quick(make_inter(command="model", user="222", options={"name": "m2"}),
-                          pool._run_model)
+        pool._inter_quick(
+            make_inter(command="model", user="222", options={"name": "m2"}), pool._run_model
+        )
         content = rest.callbacks[0][1]["data"]["content"]
         assert "owners" in content
         assert CHANNEL not in pool._channel_overrides
 
     def test_model_owner_sets_runtime_override(self):
         pool, rest = make_pool()
-        pool._inter_quick(make_inter(command="model", options={"name": "qwen3:8b"}),
-                          pool._run_model)
+        pool._inter_quick(
+            make_inter(command="model", options={"name": "qwen3:8b"}), pool._run_model
+        )
         content = rest.callbacks[0][1]["data"]["content"]
         assert "qwen3:8b" in content
         assert pool._channel_cfg(CHANNEL).model == "qwen3:8b"
@@ -484,10 +483,22 @@ class TestSubmitInteractionWiring:
             "delete_session",
             staticmethod(lambda session_id, db_path=None: calls.append(session_id) or True),
         )
-        pool, rest = make_pool()
+        pool, rest = make_pool(run_stamp="1700000000")
+        pool._inter_quick(make_inter(command="reset"), pool._run_reset)
+        # fresh mode (default): /reset clears THIS run's stamped conversation
+        assert calls == [f"discord-g{GUILD}-c{CHANNEL}-r1700000000"]
+        assert "cleared" in rest.callbacks[0][1]["data"]["content"]
+
+    def test_reset_keep_mode_clears_stable_key(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(
+            PersistentMemory,
+            "delete_session",
+            staticmethod(lambda session_id, db_path=None: calls.append(session_id) or True),
+        )
+        pool, _rest = make_pool(keep_sessions=True)
         pool._inter_quick(make_inter(command="reset"), pool._run_reset)
         assert calls == [f"discord-g{GUILD}-c{CHANNEL}"]
-        assert "cleared" in rest.callbacks[0][1]["data"]["content"]
 
     def test_owners_fallback_to_allow_users(self):
         pool, _ = make_pool()  # no owner_ids -> allow_users are owners
@@ -536,7 +547,7 @@ class TestReplyPaths:
         job = self._interaction_job(pool)
         run = AgentRun(final_answer="answer text")
         pool._send_reply(job, run)
-        assert rest.sent == []                       # channel send bypassed
+        assert rest.sent == []  # channel send bypassed
         assert len(rest.followups) == 1
         token, payload = rest.followups[0]
         assert token == "itok-i1"
@@ -552,7 +563,9 @@ class TestReplyPaths:
     def test_message_reply_still_uses_send(self):
         pool, rest = make_pool()
         job = Job(
-            make_ev_placeholder(), "hello", "k",
+            make_ev_placeholder(),
+            "hello",
+            "k",
             db_mod.resolve_channel_config(CHANNEL, None),
         )
         pool._send_reply(job, AgentRun(final_answer="plain"))

@@ -18,6 +18,13 @@ Safety posture (plan §12): deny-by-default allowlists, per-user cooldowns,
 override; shell/python_repl always excluded), `confirm_dangerous` denies
 everything (no human at the terminal to approve), secrets redacted.
 
+Conversation memory (R07.33): **sessions start fresh on every restart** —
+each run scopes its keys with a run stamp, so channels begin new
+conversations. `--keep` / DISCORD_KEEP_SESSIONS=true restores the old
+stable keys (history resumes across restarts). DISCORD_SESSION_TTL_DAYS
+(default 7) garbage-collects stale sessions from the store; it does not
+affect restart resume.
+
 The prompt envelope is a normal user message — the agentic loop, ReAct
 prompting, tool execution, and error recovery are exactly the CLI path.
 
@@ -68,6 +75,7 @@ from .sessions import (
     resolve_soul_allowed_tools,
     session_key_for,
     session_key_with_prefix,
+    session_key_with_run_stamp,
 )
 
 # The four intents from plan §5.2. MESSAGE_CONTENT is privileged — the
@@ -87,7 +95,7 @@ DEFAULT_TOOLS = ""
 # no-soul fallback system prompt. A soul no longer grants tools on its own —
 # DISCORD_TOOLS (or a channel override) must opt in too.
 
-TYPING_REFRESH_S = 8.0   # Discord typing state expires after 10s (plan §8)
+TYPING_REFRESH_S = 8.0  # Discord typing state expires after 10s (plan §8)
 SMALL_REPLY_GAP_S = 10.0  # per-channel cap for one-line notices (plan §8.6)
 
 # Set by cmd_discord; read by the on_shutdown plugin hook.
@@ -163,7 +171,8 @@ class BotConfig:
     tools: str = DEFAULT_TOOLS
     queue_max: int = 8
     max_workers: int = 2
-    session_ttl_days: int = 30
+    session_ttl_days: int = 7
+    keep_sessions: bool = False  # False = fresh conversations on every restart
     discord_json: str = ""
     soul: str | None = None
     owner_ids: list[str] = field(default_factory=list)
@@ -191,7 +200,8 @@ class BotConfig:
             tools=_cfg("DISCORD_TOOLS", DEFAULT_TOOLS) or "",  # no tools by default
             queue_max=max(1, int(_cfg("DISCORD_QUEUE_MAX", "8") or 8)),
             max_workers=max(1, int(_cfg("DISCORD_MAX_WORKERS", "2") or 2)),
-            session_ttl_days=int(_cfg("DISCORD_SESSION_TTL_DAYS", "30") or 30),
+            session_ttl_days=int(_cfg("DISCORD_SESSION_TTL_DAYS", "7") or 7),
+            keep_sessions=_as_bool(_cfg("DISCORD_KEEP_SESSIONS", "false")),
             discord_json=_cfg("DISCORD_CONFIG", "") or default_discord_json_path(),
             owner_ids=_split_ids(_cfg("DISCORD_OWNER_IDS", "")),
             register_slash=_as_bool(_cfg("DISCORD_REGISTER_SLASH", "false")),
@@ -225,17 +235,18 @@ def setup_parser(parser) -> None:
     )
     parser.add_argument("--backend", default=None, help="Backend override (e.g. ollama, zai)")
     parser.add_argument("--model", default=None, help="Model override")
-    parser.add_argument(
-        "--api", default=None, help="API mode for the backend (openre | openai)"
-    )
+    parser.add_argument("--api", default=None, help="API mode for the backend (openre | openai)")
     parser.add_argument(
         "--soul", default=None, help="Soul override (default: none — opt in per flag/channel)"
     )
+    parser.add_argument("--tools", default=None, help="Comma-separated tool allowlist override")
+    parser.add_argument("--max-steps", type=int, default=None, help="Agent step cap override")
     parser.add_argument(
-        "--tools", default=None, help="Comma-separated tool allowlist override"
-    )
-    parser.add_argument(
-        "--max-steps", type=int, default=None, help="Agent step cap override"
+        "--keep",
+        action="store_true",
+        help="Resume per-channel history across restarts (default: every "
+        "restart starts fresh conversations; DISCORD_KEEP_SESSIONS=true "
+        "also opts in)",
     )
     parser.add_argument(
         "--debug",
@@ -279,6 +290,8 @@ def cmd_discord(args) -> int:
             "max_steps": getattr(args, "max_steps", None),
             # flag wins only when raised — None keeps the DISCORD_DEBUG env value
             "debug": True if getattr(args, "debug", False) else None,
+            # same None-skip semantics for --keep (DISCORD_KEEP_SESSIONS env works alone)
+            "keep_sessions": True if getattr(args, "keep", False) else None,
         }
     )
     tools_arg = getattr(args, "tools", None)
@@ -309,7 +322,8 @@ def cmd_discord(args) -> int:
         print(f"[discord] slash: register on startup (app={cfg.app_id or 'auto'})")
     print(
         f"[discord] pool: workers={cfg.max_workers} queue={cfg.queue_max} "
-        f"max-steps={cfg.max_steps} session-ttl={cfg.session_ttl_days}d"
+        f"max-steps={cfg.max_steps} sessions={'keep' if cfg.keep_sessions else 'fresh'} "
+        f"session-ttl={cfg.session_ttl_days}d"
     )
     if cfg.debug:
         print("[discord] debug: ON — backend prompts/responses/errors will be echoed")
@@ -441,11 +455,11 @@ class Job:
     """One accepted trigger awaiting an agent run."""
 
     ev: MessageContext
-    prompt: str                    # sanitized message text (no envelope)
+    prompt: str  # sanitized message text (no envelope)
     session_key: str
     ch_cfg: ChannelConfig
-    interaction: Interaction | None = None   # set for /ask + /think jobs
-    want_think: bool = False                 # /think — show step reasoning
+    interaction: Interaction | None = None  # set for /ask + /think jobs
+    want_think: bool = False  # /think — show step reasoning
 
 
 class ResponderPool:
@@ -459,10 +473,20 @@ class ResponderPool:
       at 1 per SMALL_REPLY_GAP_S per channel so the bot can't spam
     """
 
-    def __init__(self, cfg: BotConfig, policy: Policy, rest: DiscordRest):
+    def __init__(
+        self,
+        cfg: BotConfig,
+        policy: Policy,
+        rest: DiscordRest,
+        run_stamp: str | None = None,
+    ):
         self.cfg = cfg
         self.policy = policy
         self.rest = rest
+        # Fresh sessions by default (R07.33): scope every session key to this
+        # bot run so a restart starts new conversations per channel. --keep /
+        # DISCORD_KEEP_SESSIONS=true restores the stable cross-restart keys.
+        self._run_stamp = None if cfg.keep_sessions else (run_stamp or str(int(time.time())))
         self._queue: queue.Queue = queue.Queue(maxsize=max(1, cfg.queue_max))
         self._executor = ThreadPoolExecutor(
             max_workers=max(1, cfg.max_workers), thread_name_prefix="discord-worker"
@@ -473,14 +497,19 @@ class ResponderPool:
         self._small_lock = threading.Lock()
         self._label_cache: dict[str, str] = {}
         self._label_lock = threading.Lock()
-        self._typing_quiet: set[str] = set()   # channels that 404'd typing once
+        self._typing_quiet: set[str] = set()  # channels that 404'd typing once
         self._channel_overrides: dict[str, ChannelConfig] = {}  # /model, /soul
         self._owners = cfg.owner_ids or cfg.allow_users  # owner fallback
-        self._inter_executor = ThreadPoolExecutor(
-            max_workers=1, thread_name_prefix="discord-inter"
-        )
+        self._inter_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="discord-inter")
         self._started_at = 0.0
         self.agent_runs = 0  # observable for tests/status
+
+    def _session_key(self, base_key: str, ch_cfg: ChannelConfig) -> str:
+        """Full session key: channel prefix (discord.json) then run stamp
+        (fresh-on-restart default; None under --keep)."""
+        return session_key_with_run_stamp(
+            session_key_with_prefix(base_key, ch_cfg), self._run_stamp
+        )
 
     def _dbg(self, msg: str) -> None:
         """--debug / DISCORD_DEBUG pipeline echo (backend payloads themselves
@@ -544,15 +573,13 @@ class ResponderPool:
         job = Job(
             ev=ev,
             prompt=prompt,
-            session_key=session_key_with_prefix(base_key, ch_cfg),
+            session_key=self._session_key(base_key, ch_cfg),
             ch_cfg=ch_cfg,
         )
         try:
             self._queue.put_nowait(job)
         except queue.Full:
-            self._send_small_reply(
-                ev.channel_id, "Queue is full — try again in a moment."
-            )
+            self._send_small_reply(ev.channel_id, "Queue is full — try again in a moment.")
             print(f"[discord] queue full, dropped {ev.message_id}")
 
     # -- interactions (M2, plan §10) --------------------------------------------
@@ -617,7 +644,7 @@ class ResponderPool:
                 is_dm=inter.is_dm,
             ),
             prompt=prompt,
-            session_key=session_key_with_prefix(base_key, ch_cfg),
+            session_key=self._session_key(base_key, ch_cfg),
             ch_cfg=ch_cfg,
             interaction=inter,
             want_think=(inter.command == "think"),
@@ -653,7 +680,12 @@ class ResponderPool:
     def _run_reset(self, inter: Interaction) -> tuple[str, bool]:
         from agentkthx.core.persistent_memory import PersistentMemory  # lazy
 
-        key = session_key_for(inter.guild_id, inter.channel_id, inter.user_id)
+        # Delete the CURRENT conversation key (prefix + run stamp included) —
+        # deleting the bare base key would miss this run's fresh session.
+        key = self._session_key(
+            session_key_for(inter.guild_id, inter.channel_id, inter.user_id),
+            self._channel_cfg(inter.channel_id),
+        )
         return handle_reset(inter, session_key=key, delete_fn=PersistentMemory.delete_session)
 
     def _run_status(self, inter: Interaction) -> tuple[str, bool]:
@@ -670,7 +702,7 @@ class ResponderPool:
             uptime_s=time.monotonic() - (self._started_at or time.monotonic()),
             queue_depth=self._queue.qsize(),
             agent_runs=self.agent_runs,
-            session_key=session_key_with_prefix(key, ch),
+            session_key=self._session_key(key, ch),
         )
 
     def _run_model(self, inter: Interaction) -> tuple[str, bool]:
@@ -784,10 +816,8 @@ class ResponderPool:
         from agentkthx.agent import Agent  # lazy: heavy import, worker threads only
 
         ch = job.ch_cfg
-        soul = ch.soul or self.cfg.soul   # None = no soul (no-soul fallback prompt)
-        tools_raw: str | list[str] = (
-            ch.tools if ch.tools is not None else self.cfg.tools
-        )
+        soul = ch.soul or self.cfg.soul  # None = no soul (no-soul fallback prompt)
+        tools_raw: str | list[str] = ch.tools if ch.tools is not None else self.cfg.tools
         tool_list = self.policy.filter_tools(
             tools_raw, soul_allowed=resolve_soul_allowed_tools(soul)
         )
@@ -817,8 +847,7 @@ class ResponderPool:
             reasoning = "\n\n".join(
                 step.reasoning_content.strip()
                 for step in run.steps
-                if getattr(step, "reasoning_content", "")
-                and step.reasoning_content.strip()
+                if getattr(step, "reasoning_content", "") and step.reasoning_content.strip()
             )
             if reasoning:
                 if len(reasoning) > 1500:
@@ -886,10 +915,7 @@ class ResponderPool:
         else:
             label = "dm"  # DM channels have no name; skip the REST lookup
         guild = ev.guild_id if ev.guild_id else "dm"
-        return (
-            f"[Discord] guild={guild} channel={label} "
-            f"user={ev.username}\n{job.prompt}"
-        )
+        return f"[Discord] guild={guild} channel={label} " f"user={ev.username}\n{job.prompt}"
 
     def _channel_label(self, channel_id: str) -> str:
         """#name resolved once per channel (REST), raw id as fallback."""

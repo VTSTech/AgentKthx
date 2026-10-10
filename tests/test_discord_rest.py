@@ -79,9 +79,7 @@ class TestChunkReply:
         assert chunks[cut].startswith("```")
 
     def test_fence_balance_invariant_randomish(self):
-        text = (
-            "intro\n```\n" + "\n".join(f"l{i}" for i in range(120)) + "\n```\noutro"
-        )
+        text = "intro\n```\n" + "\n".join(f"l{i}" for i in range(120)) + "\n```\noutro"
         chunks = chunk_reply(text, max_len=200, max_msgs=20)
         assert sum(c.count("```") for c in chunks) % 2 == 0
 
@@ -231,9 +229,7 @@ class TestDiscordRest:
         assert calls[0]["path"] == "/channels/chan-1/trigger-typing"
 
     def test_401_raises_parsed_error_and_redacts(self, rest_factory):
-        body = json.dumps(
-            {"code": 0, "message": f"401: Unauthorized for {TOKEN}"}
-        ).encode()
+        body = json.dumps({"code": 0, "message": f"401: Unauthorized for {TOKEN}"}).encode()
 
         def responder(call, n):
             return 401, body, {}

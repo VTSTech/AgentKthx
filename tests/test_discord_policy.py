@@ -154,12 +154,8 @@ class TestTriggerMatrix:
 
     def test_dm_plain_message_respects_user_allowlist(self):
         policy = make_policy(allow_dms=True, allow_users=["111"])
-        ok = policy.check_event(
-            ctx(is_dm=True, guild_id=None, mentions=(), user_id="111")
-        )
-        denied = policy.check_event(
-            ctx(is_dm=True, guild_id=None, mentions=(), user_id="222")
-        )
+        ok = policy.check_event(ctx(is_dm=True, guild_id=None, mentions=(), user_id="111"))
+        denied = policy.check_event(ctx(is_dm=True, guild_id=None, mentions=(), user_id="222"))
         assert ok.allowed is True
         assert not denied.allowed and denied.reason == "user-not-allowed"
 

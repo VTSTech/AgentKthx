@@ -60,6 +60,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **New `--debug` flag (+ `DISCORD_DEBUG=true` env for systemd setups)**: the `Agent` is built with `debug=True` — the **same machinery as `agentkthx chat --debug`** — so backend prompts, responses, tool-call payloads and errors are echoed while a Discord job runs.
 - Plugin-side `[discord:debug]` pipeline lines: run start (user, session, model, prompt size), the full envelope, and the outcome (success, steps, tokens, ms), with an explicit marker when a run ends incomplete; the startup banner prints `debug: ON`. The flag wins over the env only when raised; env alone works too.
 
+### Fresh sessions on restart by default (R07.33 revision)
+
+- **Restart = new conversations.** Discord session keys are now stamped with the bot's start time (`discord-g{guild}-c{channel}-r<unix-start>`), so after a restart every channel/DM begins a fresh conversation instead of silently resuming its entire stored history. Within a run, per-channel history accumulates as before, `/reset` still works (it now clears the *current* run's key — previously it could miss prefixed sessions), and `agentkthx sessions` keeps showing every session.
+- **`--keep` flag (+ `DISCORD_KEEP_SESSIONS=true`)** restores the old stable-key behavior for setups that want history to survive restarts. Same None-skip override semantics as `--debug` (flag wins only when raised, env alone works). The core CLI is unchanged — it already required an explicit `--session <name>` to persist.
+- **Session TTL is inactivity GC, not resume control.** `DISCORD_SESSION_TTL_DAYS` default lowered **30 → 7 days**: fresh-on-restart leaves one session row per channel per run behind, so the store now self-cleans after a week of inactivity (still env-overridable; `0` disables pruning).
+- Banner now reports `sessions=fresh|keep`; `/status` shows the current run-scoped key.
+
+### black-clean (CI lint)
+
+- The 13 Discord plugin files + test files (authored since the lint burn-down) are reformatted with CI's pinned `black==26.5.1` — `python -m black --check agentkthx/ tests/` is green again alongside `ruff==0.16.9`. No behavior change from formatting.
+
 ## [R07.32] - 2026-10-10 1:08:09 PM
 
 ### Date/time built-ins removed → MCP time server (@infoinlet/mcp-time)

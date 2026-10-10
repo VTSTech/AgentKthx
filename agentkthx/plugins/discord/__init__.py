@@ -21,9 +21,7 @@ def register(manager) -> None:
     from .discord_bot import cmd_discord, on_shutdown, setup_parser
 
     if hasattr(manager, "register_cli_command"):
-        manager.register_cli_command(
-            "discord", cmd_discord, setup_parser, plugin="discord"
-        )
+        manager.register_cli_command("discord", cmd_discord, setup_parser, plugin="discord")
     if hasattr(manager, "register_hook"):
         manager.register_hook("on_shutdown", on_shutdown, plugin="discord")
 

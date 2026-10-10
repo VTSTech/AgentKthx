@@ -79,8 +79,8 @@ def chunk_reply(
         return [text]
     assert max_msgs >= 1, "max_msgs must be >= 1"
 
-    REOPEN = 4   # "```\n" at chunk start when continuing an open fence
-    CLOSE = 4    # "\n```" at chunk end when the fence is left open
+    REOPEN = 4  # "```\n" at chunk start when continuing an open fence
+    CLOSE = 4  # "\n```" at chunk end when the fence is left open
 
     def hard_slice(line: str) -> None:
         piece_size = max(1, max_len - 16)
@@ -92,9 +92,7 @@ def chunk_reply(
         nonlocal cur, cur_len, has_close, fence_open, reopen_active
         cur = [line]
         reopen_active = fence_open  # state before this line flips it
-        cur_len = (REOPEN if fence_open else 0) + len(line) + (
-            CLOSE if open_after(line) else 0
-        )
+        cur_len = (REOPEN if fence_open else 0) + len(line) + (CLOSE if open_after(line) else 0)
         has_close = open_after(line)
         fence_open = open_after(line)
 
@@ -119,29 +117,23 @@ def chunk_reply(
     lines = text.split("\n")
     chunks: list[str] = []
     cur: list[str] = []
-    cur_len = 0        # exact final length if flushed right now
+    cur_len = 0  # exact final length if flushed right now
     has_close = False  # does cur_len already include the close suffix?
     fence_open = False
     reopen_active = False  # current chunk begins with a reopened fence
 
     for line in lines:
         if not cur:
-            need = (REOPEN if fence_open else 0) + len(line) + (
-                CLOSE if open_after(line) else 0
-            )
+            need = (REOPEN if fence_open else 0) + len(line) + (CLOSE if open_after(line) else 0)
             if need > max_len:
                 hard_slice(line)
                 continue
             commit(line)
             continue
-        delta = 1 + len(line) + (CLOSE if open_after(line) else 0) - (
-            CLOSE if has_close else 0
-        )
+        delta = 1 + len(line) + (CLOSE if open_after(line) else 0) - (CLOSE if has_close else 0)
         if cur_len + delta > max_len:
             flush()
-            need = (REOPEN if fence_open else 0) + len(line) + (
-                CLOSE if open_after(line) else 0
-            )
+            need = (REOPEN if fence_open else 0) + len(line) + (CLOSE if open_after(line) else 0)
             if need > max_len:
                 hard_slice(line)
                 continue
@@ -200,9 +192,7 @@ class DiscordRest:
     def send_message(self, channel_id: str, content: str) -> dict:
         """POST /channels/{id}/messages — content must be pre-chunked."""
         if len(content) > MESSAGE_MAX_LEN:
-            raise ValueError(
-                f"content exceeds {MESSAGE_MAX_LEN} chars — use chunk_reply() first"
-            )
+            raise ValueError(f"content exceeds {MESSAGE_MAX_LEN} chars — use chunk_reply() first")
         data = self._request(
             "POST", f"/channels/{channel_id}/messages", json_body={"content": content}
         )
@@ -224,7 +214,9 @@ class DiscordRest:
         data = self._request("GET", "/oauth2/applications/@me")
         return data or {}
 
-    def register_commands(self, app_id: str, commands: list[dict], guild_id: str | None = None) -> list:
+    def register_commands(
+        self, app_id: str, commands: list[dict], guild_id: str | None = None
+    ) -> list:
         """PUT /applications/{app_id}/commands — bulk slash registration (M2).
         With `guild_id`, registers guild-scoped (instant-propagating) instead
         of global commands. Returns the registered command list."""
@@ -235,7 +227,9 @@ class DiscordRest:
         data = self._request("PUT", path, json_body=list(commands))
         return data or []
 
-    def interaction_callback(self, interaction_id: str, interaction_token: str, payload: dict) -> None:
+    def interaction_callback(
+        self, interaction_id: str, interaction_token: str, payload: dict
+    ) -> None:
         """POST /interactions/{id}/{token}/callback — ACK an interaction (M2).
         Auth is carried by the path token, not the bot token."""
         self._request(
@@ -336,6 +330,4 @@ class DiscordRest:
 
     def _set_global_pause(self, seconds: float) -> None:
         with self._global_lock:
-            self._global_pause_until = max(
-                self._global_pause_until, time.monotonic() + seconds
-            )
+            self._global_pause_until = max(self._global_pause_until, time.monotonic() + seconds)

@@ -424,7 +424,7 @@ class GatewayClient:
                 self._teardown()
             if self._stop.is_set():
                 break
-            delay = min(BACKOFF_CAP_S, BACKOFF_BASE_S * (1.5**min(attempt, 10)))
+            delay = min(BACKOFF_CAP_S, BACKOFF_BASE_S * (1.5 ** min(attempt, 10)))
             delay += random.uniform(0.0, 1.0)
             attempt += 1
             self._log(f"[gateway] reconnecting in {delay:.1f}s (attempt {attempt})")
@@ -531,13 +531,8 @@ class GatewayClient:
             now = time.monotonic()
             if chunk is None:
                 # recv timeout — enforce the activity watchdog before retrying
-                if (
-                    self._hb_interval is not None
-                    and now - self._last_rx > 2 * self._hb_interval
-                ):
-                    raise ConnectionError(
-                        "watchdog: no gateway activity for 2x heartbeat interval"
-                    )
+                if self._hb_interval is not None and now - self._last_rx > 2 * self._hb_interval:
+                    raise ConnectionError("watchdog: no gateway activity for 2x heartbeat interval")
                 continue
             if chunk == b"":
                 raise ConnectionError("connection closed by remote")

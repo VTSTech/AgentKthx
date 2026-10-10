@@ -186,9 +186,7 @@ class TestLoadEnvFile:
     def test_applies_discord_keys_only(self, tmp_path):
         path = str(tmp_path / "discord.env")
         Path(path).write_text(
-            f"DISCORD_BOT_TOKEN={GOOD_TOKEN}\n"
-            "DISCORD_ALLOW_GUILDS=111,222\n"
-            "NOT_DISCORD=1\n",
+            f"DISCORD_BOT_TOKEN={GOOD_TOKEN}\n" "DISCORD_ALLOW_GUILDS=111,222\n" "NOT_DISCORD=1\n",
             encoding="utf-8",
         )
         env: dict = {}
@@ -265,9 +263,7 @@ class TestMergeEnvLines:
         assert lines[-1] == "DISCORD_BOT_TOKEN=t"
 
     def test_empty_existing(self):
-        assert merge_env_lines("", {"DISCORD_BOT_TOKEN": "t"}).startswith(
-            "DISCORD_BOT_TOKEN=t\n"
-        )
+        assert merge_env_lines("", {"DISCORD_BOT_TOKEN": "t"}).startswith("DISCORD_BOT_TOKEN=t\n")
 
 
 # ---------------------------------------------------------------------------

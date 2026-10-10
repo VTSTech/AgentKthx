@@ -201,8 +201,7 @@ def token_warning(token: str) -> str | None:
         return "token contains whitespace — likely a copy/paste mistake"
     if token.count(".") != 2:
         return (
-            "bot tokens normally have three dot-separated parts "
-            "(looks unusual — saving anyway)"
+            "bot tokens normally have three dot-separated parts " "(looks unusual — saving anyway)"
         )
     if len(token) < 50:
         return f"token is only {len(token)} chars (typical ~70) — may be truncated"

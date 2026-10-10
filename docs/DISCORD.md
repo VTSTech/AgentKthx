@@ -60,14 +60,37 @@ comments and unknown keys preserved). It asks for:
 | `DISCORD_TOOLS` | *(none)* | **No tools by default (R07.33)** — opt in with a comma list, e.g. `calculator,web_search`; `none`/`off`/empty all mean off; `shell`/`python_repl` always excluded |
 | `DISCORD_UNSAFE_TOOLS` | `false` | Lifts the shell exclusion (banner warns) |
 | `DISCORD_DEBUG` | `false` | Debug echo: backend prompts/responses/errors + pipeline details (same as `--debug`) |
+| `DISCORD_KEEP_SESSIONS` | `false` | **Fresh sessions by default (R07.33)** — `true` resumes per-channel history across restarts (same as `--keep`) |
 | `DISCORD_QUEUE_MAX` | `8` | Bounded dispatch queue; overflow gets a one-liner |
 | `DISCORD_MAX_WORKERS` | `2` | Worker threads (agent runs serialize on a semaphore) |
-| `DISCORD_SESSION_TTL_DAYS` | `30` | Stale `discord-*` session prune at startup |
+| `DISCORD_SESSION_TTL_DAYS` | `7` | Inactivity GC: `discord-*` sessions untouched this many days are deleted from the store at startup (`0` disables). Does **not** control restart resume — that's `--keep` |
 | `DISCORD_CONFIG` | `~/.agentkthx/discord.json` | Per-channel override file |
 | `DISCORD_SOUL` | *(none)* | Soul name; **no soul by default** |
 
 CLI flags: `--backend` `--model` `--api` `--soul` `--tools` `--max-steps`
-`--dry-run` `--debug` `--register-commands`.
+`--keep` `--dry-run` `--debug` `--register-commands`.
+
+### Conversation history (sessions)
+
+**Fresh on every restart (R07.33).** Each bot run scopes its session keys with
+a run stamp (`-r<unix-start>`), so every channel/DM starts a **new conversation
+after a restart** — the model never sees messages from before the restart:
+
+```
+discord-g{guild}-c{channel}-r1791675399   # this run's conversation
+discord-g{guild}-c{channel}               # --keep: stable, resumes forever
+```
+
+- **`--keep`** / `DISCORD_KEEP_SESSIONS=true` restores the old behavior:
+  stable keys and history resumes across restarts.
+- Within a run, history accumulates normally per channel (or per DM user).
+- **`/reset`** clears the *current* conversation for that channel.
+- Sessions stay visible in `agentkthx sessions` (the stamp is a unix start
+  time — `date -d @1791675399` tells you which run a session belonged to).
+- **Session TTL is not resume control.** `DISCORD_SESSION_TTL_DAYS` (default
+  `7`, was 30) only garbage-collects sessions from `~/.agentkthx/memory.db`
+  after that many days of inactivity — fresh runs leave one row per channel
+  behind, and this keeps the store from growing forever. Set `0` to disable.
 
 ### Debugging (`--debug` / `DISCORD_DEBUG=true`)
 
@@ -109,8 +132,10 @@ process; the file wins on restart.
 | Reply to a bot message | same |
 | DM | `DISCORD_ALLOW_DMS=true` + user allowlist — **no @ needed** |
 
-Sessions: `discord-g{guild}-c{channel}` in guilds, `discord-dm-{user}` for DMs —
-visible in `agentkthx sessions` like any CLI session.
+Sessions: `discord-g{guild}-c{channel}[-r{run}]` in guilds,
+`discord-dm-{user}[-r{run}]` for DMs — visible in `agentkthx sessions` like
+any CLI session. See **Conversation history** above for the fresh-on-restart
+default and `--keep`.
 
 ## 5. Slash commands (M2)
 
@@ -162,6 +187,7 @@ User=youruser   # ~/.agentkthx/.env is 0600 — run as the owner
 | `typing unavailable (404)` | Fresh-session race or channel type without typing | Cosmetic; logged once per channel, replies unaffected |
 | `(incomplete — maximum steps reached)` | Step budget exhausted — only possible when tools were opted in (each tool round burns a step) | Tools are off by default now; if you enabled them, raise `DISCORD_MAX_STEPS` or drop them again. Note Discord has its own `DISCORD_MAX_STEPS` (default 5) — the CLI max-steps setting does not apply |
 | Replies vague or backend misbehaving | Need visibility | Run with `--debug` (or `DISCORD_DEBUG=true`) — backend prompts/responses/errors are echoed; check `/status` for the effective model |
+| Bot "forgot" the conversation | Fresh-sessions default (R07.33): every restart starts new conversations | Expected — run with `--keep` (or `DISCORD_KEEP_SESSIONS=true`) to resume history across restarts; `/reset` clears the current conversation either way |
 | Slash commands missing | Never registered | `agentkthx discord --register-commands`, restart the client |
 | `insufficient permission` on `/model` | Not in `DISCORD_OWNER_IDS` | Add your user ID |
 | 429 rate-limit loop | Discord REST bucket | Handled internally (single retry + global pause); slow down bulk tests |
