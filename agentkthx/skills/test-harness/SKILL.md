@@ -2,7 +2,7 @@
 name: test-harness
 description: "Diagnostic testing skill for verifying AgentKthx's skill system, tool usage, and instruction following. Use when testing if skills load correctly or for running quick validation prompts."
 license: MIT
-allowed-tools: calculator shell web_search python_repl parse_json count_words count_chars http_get
+allowed-tools: calculator shell web_search python_repl parse_json http_get
 ---
 
 # Test Harness

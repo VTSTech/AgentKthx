@@ -42,8 +42,6 @@ from agentkthx.tools import make_builtin_registry
 from agentkthx.tools.builtins import (
     _todo_dispatch,
     calculator,
-    count_chars,
-    count_words,
     http_get,
     parse_json,
     python_repl,
@@ -273,9 +271,9 @@ def test_http_direct() -> tuple[int, int]:
 
 
 def test_json_text_direct() -> tuple[int, int]:
-    """Test JSON and text tools directly without model."""
+    """Test JSON tools directly without model."""
     print(f"\n{'='*60}")
-    print("📝 JSON & Text Tools - Direct Validation")
+    print("📝 JSON Tools - Direct Validation")
     print(f"{'='*60}")
 
     results = []
@@ -296,33 +294,9 @@ def test_json_text_direct() -> tuple[int, int]:
     status = "✅" if invalid_ok else "❌"
     print(f"    {status} Invalid JSON: {invalid_json[:40]}")
 
-    # Test count_words
-    print("\n  Testing count_words...")
-    words_result = count_words("Hello world this is a test")
-    words_ok = words_result == "6"
-    results.append(words_ok)
-    status = "✅" if words_ok else "❌"
-    print(f"    {status} count_words: {words_result}")
-
-    # Test count_chars
-    print("\n  Testing count_chars...")
-    chars_result = count_chars("Hello World")
-    chars_ok = chars_result == "11"
-    results.append(chars_ok)
-    status = "✅" if chars_ok else "❌"
-    print(f"    {status} count_chars: {chars_result}")
-
-    # Edge cases
-    print("\n  Testing edge cases...")
-    empty_words = count_words("")
-    empty_ok = empty_words == "0"
-    results.append(empty_ok)
-    status = "✅" if empty_ok else "❌"
-    print(f"    {status} Empty string words: {empty_words}")
-
     passed = sum(results)
     total = len(results)
-    print(f"\n📊 JSON/Text Direct: {passed}/{total} ({100*passed//total}%)")
+    print(f"\n📊 JSON Direct: {passed}/{total} ({100*passed//total}%)")
     return passed, total
 
 

@@ -249,7 +249,7 @@ agentkthx test 02 --model-only -m qwen2.5:0.5b --debug
 | File Tools | 7 | Read/write/list, path security, empty files |
 | HTTP | 8 | Valid requests, SSRF blocking, scheme validation |
 | DateTime | 4 | Date/time formats, timezone handling, invalid input |
-| JSON/Text | 5 | JSON parsing, word/char counting, edge cases |
+| JSON | 2 | JSON parsing, edge cases |
 
 **Phase 2 — Model Tool Calling** (model required):
 
@@ -260,7 +260,7 @@ agentkthx test 02 --model-only -m qwen2.5:0.5b --debug
 | Python REPL | 2 | python_repl | Code generation, result interpretation |
 | All Tools | 4 | varies | Tool selection from full set |
 
-> Note (added post-R03.7): the File Tools and DateTime rows reflect the suite as it existed at R03.7. The built-in file tools (read_file / list_directory / write_file / edit_file / read_file_lines / find_files) were later removed in favor of the MCP filesystem server (`--mcp filesystem`), and the date/time tools (get_time / get_date) in favor of the MCP time server (@infoinlet/mcp-time, configured by `agentkthx mcp init`).
+> Note (added post-R03.7): the File Tools and DateTime rows reflect the suite as it existed at R03.7. The built-in file tools (read_file / list_directory / write_file / edit_file / read_file_lines / find_files) were later removed in favor of the MCP filesystem server (`--mcp filesystem`), the date/time tools (get_time / get_date) in favor of the MCP time server (@infoinlet/mcp-time, configured by `agentkthx mcp init`), and the word/char-count tools (count_words / count_chars) as redundant with POSIX `wc` via `shell`.
 
 ---
 

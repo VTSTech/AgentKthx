@@ -698,37 +698,6 @@ def parse_json(json_string: str) -> str:
         return f"JSON parse error: {e}"
 
 
-# ============================================================================
-# Text Tools
-# ============================================================================
-
-
-def count_words(text: str) -> str:
-    """
-    Count words in text.
-
-    Args:
-        text: Text to count words in
-
-    Returns:
-        Word count
-    """
-    return str(len(text.split()))
-
-
-def count_chars(text: str) -> str:
-    """
-    Count characters in text.
-
-    Args:
-        text: Text to count characters in
-
-    Returns:
-        Character count
-    """
-    return str(len(text))
-
-
 # Per-session todo stores — keyed by session_id, defaults to "default".
 # Each agent instance or session gets its own isolated todo list.
 _todo_stores: dict[str, list[dict]] = {"default": []}
@@ -1106,27 +1075,6 @@ def make_builtin_registry() -> ToolRegistry:
             ],
             handler=web_search,
             category="network",
-        )
-    )
-
-    # Text
-    registry.register_tool(
-        Tool(
-            name="count_words",
-            description="Count words in text",
-            params=[ToolParam(name="text", type="string", description="Text to count")],
-            handler=count_words,
-            category="text",
-        )
-    )
-
-    registry.register_tool(
-        Tool(
-            name="count_chars",
-            description="Count characters in text",
-            params=[ToolParam(name="text", type="string", description="Text to count")],
-            handler=count_chars,
-            category="text",
         )
     )
 

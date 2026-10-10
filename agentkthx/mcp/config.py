@@ -373,7 +373,8 @@ def _build_example_config(home: str) -> str:
                     "Date/time tools (current_time, convert_timezone, "
                     "add_to_date, date_diff, cron_next_runs, business_days, "
                     "format_date). Replaces the removed get_time/get_date "
-                    "built-in tools. Uses the system timezone by default."),
+                    "built-in tools. Uses the system timezone by default."
+                ),
             },
             {
                 "name": "audit",

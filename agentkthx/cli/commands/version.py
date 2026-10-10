@@ -22,6 +22,7 @@ def cmd_version(args: argparse.Namespace) -> int:
     print(f"   {dim('Status:')}  {yellow(__status__)}")
     print(f"   {dim('Author:')}  {cyan(__author__)}")
     print(f"   {dim('Repo:')}    {dim('https://github.com/VTSTech/AgentKthx')}")
+    print(f"   {dim('Discord:')} {cyan('https://discord.gg/vSK3Ba2aQ')}")
 
     # Latest releases (live checks — silent on failure / opt-out):
     # stable track via PyPI, development track via GitHub main commits
@@ -81,6 +82,9 @@ def cmd_update(args: argparse.Namespace) -> int:
     always has to opt in after seeing the failure.
     """
     print(f"{bright_cyan('⚖ AgentKthx')} - Updating from GitHub...")
+    print(
+        f"{dim('Questions or feedback? Join the Discord:')} {cyan('https://discord.gg/vSK3Ba2aQ')}"
+    )
     # R07.32: pip needs the git binary to install from a git+https URL. On
     # minimal systems (fresh Debian/Ubuntu containers, Bookworm netinstall)
     # git isn't present — fall back to the GitHub source tarball, which pip

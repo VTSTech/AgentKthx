@@ -1506,7 +1506,7 @@ The model MUST explicitly format tool calls.
 
 ## Built-in Tools
 
-9 built-in tools are registered in `tools/builtins.py`:
+7 built-in tools are registered in `tools/builtins.py`:
 
 | Tool | Description | Dangerous | Notes |
 |------|-------------|-----------|-------|
@@ -1516,13 +1516,13 @@ The model MUST explicitly format tool calls.
 | `python_repl` | Sandboxed Python execution | No | Via sandboxed_repl.py |
 | `web_search` | Web search | No | |
 | `parse_json` | Parse JSON strings | No | |
-| `count_words` | Count words in text | No | |
-| `count_chars` | Count characters in text | No | |
 | `todo` | In-memory todo CRUD | No | Priority support, module-level store |
 
 File operations (read/write/edit/list/find) were removed from the built-ins in favor of the MCP filesystem server — run `agentkthx chat --mcp filesystem` with `@modelcontextprotocol/server-filesystem` configured in `~/.agentkthx/mcp.json` (see `agentkthx mcp install`). Their tools arrive namespaced as `filesystem__<tool>`.
 
 Date/time tools (`get_time`/`get_date`) were likewise removed in favor of the MCP time server — `agentkthx mcp init` configures `@infoinlet/mcp-time` as the `time` server (tools: `current_time`, `convert_timezone`, `add_to_date`, `date_diff`, `cron_next_runs`, `business_days`, `format_date`, namespaced as `time__<tool>`). Without MCP, `shell` with the `date` command covers the basics.
+
+The word/char-count helpers (`count_words`/`count_chars`) were also removed — basic POSIX (`wc`) through `shell` covers counting.
 
 ### Tool Details
 

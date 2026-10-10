@@ -804,7 +804,6 @@ _PARAM_STRING_EXAMPLES = {
     "query": "latest AI news",  # web_search
     "code": "print(2 + 2)",  # python_repl
     "json_string": "[1, 2, 3]",  # parse_json
-    "text": "hello world",  # count_words / count_chars
     "action": "add",  # todo
     "task_id": "1",  # todo
 }

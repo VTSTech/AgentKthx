@@ -328,13 +328,6 @@ class TestBuiltins:
         # Result can be "4" or "4.0" depending on Python version/formatting
         assert result in ("4", "4.0")
 
-    def test_count_words(self):
-        registry = make_builtin_registry()
-        tool = registry.get("count_words")
-
-        result = tool.execute(text="hello world")
-        assert result == "2"
-
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

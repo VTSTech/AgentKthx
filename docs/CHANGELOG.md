@@ -5,6 +5,19 @@ All notable changes to AgentKthx will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Built-in count tools removed
+
+- **The 2 built-in text-count tools are gone**: `count_words`, `count_chars`. Word/char counting is basic POSIX (`wc`) — `shell` covers it with no special-casing needed. `BUILTIN_REGISTRY` now builds with **7** tools (was 9 after the date/time removal): calculator, shell, http_get, python_repl, web_search, parse_json, todo.
+- **Scaffolding cleaned**: the `count`/`words`/`chars` tool-suggestion aliases in `core/error_recovery.py` now point at `shell`, and `simple_tools` lost both count members (`_is_simple_result`'s direct-answer set is `calculator` only); the `text` sample-argument entry was dropped from `soul/loader.py`.
+- **Souls/skills**: kthx-helper `allowedTools` and the test-harness SKILL.md `allowed-tools` trimmed.
+- **Tests/examples/docs**: registry-completeness list trimmed (5 asserted names); `test_agent.py` count_words execution test removed; `examples/02_tool_test.py` JSON section is JSON-only (2 checks, was 5); README + ARCH tool table now say 7.
+
+### Discord invite added to version/update output
+
+- **`agentkthx version` now prints a `Discord:` line** (alongside Repo) with the community invite (https://discord.gg/vSK3Ba2aQ), and **`agentkthx update` shows the invite** under its header (`cli/commands/version.py`, `cmd_version` + `cmd_update`).
+
 ## [R07.32] - 2026-10-10 1:08:09 PM
 
 ### Date/time built-ins removed → MCP time server (@infoinlet/mcp-time)

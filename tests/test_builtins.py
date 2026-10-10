@@ -261,8 +261,6 @@ class TestToolRegistryCompleteness:
         "http_get",
         "python_repl",
         "parse_json",
-        "count_words",
-        "count_chars",
     ]
 
     def test_all_tools_present(self):

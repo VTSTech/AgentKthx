@@ -220,10 +220,10 @@ TOOL_NAME_SUGGESTIONS = {
     # JSON
     "parse": "parse_json",
     "json": "parse_json",
-    # Text
-    "count": "count_words or count_chars",
-    "words": "count_words",
-    "chars": "count_chars",
+    # Text counting — built-in count tools removed; shell covers POSIX basics.
+    "count": "shell",
+    "words": "shell",
+    "chars": "shell",
 }
 
 
@@ -636,7 +636,7 @@ def _is_simple_result(result: str, tool_name: str) -> bool:
     - Long outputs
     """
     # Simple tools that typically produce direct answers
-    simple_tools = {"calculator", "count_words", "count_chars"}
+    simple_tools = {"calculator"}
     if tool_name in simple_tools:
         return True
 
