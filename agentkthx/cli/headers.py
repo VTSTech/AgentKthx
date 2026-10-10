@@ -45,7 +45,7 @@ def _print_session_header(agent: Agent, args: argparse.Namespace, config, label:
         print(f"{dim('Timeout:')} {yellow(str(timeout) + 's')}")
     acp = getattr(args, "_acp", None)
     if acp:
-        print(f"{dim('ACP:')} {green('\u2713 Connected')} ({acp.base_url})")
+        print(f"{dim('ACP:')} {green('✓ Connected')} ({acp.base_url})")
     if agent._response_format:
         print(f"{dim('Output:')} {yellow('JSON mode')}")
     if getattr(agent, "_is_persistent", False) and hasattr(agent.memory, "session_id"):

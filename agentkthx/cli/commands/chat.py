@@ -1814,8 +1814,11 @@ def cmd_chat(args: argparse.Namespace) -> int:
                         )
                     )
                 elif _throttled:
-                    print(f"\n{yellow('⏸  Run paused — the provider kept rate-limiting this model '
-                                   'even after repeated retries.')}")
+                    _pause_msg = (
+                        "⏸  Run paused — the provider kept rate-limiting this model "
+                        "even after repeated retries."
+                    )
+                    print(f"\n{yellow(_pause_msg)}")
                     print(
                         yellow(
                             "   Your conversation history is intact: just send 'continue' "

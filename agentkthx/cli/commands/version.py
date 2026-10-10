@@ -79,7 +79,7 @@ def cmd_update(args: argparse.Namespace) -> int:
     ``--break-system-packages``. Never silently enables the flag — the user
     always has to opt in after seeing the failure.
     """
-    print(f"{bright_cyan('\u2696 AgentKthx')} - Updating from GitHub...")
+    print(f"{bright_cyan('⚖ AgentKthx')} - Updating from GitHub...")
     base_cmd = [
         sys.executable,
         "-m",
@@ -100,7 +100,7 @@ def cmd_update(args: argparse.Namespace) -> int:
     # Python installs. We do NOT silently add --break-system-packages —
     # we surface the failure and ask the user explicitly.
     if result.returncode != 0 and _is_externally_managed_error(result.stderr):
-        print(f"{red('\u2717 Update failed.')}")
+        print(f"{red('✗ Update failed.')}")
         print(f"{yellow('This Python environment is externally managed (PEP 668).')}")
         print(
             f"{dim('The system Python on Debian/Ubuntu/Fedora blocks pip installs to')} "
@@ -126,7 +126,7 @@ def cmd_update(args: argparse.Namespace) -> int:
             return 1
 
     if result.returncode == 0:
-        print(f"{green('\u2713 Updated successfully!')}")
+        print(f"{green('✓ Updated successfully!')}")
         # Show the installed version
         try:
             version_result = sp.run(
@@ -139,7 +139,7 @@ def cmd_update(args: argparse.Namespace) -> int:
         except Exception:
             pass
     else:
-        print(f"{red('\u2717 Update failed.')}")
+        print(f"{red('✗ Update failed.')}")
         if result.stderr:
             print()
             for line in result.stderr.strip().split("\n")[-5:]:
