@@ -5,6 +5,50 @@ All notable changes to AgentKthx will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [R07.33] - 2026-10-10 10:22:00 PM
+
+### Discord plugin M0 — stdlib gateway, policy gate, REST client (`agentkthx discord`)
+
+- **New plugin `agentkthx/plugins/discord/`** — a long-running `agentkthx discord` command connecting to Discord **Gateway v10 over a hand-rolled RFC 6455 WebSocket client** (masking, 7/16/64-bit lengths, fragmentation, `Sec-WebSocket-Accept` check, Hello/Heartbeat/Identify/READY/Resume/Reconnect/Invalid-Session state machine, watchdog resume, fatal close codes 4004/4013/4014). Zero third-party dependencies — stdlib `socket`/`ssl`/`urllib` only, per the plugin spec.
+- **Deny-by-default policy gate** (`policy.py`): guild/channel/user allowlists (empty = silent), self/bot-author drops, trigger matrix, per-user cooldowns (lock-guarded for concurrent workers), prompt sanitization (bot mention stripped, `@everyone`/`@here` neutralized, horizontal whitespace collapsed, 1500-char cap), and the Discord tool filter (shell/python_repl always excluded; soul `allowedTools` intersects stricter-wins).
+- **REST v10 client** (`rest.py`): `send_message` (2000-char guard), `trigger_typing`, `get_self`, `get_channel`, `get_application`, 429 single-retry with `Retry-After` + global-pause, token redaction on every error path, and `chunk_reply()` — the 2000-char splitter that prefers paragraph/line boundaries and never leaves an unclosed code fence (close + reopen across chunks, cap + truncation marker).
+- **`--dry-run`**: full gateway + policy decisions, no agent runs, no sends.
+- Transport seam in the gateway client keeps the entire test battery offline.
+
+### `agentkthx discord setup` — interactive wizard
+
+- **New wizard writing `~/.agentkthx/.env` (mode 0600, parent 0700, atomic tmp+os.replace)**: `DISCORD_BOT_TOKEN` (getpass blind entry, format sanity warnings, optional live validation), `DISCORD_ALLOW_GUILDS` + `DISCORD_ALLOW_USERS` (Developer Mode copy-paste hints, snowflake normalization: comma/space split, dedup, non-numeric dropped with warning), and **`DISCORD_ALLOW_DMS`** (step-4 confirm, default off, Enter keeps the stored value).
+- **OAuth2 invite built in**: after successful token validation the wizard resolves the **Application ID** via `GET /oauth2/applications/@me` and prints a ready-to-open invite URL (`scope=bot&permissions=68608` = View Channels + Send Messages + Read Message History) plus the manual URL-Generator steps — a fresh bot is in NO server until invited.
+- Env-file primitives: `export KEY=` + quoted values parsed, managed keys replaced in place with comments/unknown keys preserved, fresh files carry header + all four keys, `setdefault` load semantics (exported env wins). Ctrl+C/EOF aborts before anything is written; the token is never echoed and always redacted on screen.
+
+### Discord M1 — chat responder (the bot answers)
+
+- **MESSAGE_CREATE → agent pipeline** (plan §8): gateway thread → policy gate → bounded dispatch queue (`DISCORD_QUEUE_MAX`, overflow one-liner) → worker pool (`DISCORD_MAX_WORKERS`) → agent runs serialized by a semaphore (local backends never face concurrent inference) → `final_answer` chunked into ≤2000-char messages → sequential REST sends.
+- **Per-channel persistent sessions**: `discord-g{guild}-c{channel}` / `discord-dm-{user}` via `Agent(session_id=...)` → `PersistentMemory` — real, resumable conversations visible in `agentkthx sessions`; `DISCORD_SESSION_TTL_DAYS` (default 30) prunes stale `discord-*` sessions at startup.
+- **Typing indicator** refreshed every 8s per job (failure-tolerant), per-channel `discord.json` overrides (soul/tools/session_prefix — narrower only), per-channel cooldown/queue one-liner caps, `--backend/--model/--api/--soul/--tools/--max-steps` flags, max-steps marker "(incomplete — maximum steps reached)", backend-error one-liners, `confirm_dangerous` **always denies** (no human at the terminal).
+- **DMs trigger without @mention** (plan §16 conformance): a DM is a 1:1 conversation — every message from an allowlisted user fires once `DISCORD_ALLOW_DMS=true`; guild channels still require @mention or reply-to-bot; the `dms-disabled`/`user-not-allowed` gates run before the trigger matrix.
+
+### Discord M2 — slash commands
+
+- **Six commands registered globally** via `PUT /applications/{app_id}/commands` (`--register-commands` one-shot + `DISCORD_REGISTER_SLASH=true` startup registration; app id from `DISCORD_APP_ID` or auto-resolved from the token): `/ask` (+`ephemeral`), `/think`, `/model`, `/soul`, `/reset`, `/status`.
+- **ACK < 3s rule honored** (plan §10): `INTERACTION_CREATE` → parse + gate on a dedicated single interaction thread (gateway never blocks on REST) → `/ask`//`/think` defer (`type 5`) then enqueue regular jobs answered via auth-free webhook followups (`POST /webhooks/{app}/{token}`, ephemeral flag supported); quick commands answer directly (`type 4`, ephemeral).
+- **`/ask` + `/think` reuse the whole M1 pipeline** (cooldown, sessions, semaphore, chunking, tool policy); **`/think` prepends the model's captured `reasoning_content` in a code fence** (1500-char cap). **`/model` + `/soul` are owner-gated** (`DISCORD_OWNER_IDS`, falling back to `DISCORD_ALLOW_USERS`) with ephemeral denials; `/soul` validates names against the souls loader; both write per-channel runtime overrides (file wins on restart). `/reset` deletes the channel session via `PersistentMemory.delete_session`; `/status` reports backend/model/soul/tools/uptime/queue depth/run counters.
+- ChannelConfig gains a `model` override (discord.json `"model": "..."`), honored by `_build_agent` ahead of `--model`.
+
+### No soul by default
+
+- **The Discord responder no longer defaults to the `kthx-helper` soul**: `Agent(soul=None)` uses the built-in no-soul fallback system prompt, and the tool list is then only narrowed by the Discord exclusion (shell/python_repl). Opt in via `--soul`, `DISCORD_SOUL`, per-channel `discord.json`, or `/soul` — the `kthx-helper` constraint-intersection behavior is unchanged when one is set. Startup banner shows `soul=none` unless configured.
+
+### Typing 404 resolved + REST hardening
+
+- **Typing indicator skipped for DM jobs** (DM channels don't accept `trigger-typing` — the source of the observed `404: Not Found`), and guild-channel 404s (transient right after READY) now log **once per channel** then stay quiet; non-404 typing errors still log. Replies were never affected.
+- `interaction_callback` + `followup` send **no Authorization header** (auth is carried by the interaction token in the path); `register_commands` supports global and guild-scoped PUTs.
+
+### Docs + tests
+
+- **`docs/DISCORD.md` (new)**: portal setup + invite URL, wizard guide, full env-var reference, `discord.json` guide, slash-command table, run cookbook (ZAI/Ollama/systemd), troubleshooting matrix (4014/4004/silent-bot/cooldown/typing-404), security posture. README docs table updated.
+- Tests: 97 new offline tests across the Discord battery — gateway codec + seam, policy matrix (incl. plain-DM trigger, user-allowlist DM gate), REST client against a localhost stub (auth headers, 429 retry, chunk fence integrity, no-auth webhook calls), setup wizard flows (44), responder pipeline e2e with stubbed Agent (cooldown race, queue-full, chunking, overrides, model override), M2 interaction wiring (parse/gate/handlers/defer/followup/owner gates/typing). Full suite: **3,735 passed / 20 skipped**.
+
 ## [R07.32] - 2026-10-10 1:08:09 PM
 
 ### Date/time built-ins removed → MCP time server (@infoinlet/mcp-time)

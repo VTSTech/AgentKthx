@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agentkthx"
-version = "0.7.32"
+version = "0.7.33"
 description = "⚛️ AgentKthx - A minimal, modular, python stdlib, agentic framework for tool calling AI agents"
 readme = "README.md"
 authors = [

@@ -55,13 +55,16 @@ DM_CHANNEL = "333444555666777888"
 
 
 class FakeRest:
-    """Records every send/typing/channel call. Never touches network."""
+    """Records every send/typing/channel/interaction call. Never network."""
 
     def __init__(self, *, fail_typing=False, fail_channel=False):
+        # fail_typing: True -> 403, or an int status (e.g. 404)
+        self._typing_status = int(fail_typing) if fail_typing else 0
         self.sent: list[tuple[str, str]] = []
         self.typings: list[str] = []
         self.channels_queried: list[str] = []
-        self._fail_typing = fail_typing
+        self.callbacks: list[tuple[str, dict]] = []   # (interaction_id, payload)
+        self.followups: list[tuple[str, dict]] = []   # (token, payload)
         self._fail_channel = fail_channel
 
     def send_message(self, channel_id: str, content: str):
@@ -69,9 +72,16 @@ class FakeRest:
         return {"id": "m"}
 
     def trigger_typing(self, channel_id: str) -> None:
-        if self._fail_typing:
-            raise DiscordRestError(403, None, "missing perms")
+        if self._typing_status:
+            raise DiscordRestError(self._typing_status, None, "typing refused")
         self.typings.append(channel_id)
+
+    def interaction_callback(self, interaction_id: str, token: str, payload: dict) -> None:
+        self.callbacks.append((interaction_id, payload))
+
+    def followup(self, app_id: str, token: str, payload: dict) -> dict:
+        self.followups.append((token, payload))
+        return {"id": "f"}
 
     def get_channel(self, channel_id: str) -> dict:
         self.channels_queried.append(channel_id)
@@ -523,7 +533,7 @@ class TestBuildAgent:
         assert kw["model"] == "fake-model"
         assert kw["backend"] == "fake"
         assert kw["tools"] == ["calculator"]  # shell/python_repl excluded by policy
-        assert kw["soul"] == "kthx-helper"
+        assert kw["soul"] is None  # R07.33: no soul unless opted in
         assert kw["session_id"] == f"discord-g{GUILD}-c{CHANNEL}"
         assert kw["max_steps"] == 5
         assert kw["confirm_dangerous"] is _deny_dangerous
@@ -557,17 +567,50 @@ class TestBuildAgent:
         pool._build_agent(job)
         assert AgentCapture.instances[-1]["tools"] == ["todo"]
 
-    def test_soul_constraint_intersects(self, monkeypatch):
+    def test_soul_constraint_intersects(self, monkeypatch, tmp_path):
         """kthx-helper allows todo/calculator/shell/http_get/python_repl/
         parse_json — 'web_search' in DISCORD_TOOLS must be dropped, and
         shell/python_repl dropped by the Discord exclusion (stricter wins)."""
+        monkeypatch.setattr("agentkthx.agent.Agent", AgentCapture)
+        AgentCapture.instances.clear()
+        path = tmp_path / "discord.json"
+        path.write_text(
+            '{"channels": {"%s": {"soul": "kthx-helper"}}}' % CHANNEL,
+            encoding="utf-8",
+        )
+        cfg = make_cfg(tools="calculator,web_search,shell", discord_json=str(path))
+        pool = ResponderPool(cfg, make_policy(), FakeRest())
+        job = Job(make_ev(), "hello", "k", resolve_channel_config(CHANNEL, str(path)))
+        pool._build_agent(job)
+        assert AgentCapture.instances[-1]["tools"] == ["calculator"]
+
+    def test_no_soul_keeps_full_tool_list(self, monkeypatch):
+        """R07.33 default: soul=None constrains nothing — the tool list is
+        only narrowed by the Discord exclusion (shell/python_repl)."""
         monkeypatch.setattr("agentkthx.agent.Agent", AgentCapture)
         AgentCapture.instances.clear()
         cfg = make_cfg(tools="calculator,web_search,shell")
         pool = ResponderPool(cfg, make_policy(), FakeRest())
         job = Job(make_ev(), "hello", "k", resolve_channel_config(CHANNEL, None))
         pool._build_agent(job)
-        assert AgentCapture.instances[-1]["tools"] == ["calculator"]
+        kw = AgentCapture.instances[-1]
+        assert kw["soul"] is None
+        assert kw["tools"] == ["calculator", "web_search"]
+
+    def test_channel_model_override(self, monkeypatch, tmp_path):
+        monkeypatch.setattr("agentkthx.agent.Agent", AgentCapture)
+        AgentCapture.instances.clear()
+        path = tmp_path / "discord.json"
+        path.write_text(
+            '{"channels": {"%s": {"model": "qwen3:8b"}}}' % CHANNEL,
+            encoding="utf-8",
+        )
+        pool = ResponderPool(
+            make_cfg(discord_json=str(path), model="cfg-model"), make_policy(), FakeRest()
+        )
+        job = Job(make_ev(), "hello", "k", resolve_channel_config(CHANNEL, str(path)))
+        pool._build_agent(job)
+        assert AgentCapture.instances[-1]["model"] == "qwen3:8b"  # channel wins
 
     def test_env_file_override_flag_precedence(self):
         """--tools flag (already merged into cfg.tools by cmd_discord) wins

@@ -1,11 +1,17 @@
 """
-AgentKthx Plugin — `agentkthx discord` command (M1 chat responder)
+AgentKthx Plugin — `agentkthx discord` command (M2 chat responder + slash)
 
 M1 scope (docs/DISCORD_PLUGIN_PLAN.md §15): the bot answers. Message flow
 (plan §8): gateway thread -> policy gate -> bounded dispatch queue ->
 worker pool -> typing indicator (refreshed ~8s) -> Agent(session_id=...)
 run under a global semaphore -> final_answer chunked into <=2000-char
 messages -> sequential REST sends.
+
+M2 scope (plan §10): six slash commands (/ask /think /model /soul /reset
+/status). INTERACTION_CREATE -> parse + gate -> single interaction thread
+ACKs (type 4 direct or type 5 defer) -> /ask //think enqueue regular jobs
+answered via webhook followups; quick commands answer in the callback.
+/model + /soul are owner-gated and apply per-channel runtime overrides.
 
 Safety posture (plan §12): deny-by-default allowlists, per-user cooldowns,
 tool policy excluding `shell`/`python_repl`, `confirm_dangerous` denies
@@ -28,6 +34,21 @@ import traceback
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
+from .commands import (
+    CALLBACK_DEFER,
+    CALLBACK_MESSAGE,
+    COMMAND_NAMES,
+    EPHEMERAL,
+    Interaction,
+    SLASH_COMMANDS,
+    gate_interaction,
+    handle_model,
+    handle_reset,
+    handle_soul,
+    handle_status,
+    is_owner,
+    parse_interaction,
+)
 from .gateway import (
     FATAL_CLOSE_CODES,
     INTENT_DIRECT_MESSAGES,
@@ -56,7 +77,9 @@ DISCORD_INTENTS = (
 )
 
 DEFAULT_TOOLS = "calculator,parse_json,todo,web_search,http_get"
-DEFAULT_SOUL = "kthx-helper"
+# No soul by default (R07.33): `--soul` / DISCORD_SOUL / per-channel
+# discord.json / /soul opt into one; Agent(soul=None) uses the built-in
+# no-soul fallback system prompt.
 
 TYPING_REFRESH_S = 8.0   # Discord typing state expires after 10s (plan §8)
 SMALL_REPLY_GAP_S = 10.0  # per-channel cap for one-line notices (plan §8.6)
@@ -124,6 +147,8 @@ class BotConfig:
     session_ttl_days: int = 30
     discord_json: str = ""
     soul: str | None = None
+    owner_ids: list[str] = field(default_factory=list)
+    register_slash: bool = False
     api_mode: str | None = None
     dry_run: bool = False
     backend: str | None = None
@@ -148,6 +173,9 @@ class BotConfig:
             max_workers=max(1, int(_cfg("DISCORD_MAX_WORKERS", "2") or 2)),
             session_ttl_days=int(_cfg("DISCORD_SESSION_TTL_DAYS", "30") or 30),
             discord_json=_cfg("DISCORD_CONFIG", "") or default_discord_json_path(),
+            owner_ids=_split_ids(_cfg("DISCORD_OWNER_IDS", "")),
+            register_slash=_as_bool(_cfg("DISCORD_REGISTER_SLASH", "false")),
+            soul=(_cfg("DISCORD_SOUL", "") or None),  # no soul by default (R07.33)
         )
         for key, value in overrides.items():
             if value is not None:
@@ -179,12 +207,19 @@ def setup_parser(parser) -> None:
     parser.add_argument(
         "--api", default=None, help="API mode for the backend (openre | openai)"
     )
-    parser.add_argument("--soul", default=None, help=f"Soul override (default: {DEFAULT_SOUL})")
+    parser.add_argument(
+        "--soul", default=None, help="Soul override (default: none — opt in per flag/channel)"
+    )
     parser.add_argument(
         "--tools", default=None, help="Comma-separated tool allowlist override"
     )
     parser.add_argument(
         "--max-steps", type=int, default=None, help="Agent step cap override"
+    )
+    parser.add_argument(
+        "--register-commands",
+        action="store_true",
+        help="Register slash commands (global) then exit without the gateway",
     )
 
 
@@ -239,8 +274,10 @@ def cmd_discord(args) -> int:
     )
     print(
         f"[discord] backend={cfg.backend or 'default'} model={cfg.model or 'default'} "
-        f"tools={cfg.tools} soul={cfg.soul or 'per-channel/' + DEFAULT_SOUL}"
+        f"tools={cfg.tools} soul={cfg.soul or 'none'}"
     )
+    if cfg.register_slash:
+        print(f"[discord] slash: register on startup (app={cfg.app_id or 'auto'})")
     print(
         f"[discord] pool: workers={cfg.max_workers} queue={cfg.queue_max} "
         f"max-steps={cfg.max_steps} session-ttl={cfg.session_ttl_days}d"
@@ -256,6 +293,36 @@ def cmd_discord(args) -> int:
         return 1
     bot_user_id = str(me.get("id", ""))
     print(f"[discord] connected as {me.get('username', '?')} ({bot_user_id})")
+
+    # Slash registration (M2): DISCORD_APP_ID env or auto-resolved via
+    # GET /oauth2/applications/@me. --register-commands exits after.
+    app_id = cfg.app_id
+    if not app_id:
+        try:
+            app_id = str((rest.get_application() or {}).get("id") or "")
+        except DiscordRestError as err:
+            print(f"[discord] app id lookup failed: {err}")
+            app_id = ""
+    register_now = bool(getattr(args, "register_commands", False))
+    if register_now or cfg.register_slash:
+        if not app_id:
+            print(
+                "[discord] cannot register slash commands: DISCORD_APP_ID is not set "
+                "and could not be resolved from the token"
+            )
+            if register_now:
+                return 1
+        else:
+            try:
+                registered = rest.register_commands(app_id, SLASH_COMMANDS)
+                print(f"[discord] registered {len(registered)} slash command(s) (global)")
+            except DiscordRestError as err:
+                print(f"[discord] slash registration failed: {err}")
+                if register_now:
+                    return 1
+    if register_now:
+        print("[discord] --register-commands: done — gateway not started")
+        return 0
 
     policy = Policy(
         bot_user_id=bot_user_id,
@@ -279,6 +346,8 @@ def cmd_discord(args) -> int:
     def dispatcher(event: str, data: dict) -> None:
         if event == "MESSAGE_CREATE":
             pool.submit_event(context_from_payload(data))
+        elif event == "INTERACTION_CREATE":
+            pool.submit_interaction(data)
         # READY / RESUMED / everything else is already logged by the client.
 
     gateway = GatewayClient(cfg.token, DISCORD_INTENTS, dispatcher, log=_print_log)
@@ -317,6 +386,20 @@ def _deny_dangerous(tool_name: str, tool_args: dict) -> bool:
     return False
 
 
+def _soul_exists(name: str) -> bool:
+    """True when `name` resolves to a known soul package (souls loader)."""
+    if not name:
+        return False
+    try:
+        from pathlib import Path
+
+        from agentkthx.soul.loader import get_soul_loader
+
+        return get_soul_loader()._resolve_soul_path(Path(name)) is not None  # noqa: SLF001
+    except Exception:  # noqa: BLE001 - loader trouble: don't block the set
+        return True
+
+
 # ---------------------------------------------------------------------------
 # Responder pool (plan §4: bounded queue + workers + semaphore)
 # ---------------------------------------------------------------------------
@@ -330,6 +413,8 @@ class Job:
     prompt: str                    # sanitized message text (no envelope)
     session_key: str
     ch_cfg: ChannelConfig
+    interaction: Interaction | None = None   # set for /ask + /think jobs
+    want_think: bool = False                 # /think — show step reasoning
 
 
 class ResponderPool:
@@ -357,12 +442,20 @@ class ResponderPool:
         self._small_lock = threading.Lock()
         self._label_cache: dict[str, str] = {}
         self._label_lock = threading.Lock()
+        self._typing_quiet: set[str] = set()   # channels that 404'd typing once
+        self._channel_overrides: dict[str, ChannelConfig] = {}  # /model, /soul
+        self._owners = cfg.owner_ids or cfg.allow_users  # owner fallback
+        self._inter_executor = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="discord-inter"
+        )
+        self._started_at = 0.0
         self.agent_runs = 0  # observable for tests/status
 
     # -- lifecycle -----------------------------------------------------------
 
     def start(self) -> None:
         self._stop.clear()
+        self._started_at = time.monotonic()
         for _ in range(max(1, self.cfg.max_workers)):
             self._executor.submit(self._worker_loop)
 
@@ -370,10 +463,29 @@ class ResponderPool:
         self._stop.set()
         pending = self._queue.qsize()
         self._executor.shutdown(wait=False, cancel_futures=True)
+        self._inter_executor.shutdown(wait=False)
         if pending:
             print(f"[discord] pool stopped with {pending} queued job(s) dropped")
 
     # -- intake ----------------------------------------------------------------
+
+    def _channel_cfg(self, channel_id: str) -> ChannelConfig:
+        """File-based overrides merged with runtime /model + /soul changes
+        (runtime overrides win for this process; file wins on restart)."""
+        base = resolve_channel_config(channel_id, self.cfg.discord_json)
+        override = self._channel_overrides.get(channel_id)
+        if override is None:
+            return base
+        return ChannelConfig(
+            soul=override.soul if override.soul is not None else base.soul,
+            tools=override.tools if override.tools is not None else base.tools,
+            session_prefix=(
+                override.session_prefix
+                if override.session_prefix is not None
+                else base.session_prefix
+            ),
+            model=override.model if override.model is not None else base.model,
+        )
 
     def submit_event(self, ev: MessageContext) -> None:
         """Gateway-thread side: policy gate -> dry-run print -> enqueue."""
@@ -391,7 +503,7 @@ class ResponderPool:
             print(f"[discord] DRY-RUN would answer {ev.username}: {preview!r}")
             return
         base_key = session_key_for(ev.guild_id, ev.channel_id, ev.user_id)
-        ch_cfg = resolve_channel_config(ev.channel_id, self.cfg.discord_json)
+        ch_cfg = self._channel_cfg(ev.channel_id)
         job = Job(
             ev=ev,
             prompt=prompt,
@@ -405,6 +517,151 @@ class ResponderPool:
                 ev.channel_id, "Queue is full — try again in a moment."
             )
             print(f"[discord] queue full, dropped {ev.message_id}")
+
+    # -- interactions (M2, plan §10) --------------------------------------------
+
+    def submit_interaction(self, data: dict) -> None:
+        """Gateway-thread side: parse + gate, then hand to the single
+        interaction thread (never block the gateway on REST calls)."""
+        try:
+            inter = parse_interaction(data)
+        except Exception as err:  # noqa: BLE001 - malformed dispatch
+            print(f"[discord] bad INTERACTION_CREATE: {type(err).__name__}: {err}")
+            return
+        reason = gate_interaction(
+            inter,
+            allow_guilds=self.policy.allow_guilds,
+            allow_channels=self.policy.allow_channels,
+            allow_users=self.policy.allow_users,
+            allow_dms=self.policy.allow_dms,
+        )
+        if reason:
+            print(f"[discord] denied interaction {inter.interaction_id}: {reason}")
+            return
+        cmd = inter.command
+        if cmd in ("ask", "think"):
+            self._inter_executor.submit(self._inter_defer_and_enqueue, inter)
+        elif cmd == "reset":
+            self._inter_executor.submit(self._inter_quick, inter, self._run_reset)
+        elif cmd == "status":
+            self._inter_executor.submit(self._inter_quick, inter, self._run_status)
+        elif cmd == "model":
+            self._inter_executor.submit(self._inter_quick, inter, self._run_model)
+        elif cmd == "soul":
+            self._inter_executor.submit(self._inter_quick, inter, self._run_soul)
+        else:
+            print(f"[discord] interaction for unknown command {cmd!r} — ignored")
+
+    def _inter_defer_and_enqueue(self, inter: Interaction) -> None:
+        """/ask + /think: ACK with type 5 (<3s rule), then enqueue a normal
+        agent job — cooldown, sessions, semaphore and chunking all apply."""
+        defer_data = {"flags": EPHEMERAL} if inter.ephemeral else {}
+        try:
+            self.rest.interaction_callback(
+                inter.interaction_id, inter.token, {"type": CALLBACK_DEFER, "data": defer_data}
+            )
+        except DiscordRestError as err:
+            print(f"[discord] defer failed for {inter.command}: {err}")
+            return
+        prompt = self.policy.sanitize_prompt(inter.options.get("prompt", ""))
+        if not prompt:
+            self._inter_followup_text(inter, "Prompt is empty.")
+            return
+        base_key = session_key_for(inter.guild_id, inter.channel_id, inter.user_id)
+        ch_cfg = self._channel_cfg(inter.channel_id)
+        job = Job(
+            ev=MessageContext(
+                message_id=inter.interaction_id,
+                channel_id=inter.channel_id,
+                guild_id=inter.guild_id,
+                user_id=inter.user_id,
+                username=inter.username,
+                content=prompt,
+                is_dm=inter.is_dm,
+            ),
+            prompt=prompt,
+            session_key=session_key_with_prefix(base_key, ch_cfg),
+            ch_cfg=ch_cfg,
+            interaction=inter,
+            want_think=(inter.command == "think"),
+        )
+        try:
+            self._queue.put_nowait(job)
+        except queue.Full:
+            self._inter_followup_text(inter, "Queue is full — try again in a moment.")
+            print(f"[discord] queue full, dropped interaction {inter.interaction_id}")
+
+    def _inter_quick(self, inter: Interaction, handler) -> None:
+        """Quick commands: one REST callback (type 4) carries the answer."""
+        try:
+            content, ephemeral = handler(inter)
+            payload: dict = {"content": content[:1900]}
+            if ephemeral:
+                payload["flags"] = EPHEMERAL
+            self.rest.interaction_callback(
+                inter.interaction_id, inter.token, {"type": CALLBACK_MESSAGE, "data": payload}
+            )
+        except DiscordRestError as err:
+            print(f"[discord] interaction reply failed: {err}")
+
+    def _inter_followup_text(self, inter: Interaction, content: str) -> None:
+        """Ephemeral one-liner via the interaction webhook."""
+        try:
+            self.rest.followup(
+                inter.app_id, inter.token, {"content": content[:1900], "flags": EPHEMERAL}
+            )
+        except DiscordRestError as err:
+            print(f"[discord] interaction followup failed: {err}")
+
+    def _run_reset(self, inter: Interaction) -> tuple[str, bool]:
+        from agentkthx.core.persistent_memory import PersistentMemory  # lazy
+
+        key = session_key_for(inter.guild_id, inter.channel_id, inter.user_id)
+        return handle_reset(inter, session_key=key, delete_fn=PersistentMemory.delete_session)
+
+    def _run_status(self, inter: Interaction) -> tuple[str, bool]:
+        ch = self._channel_cfg(inter.channel_id)
+        key = session_key_for(inter.guild_id, inter.channel_id, inter.user_id)
+        return handle_status(
+            inter,
+            backend=self.cfg.backend or "default",
+            model=ch.model or self.cfg.model or _default_model(),
+            soul=ch.soul or self.cfg.soul or "none",
+            tools=self.cfg.tools,
+            max_steps=self.cfg.max_steps,
+            cooldown_s=self.cfg.cooldown_s,
+            uptime_s=time.monotonic() - (self._started_at or time.monotonic()),
+            queue_depth=self._queue.qsize(),
+            agent_runs=self.agent_runs,
+            session_key=session_key_with_prefix(key, ch),
+        )
+
+    def _run_model(self, inter: Interaction) -> tuple[str, bool]:
+        ch = self._channel_cfg(inter.channel_id)
+        current = ch.model or self.cfg.model or _default_model()
+        name = str(inter.options.get("name", "")).strip()
+        content, ephemeral = handle_model(
+            inter, current_model=current, owner=is_owner(inter.user_id, self._owners), name=name
+        )
+        if name and is_owner(inter.user_id, self._owners):
+            self._channel_overrides[inter.channel_id] = ChannelConfig(model=name)
+        return content, ephemeral
+
+    def _run_soul(self, inter: Interaction) -> tuple[str, bool]:
+        ch = self._channel_cfg(inter.channel_id)
+        name = str(inter.options.get("name", "")).strip()
+        owner = is_owner(inter.user_id, self._owners)
+        valid = _soul_exists(name) if name else True
+        content, ephemeral = handle_soul(
+            inter,
+            current_soul=ch.soul or self.cfg.soul or "none",
+            owner=owner,
+            name=name,
+            validate_fn=_soul_exists,
+        )
+        if name and valid and owner:
+            self._channel_overrides[inter.channel_id] = ChannelConfig(soul=name)
+        return content, ephemeral
 
     # -- workers ---------------------------------------------------------------
 
@@ -427,21 +684,26 @@ class ResponderPool:
         rate = self.policy.check_rate(ev.user_id)
         if not rate.allowed:
             wait = f" (retry in {rate.retry_after:.0f}s)" if rate.retry_after else ""
-            self._send_small_reply(
-                ev.channel_id,
-                f"Rate limited{wait} — cooldown {self.cfg.cooldown_s:g}s.",
-            )
+            text = f"Rate limited{wait} — cooldown {self.cfg.cooldown_s:g}s."
+            if job.interaction is not None:
+                self._inter_followup_text(job.interaction, text)
+            else:
+                self._send_small_reply(ev.channel_id, text)
             print(f"[discord] cooldown {ev.username}: {rate.retry_after:.1f}s remaining")
             return
 
+        # Typing indicator: guild channels only — DM channels 404 on
+        # trigger-typing (R07.33), and typing is cosmetic anyway.
+        typing_thread = None
         stop_typing = threading.Event()
-        typing_thread = threading.Thread(
-            target=self._typing_loop,
-            args=(ev.channel_id, stop_typing),
-            daemon=True,
-            name=f"discord-typing-{ev.channel_id}",
-        )
-        typing_thread.start()
+        if not ev.is_dm:
+            typing_thread = threading.Thread(
+                target=self._typing_loop,
+                args=(ev.channel_id, stop_typing),
+                daemon=True,
+                name=f"discord-typing-{ev.channel_id}",
+            )
+            typing_thread.start()
         try:
             with self._agent_sem:
                 agent = self._build_agent(job)
@@ -449,15 +711,17 @@ class ResponderPool:
             self.agent_runs += 1
         except Exception as err:  # noqa: BLE001 - reply one line, log full trace
             traceback.print_exc()
-            self._send_small_reply(
-                ev.channel_id,
-                f"Backend error: {type(err).__name__} — try again later.",
-            )
+            text = f"Backend error: {type(err).__name__} — try again later."
+            if job.interaction is not None:
+                self._inter_followup_text(job.interaction, text)
+            else:
+                self._send_small_reply(ev.channel_id, text)
             print(f"[discord] agent run failed for {ev.username}: {err}")
             return
         finally:
             stop_typing.set()
-            typing_thread.join(timeout=3)
+            if typing_thread is not None:
+                typing_thread.join(timeout=3)
         self._send_reply(job, run)
 
     def _build_agent(self, job: Job):
@@ -466,7 +730,7 @@ class ResponderPool:
         from agentkthx.agent import Agent  # lazy: heavy import, worker threads only
 
         ch = job.ch_cfg
-        soul = ch.soul or self.cfg.soul or DEFAULT_SOUL
+        soul = ch.soul or self.cfg.soul   # None = no soul (no-soul fallback prompt)
         tools_raw: str | list[str] = (
             ch.tools if ch.tools is not None else self.cfg.tools
         )
@@ -474,7 +738,7 @@ class ResponderPool:
             tools_raw, soul_allowed=resolve_soul_allowed_tools(soul)
         )
         return Agent(
-            model=self.cfg.model or _default_model(),
+            model=ch.model or self.cfg.model or _default_model(),
             backend=self.cfg.backend or None,
             tools=tool_list,
             soul=soul,
@@ -494,10 +758,29 @@ class ResponderPool:
             text = f"{text}\n\n{marker}".strip() if text else marker
         if not text:
             text = "(empty response)"
+        if job.want_think:
+            reasoning = "\n\n".join(
+                step.reasoning_content.strip()
+                for step in run.steps
+                if getattr(step, "reasoning_content", "")
+                and step.reasoning_content.strip()
+            )
+            if reasoning:
+                if len(reasoning) > 1500:
+                    reasoning = reasoning[:1500] + " …(reasoning truncated)"
+                text = f"```text\n{reasoning}\n```\n\n{text}"
         try:
             chunks = chunk_reply(text, max_msgs=self.cfg.max_reply_msgs)
-            for chunk in chunks:
-                self.rest.send_message(ev.channel_id, chunk)
+            if job.interaction is not None:
+                inter = job.interaction
+                for chunk in chunks:
+                    payload: dict = {"content": chunk}
+                    if inter.ephemeral:
+                        payload["flags"] = EPHEMERAL
+                    self.rest.followup(inter.app_id, inter.token, payload)
+            else:
+                for chunk in chunks:
+                    self.rest.send_message(ev.channel_id, chunk)
             print(
                 f"[discord] answered {ev.username} in {ev.channel_id}: "
                 f"{len(chunks)} msg(s), {run.total_tokens} tokens, {run.total_ms:.0f}ms"
@@ -528,7 +811,14 @@ class ResponderPool:
             try:
                 self.rest.trigger_typing(channel_id)
             except DiscordRestError as err:
-                print(f"[discord] typing refresh failed: {err}")
+                if err.status == 404:
+                    # Known transient right after session start (and on some
+                    # channel types) — log once per channel, then stay quiet.
+                    if channel_id not in self._typing_quiet:
+                        self._typing_quiet.add(channel_id)
+                        print(f"[discord] typing unavailable in {channel_id} (404) — skipping")
+                else:
+                    print(f"[discord] typing refresh failed: {err}")
                 return
             if stop.wait(TYPING_REFRESH_S):
                 return

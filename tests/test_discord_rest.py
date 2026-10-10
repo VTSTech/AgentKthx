@@ -163,7 +163,7 @@ def start_stub(responder):
             if resp_body:
                 self.wfile.write(resp_body)
 
-        do_GET = do_POST = _handle
+        do_GET = do_POST = do_PUT = _handle
 
         def log_message(self, *args):  # silence test output
             pass
@@ -279,3 +279,40 @@ class TestDiscordRest:
             rest.get_self()
         assert excinfo.value.status == 0
         assert TOKEN not in str(excinfo.value)
+
+    # -- M2: slash registration + interactions --------------------------------
+
+    def test_register_commands_global(self, rest_factory):
+        def responder(call, n):
+            return 200, json.dumps([{"id": "c1", "name": "ask"}]).encode(), {}
+
+        rest, calls = rest_factory(responder)
+        cmds = [{"name": "ask", "description": "d"}]
+        out = rest.register_commands("app1", cmds)
+        assert out[0]["name"] == "ask"
+        assert calls[0]["method"] == "PUT"
+        assert calls[0]["path"] == "/applications/app1/commands"
+        assert json.loads(calls[0]["body"]) == cmds
+        assert calls[0]["headers"]["authorization"] == f"Bot {TOKEN}"
+
+    def test_register_commands_guild_scoped(self, rest_factory):
+        rest, calls = rest_factory(lambda call, n: (200, b"[]", {}))
+        rest.register_commands("app1", [{"name": "ask"}], guild_id="g1")
+        assert calls[0]["path"] == "/applications/app1/guilds/g1/commands"
+
+    def test_interaction_callback_no_auth_header(self, rest_factory):
+        rest, calls = rest_factory(lambda call, n: (204, b"", {}))
+        rest.interaction_callback("i1", "tok", {"type": 5})
+        assert calls[0]["method"] == "POST"
+        assert calls[0]["path"] == "/interactions/i1/tok/callback"
+        assert json.loads(calls[0]["body"]) == {"type": 5}
+        # auth is carried by the path token — no bot-token header
+        assert "authorization" not in calls[0]["headers"]
+
+    def test_followup_no_auth_and_flags(self, rest_factory):
+        rest, calls = rest_factory(lambda call, n: (200, json.dumps({"id": "f1"}).encode(), {}))
+        out = rest.followup("app1", "tok", {"content": "hi", "flags": 64})
+        assert out == {"id": "f1"}
+        assert calls[0]["path"] == "/webhooks/app1/tok"
+        assert json.loads(calls[0]["body"]) == {"content": "hi", "flags": 64}
+        assert "authorization" not in calls[0]["headers"]

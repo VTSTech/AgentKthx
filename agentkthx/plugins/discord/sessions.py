@@ -67,6 +67,7 @@ class ChannelConfig:
     soul: str | None = None
     tools: list[str] | None = None
     session_prefix: str | None = None
+    model: str | None = None   # /model slash command or discord.json override
 
 
 def default_discord_json_path() -> str:
@@ -81,7 +82,8 @@ def resolve_channel_config(
 
         {"channels": {"123...": {"soul": "kthx-trading",
                                   "tools": ["calculator"],
-                                  "session_prefix": "support"}}}
+                                  "session_prefix": "support",
+                                  "model": "qwen3:8b"}}}
 
     Missing file / missing channel / malformed JSON -> all-None defaults.
     Never raises: a broken overrides file must not take the bot down.
@@ -103,6 +105,7 @@ def resolve_channel_config(
         session_prefix=(
             str(entry["session_prefix"]) if entry.get("session_prefix") else None
         ),
+        model=str(entry["model"]) if entry.get("model") else None,
     )
 
 

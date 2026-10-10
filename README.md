@@ -1,4 +1,4 @@
-# ⚛️ AgentKthx R07.32
+# ⚛️ AgentKthx R07.33
 
 **Status: Alpha**
 
@@ -36,6 +36,7 @@ Inspired by the architecture of OpenClaw, rebuilt from scratch for local-first o
 | [ARCH.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/ARCH.md) | Technical documentation for developers (directory structure, core design, orchestrator modes) |
 | [CHANGELOG.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/CHANGELOG.md) | Version history and release notes (includes LocalClaw history) |
 | [CREDITS.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/CREDITS.md) | Acknowledges every project, inspiration, API, model creator, and specification that makes AgentKthx possible |
+| [DISCORD.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/DISCORD.md) | **Discord bot guide** — portal setup + invite URL, `agentkthx discord setup` wizard, env var reference, per-channel `discord.json` overrides, slash commands (`/ask` `/think` `/model` `/soul` `/reset` `/status`), run cookbook, troubleshooting matrix (4014/4004/silent bot) |
 | [docs/api/](https://github.com/VTSTech/AgentKthx/blob/main/docs/api/) | **API Technical References** — one deep-dive per provider, all in one folder: NVIDIA NIM, ZAI, OpenRouter, Gemini, Hugging Face Router, OpenAI, Mistral, Pollinations, OrcaRouter (auth & endpoints, request/response schemas, model catalogs, function calling, streaming, error codes & recovery, rate limits, free-tier behavior, AgentKthx `Backend` + `plugin.json` blueprints, troubleshooting matrices) |
 | [JEV_API_MODE.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/JEV_API_MODE.md) | JEV API mode — System-One decisions via any free LLM (Jev-compatible shape) |
 | [mcp/ROADMAP.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/mcp/ROADMAP.md) | **MCP support** — Phase 1 (client mode, stdio) status + Phase 2 (`kthx-audit` MCP server) + Phase 3 (generic `mcp serve`) plan |

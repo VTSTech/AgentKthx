@@ -224,14 +224,50 @@ class DiscordRest:
         data = self._request("GET", "/oauth2/applications/@me")
         return data or {}
 
+    def register_commands(self, app_id: str, commands: list[dict], guild_id: str | None = None) -> list:
+        """PUT /applications/{app_id}/commands — bulk slash registration (M2).
+        With `guild_id`, registers guild-scoped (instant-propagating) instead
+        of global commands. Returns the registered command list."""
+        if guild_id:
+            path = f"/applications/{app_id}/guilds/{guild_id}/commands"
+        else:
+            path = f"/applications/{app_id}/commands"
+        data = self._request("PUT", path, json_body=list(commands))
+        return data or []
+
+    def interaction_callback(self, interaction_id: str, interaction_token: str, payload: dict) -> None:
+        """POST /interactions/{id}/{token}/callback — ACK an interaction (M2).
+        Auth is carried by the path token, not the bot token."""
+        self._request(
+            "POST",
+            f"/interactions/{interaction_id}/{interaction_token}/callback",
+            json_body=payload,
+            auth=False,
+        )
+
+    def followup(self, app_id: str, interaction_token: str, payload: dict) -> dict:
+        """POST /webhooks/{app_id}/{token} — interaction followup message
+        (M2). Auth-free by design (the token in the path IS the secret).
+        flags=64 in the payload marks the message ephemeral."""
+        data = self._request(
+            "POST",
+            f"/webhooks/{app_id}/{interaction_token}",
+            json_body=payload,
+            auth=False,
+        )
+        return data or {}
+
     # -- core request path ------------------------------------------------------
 
-    def _request(self, method: str, path: str, *, json_body: dict | None = None) -> dict | None:
+    def _request(
+        self, method: str, path: str, *, json_body: dict | None = None, auth: bool = True
+    ) -> dict | None:
         url = f"{self.base_url}{path}"
         headers = {
-            "Authorization": f"Bot {self.token}",
             "User-Agent": USER_AGENT,
         }
+        if auth:
+            headers["Authorization"] = f"Bot {self.token}"
         body = None
         if json_body is not None:
             body = json.dumps(json_body).encode("utf-8")
