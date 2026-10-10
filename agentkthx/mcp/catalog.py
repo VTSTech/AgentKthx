@@ -144,10 +144,10 @@ KNOWN_MCP_SERVERS: list[dict[str, Any]] = [
     },
     {
         "name": "time",
-        "package": "@modelcontextprotocol/server-time",
-        "install": "npx -y @modelcontextprotocol/server-time",
-        "use_case": "Timezone conversion and current-time lookup.",
-        "tags": ["time", "timezone", "date", "clock"],
+        "package": "@infoinlet/mcp-time",
+        "install": "npx -y @infoinlet/mcp-time",
+        "use_case": "Date/time tools — current time in any IANA timezone, timezone conversion, date math, diffs, cron next-runs, business-day calc.",
+        "tags": ["time", "timezone", "date", "clock", "cron", "calendar"],
         "free_tier": True,
         "requires_api_key": False,
         "status": "community",
@@ -155,10 +155,16 @@ KNOWN_MCP_SERVERS: list[dict[str, Any]] = [
         "config_snippet": {
             "name": "time",
             "command": "npx",
-            "args": ["-y", "@modelcontextprotocol/server-time"],
+            "args": ["-y", "@infoinlet/mcp-time"],
             "enabled": True,
         },
-        "notes": None,
+        "notes": (
+            "R07.32: replaces @modelcontextprotocol/server-time in this catalog and "
+            "in `agentkthx mcp init`'s default config — the built-in get_time/get_date "
+            "tools were removed in the same release. Tools arrive namespaced as "
+            "time__<tool> (current_time, convert_timezone, add_to_date, date_diff, "
+            "cron_next_runs, business_days, format_date)."
+        ),
     },
     {
         "name": "fetch",

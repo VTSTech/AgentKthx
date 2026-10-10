@@ -149,9 +149,9 @@ When simulating a trade:
 3. Apply the trade
 4. Write updated `portfolio.json` (filesystem MCP server `write_text_file`, or `shell` with a heredoc)
 
-### Checking Market Hours (use `get_time` and `get_date` tools)
+### Checking Market Hours
 TSX trading hours: 9:30 AM - 4:00 PM ET, Monday-Friday
-Use these tools to check if the market is currently open.
+Check whether the market is currently open with the MCP `time` server's tools (`agentkthx chat --mcp time` — @infoinlet/mcp-time, ET timezone supported), or `shell` with `date` when no MCP server is running.
 
 ## Analysis Workflow
 

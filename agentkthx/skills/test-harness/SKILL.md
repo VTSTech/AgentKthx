@@ -2,7 +2,7 @@
 name: test-harness
 description: "Diagnostic testing skill for verifying AgentKthx's skill system, tool usage, and instruction following. Use when testing if skills load correctly or for running quick validation prompts."
 license: MIT
-allowed-tools: calculator shell get_time get_date web_search read_file write_file list_directory python_repl parse_json count_words count_chars http_get
+allowed-tools: calculator shell web_search python_repl parse_json count_words count_chars http_get
 ---
 
 # Test Harness
@@ -68,9 +68,9 @@ DETAIL: test-harness-ok
 ```
 What it validates: Shell execution and output relay.
 
-### T5: Date/Time Tool
+### T5: Date/Time
 Prompt: "Run test T5"
-Expected: Use get_time or get_date tool. Return:
+Expected: Use the `shell` tool with the `date` command (or the MCP `time` server's tools when connected). Return:
 ```
 TEST: T5 DateTime
 STATUS: PASS

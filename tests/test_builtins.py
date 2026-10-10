@@ -260,8 +260,6 @@ class TestToolRegistryCompleteness:
         "shell",
         "http_get",
         "python_repl",
-        "get_time",
-        "get_date",
         "parse_json",
         "count_words",
         "count_chars",

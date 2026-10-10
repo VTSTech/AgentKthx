@@ -24,6 +24,13 @@
       "comment": "Persistent knowledge graph (entities + relations). Storage path defaults to ~/.agentkthx/memory.json so the graph survives restarts."
     },
     {
+      "name": "time",
+      "command": "npx",
+      "args": ["-y", "@infoinlet/mcp-time"],
+      "enabled": true,
+      "comment": "Date/time tools (current_time, convert_timezone, add_to_date, date_diff, cron_next_runs, business_days, format_date). Replaces the removed get_time/get_date built-in tools. Uses the system timezone by default."
+    },
+    {
       "name": "audit",
       "command": "python3",
       "args": ["-m", "agentkthx.skills.codebase_audit.mcp_server", "--repo", "/home/REPLACE_ME/workspace"],

@@ -807,7 +807,6 @@ _PARAM_STRING_EXAMPLES = {
     "text": "hello world",  # count_words / count_chars
     "action": "add",  # todo
     "task_id": "1",  # todo
-    "timezone": "UTC",  # get_time
 }
 
 
@@ -979,53 +978,6 @@ Action: shell
 Action Input: {"command": "ls"}
 Observation: file1.txt file2.txt
 Final Answer: file1.txt file2.txt
-```""",
-        },
-        "get_time": {
-            "example": """**Example** - User asks "What time is it?":
-```
-Action: get_time
-Action Input: {}
-```""",
-            "example_flow": """**Example flow:**
-```
-User: What time is it?
-Action: get_time
-Action Input: {}
-Observation: 14:30:00
-Final Answer: 14:30:00
-```""",
-            "error_example": """**Example recovery:**
-```
-Action: get_time
-Action Input: {"timezone": "InvalidZone"}
-Observation: Error: Unknown timezone
-Action: get_time
-Action Input: {}
-Observation: 14:30:00
-Final Answer: 14:30:00
-```""",
-        },
-        "get_date": {
-            "example": """**Example** - User asks "What is today's date?":
-```
-Action: get_date
-Action Input: {}
-```""",
-            "example_flow": """**Example flow:**
-```
-User: What is today's date?
-Action: get_date
-Action Input: {}
-Observation: 2024-01-15
-Final Answer: 2024-01-15
-```""",
-            "error_example": """**Example:**
-```
-Action: get_date
-Action Input: {}
-Observation: 2024-01-15
-Final Answer: 2024-01-15
 ```""",
         },
         "python_repl": {

@@ -193,16 +193,6 @@ Thought: I need to compute something in Python
 Action: python_repl
 Action Input: {{"code": "print(2 ** 10)"}}
 
-Example 6 - Get date:
-Thought: User wants to know today's date
-Action: get_date
-Action Input: {{}}
-
-Example 7 - Get time:
-Thought: User wants to know current time
-Action: get_time
-Action Input: {{}}
-
 CRITICAL RULES:
 1. Action line: just the tool name (no backticks, no quotes)
 2. Action Input: valid JSON with correct argument names for THAT tool
@@ -210,8 +200,6 @@ CRITICAL RULES:
    - calculator: {{"expression": "15 * 8"}}
    - shell: {{"command": "echo Hello"}}
    - python_repl: {{"code": "print(result)"}}
-   - get_date: {{}} (no arguments)
-   - get_time: {{}} or {{"timezone": "America/New_York"}}
 4. MATH OPERATORS: * (multiply), ** (power), / (divide), + (add), - (subtract)
 5. NEVER write Observation yourself - wait for the actual result!
 ═══════════════════════════════════════════════════════════════
@@ -224,8 +212,6 @@ Calculator: {{"expression": "15 * 8"}}
 Shell: {{"command": "echo Hello World"}}
 Current dir: {{"command": "{PLATFORM_DIR_CMD}"}}
 Python: {{"code": "print(result)"}}
-Get date: {{}}
-Get time: {{}}
 
 ARGUMENT NAMES: expression (calculator), command (shell), code (python_repl)
 MATH: * = multiply, ** = power, / = divide

@@ -335,13 +335,6 @@ class TestBuiltins:
         result = tool.execute(text="hello world")
         assert result == "2"
 
-    def test_get_time(self):
-        registry = make_builtin_registry()
-        tool = registry.get("get_time")
-
-        result = tool.execute()
-        assert len(result) > 0  # Returns timestamp string
-
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

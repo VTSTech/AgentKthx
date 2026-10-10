@@ -1506,15 +1506,13 @@ The model MUST explicitly format tool calls.
 
 ## Built-in Tools
 
-11 built-in tools are registered in `tools/builtins.py`:
+9 built-in tools are registered in `tools/builtins.py`:
 
 | Tool | Description | Dangerous | Notes |
 |------|-------------|-----------|-------|
 | `calculator` | Evaluate mathematical expressions | No | Python syntax, math functions |
 | `shell` | Execute shell commands | Yes | Audit logged |
 | `http_get` | HTTP GET requests | No | |
-| `get_time` | Get current time | No | |
-| `get_date` | Get current date | No | |
 | `python_repl` | Sandboxed Python execution | No | Via sandboxed_repl.py |
 | `web_search` | Web search | No | |
 | `parse_json` | Parse JSON strings | No | |
@@ -1523,6 +1521,8 @@ The model MUST explicitly format tool calls.
 | `todo` | In-memory todo CRUD | No | Priority support, module-level store |
 
 File operations (read/write/edit/list/find) were removed from the built-ins in favor of the MCP filesystem server — run `agentkthx chat --mcp filesystem` with `@modelcontextprotocol/server-filesystem` configured in `~/.agentkthx/mcp.json` (see `agentkthx mcp install`). Their tools arrive namespaced as `filesystem__<tool>`.
+
+Date/time tools (`get_time`/`get_date`) were likewise removed in favor of the MCP time server — `agentkthx mcp init` configures `@infoinlet/mcp-time` as the `time` server (tools: `current_time`, `convert_timezone`, `add_to_date`, `date_diff`, `cron_next_runs`, `business_days`, `format_date`, namespaced as `time__<tool>`). Without MCP, `shell` with the `date` command covers the basics.
 
 ### Tool Details
 
@@ -2123,7 +2123,7 @@ This tool has failed N times. Consider using a different tool or approach.
 ### Tool Not Allowed
 ```
 Tool: read_file
-Result: Error: Unknown tool 'read_file'. Available tools: ['get_time', 'get_date']
+Result: Error: Unknown tool 'read_file'. Available tools: ['calculator', 'shell']
 ```
 
 ### Tool Execution Error

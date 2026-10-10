@@ -310,7 +310,7 @@ class TestGenerateStreamToolCallAccumulation(unittest.TestCase):
                     {
                         "index": 0,
                         "id": "call_1",
-                        "function": {"name": "get_time", "arguments": ""},
+                        "function": {"name": "calculator", "arguments": ""},
                     }
                 ],
                 "finish_reason": None,

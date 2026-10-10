@@ -11,7 +11,7 @@ Primary tools for trading analysis:
 | `parse_json` | Parse API responses from Yahoo Finance |
 | `web_search` | Find news, earnings dates, market events |
 | `calculator` | Quick position sizing and risk math |
-| `get_time` | Check current time for market hours |
+| `shell` | Check current time/date for market hours (`date` command) |
 
 ## Model Recommendations
 

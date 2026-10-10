@@ -44,8 +44,6 @@ from agentkthx.tools.builtins import (
     calculator,
     count_chars,
     count_words,
-    get_date,
-    get_time,
     http_get,
     parse_json,
     python_repl,
@@ -271,52 +269,6 @@ def test_http_direct() -> tuple[int, int]:
     passed = sum(results)
     total = len(results)
     print(f"\n📊 HTTP Direct: {passed}/{total} ({100*passed//total}%)")
-    return passed, total
-
-
-def test_datetime_direct() -> tuple[int, int]:
-    """Test datetime tools directly without model."""
-    print(f"\n{'='*60}")
-    print("📅 DateTime Tools - Direct Validation")
-    print(f"{'='*60}")
-
-    results = []
-
-    # Test get_date
-    print("\n  Testing get_date...")
-    date_result = get_date()
-    date_ok = bool(re.match(r"\d{4}-\d{2}-\d{2}", date_result))
-    results.append(date_ok)
-    status = "✅" if date_ok else "❌"
-    print(f"    {status} get_date: {date_result}")
-
-    # Test get_time (local)
-    print("\n  Testing get_time (local)...")
-    time_result = get_time()
-    time_ok = bool(re.match(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", time_result))
-    results.append(time_ok)
-    status = "✅" if time_ok else "❌"
-    print(f"    {status} get_time: {time_result}")
-
-    # Test get_time with timezone
-    print("\n  Testing get_time (timezone)...")
-    tz_result = get_time("UTC")
-    tz_ok = "UTC" in tz_result or bool(re.match(r"\d{4}-\d{2}-\d{2}", tz_result))
-    results.append(tz_ok)
-    status = "✅" if tz_ok else "❌"
-    print(f"    {status} get_time(UTC): {tz_result}")
-
-    # Test invalid timezone
-    print("\n  Testing invalid timezone...")
-    invalid_tz = get_time("Invalid/Timezone")
-    invalid_ok = "error" in invalid_tz.lower() or "unknown" in invalid_tz.lower()
-    results.append(invalid_ok)
-    status = "✅" if invalid_ok else "❌"
-    print(f"    {status} Invalid timezone: {invalid_tz[:50]}")
-
-    passed = sum(results)
-    total = len(results)
-    print(f"\n📊 DateTime Direct: {passed}/{total} ({100*passed//total}%)")
     return passed, total
 
 
@@ -571,10 +523,6 @@ def run_phase1() -> tuple[int, int]:
     total_passed += p
     total_tests += t
 
-    p, t = test_datetime_direct()
-    total_passed += p
-    total_tests += t
-
     p, t = test_json_text_direct()
     total_passed += p
     total_tests += t
@@ -817,93 +765,6 @@ def test_shell_model(
     return passed, total
 
 
-def test_datetime_model(
-    model: str,
-    backend,
-    debug: bool = False,
-    soul: str = None,
-    soul_level: int = 2,
-    force_react: bool = False,
-    num_ctx: int = None,
-    num_predict: int = None,
-    temperature: float = None,
-    top_p: float = None,
-) -> tuple[int, int]:
-    """Test model's ability to call datetime tools."""
-    print(f"\n{'='*60}")
-    print("📅 DateTime Tools - Model Calling")
-    print(f"   Model: {model}")
-    print(f"{'='*60}")
-
-    tools = make_builtin_registry().subset(["get_time", "get_date"])
-
-    tests = [
-        ("Get date", "What is today's date?", "date"),
-        ("Get time", "What time is it?", "time"),
-    ]
-
-    results = []
-
-    for name, prompt, keyword in tests:
-        print(f"\n📋 {name}")
-        print(f"   Prompt: {prompt}")
-
-        agent = Agent(
-            model=model,
-            tools=tools,
-            backend=backend,
-            max_steps=5,
-            debug=debug,
-            soul=soul,
-            soul_level=soul_level,
-            force_react=force_react,
-            num_ctx=num_ctx,
-            num_predict=num_predict,
-            temperature=temperature,
-            top_p=top_p,
-        )
-
-        t0 = time.time()
-        run = agent.run(prompt)
-        elapsed = time.time() - t0
-
-        tool_used = check_tool_used(run, "get_time") or check_tool_used(run, "get_date")
-
-        has_date = bool(re.search(r"\d{4}-\d{2}-\d{2}", run.final_answer))
-        has_time = bool(re.search(r"\d{2}:\d{2}", run.final_answer))
-        passed = (keyword == "date" and has_date) or (keyword == "time" and has_time)
-
-        # Fallback: check tool results if model didn't format the answer
-        # (consistent with calculator/shell/file tests — the model may have
-        # called the right tool but failed to produce a well-formed Final Answer)
-        if not passed and tool_used:
-            for step in run.steps:
-                if step.tool_result:
-                    result_str = str(step.tool_result)
-                    if keyword == "date" and re.search(r"\d{4}-\d{2}-\d{2}", result_str):
-                        passed = True
-                        break
-                    elif keyword == "time" and re.search(r"\d{2}:\d{2}", result_str):
-                        passed = True
-                        break
-
-        results.append(passed)
-        status = "✅" if passed else "❌"
-        tool_status = "🔧" if tool_used else "⚠️"
-        found_where = (
-            "(in answer)"
-            if (keyword == "date" and has_date) or (keyword == "time" and has_time)
-            else "(in tool result)" if passed and tool_used else ""
-        )
-        print(f"  {status} {tool_status} Tool used: {tool_used} | {elapsed:.1f}s {found_where}")
-        print(f"  📝 {run.final_answer}")
-
-    passed = sum(results)
-    total = len(results)
-    print(f"\n📊 DateTime Model: {passed}/{total} ({100*passed//total}%)")
-    return passed, total
-
-
 def test_python_repl_model(
     model: str,
     backend,
@@ -1087,7 +948,6 @@ def test_all_tools_model(
     tests = [
         ("Calculator choice", "What is 25 times 4?", "100", "calculator"),
         ("Shell choice", "Echo the text 'MultiTool'", "MultiTool", "shell"),
-        ("Date choice", "What is today's date?", None, "get_date"),
         ("Todo add choice", "Add a todo: Review test results", "Review", "todo"),
     ]
 
@@ -1179,24 +1039,8 @@ def run_phase2(
     total_tests = 0
 
     if quick:
-        # Quick mode: only calculator (5 tests) + datetime (2 tests) = 7 tests
-        # These are the fastest since they don't need file I/O or sandboxing
+        # Quick mode: only calculator (5 tests) — no file I/O or sandboxing
         p, t = test_calculator_model(
-            model,
-            backend,
-            debug,
-            soul=soul,
-            soul_level=soul_level,
-            force_react=force_react,
-            num_ctx=num_ctx,
-            num_predict=num_predict,
-            temperature=temperature,
-            top_p=top_p,
-        )
-        total_passed += p
-        total_tests += t
-
-        p, t = test_datetime_model(
             model,
             backend,
             debug,
@@ -1228,21 +1072,6 @@ def run_phase2(
         total_tests += t
 
         p, t = test_shell_model(
-            model,
-            backend,
-            debug,
-            soul=soul,
-            soul_level=soul_level,
-            force_react=force_react,
-            num_ctx=num_ctx,
-            num_predict=num_predict,
-            temperature=temperature,
-            top_p=top_p,
-        )
-        total_passed += p
-        total_tests += t
-
-        p, t = test_datetime_model(
             model,
             backend,
             debug,

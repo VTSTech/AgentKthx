@@ -152,12 +152,6 @@ TOOL_ERROR_HINTS = {
             "The Python REPL is sandboxed. No file or network operations.",
         ),
     },
-    "get_time": {
-        "unknown timezone": (
-            "Unknown timezone identifier.",
-            "Use IANA timezone names like 'UTC', 'America/New_York', 'Europe/London'",
-        ),
-    },
     "parse_json": {
         "expecting": ("Invalid JSON format.", "Check for missing quotes, commas, or brackets."),
         "unterminated": (
@@ -210,12 +204,14 @@ TOOL_NAME_SUGGESTIONS = {
     "exec": "python_repl",
     "run": "python_repl or shell",
     "execute": "python_repl or shell",
-    # DateTime
-    "date": "get_date",
-    "time": "get_time",
-    "datetime": "get_time or get_date",
-    "now": "get_time",
-    "today": "get_date",
+    # DateTime — R07.32: built-in time tools removed; use the MCP `time`
+    # server (@infoinlet/mcp-time) or shell `date` when no MCP server is
+    # connected.
+    "date": "MCP time server or shell 'date'",
+    "time": "MCP time server or shell 'date'",
+    "datetime": "MCP time server or shell 'date'",
+    "now": "MCP time server or shell 'date'",
+    "today": "MCP time server or shell 'date'",
     # Web
     "search": "web_search",
     "web": "web_search or http_get",
@@ -278,8 +274,6 @@ TOOL_ALTERNATIVES = {
     "shell": ["python_repl"],
     "http_get": [],  # No direct alternative
     "python_repl": ["calculator"],
-    "get_time": ["python_repl"],  # datetime in Python
-    "get_date": ["python_repl"],
 }
 
 
@@ -642,7 +636,7 @@ def _is_simple_result(result: str, tool_name: str) -> bool:
     - Long outputs
     """
     # Simple tools that typically produce direct answers
-    simple_tools = {"calculator", "get_time", "get_date", "count_words", "count_chars"}
+    simple_tools = {"calculator", "count_words", "count_chars"}
     if tool_name in simple_tools:
         return True
 

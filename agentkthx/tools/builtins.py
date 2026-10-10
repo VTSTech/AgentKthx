@@ -394,64 +394,8 @@ def python_repl(code: str) -> str:
 
 
 # ============================================================================
-# Time Tools
-# ============================================================================
-
-
-def get_time(timezone: str | None = None) -> str:
-    """
-    Get current date and time, optionally in a specified timezone.
-
-    Args:
-        timezone: IANA timezone name, e.g. 'America/New_York', 'Europe/London'
-                  If omitted, returns local system time.
-
-    Returns:
-        Current datetime string, or an error if the timezone is unknown
-    """
-    from datetime import datetime
-
-    if not timezone:
-        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    try:
-        import zoneinfo
-
-        tz = zoneinfo.ZoneInfo(timezone)
-        now = datetime.now(tz)
-        # Include %Z so the caller can confirm which timezone was applied.
-        return now.strftime("%Y-%m-%d %H:%M:%S %Z")
-
-    except AttributeError:
-        # zoneinfo.ZoneInfoNotFoundError may not exist on some builds.
-        return (
-            f"Error: unknown timezone '{timezone}'. "
-            f"Use an IANA name such as 'America/New_York' or 'UTC'."
-        )
-    except Exception as e:
-        err_str = str(e)
-        if (
-            "No time zone found" in err_str
-            or "ZoneInfoNotFoundError" in err_str
-            or "No such" in err_str
-        ):
-            return (
-                f"Error: unknown timezone '{timezone}'. "
-                f"Use an IANA name such as 'America/New_York' or 'UTC'."
-            )
-        return f"Error getting time for timezone '{timezone}': {e}"
-
-
-def get_date() -> str:
-    """
-    Get current local date.
-
-    Returns:
-        Current date string (YYYY-MM-DD)
-    """
-    from datetime import datetime
-
-    return datetime.now().strftime("%Y-%m-%d")
+# (Time tools removed — R07.32: use the MCP time server instead,
+# `agentkthx mcp init` configures @infoinlet/mcp-time as the `time` server.)
 
 
 # ============================================================================
@@ -1118,33 +1062,8 @@ def make_builtin_registry() -> ToolRegistry:
         )
     )
 
-    # Time
-    registry.register_tool(
-        Tool(
-            name="get_time",
-            description="Get current date and time, optionally in a specific timezone",
-            params=[
-                ToolParam(
-                    name="timezone",
-                    type="string",
-                    description="Optional IANA timezone name, e.g. 'America/New_York'",
-                    required=False,
-                )
-            ],
-            handler=get_time,
-            category="utility",
-        )
-    )
-
-    registry.register_tool(
-        Tool(
-            name="get_date",
-            description="Get current local date (YYYY-MM-DD)",
-            params=[],
-            handler=get_date,
-            category="utility",
-        )
-    )
+    # (Time tools get_time/get_date removed — R07.32: use the MCP `time`
+    # server, @infoinlet/mcp-time, configured by `agentkthx mcp init`.)
 
     # JSON
     registry.register_tool(

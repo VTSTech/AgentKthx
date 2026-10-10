@@ -257,12 +257,10 @@ agentkthx test 02 --model-only -m qwen2.5:0.5b --debug
 |----------|:-----:|:------------:|-----------------|
 | Calculator | 5 | calculator | Expression construction, result extraction |
 | Shell | 2 | shell | Command formation, result relay |
-| DateTime | 2 | get_time / get_date | Tool selection, answer formatting |
-| File Tools | 2 | read_file / list_directory | Path handling, content extraction |
 | Python REPL | 2 | python_repl | Code generation, result interpretation |
 | All Tools | 4 | varies | Tool selection from full set |
 
-> Note (added post-R03.7): the File Tools row reflects the suite as it existed at R03.7. The built-in file tools (read_file / list_directory / write_file / edit_file / read_file_lines / find_files) were later removed in favor of the MCP filesystem server (`--mcp filesystem`).
+> Note (added post-R03.7): the File Tools and DateTime rows reflect the suite as it existed at R03.7. The built-in file tools (read_file / list_directory / write_file / edit_file / read_file_lines / find_files) were later removed in favor of the MCP filesystem server (`--mcp filesystem`), and the date/time tools (get_time / get_date) in favor of the MCP time server (@infoinlet/mcp-time, configured by `agentkthx mcp init`).
 
 ---
 

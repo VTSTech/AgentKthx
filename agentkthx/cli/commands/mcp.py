@@ -180,6 +180,7 @@ def _mcp_init(args: argparse.Namespace) -> int:
     print(dim("  • filesystem           — sandboxed file ops (~/workspace)"))
     print(dim("  • sequential-thinking  — chain-of-thought scratchpad"))
     print(dim("  • memory               — knowledge graph (persists to ~/.agentkthx/memory.json)"))
+    print(dim("  • time                 — date/time + timezone tools (@infoinlet/mcp-time)"))
     print()
     print(dim(f"Probe one now:    {cyan('agentkthx mcp probe filesystem')}"))
     print(dim(f"Enable in chat:   {cyan('agentkthx chat --mcp')}"))
