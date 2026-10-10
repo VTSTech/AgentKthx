@@ -66,10 +66,10 @@ Inspired by the architecture of OpenClaw, rebuilt from scratch for local-first o
 - **Ctrl+C cancellation** — Graceful interrupt at backend, tool, and agent loop levels (R05.0; R07.06 ROB-01: half-cancelled run bug fixed)
 - **Persistent memory** — SQLite-backed conversation persistence with session management (`--session`); writes are thread-safe (R07.05 ROB-03)
 - **`/model` switch re-derives per-model state** (R07.06 ROB-14) — `num_ctx`, `num_predict`, `model_config`, `model_family` all follow the new model; values pinned via `--num-ctx`/`--num-predict`/`/param` survive the switch
-- **17 built-in tools** — Calculator, shell, file ops (read/write/edit/list/find), HTTP, web search, JSON parse, Python REPL, todo list, datetime, word/char count. Load mid-session via `/tool shell,read_file`
-- **MCP client support** (R07.22) — Connect to external [Model Context Protocol](https://modelcontextprotocol.io) servers via stdio JSON-RPC; their tools are bridged into the agent's registry with `<server>__<tool>` namespacing. See [docs/USAGE.md#mcp-model-context-protocol](docs/USAGE.md#mcp-model-context-protocol) for the full guide (`mcp init` / `mcp probe` / `mcp search` / `mcp install` / `chat --mcp [server...]`).
-- **Dangerous tool confirmation** — `--confirm` flag for interactive approval of destructive operations
-- **Audit logging** — Automatic JSON-lines logging of shell, write, and edit operations
+- **11 built-in tools** — Calculator, shell, HTTP, web search, JSON parse, Python REPL, todo list, datetime, word/char count. File operations (read/write/edit/list) come from the MCP filesystem server (`--mcp filesystem`). Load mid-session via `/tool calculator,shell`
+- **MCP client support** (R07.22) — Connect to external [Model Context Protocol](https://modelcontextprotocol.io) servers via stdio JSON-RPC; their tools are bridged into the agent's registry with `<server>__<tool>` namespacing. The filesystem server covers read/write/edit/list operations. See [docs/USAGE.md#mcp-model-context-protocol](docs/USAGE.md#mcp-model-context-protocol) for the full guide (`mcp init` / `mcp probe` / `mcp search` / `mcp install` / `chat --mcp [server...]`).
+- **Dangerous tool confirmation** — `--confirm` flag for interactive approval of destructive operations (shell)
+- **Audit logging** — Automatic JSON-lines logging of shell operations
 - **Argument normalization** — ~100+ tool argument aliases for small model compatibility
 - **JSON structured output** — `--response-format json` for structured JSON responses
 - **Self-update** — `agentkthx update` to update to latest version from GitHub

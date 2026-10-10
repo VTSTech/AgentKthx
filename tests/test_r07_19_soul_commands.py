@@ -81,8 +81,6 @@ TRADING_TOOLS = {
     "python_repl",
     "parse_json",
     "web_search",
-    "read_file",
-    "write_file",
     "calculator",
 }
 
@@ -92,7 +90,7 @@ def _make_agent(**overrides):
 
     params = dict(
         model="qwen2.5:0.5b",
-        tools=["calculator", "shell", "read_file"],
+        tools=["calculator", "shell"],
         soul="kthx-helper",
     )
     params.update(overrides)
@@ -120,7 +118,7 @@ class TestSwitchSoul:
         agent = _make_agent()
         agent.switch_soul("kthx-trading")
         new_tools = set(agent.tools.names())
-        assert new_tools == {"calculator", "shell", "read_file"} & TRADING_TOOLS
+        assert new_tools == {"calculator", "shell"} & TRADING_TOOLS
         assert "shell" not in new_tools
 
     def test_switch_never_adds_missing_tools(self):

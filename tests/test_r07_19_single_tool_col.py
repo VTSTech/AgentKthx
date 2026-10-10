@@ -384,7 +384,7 @@ class TestAgentFactoryNoneFallback:
             model="test-model",
             backend="stub",
             debug=False,
-            tools="shell,read_file",
+            tools="shell,calculator",
             force_react=False,
             security="max",
             soul=None,

@@ -104,7 +104,7 @@ class TestDefaultRegistryFullyReal:
         tools = make_builtin_registry().all()
         section = _build_tool_section(tools)
         assert '"timeout": 10' in section
-        assert '"max_results": 10' in section
+        assert '"num_results": 10' in section
 
 
 class TestParamTypeRules:
