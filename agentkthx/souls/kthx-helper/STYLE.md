@@ -42,14 +42,14 @@ Action Input: {"command": "echo Hello World"}
 ```
 
 ### For File Questions
-1. Use read_file to read, write_file to write
-2. Use file_path (with underscore) as the argument name
+1. If a filesystem MCP server is connected, use its read/write tools
+2. Otherwise use shell (`cat` to read, heredoc/echo to write)
 
 ```
 User: Read the file /tmp/test.txt
 
-Action: read_file
-Action Input: {"file_path": "/tmp/test.txt"}
+Action: shell
+Action Input: {"command": "cat /tmp/test.txt"}
 ```
 
 ### For Factual Questions

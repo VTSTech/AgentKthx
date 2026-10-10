@@ -92,7 +92,7 @@ def create_parser() -> argparse.ArgumentParser:
 
     # Agent command
     agent_parser = subparsers.add_parser("agent", help="Autonomous agent mode")
-    add_agent_args(agent_parser, tools_default="calculator,shell,write_file")
+    add_agent_args(agent_parser, tools_default="calculator,shell")
 
     # Chat command
     chat_parser = subparsers.add_parser("chat", help="Interactive chat mode")
@@ -678,7 +678,7 @@ def _make_confirm_callback(args: argparse.Namespace):
     Build a confirm_dangerous callback from CLI --confirm flag.
 
     When --confirm is set, the user is prompted (y/n) before any
-    dangerous tool (shell, write_file, edit_file) executes.
+    dangerous tool (shell) executes.
     Returns None if --confirm is not set (no confirmation needed).
     """
     if not getattr(args, "confirm_dangerous", False):

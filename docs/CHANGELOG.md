@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Built-in file tools removed → MCP filesystem server
+
+- **The 6 built-in file tools are gone**: `read_file`, `write_file`, `list_directory`, `read_file_lines`, `find_files`, `edit_file`. File operations now come from the MCP filesystem server — configure `@modelcontextprotocol/server-filesystem` in `~/.agentkthx/mcp.json` (`agentkthx mcp install @modelcontextprotocol/server-filesystem`) and run `agentkthx chat --mcp filesystem` / `agentkthx run "<task>" --mcp filesystem`; tools arrive namespaced as `filesystem__<tool>`.
+- **`agentkthx tools` and the in-chat `/tools` output now suggest the swap**: both print `File operations (read/write/edit/list): use the MCP filesystem server — agentkthx chat --mcp filesystem`.
+- **Removed from `tools/builtins.py`**: the 6 handler functions + 6 registry registrations (−476 lines); `validate_path` import dropped (no longer used here). `BUILTIN_REGISTRY` now builds with 11 tools; `shell` is the only remaining `dangerous=True` tool.
+- **Prompt/ReAct scaffolding cleaned**: `TOOL_ARG_ALIASES` + `CONTEXTUAL_ALIASES` entries for the 4 alias-tracked tools removed from `core/prompts.py`; ReAct few-shot examples renumbered (Examples 6–7 are now get_date/get_time) and `FEW_SHOT_COMPACT` trimmed; `_PARAM_STRING_EXAMPLES` entries for `file_path`/`path`/`pattern`/`old_string`/`new_string` dropped from `soul/loader.py`; `error_recovery.py` lost the read_file/write_file/list_directory hint blocks, the `read`/`write`/`load`/`save`/`open` fuzzy aliases now map to `shell`, and `ls`/`dir`/`list`/`cat` suggestions point at `shell`.
+- **Souls updated**: `kthx-helper` + `kthx-trading` `allowedTools` no longer reference file tools; their markdown guides (SOUL.md / STYLE.md / AGENTS.md / TRADING_REFERENCE.md) now say to use the filesystem MCP server when connected, else `shell` (`cat` / heredocs).
+- **CLI defaults/examples**: `agent` default `--tools` is now `calculator,shell` (was `calculator,shell,write_file`); `/tool` usage examples updated; `--confirm` help text says `(shell)`.
+- **Tests/examples/docs**: file-tool test classes removed from `test_builtins.py` (registry-completeness list now 12 names → 9 asserted + MCP note); `subset(["read_file"])` fixtures switched to `calculator` (api_resilience, rob_fixes); `test_r07_19_tool_examples` numeric-example pin moved from `max_results` (find_files) to `num_results` (web_search); `examples/02_tool_test.py` file-tool sections removed (−590 lines); README (11 built-in tools + MCP pointer), USAGE, ARCH (tool table rewritten), TESTS (post-R03.7 footnote) updated.
+
 ### Python 3.11 support restored (floor `>=3.12` → `>=3.11`)
 
 - **`requires-python` lowered back to `>=3.11`** (R07.00 raised it). Rationale: R00–R06.x shipped as `>=3.9`; pypistats shows 3.11 ≈ 3.12 among version-identified downloads; 3.11 is Debian 12's system Python and stays upstream-supported until Oct 2027. 3.9/3.10 are NOT covered (3.9 EOL'd Oct 2025, 3.10 EOLs Oct 31 2026; supporting 3.9 would additionally require `from __future__ import annotations` in 4 files with runtime-evaluated `X | None` signatures — `core/prompts.py` + 3 skill-creator scripts — plus a `platform.freedesktop_os_release` fallback).

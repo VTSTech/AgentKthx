@@ -60,7 +60,7 @@ def _make_agent(script):
     agent = Agent(
         model="stub",
         backend=backend,
-        tools=make_builtin_registry().subset(["read_file"]),
+        tools=make_builtin_registry().subset(["calculator"]),
         max_steps=3,
         soul=None,
         max_api_retries=2,

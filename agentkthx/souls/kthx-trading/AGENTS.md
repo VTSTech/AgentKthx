@@ -10,8 +10,6 @@ Primary tools for trading analysis:
 | `python_repl` | Calculate technical indicators, run backtests, analyze data |
 | `parse_json` | Parse API responses from Yahoo Finance |
 | `web_search` | Find news, earnings dates, market events |
-| `write_file` | Save portfolio state, trade logs, analysis reports |
-| `read_file` | Load portfolio, trade history, saved strategies |
 | `calculator` | Quick position sizing and risk math |
 | `get_time` | Check current time for market hours |
 

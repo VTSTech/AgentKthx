@@ -589,7 +589,7 @@ def cmd_chat(args: argparse.Namespace) -> int:
                 print(f"  {cyan('/system')}     Print the current system prompt")
                 print(f"  {cyan('/tools')}      Show available tools (✓ = loaded)")
                 print(
-                    f"  {cyan('/tool')}       Load a tool mid-session (e.g. /tool shell,read_file,write_file)"
+                    f"  {cyan('/tool')}       Load a tool mid-session (e.g. /tool calculator,shell)"
                 )
                 print(f"  {cyan('/quit')}       Exit AgentKthx")
                 continue
@@ -657,6 +657,12 @@ def cmd_chat(args: argparse.Namespace) -> int:
                             f"Use {cyan('/tool <name,name,...>')} to load more."
                         )
                     )
+                print(
+                    dim(
+                        "  File operations (read/write/edit/list): use the MCP filesystem "
+                        f"server — {cyan('agentkthx chat --mcp filesystem')}"
+                    )
+                )
                 continue
 
             # ── /tool slash command ────────────────────────────────────────────
@@ -664,14 +670,14 @@ def cmd_chat(args: argparse.Namespace) -> int:
             # Usage:
             #   /tool                       — show usage
             #   /tool shell                 — load one tool
-            #   /tool shell,read_file,calc  — load multiple tools
+            #   /tool shell,calculator      — load multiple tools
             if user_input == "/tool" or user_input.startswith("/tool "):
                 parts = user_input.split(None, 1)
                 if len(parts) < 2 or not parts[1].strip():
                     # No args — show usage + currently loaded tools
                     loaded_names = set(agent.tools.names()) if agent.tools else set()
                     print(dim("  Usage: /tool <name,name,...>  (comma-separated, like --tools)"))
-                    print(dim("  Example: /tool shell,read_file,write_file"))
+                    print(dim("  Example: /tool shell,calculator"))
                     print()
                     if loaded_names:
                         print(f"  Currently loaded: {cyan(', '.join(sorted(loaded_names)))}")

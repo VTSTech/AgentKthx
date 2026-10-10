@@ -26,5 +26,11 @@ def cmd_tools(args: argparse.Namespace) -> int:
 
     print(dim("-" * 60))
     print(f"Total: {bright_green(str(len(tools.all())))} tools")
+    print()
+    print(
+        f"{yellow('File operations (read/write/edit/list)')}: use the MCP filesystem server instead:"
+    )
+    print(f"  {cyan('agentkthx mcp install @modelcontextprotocol/server-filesystem')}")
+    print(f"  {cyan('agentkthx chat --mcp filesystem')}")
 
     return 0

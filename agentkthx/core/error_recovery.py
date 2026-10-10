@@ -107,57 +107,6 @@ TOOL_ERROR_HINTS = {
             "Try a simpler command or reduce the operation scope.",
         ),
     },
-    "read_file": {
-        "not found": (
-            "File not found.",
-            "Check the path with list_directory, or verify the file exists.",
-        ),
-        "permission denied": (
-            "Permission denied to read this file.",
-            "Try a different file or check the path.",
-        ),
-        "is a directory": (
-            "Path is a directory, not a file.",
-            "Use list_directory to see contents, or specify a file path.",
-        ),
-        "security": (
-            "Path access denied for security.",
-            "Use paths in allowed directories: /tmp, ./output, ./data",
-        ),
-        "truncated": (
-            "File was too large and truncated.",
-            "Read specific sections or use a more targeted approach.",
-        ),
-    },
-    "write_file": {
-        "permission denied": (
-            "Permission denied to write to this location.",
-            "Try writing to /tmp, ./output, or another allowed directory.",
-        ),
-        "security": (
-            "Path access denied for security.",
-            "Use paths in allowed directories: /tmp, ./output, ./data",
-        ),
-        "no such file or directory": (
-            "Parent directory does not exist.",
-            "The parent directory will be created automatically. Try again.",
-        ),
-    },
-    "list_directory": {
-        "not a directory": (
-            "Path is a file, not a directory.",
-            "Use read_file to read file contents, or specify a directory path.",
-        ),
-        "not found": (
-            "Directory not found.",
-            "Check the parent path with list_directory on a parent directory.",
-        ),
-        "permission denied": (
-            "Permission denied to list this directory.",
-            "Try a different directory path.",
-        ),
-        "security": ("Path access denied for security.", "Use paths in allowed directories."),
-    },
     "http_get": {
         "connection": (
             "Could not connect to the URL.",
@@ -233,12 +182,12 @@ GENERIC_ERROR_HINTS = {
 # When model hallucinates a tool name, suggest the correct tool
 # This provides guidance WITHOUT auto-correcting (strict spec compliance)
 TOOL_NAME_SUGGESTIONS = {
-    # Shell commands -> list_directory
-    "ls": "list_directory",
-    "dir": "list_directory",
-    "list": "list_directory",
+    # File browsing commands -> shell (no builtin list tool)
+    "ls": "shell",
+    "dir": "shell",
+    "list": "shell",
     # Shell commands -> shell (if available)
-    "cat": "shell (cat file) or read_file",
+    "cat": "shell",
     "rm": "shell",
     "mkdir": "shell",
     "cp": "shell",
@@ -249,11 +198,6 @@ TOOL_NAME_SUGGESTIONS = {
     "cd": "shell",
     "echo": "shell",
     # File operations
-    "read": "read_file",
-    "write": "write_file",
-    "load": "read_file",
-    "save": "write_file",
-    "open": "read_file",
     # Calculator/math
     "calc": "calculator",
     "math": "calculator",
@@ -332,13 +276,10 @@ def get_tool_suggestion(hallucinated_name: str, available_tools: list[str]) -> s
 TOOL_ALTERNATIVES = {
     "calculator": ["python_repl"],
     "shell": ["python_repl"],
-    "read_file": ["shell"],  # Can use cat via shell
-    "write_file": ["shell"],  # Can use echo via shell
     "http_get": [],  # No direct alternative
     "python_repl": ["calculator"],
     "get_time": ["python_repl"],  # datetime in Python
     "get_date": ["python_repl"],
-    "list_directory": ["shell"],
 }
 
 

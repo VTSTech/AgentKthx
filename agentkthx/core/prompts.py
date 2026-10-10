@@ -63,47 +63,6 @@ TOOL_ARG_ALIASES = {
         "source": "code",
         "input": "code",
     },
-    "write_file": {
-        "path": "file_path",  # actual param name is file_path
-        "filepath": "file_path",
-        "file_path": "file_path",
-        "filename": "file_path",
-        "file": "file_path",
-        "dest": "file_path",
-        "destination": "file_path",
-        "output_path": "file_path",
-        "outputfile": "file_path",
-        "location": "file_path",
-        "content": "content",  # correct
-        "data": "content",
-        "text": "content",
-        "body": "content",
-        "output": "content",
-        "string": "content",
-        "value": "content",
-        "write": "content",
-        "output_data": "content",
-    },
-    "read_file": {
-        "path": "file_path",  # actual param name is file_path
-        "filepath": "file_path",
-        "file_path": "file_path",
-        "filename": "file_path",
-        "file": "file_path",
-        "input": "file_path",
-        "source": "file_path",
-        "location": "file_path",
-    },
-    "list_directory": {
-        "path": "path",  # correct
-        "dir": "path",
-        "directory": "path",
-        "folder": "path",
-        "dir_path": "path",
-        "directory_path": "path",
-        "folder_path": "path",
-        "location": "path",
-    },
     "shell": {
         "command": "command",  # correct
         "cmd": "command",
@@ -154,43 +113,6 @@ TOOL_ARG_ALIASES = {
         "value": "amount",
         "price": "amount",
     },
-    "edit_file": {
-        # Common hallucinations for file_path
-        "file_path": "file_path",  # correct
-        "path": "file_path",
-        "filepath": "file_path",
-        "file": "file_path",
-        "filename": "file_path",
-        "source": "file_path",
-        # Common hallucinations for old_string
-        "old_string": "old_string",  # correct
-        "old": "old_string",
-        "find": "old_string",
-        "search": "old_string",
-        "replace": "old_string",
-        "target": "old_string",
-        "original": "old_string",
-        "before": "old_string",
-        "from": "old_string",
-        "match": "old_string",
-        "old_text": "old_string",
-        "old_content": "old_string",
-        # Common hallucinations for new_string
-        "new_string": "new_string",  # correct
-        "new": "new_string",
-        "replacement": "new_string",
-        "with": "new_string",
-        "to": "new_string",
-        "after": "new_string",
-        "replacement_text": "new_string",
-        "new_text": "new_string",
-        "new_content": "new_string",
-        # Common hallucinations for replace_all
-        "replace_all": "replace_all",  # correct
-        "all": "replace_all",
-        "global": "replace_all",
-        "everywhere": "replace_all",
-    },
     "todo": {
         # Common hallucinations for action
         "action": "action",  # correct
@@ -229,12 +151,9 @@ TOOL_ARG_ALIASES = {
 CONTEXTUAL_ALIASES = {
     "calculator": {"value", "input", "result", "n", "p", "exp"},
     "shell": {"text", "input", "arg", "args", "str", "value"},
-    "write_file": {"value", "string"},
-    "read_file": {"input"},
     "web_search": {"text", "input"},
     "python_repl": {"input", "expression", "expr"},
     "convert_currency": {"value"},
-    "edit_file": {"old", "new", "file", "source", "target"},
     "todo": {"text", "task", "item", "value", "input", "desc"},
 }
 
@@ -274,27 +193,12 @@ Thought: I need to compute something in Python
 Action: python_repl
 Action Input: {{"code": "print(2 ** 10)"}}
 
-Example 6 - Write to file:
-Thought: User wants to save text to a file
-Action: write_file
-Action Input: {{"file_path": "/tmp/test.txt", "content": "Hello World"}}
-
-Example 7 - Read a file:
-Thought: User wants to see file contents
-Action: read_file
-Action Input: {{"file_path": "/tmp/test.txt"}}
-
-Example 8 - List directory:
-Thought: User wants to see files in a directory
-Action: list_directory
-Action Input: {{"path": "/tmp"}}
-
-Example 9 - Get date:
+Example 6 - Get date:
 Thought: User wants to know today's date
 Action: get_date
 Action Input: {{}}
 
-Example 10 - Get time:
+Example 7 - Get time:
 Thought: User wants to know current time
 Action: get_time
 Action Input: {{}}
@@ -306,9 +210,6 @@ CRITICAL RULES:
    - calculator: {{"expression": "15 * 8"}}
    - shell: {{"command": "echo Hello"}}
    - python_repl: {{"code": "print(result)"}}
-   - write_file: {{"file_path": "/path/file.txt", "content": "text to write"}}
-   - read_file: {{"file_path": "/path/file.txt"}}
-   - list_directory: {{"path": "/tmp"}}
    - get_date: {{}} (no arguments)
    - get_time: {{}} or {{"timezone": "America/New_York"}}
 4. MATH OPERATORS: * (multiply), ** (power), / (divide), + (add), - (subtract)
@@ -323,13 +224,10 @@ Calculator: {{"expression": "15 * 8"}}
 Shell: {{"command": "echo Hello World"}}
 Current dir: {{"command": "{PLATFORM_DIR_CMD}"}}
 Python: {{"code": "print(result)"}}
-Write file: {{"file_path": "/tmp/file.txt", "content": "Hello"}}
-Read file: {{"file_path": "/tmp/file.txt"}}
-List dir: {{"path": "/tmp"}}
 Get date: {{}}
 Get time: {{}}
 
-ARGUMENT NAMES: expression (calculator), command (shell), code (python_repl), file_path+content (write_file), file_path (read_file), path (list_directory)
+ARGUMENT NAMES: expression (calculator), command (shell), code (python_repl)
 MATH: * = multiply, ** = power, / = divide
 NEVER write Observation yourself - wait for real result!
 """

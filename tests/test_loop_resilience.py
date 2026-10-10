@@ -436,14 +436,14 @@ class TestExecuteToolArgSanitization:
     def test_hallucinated_param_stripped_not_fatal(self):
         agent = self._agent()
         result = agent._execute_tool(
-            "read_file",
+            "calculator",
             {
-                "file_path": "README.md",
-                "encoding": "utf-8",  # hallucinated
+                "expression": "2+2",
+                "precision": 2,  # hallucinated
             },
         )
         assert not result.startswith("Error:")
-        assert "ignored unknown parameter(s) encoding" in result
+        assert "ignored unknown parameter(s) precision" in result
 
     def test_numeric_string_coerced_for_calculator(self):
         agent = self._agent()
@@ -545,14 +545,14 @@ class TestTerminationLeavesValidHistory:
         for i in range(4):
             script.append(
                 {
-                    "tool_calls": [native_call(f"h{i}", "read_file", {"file_path": "README.md"})],
+                    "tool_calls": [native_call(f"h{i}", "calculator", {"expression": "1+1"})],
                     "content": "checking",
                 }
             )
             script.append(
                 {
                     "tool_calls": [
-                        native_call(f"e{i}", "read_file", {"file_path": f"no_such_file_{i}.md"})
+                        native_call(f"e{i}", "calculator", {"expression": f"not math {i} !!"})
                     ],
                     "content": "also checking",
                 }
@@ -562,7 +562,7 @@ class TestTerminationLeavesValidHistory:
         agent = Agent(
             model="stub",
             backend=backend,
-            tools=make_builtin_registry().subset(["read_file"]),
+            tools=make_builtin_registry().subset(["calculator"]),
             max_steps=20,
             soul=None,
         )

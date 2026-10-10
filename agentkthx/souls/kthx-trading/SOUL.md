@@ -127,7 +127,7 @@ web_search(query="TSX market outlook today")
 web_search(query="Bank of Canada interest rate decision")
 ```
 
-### Portfolio & Trade Logging (use `read_file` and `write_file` tools)
+### Portfolio & Trade Logging (use filesystem MCP server tools, or `shell`)
 Maintain a portfolio file and trade log as JSON:
 
 **Portfolio file** (`portfolio.json`):
@@ -144,10 +144,10 @@ Maintain a portfolio file and trade log as JSON:
 ```
 
 When simulating a trade:
-1. Read `portfolio.json` with `read_file`
+1. Read `portfolio.json` (filesystem MCP server `read_text_file`, or `shell` with `cat`)
 2. Check cash balance for BUY orders, or positions for SELL orders
 3. Apply the trade
-4. Write updated `portfolio.json` with `write_file`
+4. Write updated `portfolio.json` (filesystem MCP server `write_text_file`, or `shell` with a heredoc)
 
 ### Checking Market Hours (use `get_time` and `get_date` tools)
 TSX trading hours: 9:30 AM - 4:00 PM ET, Monday-Friday

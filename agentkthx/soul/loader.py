@@ -799,12 +799,7 @@ def _build_tool_choice_context(tool_choice: object) -> str:
 _PARAM_STRING_EXAMPLES = {
     "command": "echo Hello, World!",  # shell
     "expression": "15 * 8",  # calculator
-    "file_path": "/tmp/example.txt",  # read_file / write_file / edit_file / read_file_lines
-    "path": "/tmp",  # list_directory / find_files
-    "pattern": "*.py",  # find_files
-    "content": "Hello, World!",  # write_file / todo add
-    "old_string": "text to replace",  # edit_file
-    "new_string": "replacement text",  # edit_file
+    "content": "Hello, World!",  # todo add
     "url": "https://example.com",  # http_get
     "query": "latest AI news",  # web_search
     "code": "print(2 + 2)",  # python_repl
@@ -986,31 +981,6 @@ Observation: file1.txt file2.txt
 Final Answer: file1.txt file2.txt
 ```""",
         },
-        "read_file": {
-            "example": """**Example** - User asks "What is in config.json?":
-```
-Action: read_file
-Action Input: {"file_path": "config.json"}
-```""",
-            "example_flow": """**Example flow:**
-```
-User: What is in config.json?
-Action: read_file
-Action Input: {"file_path": "config.json"}
-Observation: {"setting": "value"}
-Final Answer: The config.json contains {"setting": "value"}
-```""",
-            "error_example": """**Example recovery:**
-```
-Action: read_file
-Action Input: {"file_path": "missing.txt"}
-Observation: Error: File not found
-Action: read_file
-Action Input: {"file_path": "existing.txt"}
-Observation: Hello World
-Final Answer: Hello World
-```""",
-        },
         "get_time": {
             "example": """**Example** - User asks "What time is it?":
 ```
@@ -1056,56 +1026,6 @@ Action: get_date
 Action Input: {}
 Observation: 2024-01-15
 Final Answer: 2024-01-15
-```""",
-        },
-        "list_directory": {
-            "example": """**Example** - User asks "What files are in /tmp?":
-```
-Action: list_directory
-Action Input: {"path": "/tmp"}
-```""",
-            "example_flow": """**Example flow:**
-```
-User: What files are in /tmp?
-Action: list_directory
-Action Input: {"path": "/tmp"}
-Observation: file1.txt, file2.txt
-Final Answer: /tmp contains file1.txt and file2.txt
-```""",
-            "error_example": """**Example recovery:**
-```
-Action: list_directory
-Action Input: {"path": "/nonexistent"}
-Observation: Error: Directory not found
-Action: list_directory
-Action Input: {"path": "/tmp"}
-Observation: file1.txt
-Final Answer: file1.txt
-```""",
-        },
-        "write_file": {
-            "example": """**Example** - User asks "Create a test file":
-```
-Action: write_file
-Action Input: {"file_path": "test.txt", "content": "Hello World"}
-```""",
-            "example_flow": """**Example flow:**
-```
-User: Create a test file
-Action: write_file
-Action Input: {"file_path": "test.txt", "content": "Hello World"}
-Observation: File written successfully
-Final Answer: Created test.txt with content "Hello World"
-```""",
-            "error_example": """**Example recovery:**
-```
-Action: write_file
-Action Input: {"file_path": "/readonly/test.txt", "content": "test"}
-Observation: Error: Permission denied
-Action: write_file
-Action Input: {"file_path": "test.txt", "content": "test"}
-Observation: File written successfully
-Final Answer: Created test.txt
 ```""",
         },
         "python_repl": {

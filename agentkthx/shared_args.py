@@ -447,7 +447,7 @@ def add_agent_args(
             "--confirm",
             action="store_true",
             dest="confirm_dangerous",
-            help="Require confirmation before executing dangerous tools (shell, write_file, edit_file)",
+            help="Require confirmation before executing dangerous tools (shell)",
         )
 
     # R07.22 MCP client (Phase 1.2): --mcp enables servers declared in

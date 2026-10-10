@@ -376,7 +376,7 @@ The main Agent class implements the **OpenResponses Agentic Loop**:
 - Persistent memory sessions via PersistentMemory (R04.3)
 - Error recovery with retry context injection
 - Dangerous tool confirmation via `confirm_dangerous` callback (R04.2)
-- Audit logging for shell, write_file, edit_file outcomes (R04.2)
+- Audit logging for shell outcomes (R04.2)
 - Ctrl+C cancellation at backend, tool, and agent loop levels (R05.0)
 
 ### Orchestrator (`orchestrator.py`)
@@ -418,7 +418,7 @@ code_card = AgentCard(
     name="code_agent", 
     description="Writes and executes code",
     capabilities=["code", "python", "script"],
-    tools=["shell", "write_file"],
+    tools=["shell", "python_repl"],
     fallback=True,      # Use as fallback if others fail
 )
 
@@ -488,7 +488,7 @@ agent = Agent(model="llama3", tools=["calculator"], tool_choice="required")
 # Restrict to specific tools
 agent = Agent(
     model="llama3",
-    tools=["calculator", "shell", "read_file"],
+    tools=["calculator", "shell"],
     allowed_tools=["calculator"]  # Only calculator available
 )
 
@@ -1226,7 +1226,7 @@ Uses `mmap` to read GGUF binary headers without loading the full file into memor
 
 Tools marked `dangerous=True` require explicit confirmation before execution.
 
-**Dangerous tools**: `shell`, `write_file`, `edit_file`
+**Dangerous tools**: `shell`
 
 ```bash
 # Enable confirmation prompt (interactive y/N)
@@ -1241,7 +1241,7 @@ The `Agent` class accepts a `confirm_dangerous` callback that is invoked before 
 
 `_audit_log()` writes structured JSON-lines to `~/.agentkthx/audit.log` tracking outcomes of dangerous tool executions.
 
-**Audited tools**: `shell`, `write_file`, `edit_file`
+**Audited tools**: `shell`
 
 Each log entry records:
 - Timestamp
@@ -1506,18 +1506,12 @@ The model MUST explicitly format tool calls.
 
 ## Built-in Tools
 
-17 built-in tools are registered in `tools/builtins.py`:
+11 built-in tools are registered in `tools/builtins.py`:
 
 | Tool | Description | Dangerous | Notes |
 |------|-------------|-----------|-------|
 | `calculator` | Evaluate mathematical expressions | No | Python syntax, math functions |
 | `shell` | Execute shell commands | Yes | Audit logged |
-| `read_file` | Read file contents | No | Full file read |
-| `read_file_lines` | Read file by line range | No | 500-line cap, line range selection |
-| `write_file` | Write/create files | Yes | Audit logged |
-| `edit_file` | Search-and-replace in files | Yes | Audit logged |
-| `list_directory` | List directory contents | No | |
-| `find_files` | Recursive file search | No | fnmatch glob, max_results cap |
 | `http_get` | HTTP GET requests | No | |
 | `get_time` | Get current time | No | |
 | `get_date` | Get current date | No | |
@@ -1528,15 +1522,13 @@ The model MUST explicitly format tool calls.
 | `count_chars` | Count characters in text | No | |
 | `todo` | In-memory todo CRUD | No | Priority support, module-level store |
 
-### Tool Details
+File operations (read/write/edit/list/find) were removed from the built-ins in favor of the MCP filesystem server — run `agentkthx chat --mcp filesystem` with `@modelcontextprotocol/server-filesystem` configured in `~/.agentkthx/mcp.json` (see `agentkthx mcp install`). Their tools arrive namespaced as `filesystem__<tool>`.
 
-**edit_file**: Search-and-replace operations within files. Marked `dangerous=True` for safety. All operations are audit-logged.
+### Tool Details
 
 **todo**: In-memory task list with full CRUD operations. Supports priority levels. Store is module-level (shared across invocations within a process). Useful for tracking multi-step tasks.
 
-**read_file_lines**: Reads a specific range of lines from a file. Enforces a 500-line cap per request to prevent excessive memory usage.
-
-**find_files**: Recursive file search using fnmatch glob patterns. Supports `max_results` parameter to cap output and prevent runaway searches.
+**python_repl**: Sandboxed Python execution via `sandboxed_repl.py` — no filesystem or network access, restricted builtins.
 
 ---
 

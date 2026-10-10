@@ -483,7 +483,7 @@ class Memory:
           and args are preserved (they're small and essential for context).
 
         R06.58 BUGFIX: a single oversized message in the "recent" window
-        (e.g., a 200KB ``read_file`` result) used to survive compaction
+        (e.g., a 200KB tool result) used to survive compaction
         untouched because it was within ``keep_count``. Now any single
         message larger than ``max_kept_msg_chars`` (default 8KB) is also
         truncated, regardless of position. This catches the common failure
@@ -509,7 +509,7 @@ class Memory:
         compacted_count = 0
 
         # R06.58: per-message size cap. Apply to ALL non-system messages,
-        # including the "kept" recent ones. An oversized read_file result
+        # including the "kept" recent ones. An oversized tool result
         # in the last 10 messages used to bypass compaction entirely.
         if max_kept_msg_chars > 0:
             for msg in non_system:

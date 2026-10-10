@@ -629,7 +629,7 @@ class SkillRegistry:
                 f"# Instructions for using skills:\n"
                 f"1. When the user's request matches a skill's purpose, follow that skill's instructions.\n"
                 f"2. Skills may reference scripts, references, or assets - these are available in the skill directory.\n"
-                f"3. Use your available tools (shell, write_file, etc.) to execute the skill's instructions.\n"
+                f"3. Use your available tools (shell, python_repl, etc.) to execute the skill's instructions.\n"
             )
         return ""
 

@@ -210,77 +210,6 @@ class TestShellSafeCommands:
 # ============================================================================
 
 
-class TestFileSystemAllowed:
-    """File operations should work in allowed directories."""
-
-    def test_write_and_read_tmp(self, tmp_path):
-        registry = make_builtin_registry()
-        write_tool = registry.get("write_file")
-        read_tool = registry.get("read_file")
-
-        test_file = str(tmp_path / "test.txt")
-        # tmp_path is typically under /tmp or a temp dir which is allowed
-        # However, validate_path checks for /tmp, /home, ./output, ./data, ./files
-        # Some temp dirs may not match these patterns. Use write_tool to test.
-        result = write_tool.execute(file_path=test_file, content="hello world")
-
-        # May be blocked if tmp_path is not in allowed dirs
-        if "Security error" in result:
-            pytest.skip(f"Temp path {tmp_path} not in allowed directories for file tools")
-
-        assert "Successfully wrote" in result
-
-        # Read back
-        read_result = read_tool.execute(file_path=test_file)
-        assert "hello world" in read_result
-
-
-class TestFileSystemBlocked:
-    """File operations to system directories must be blocked."""
-
-    @pytest.mark.parametrize(
-        "path",
-        [
-            "/etc/passwd",
-            "/etc/shadow",
-            "/root/.ssh/id_rsa",
-            "/var/log/auth.log",
-            "/proc/self/environ",
-        ],
-    )
-    def test_read_blocked(self, path):
-        registry = make_builtin_registry()
-        tool = registry.get("read_file")
-        result = tool.execute(file_path=path)
-        assert "Security error" in result
-
-    @pytest.mark.parametrize(
-        "path",
-        [
-            "/etc/evil.txt",
-            "/root/backdoor.sh",
-            "/var/tmp/exploit.js",
-        ],
-    )
-    def test_write_blocked(self, path):
-        registry = make_builtin_registry()
-        tool = registry.get("write_file")
-        result = tool.execute(file_path=path, content="malicious")
-        assert "Security error" in result
-
-    def test_read_traversal(self):
-        registry = make_builtin_registry()
-        tool = registry.get("read_file")
-        result = tool.execute(file_path="../../../etc/passwd")
-        assert "Security error" in result
-
-    def test_write_traversal(self):
-        registry = make_builtin_registry()
-        tool = registry.get("write_file")
-        result = tool.execute(file_path="../../etc/cron.d/evil", content="* * * * * root bad")
-        assert "Security error" in result
-
-
 # ============================================================================
 # HTTP SSRF Blocking Tests
 # ============================================================================
@@ -329,9 +258,6 @@ class TestToolRegistryCompleteness:
     EXPECTED_TOOLS = [
         "calculator",
         "shell",
-        "read_file",
-        "write_file",
-        "list_directory",
         "http_get",
         "python_repl",
         "get_time",

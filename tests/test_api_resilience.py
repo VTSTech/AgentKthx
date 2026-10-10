@@ -136,7 +136,7 @@ class TestAgentRetriesTransientErrors:
         agent = Agent(
             model="stub",
             backend=backend,
-            tools=make_builtin_registry().subset(["read_file"]),
+            tools=make_builtin_registry().subset(["calculator"]),
             max_steps=5,
             soul=None,
             max_api_retries=3,
@@ -243,7 +243,7 @@ class TestAgentRetriesTransientErrors:
         agent = Agent(
             model="stub",
             backend=backend,
-            tools=make_builtin_registry().subset(["read_file"]),
+            tools=make_builtin_registry().subset(["calculator"]),
             max_steps=5,
             soul=None,
             max_api_retries=2,

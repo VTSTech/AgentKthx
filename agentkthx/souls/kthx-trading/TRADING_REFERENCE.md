@@ -1,6 +1,6 @@
 # Trading Reference Guide
 
-> Read this file with `read_file` when you need detailed formulas, API specs, or strategy definitions.
+> Consult this guide when you need detailed formulas, API specs, or strategy definitions.
 
 ## Yahoo Finance API — Complete Reference
 

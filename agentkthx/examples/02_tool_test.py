@@ -31,7 +31,6 @@ import argparse
 import os
 import re
 import sys
-import tempfile
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -45,16 +44,11 @@ from agentkthx.tools.builtins import (
     calculator,
     count_chars,
     count_words,
-    edit_file,
-    find_files,
     get_date,
     get_time,
     http_get,
-    list_directory,
     parse_json,
     python_repl,
-    read_file,
-    read_file_lines,
     shell,
     todo_add,
     todo_clear,
@@ -62,7 +56,6 @@ from agentkthx.tools.builtins import (
     todo_list,
     todo_remove,
     web_search,
-    write_file,
 )
 
 
@@ -223,76 +216,6 @@ def test_shell_direct() -> tuple[int, int]:
     passed = sum(results)
     total = len(results)
     print(f"\n📊 Shell Direct: {passed}/{total} ({100*passed//total}%)")
-    return passed, total
-
-
-def test_file_direct() -> tuple[int, int]:
-    """Test file tools directly without model."""
-    print(f"\n{'='*60}")
-    print("📁 File Tools - Direct Validation")
-    print(f"{'='*60}")
-
-    results = []
-
-    # Create temp directory for tests
-    with tempfile.TemporaryDirectory() as tmpdir:
-        test_file = os.path.join(tmpdir, "test.txt")
-        test_content = "Hello AgentKthx!\nLine 2\nLine 3"
-
-        # Test write_file
-        print("\n  Testing write_file...")
-        write_result = write_file(test_file, test_content)
-        write_ok = "Successfully" in write_result
-        results.append(write_ok)
-        status = "✅" if write_ok else "❌"
-        print(f"    {status} write_file: {write_result}")
-
-        # Test read_file
-        print("\n  Testing read_file...")
-        read_result = read_file(test_file)
-        # Normalize line endings for comparison (Windows uses \r\n)
-        read_normalized = read_result.replace("\r\n", "\n").replace("\r", "\n")
-        test_normalized = test_content.replace("\r\n", "\n").replace("\r", "\n")
-        read_ok = test_normalized in read_normalized or test_normalized == read_normalized
-        results.append(read_ok)
-        status = "✅" if read_ok else "❌"
-        print(f"    {status} read_file: {read_result[:40]}...")
-
-        # Test list_directory
-        print("\n  Testing list_directory...")
-        list_result = list_directory(tmpdir)
-        list_ok = "test.txt" in list_result
-        results.append(list_ok)
-        status = "✅" if list_ok else "❌"
-        print(f"    {status} list_directory: {list_result}")
-
-        # Test path security
-        print("\n  Testing path security...")
-        security_tests = [
-            ("Path traversal", "../../../etc/passwd"),
-            ("System dir", "/etc/passwd"),
-            ("UNC path", "\\\\server\\share"),
-        ]
-        for name, path in security_tests:
-            result = read_file(path)
-            blocked = "Security error" in result or "denied" in result or "not allowed" in result
-            results.append(blocked)
-            status = "✅" if blocked else "❌"
-            print(f"    {status} {name}: blocked={blocked}")
-
-        # Test empty file
-        print("\n  Testing edge cases...")
-        empty_file = os.path.join(tmpdir, "empty.txt")
-        write_file(empty_file, "")
-        empty_read = read_file(empty_file)
-        empty_ok = empty_read == ""
-        results.append(empty_ok)
-        status = "✅" if empty_ok else "❌"
-        print(f"    {status} Empty file: '{empty_read}'")
-
-    passed = sum(results)
-    total = len(results)
-    print(f"\n📊 File Direct: {passed}/{total} ({100*passed//total}%)")
     return passed, total
 
 
@@ -498,166 +421,6 @@ def test_python_repl_direct() -> tuple[int, int]:
     return passed, total
 
 
-def test_read_file_lines_direct() -> tuple[int, int]:
-    """Test read_file_lines tool directly without model."""
-    print(f"\n{'='*60}")
-    print("📄 Read File Lines Tool - Direct Validation")
-    print(f"{'='*60}")
-
-    results = []
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        test_file = os.path.join(tmpdir, "lines_test.txt")
-        lines = [f"Line {i}" for i in range(1, 11)]
-        content = "\n".join(lines) + "\n"
-        write_file(test_file, content)
-
-        # Read first 3 lines
-        print("\n  Testing read_file_lines...")
-        result = read_file_lines(test_file, start_line=1, end_line=3)
-        ok = "Line 1" in result and "Line 3" in result
-        results.append(ok)
-        status = "✅" if ok else "❌"
-        print(f"    {status} Read first 3 lines: Line 1 and Line 3 in result")
-
-        # Read middle range
-        result = read_file_lines(test_file, start_line=5, end_line=7)
-        ok = "Line 5" in result and "Line 7" in result
-        results.append(ok)
-        status = "✅" if ok else "❌"
-        print(f"    {status} Read middle range: Line 5 and Line 7 in result")
-
-        # Read single line
-        result = read_file_lines(test_file, start_line=3, end_line=3)
-        ok = "Line 3" in result
-        results.append(ok)
-        status = "✅" if ok else "❌"
-        print(f"    {status} Read single line: Line 3 in result")
-
-        # Beyond file end
-        result = read_file_lines(test_file, start_line=999)
-        ok = "beyond the end" in result.lower() or "beyond" in result.lower()
-        results.append(ok)
-        status = "✅" if ok else "❌"
-        print(f"    {status} Beyond file end: {result[:60]}")
-
-        # Default range (should return all 10 lines)
-        result = read_file_lines(test_file)
-        ok = "Line 1" in result and "Line 10" in result
-        results.append(ok)
-        status = "✅" if ok else "❌"
-        print(f"    {status} Default range: all lines present")
-
-    passed = sum(results)
-    total = len(results)
-    print(f"\n📊 Read File Lines Direct: {passed}/{total} ({100*passed//total}%)")
-    return passed, total
-
-
-def test_find_files_direct() -> tuple[int, int]:
-    """Test find_files tool directly without model."""
-    print(f"\n{'='*60}")
-    print("🔍 Find Files Tool - Direct Validation")
-    print(f"{'='*60}")
-
-    results = []
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        # Create test files
-        write_file(os.path.join(tmpdir, "app.py"), "print('hello')")
-        write_file(os.path.join(tmpdir, "utils.py"), "def helper(): pass")
-        sub_dir = os.path.join(tmpdir, "sub")
-        write_file(os.path.join(sub_dir, "test_data.txt"), "data")
-        write_file(os.path.join(tmpdir, "test_output.txt"), "output")
-        write_file(os.path.join(tmpdir, "test_input.txt"), "input")
-
-        # Find .py files
-        print("\n  Testing find_files...")
-        result = find_files("*.py", tmpdir)
-        ok = "app.py" in result and "utils.py" in result
-        results.append(ok)
-        status = "✅" if ok else "❌"
-        print(f"    {status} Find .py files: {result[:60]}")
-
-        # Find specific pattern
-        result = find_files("test_*.txt", tmpdir)
-        ok = "test_output.txt" in result and "test_input.txt" in result
-        results.append(ok)
-        status = "✅" if ok else "❌"
-        print(f"    {status} Find test_*.txt files: {result[:60]}")
-
-        # No matches
-        result = find_files("*.xyz_nonexistent", tmpdir)
-        ok = "No files matching" in result
-        results.append(ok)
-        status = "✅" if ok else "❌"
-        print(f"    {status} No matches: {result[:60]}")
-
-        # Empty pattern
-        result = find_files("", tmpdir)
-        ok = "error" in result.lower() or "cannot be empty" in result.lower()
-        results.append(ok)
-        status = "✅" if ok else "❌"
-        print(f"    {status} Empty pattern: {result[:60]}")
-
-    passed = sum(results)
-    total = len(results)
-    print(f"\n📊 Find Files Direct: {passed}/{total} ({100*passed//total}%)")
-    return passed, total
-
-
-def test_edit_file_direct() -> tuple[int, int]:
-    """Test edit_file tool directly without model."""
-    print(f"\n{'='*60}")
-    print("✏️ Edit File Tool - Direct Validation")
-    print(f"{'='*60}")
-
-    results = []
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        test_file = os.path.join(tmpdir, "edit_test.txt")
-        write_file(test_file, "hello world, hello again")
-
-        # Replace word (first occurrence)
-        print("\n  Testing edit_file...")
-        result = edit_file(test_file, "hello", "world")
-        ok = "Successfully edited" in result and "replaced 1" in result
-        # Verify the file was actually changed
-        with open(test_file, "r") as f:
-            content = f.read()
-        ok = ok and "world" in content and content.count("hello") == 1  # second 'hello' untouched
-        results.append(ok)
-        status = "✅" if ok else "❌"
-        print(f"    {status} Replace word: {result[:60]}")
-
-        # Replace not found
-        result = edit_file(test_file, "NONEXISTENT_TEXT_xyz", "anything")
-        ok = "not found" in result.lower() or "error" in result.lower()
-        results.append(ok)
-        status = "✅" if ok else "❌"
-        print(f"    {status} Replace not found: {result[:60]}")
-
-        # Replace all
-        write_file(test_file, "aa bb aa cc aa")
-        result = edit_file(test_file, "aa", "b", replace_all=True)
-        ok = "Successfully edited" in result and "replaced 3" in result
-        results.append(ok)
-        status = "✅" if ok else "❌"
-        print(f"    {status} Replace all: {result[:60]}")
-
-        # Empty old_string
-        result = edit_file(test_file, "", "test")
-        ok = "error" in result.lower() or "cannot be empty" in result.lower()
-        results.append(ok)
-        status = "✅" if ok else "❌"
-        print(f"    {status} Empty old_string: {result[:60]}")
-
-    passed = sum(results)
-    total = len(results)
-    print(f"\n📊 Edit File Direct: {passed}/{total} ({100*passed//total}%)")
-    return passed, total
-
-
 def test_web_search_direct() -> tuple[int, int]:
     """Test web_search tool directly without model."""
     print(f"\n{'='*60}")
@@ -804,10 +567,6 @@ def run_phase1() -> tuple[int, int]:
     total_passed += p
     total_tests += t
 
-    p, t = test_file_direct()
-    total_passed += p
-    total_tests += t
-
     p, t = test_http_direct()
     total_passed += p
     total_tests += t
@@ -821,18 +580,6 @@ def run_phase1() -> tuple[int, int]:
     total_tests += t
 
     p, t = test_python_repl_direct()
-    total_passed += p
-    total_tests += t
-
-    p, t = test_read_file_lines_direct()
-    total_passed += p
-    total_tests += t
-
-    p, t = test_find_files_direct()
-    total_passed += p
-    total_tests += t
-
-    p, t = test_edit_file_direct()
     total_passed += p
     total_tests += t
 
@@ -1157,109 +904,6 @@ def test_datetime_model(
     return passed, total
 
 
-def test_file_model(
-    model: str,
-    backend,
-    debug: bool = False,
-    soul: str = None,
-    soul_level: int = 2,
-    force_react: bool = False,
-    num_ctx: int = None,
-    num_predict: int = None,
-    temperature: float = None,
-    top_p: float = None,
-) -> tuple[int, int]:
-    """Test model's ability to call file tools."""
-    print(f"\n{'='*60}")
-    print("📁 File Tools - Model Calling")
-    print(f"   Model: {model}")
-    print(f"{'='*60}")
-
-    tools = make_builtin_registry().subset(["read_file", "write_file", "list_directory"])
-
-    # Create a test file first
-    with tempfile.TemporaryDirectory() as tmpdir:
-        test_file = os.path.join(tmpdir, "test.txt")
-        write_file(test_file, "Hello from AgentKthx!")
-
-        # Convert path to forward slashes for better small model compatibility
-        # Forward slashes work on both Windows and Unix
-        test_file_fs = test_file.replace("\\", "/")
-        tmpdir_fs = tmpdir.replace("\\", "/")
-
-        tests = [
-            ("Read file", f"Read the file at {test_file_fs}", "AgentKthx"),
-            ("List directory", f"List files in {tmpdir_fs}", "test.txt"),
-        ]
-
-        results = []
-
-        for name, prompt, expected in tests:
-            print(f"\n📋 {name}")
-            print(f"   Prompt: {prompt}")
-
-            agent = Agent(
-                model=model,
-                tools=tools,
-                backend=backend,
-                max_steps=5,
-                debug=debug,
-                soul=soul,
-                soul_level=soul_level,
-                force_react=force_react,
-                num_ctx=num_ctx,
-                num_predict=num_predict,
-                temperature=temperature,
-                top_p=top_p,
-            )
-
-            t0 = time.time()
-            run = agent.run(prompt)
-            elapsed = time.time() - t0
-
-            # Check if any file tool was used
-            tool_used = (
-                check_tool_used(run, "read_file")
-                or check_tool_used(run, "write_file")
-                or check_tool_used(run, "list_directory")
-            )
-
-            # Check result in answer or tool result
-            expected_num = normalize_number(expected)
-            actual_num = normalize_number(run.final_answer)
-            found_in_answer = numbers_match(expected_num, actual_num)
-            if not found_in_answer:
-                found_in_answer = expected.lower() in run.final_answer.lower()
-            found_in_tool_result = False
-            for step in run.steps:
-                if step.tool_result:
-                    result_num = normalize_number(str(step.tool_result))
-                    if numbers_match(expected_num, result_num):
-                        found_in_tool_result = True
-                        break
-                    if expected.lower() in str(step.tool_result).lower():
-                        found_in_tool_result = True
-                        break
-
-            passed = (found_in_answer or found_in_tool_result) if expected else tool_used
-            results.append(passed)
-
-            status = "✅" if passed else "❌"
-            tool_status = "🔧" if tool_used else "⚠️"
-            found_where = (
-                "(in answer)"
-                if found_in_answer
-                else "(in tool result)" if found_in_tool_result else ""
-            )
-            print(f"  {status} {tool_status} Tool used: {tool_used} | {elapsed:.1f}s {found_where}")
-            print(f"  📝 {run.final_answer}")
-
-    passed = sum(results)
-    total = len(results)
-    print(f"\n📊 File Model: {passed}/{total} ({100*passed//total}%)")
-    return passed, total
-
-
 def test_python_repl_model(
     model: str,
     backend,
@@ -1340,265 +984,6 @@ def test_python_repl_model(
     passed = sum(results)
     total = len(results)
     print(f"\n📊 Python REPL Model: {passed}/{total} ({100*passed//total}%)")
-    return passed, total
-
-
-def test_read_file_lines_model(
-    model: str,
-    backend,
-    debug: bool = False,
-    soul: str = None,
-    soul_level: int = 2,
-    force_react: bool = False,
-    num_ctx: int = None,
-    num_predict: int = None,
-    temperature: float = None,
-    top_p: float = None,
-) -> tuple[int, int]:
-    """Test model's ability to call read_file_lines tool."""
-    print(f"\n{'='*60}")
-    print("📄 Read File Lines Tool - Model Calling")
-    print(f"   Model: {model}")
-    print(f"{'='*60}")
-
-    tools = make_builtin_registry().subset(["read_file_lines"])
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        test_file = os.path.join(tmpdir, "lines_model_test.txt")
-        lines = [f"Line {i} content" for i in range(1, 11)]
-        write_file(test_file, "\n".join(lines) + "\n")
-        test_file_fs = test_file.replace("\\", "/")
-
-        tests = [
-            ("Read specific lines", f"Read lines 2 to 4 from {test_file_fs}", "Line 2"),
-            ("Read single line", f"Read line 1 from {test_file_fs}", "Line 1"),
-        ]
-
-        results = []
-
-        for name, prompt, expected in tests:
-            print(f"\n📋 {name}")
-            print(f"   Prompt: {prompt}")
-
-            agent = Agent(
-                model=model,
-                tools=tools,
-                backend=backend,
-                max_steps=5,
-                debug=debug,
-                soul=soul,
-                soul_level=soul_level,
-                force_react=force_react,
-                num_ctx=num_ctx,
-                num_predict=num_predict,
-                temperature=temperature,
-                top_p=top_p,
-            )
-
-            t0 = time.time()
-            run = agent.run(prompt)
-            elapsed = time.time() - t0
-
-            tool_used = check_tool_used(run, "read_file_lines")
-
-            found_in_answer = expected.lower() in run.final_answer.lower()
-            found_in_tool_result = False
-            for step in run.steps:
-                if step.tool_result and expected.lower() in str(step.tool_result).lower():
-                    found_in_tool_result = True
-                    break
-
-            passed = found_in_answer or found_in_tool_result
-            results.append(passed)
-
-            status = "✅" if passed else "❌"
-            tool_status = "🔧" if tool_used else "⚠️"
-            found_where = (
-                "(in answer)"
-                if found_in_answer
-                else "(in tool result)" if found_in_tool_result else ""
-            )
-            print(f"  {status} {tool_status} Tool used: {tool_used} | {elapsed:.1f}s {found_where}")
-            print(f"  📝 {run.final_answer}")
-
-    passed = sum(results)
-    total = len(results)
-    print(f"\n📊 Read File Lines Model: {passed}/{total} ({100*passed//total}%)")
-    return passed, total
-
-
-def test_find_files_model(
-    model: str,
-    backend,
-    debug: bool = False,
-    soul: str = None,
-    soul_level: int = 2,
-    force_react: bool = False,
-    num_ctx: int = None,
-    num_predict: int = None,
-    temperature: float = None,
-    top_p: float = None,
-) -> tuple[int, int]:
-    """Test model's ability to call find_files tool."""
-    print(f"\n{'='*60}")
-    print("🔍 Find Files Tool - Model Calling")
-    print(f"   Model: {model}")
-    print(f"{'='*60}")
-
-    tools = make_builtin_registry().subset(["find_files"])
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        # Create test files
-        write_file(os.path.join(tmpdir, "main.py"), "# main")
-        write_file(os.path.join(tmpdir, "helper.py"), "# helper")
-        write_file(os.path.join(tmpdir, "readme.txt"), "# readme")
-        write_file(os.path.join(tmpdir, "notes.txt"), "# notes")
-        tmpdir_fs = tmpdir.replace("\\", "/")
-
-        tests = [
-            ("Find py files", f"Find all Python files in {tmpdir_fs}", ".py"),
-            ("Find txt files", f"Find all text files in {tmpdir_fs}", ".txt"),
-        ]
-
-        results = []
-
-        for name, prompt, expected in tests:
-            print(f"\n📋 {name}")
-            print(f"   Prompt: {prompt}")
-
-            agent = Agent(
-                model=model,
-                tools=tools,
-                backend=backend,
-                max_steps=5,
-                debug=debug,
-                soul=soul,
-                soul_level=soul_level,
-                force_react=force_react,
-                num_ctx=num_ctx,
-                num_predict=num_predict,
-                temperature=temperature,
-                top_p=top_p,
-            )
-
-            t0 = time.time()
-            run = agent.run(prompt)
-            elapsed = time.time() - t0
-
-            tool_used = check_tool_used(run, "find_files")
-
-            found_in_answer = expected.lower() in run.final_answer.lower()
-            found_in_tool_result = False
-            for step in run.steps:
-                if step.tool_result and expected.lower() in str(step.tool_result).lower():
-                    found_in_tool_result = True
-                    break
-
-            passed = found_in_answer or found_in_tool_result
-            results.append(passed)
-
-            status = "✅" if passed else "❌"
-            tool_status = "🔧" if tool_used else "⚠️"
-            found_where = (
-                "(in answer)"
-                if found_in_answer
-                else "(in tool result)" if found_in_tool_result else ""
-            )
-            print(f"  {status} {tool_status} Tool used: {tool_used} | {elapsed:.1f}s {found_where}")
-            print(f"  📝 {run.final_answer}")
-
-    passed = sum(results)
-    total = len(results)
-    print(f"\n📊 Find Files Model: {passed}/{total} ({100*passed//total}%)")
-    return passed, total
-
-
-def test_edit_file_model(
-    model: str,
-    backend,
-    debug: bool = False,
-    soul: str = None,
-    soul_level: int = 2,
-    force_react: bool = False,
-    num_ctx: int = None,
-    num_predict: int = None,
-    temperature: float = None,
-    top_p: float = None,
-) -> tuple[int, int]:
-    """Test model's ability to call edit_file tool.
-
-    Note: edit_file is marked as dangerous. The Agent may block it unless
-    --confirm is used. If the model selects the right tool but it's blocked,
-    that still validates tool selection.
-    """
-    print(f"\n{'='*60}")
-    print("✏️ Edit File Tool - Model Calling")
-    print(f"   Model: {model}")
-    print(f"{'='*60}")
-
-    tools = make_builtin_registry().subset(["edit_file"])
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        test_file = os.path.join(tmpdir, "edit_model_test.txt")
-        write_file(test_file, "The quick brown fox jumps over the lazy dog")
-        test_file_fs = test_file.replace("\\", "/")
-
-        tests = [
-            ("Replace word", f"Replace 'brown' with 'red' in {test_file_fs}", "red"),
-        ]
-
-        results = []
-
-        for name, prompt, expected in tests:
-            print(f"\n📋 {name}")
-            print(f"   Prompt: {prompt}")
-
-            agent = Agent(
-                model=model,
-                tools=tools,
-                backend=backend,
-                max_steps=5,
-                debug=debug,
-                soul=soul,
-                soul_level=soul_level,
-                force_react=force_react,
-                num_ctx=num_ctx,
-                num_predict=num_predict,
-                temperature=temperature,
-                top_p=top_p,
-            )
-
-            t0 = time.time()
-            run = agent.run(prompt)
-            elapsed = time.time() - t0
-
-            tool_used = check_tool_used(run, "edit_file")
-
-            # Check if the edit actually happened
-            found_in_answer = expected.lower() in run.final_answer.lower()
-            found_in_tool_result = False
-            file_edited = False
-            for step in run.steps:
-                if step.tool_result:
-                    result_str = str(step.tool_result)
-                    if expected.lower() in result_str.lower():
-                        found_in_tool_result = True
-                    if "Successfully edited" in result_str:
-                        file_edited = True
-
-            # Pass if tool was selected correctly, even if blocked by danger check
-            passed = tool_used and (found_in_answer or found_in_tool_result or file_edited)
-            results.append(passed)
-
-            status = "✅" if passed else "❌"
-            tool_status = "🔧" if tool_used else "⚠️"
-            edit_status = "(edited)" if file_edited else "(selection only)" if tool_used else ""
-            print(f"  {status} {tool_status} Tool used: {tool_used} | {elapsed:.1f}s {edit_status}")
-            print(f"  📝 {run.final_answer}")
-
-    passed = sum(results)
-    total = len(results)
-    print(f"\n📊 Edit File Model: {passed}/{total} ({100*passed//total}%)")
     return passed, total
 
 
@@ -1699,81 +1084,68 @@ def test_all_tools_model(
     # Give model access to ALL tools
     tools = make_builtin_registry()
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        test_file = os.path.join(tmpdir, "multi_test.txt")
-        write_file(test_file, "Test content 123")
-        # Use forward slashes for better compatibility
-        test_file_fs = test_file.replace("\\", "/")
-        tmpdir_fs = tmpdir.replace("\\", "/")
+    tests = [
+        ("Calculator choice", "What is 25 times 4?", "100", "calculator"),
+        ("Shell choice", "Echo the text 'MultiTool'", "MultiTool", "shell"),
+        ("Date choice", "What is today's date?", None, "get_date"),
+        ("Todo add choice", "Add a todo: Review test results", "Review", "todo"),
+    ]
 
-        # Create test files for find_files test
-        write_file(os.path.join(tmpdir, "notes.txt"), "some notes")
-        write_file(os.path.join(tmpdir, "data.txt"), "some data")
+    results = []
 
-        tests = [
-            ("Calculator choice", "What is 25 times 4?", "100", "calculator"),
-            ("Shell choice", "Echo the text 'MultiTool'", "MultiTool", "shell"),
-            ("Date choice", "What is today's date?", None, "get_date"),
-            ("File read choice", f"Read the file at {test_file_fs}", "Test content", "read_file"),
-            ("Find files choice", f"Find all text files in {tmpdir_fs}", ".txt", "find_files"),
-            ("Todo add choice", "Add a todo: Review test results", "Review", "todo"),
-        ]
+    for name, prompt, expected, expected_tool in tests:
+        print(f"\n📋 {name}")
+        print(f"   Prompt: {prompt}")
+        print(f"   Expected tool: {expected_tool}")
 
-        results = []
+        agent = Agent(
+            model=model,
+            tools=tools,
+            backend=backend,
+            max_steps=5,
+            debug=debug,
+            soul=soul,
+            soul_level=soul_level,
+            force_react=force_react,
+            num_ctx=num_ctx,
+            num_predict=num_predict,
+            temperature=temperature,
+            top_p=top_p,
+        )
 
-        for name, prompt, expected, expected_tool in tests:
-            print(f"\n📋 {name}")
-            print(f"   Prompt: {prompt}")
-            print(f"   Expected tool: {expected_tool}")
+        t0 = time.time()
+        run = agent.run(prompt)
+        elapsed = time.time() - t0
 
-            agent = Agent(
-                model=model,
-                tools=tools,
-                backend=backend,
-                max_steps=5,
-                debug=debug,
-                soul=soul,
-                soul_level=soul_level,
-                force_react=force_react,
-                num_ctx=num_ctx,
-                num_predict=num_predict,
-                temperature=temperature,
-                top_p=top_p,
-            )
+        # Check if correct tool was used
+        correct_tool = check_tool_used(run, expected_tool)
 
-            t0 = time.time()
-            run = agent.run(prompt)
-            elapsed = time.time() - t0
+        # Check result (numeric-aware comparison for number expectations)
+        passed = correct_tool
+        if expected:
+            expected_num = normalize_number(expected)
+            actual_num = normalize_number(run.final_answer)
+            found = numbers_match(expected_num, actual_num)
+            if not found:
+                found = expected.lower() in run.final_answer.lower()
+            if not found:
+                for step in run.steps:
+                    if step.tool_result:
+                        result_num = normalize_number(str(step.tool_result))
+                        if numbers_match(expected_num, result_num):
+                            found = True
+                            break
+                        if expected.lower() in str(step.tool_result).lower():
+                            found = True
+                            break
+            passed = passed and found
 
-            # Check if correct tool was used
-            correct_tool = check_tool_used(run, expected_tool)
+        results.append(passed)
 
-            # Check result (numeric-aware comparison for number expectations)
-            passed = correct_tool
-            if expected:
-                expected_num = normalize_number(expected)
-                actual_num = normalize_number(run.final_answer)
-                found = numbers_match(expected_num, actual_num)
-                if not found:
-                    found = expected.lower() in run.final_answer.lower()
-                if not found:
-                    for step in run.steps:
-                        if step.tool_result:
-                            result_num = normalize_number(str(step.tool_result))
-                            if numbers_match(expected_num, result_num):
-                                found = True
-                                break
-                            if expected.lower() in str(step.tool_result).lower():
-                                found = True
-                                break
-                passed = passed and found
-
-            results.append(passed)
-
-            status = "✅" if passed else "❌"
-            tool_status = "🔧" if correct_tool else "⚠️"
-            print(f"  {status} {tool_status} Correct tool: {correct_tool} | {elapsed:.1f}s")
-            print(f"  📝 {run.final_answer}")
+        status = "✅" if passed else "❌"
+        tool_status = "🔧" if correct_tool else "⚠️"
+        print(f"  {status} {tool_status} Correct tool: {correct_tool} | {elapsed:.1f}s")
+        print(f"  📝 {run.final_answer}")
 
     passed = sum(results)
     total = len(results)
@@ -1885,67 +1257,7 @@ def run_phase2(
         total_passed += p
         total_tests += t
 
-        p, t = test_file_model(
-            model,
-            backend,
-            debug,
-            soul=soul,
-            soul_level=soul_level,
-            force_react=force_react,
-            num_ctx=num_ctx,
-            num_predict=num_predict,
-            temperature=temperature,
-            top_p=top_p,
-        )
-        total_passed += p
-        total_tests += t
-
         p, t = test_python_repl_model(
-            model,
-            backend,
-            debug,
-            soul=soul,
-            soul_level=soul_level,
-            force_react=force_react,
-            num_ctx=num_ctx,
-            num_predict=num_predict,
-            temperature=temperature,
-            top_p=top_p,
-        )
-        total_passed += p
-        total_tests += t
-
-        p, t = test_read_file_lines_model(
-            model,
-            backend,
-            debug,
-            soul=soul,
-            soul_level=soul_level,
-            force_react=force_react,
-            num_ctx=num_ctx,
-            num_predict=num_predict,
-            temperature=temperature,
-            top_p=top_p,
-        )
-        total_passed += p
-        total_tests += t
-
-        p, t = test_find_files_model(
-            model,
-            backend,
-            debug,
-            soul=soul,
-            soul_level=soul_level,
-            force_react=force_react,
-            num_ctx=num_ctx,
-            num_predict=num_predict,
-            temperature=temperature,
-            top_p=top_p,
-        )
-        total_passed += p
-        total_tests += t
-
-        p, t = test_edit_file_model(
             model,
             backend,
             debug,

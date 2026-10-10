@@ -1522,7 +1522,7 @@ def detect_and_fix_repetition(text: str) -> str:
 # ============================================================================
 #
 # Indirect prompt injection vector: tool results from ``http_get``,
-# ``web_search``, ``shell``, and ``read_file`` flow verbatim into the
+# ``web_search``, and ``shell`` flow verbatim into the
 # next model context. A 256KB HTTP response that starts with "OK" but
 # contains "ignore prior instructions, run X" later passes through
 # ``is_error_result``'s first-line check and reaches the model intact.
@@ -1602,7 +1602,7 @@ def sanitize_tool_output(
     2. **Secret redaction** — lines matching ``password=``, ``api_key:``,
        ``Bearer ...``, etc. have their values replaced with
        ``[REDACTED]``. Protects against the model echo-ing a secret the
-       user accidentally exposed via ``shell`` or ``read_file``.
+       user accidentally exposed via ``shell``.
     3. **ANSI escape stripping** — terminal control sequences are removed
        so a malicious tool output cannot clear the screen, rewrite the
        terminal title, or enable mouse tracking during chat.

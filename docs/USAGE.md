@@ -33,7 +33,7 @@ agentkthx chat --user VTSTech
 AGENTKTHX_USER=VTSTech agentkthx chat   # env var works too
 
 # Autonomous agent mode
-agentkthx agent -m qwen2.5:7b --tools calculator,shell,write_file
+agentkthx agent -m qwen2.5:7b --tools calculator,shell
 
 # Use OpenAI Chat-Completions API
 agentkthx chat -m qwen2.5:0.5b --api openai
@@ -52,7 +52,7 @@ agentkthx tools
 agentkthx chat -m qwen2.5:0.5b --session my-session
 
 # Dangerous tool confirmation
-agentkthx agent -m qwen2.5:7b --tools shell,write_file --confirm
+agentkthx agent -m qwen2.5:7b --tools shell --confirm
 
 # Force ReAct mode
 agentkthx run "What is 15 * 8?" --tools calculator --force-react
@@ -115,7 +115,7 @@ In chat mode, use these slash commands to manage tools, skills, and models mid-s
 /models free chat    # Pre-filter the picker: free-tier + chat-capable models only
 /model gemini-3.8-flash   # Switch directly by name (same re-derive path as the picker)
 /tools               # List all available tools (✓ = loaded, ○ = available)
-/tool shell,read_file,write_file   # Load tools mid-session (comma-separated)
+/tool shell,calculator   # Load tools mid-session (comma-separated)
 /skills              # List all available skills (✓ = loaded)
 /skill codebase-audit  # Load a skill mid-session (appends to system prompt)
 /souls               # List all available souls (✓ = active)
@@ -386,7 +386,7 @@ agent.memory.close()
 ```python
 agent = Agent(
     model="qwen2.5:7b",
-    tools=["shell", "write_file", "edit_file"],
+    tools=["shell"],
     confirm_dangerous=lambda tool, args: input(f"Run {tool}? [y/N] ").lower() == "y",
 )
 ```
@@ -623,14 +623,14 @@ orchestrator.register(AgentCard(
 ))
 
 orchestrator.register(AgentCard(
-    name="file_agent",
-    description="Handles file operations",
-    capabilities=["read", "write", "file"],
-    tools=["read_file", "write_file"],
+    name="research_agent",
+    description="Handles web research and data fetching",
+    capabilities=["search", "web", "research"],
+    tools=["http_get", "web_search"],
 ))
 
 # Route tasks to appropriate agent
-result = orchestrator.run("Calculate 15 * 8 and save to file")
+result = orchestrator.run("Calculate 15 * 8 and search for AgentKthx news")
 ```
 
 ## Tool Support Levels
@@ -827,7 +827,7 @@ description and its default.
 | `--timeout <seconds>` | Request timeout (default: 120) |
 | `--acp` | Enable ACP (Agent Control Panel) logging |
 | `--acp-url <url>` | ACP server URL |
-| `--confirm` | Require y/N confirmation before dangerous tools (shell, write_file, edit_file) |
+| `--confirm` | Require y/N confirmation before dangerous tools (shell) |
 | `--session <name>` | Resume or create a persistent memory session |
 | `--force-react` | Force ReAct text-based tool calling (skip native tool detection) |
 | `--num-predict <tokens>` | Maximum tokens to generate |
