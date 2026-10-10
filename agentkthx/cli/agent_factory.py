@@ -443,7 +443,7 @@ def _build_agent(args: argparse.Namespace, config) -> Agent:
         response_format=response_format,
         session_id=getattr(args, "session", None),
         truncation=truncation,
-        max_steps=getattr(args, "max_steps", 25),
+        max_steps=getattr(args, "max_steps", 50),
         # Thinking controls
         thinking_level=thinking_level,
         think=think_param,

@@ -45,6 +45,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`agentkthx version` now prints a `Discord:` line** (alongside Repo) with the community invite (https://discord.gg/vSK3Ba2aQ), and **`agentkthx update` shows the invite** under its header (`cli/commands/version.py`, `cmd_version` + `cmd_update`).
 
+### Default `--max-steps` raised 25 → 50
+
+- **Agent runs get a bigger reasoning budget by default**: the `25` default (in place since R05.x's 10 → 25 bump) is now `50` across all four default sites — `config.py` `MAX_STEPS` (env `AGENTKTHX_MAX_STEPS` still overrides), `Agent.__init__`/`agent_setup.py` (signature + defensive None fallback), and `agent_factory.py`'s flag fallback — plus the `--max-steps` help text. Explicit `--max-steps N` and `/param max_steps N` behavior unchanged; sd backend sample-steps remap unaffected.
+
 ### Python 3.11 support restored (floor `>=3.12` → `>=3.11`)
 
 - **`requires-python` lowered back to `>=3.11`** (R07.00 raised it). Rationale: R00–R06.x shipped as `>=3.9`; pypistats shows 3.11 ≈ 3.12 among version-identified downloads; 3.11 is Debian 12's system Python and stays upstream-supported until Oct 2027. 3.9/3.10 are NOT covered (3.9 EOL'd Oct 2025, 3.10 EOLs Oct 31 2026; supporting 3.9 would additionally require `from __future__ import annotations` in 4 files with runtime-evaluated `X | None` signatures — `core/prompts.py` + 3 skill-creator scripts — plus a `platform.freedesktop_os_release` fallback).

@@ -526,7 +526,7 @@ else:
 # ═══════════════════════════════════════════════════════════════════════════════
 # AGENT SETTINGS
 # ═══════════════════════════════════════════════════════════════════════════════
-MAX_STEPS = int(os.environ.get("AGENTKTHX_MAX_STEPS", "25"))
+MAX_STEPS = int(os.environ.get("AGENTKTHX_MAX_STEPS", "50"))
 DEBUG = os.environ.get("AGENTKTHX_DEBUG", "").lower() in ("1", "true", "yes")
 VERBOSE = os.environ.get("AGENTKTHX_VERBOSE", "").lower() in ("1", "true", "yes")
 

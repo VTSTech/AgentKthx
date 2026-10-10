@@ -77,7 +77,7 @@ class AgentSetupMixin:
         model: str,
         tools: ToolRegistry | list[str] | list[Tool] | None = None,
         backend: BaseBackend | str | None = None,
-        max_steps: int = 25,
+        max_steps: int = 50,
         memory_config: MemoryConfig | None = None,
         debug: bool = False,
         system_prompt: str | None = None,
@@ -217,7 +217,7 @@ class AgentSetupMixin:
             )
         # Ensure max_steps is never None (defensive fix)
         if max_steps is None:
-            max_steps = 25  # Default value
+            max_steps = 50  # Default value
 
         self.model = model
         self.max_steps = max_steps
