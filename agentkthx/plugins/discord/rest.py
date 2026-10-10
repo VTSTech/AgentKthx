@@ -217,6 +217,13 @@ class DiscordRest:
         data = self._request("GET", f"/channels/{channel_id}")
         return data or {}
 
+    def get_application(self) -> dict:
+        """GET /oauth2/applications/@me — resolves the OAuth2 application id
+        (the client_id used in bot invite URLs; usually differs from the
+        bot's user id)."""
+        data = self._request("GET", "/oauth2/applications/@me")
+        return data or {}
+
     # -- core request path ------------------------------------------------------
 
     def _request(self, method: str, path: str, *, json_body: dict | None = None) -> dict | None:

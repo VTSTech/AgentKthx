@@ -1,11 +1,17 @@
 """
 AgentKthx Plugin — `agentkthx discord setup` (interactive wizard)
 
-Collects the three minimum settings for running the bot:
+Collects the four core settings for running the bot:
   1. DISCORD_BOT_TOKEN      (secret — pasted blind, optionally validated
                              against GET /users/@me)
   2. DISCORD_ALLOW_GUILDS   (deny-by-default server allowlist)
-  3. DISCORD_ALLOW_USERS    (user allowlist, used for DM/owner checks in M1+)
+  3. DISCORD_ALLOW_USERS    (user allowlist, used for DM/owner checks)
+  4. DISCORD_ALLOW_DMS      (answer direct messages? default: false)
+
+When token validation runs, the wizard also resolves the OAuth2
+application id (GET /oauth2/applications/@me) and prints a ready-to-open
+bot invite URL, followed by the manual URL-Generator steps — a fresh bot
+is in NO server until it is invited through that URL.
 
 Each prompt carries a "where do I find this" hint. Everything is persisted
 to ~/.agentkthx/.env with 0600 permissions (atomic replace, unknown keys and
@@ -26,7 +32,12 @@ import stat
 from pathlib import Path
 from typing import Any, Callable
 
-MANAGED_KEYS = ("DISCORD_BOT_TOKEN", "DISCORD_ALLOW_GUILDS", "DISCORD_ALLOW_USERS")
+MANAGED_KEYS = (
+    "DISCORD_BOT_TOKEN",
+    "DISCORD_ALLOW_GUILDS",
+    "DISCORD_ALLOW_USERS",
+    "DISCORD_ALLOW_DMS",
+)
 
 _FILE_HEADER = (
     "# AgentKthx Discord plugin settings",
@@ -36,6 +47,10 @@ _FILE_HEADER = (
 )
 
 _PORTAL_URL = "https://discord.com/developers/applications"
+
+# Bot invite permissions: View Channels (1024) + Send Messages (2048) +
+# Read Message History (65536).
+INVITE_PERMISSIONS = 68608
 
 
 def default_env_path() -> str:
@@ -118,7 +133,7 @@ def write_env_file(path: str, updates: dict[str, str]) -> None:
         new_text = merge_env_lines(existing, updates)
     else:
         lines = list(_FILE_HEADER)
-        for key in MANAGED_KEYS:  # fresh files always carry all three keys
+        for key in MANAGED_KEYS:  # fresh files always carry all managed keys
             lines.append(f"{key}={updates.get(key, '')}")
         new_text = "\n".join(lines) + "\n"
     tmp = p.with_name(p.name + ".tmp")
@@ -203,10 +218,18 @@ def redact_token(token: str) -> str:
     return f"{token[:4]}…{token[-4:]}"
 
 
-def _validate_token(token: str, rest_factory: Callable[[str], Any], out) -> bool:
+def invite_url(client_id: str) -> str:
+    """Ready-to-open bot invite URL (scope=bot, least-privilege perms)."""
+    return (
+        "https://discord.com/oauth2/authorize"
+        f"?client_id={client_id}&scope=bot&permissions={INVITE_PERMISSIONS}"
+    )
+
+
+def _validate_token(rest: Any, out) -> bool:
     """GET /users/@me with the pasted token — catches typos instantly."""
     try:
-        me = rest_factory(token).get_self() or {}
+        me = rest.get_self() or {}
     except Exception as err:  # noqa: BLE001 - any failure = "not validated"
         out(f"   ! Validation failed: {err}")
         out("     (saved anyway — fix the token or network and re-run setup)")
@@ -261,6 +284,7 @@ def run_setup(
     cur_token = stored.get("DISCORD_BOT_TOKEN", "")
     cur_guilds = stored.get("DISCORD_ALLOW_GUILDS", "")
     cur_users = stored.get("DISCORD_ALLOW_USERS", "")
+    cur_dms = stored.get("DISCORD_ALLOW_DMS", "")
 
     out(f"AgentKthx Discord setup — writes {path}")
     out("The file holds a bot secret: written with 0600 perms, never commit it.")
@@ -289,8 +313,17 @@ def run_setup(
                 token = cur_token
                 break
             out("   ! No token stored yet — paste a token (or Ctrl+C to abort).")
+        app_id = ""
         if token and confirm_fn("   Validate token against Discord now?", True):
-            _validate_token(token, rest_factory, out)
+            rest = rest_factory(token)
+            if _validate_token(rest, out):
+                try:
+                    data = rest.get_application() or {}
+                    app_id = str(data.get("id") or "")
+                except Exception as err:  # noqa: BLE001 - invite URL is best-effort
+                    out(f"   ! Application ID lookup failed: {err}")
+                if app_id:
+                    out(f"   Application ID: {app_id} (baked into the invite URL below)")
 
         # -- 2) allowed guilds ----------------------------------------------
         out("")
@@ -313,8 +346,7 @@ def run_setup(
         out("")
         out("3) ALLOWED USERS (user IDs)")
         out("   Where: right-click a username (Developer Mode ON) -> Copy User ID.")
-        out("   Comma-separated. Used for DM/owner checks (DMs also need")
-        out("   DISCORD_ALLOW_DMS=true — default off).")
+        out("   Comma-separated. Used for DM/owner checks (DM gating is step 4).")
         if cur_users:
             out(f"   Current: {cur_users} (Enter keeps it)")
         raw_users = input_fn("   User IDs: ").strip()
@@ -323,6 +355,16 @@ def run_setup(
         user_ids, dropped_u = normalize_ids(raw_users)
         if dropped_u:
             out(f"   ! dropped non-numeric IDs: {', '.join(dropped_u)}")
+
+        # -- 4) allow DMs -----------------------------------------------------
+        out("")
+        out("4) ALLOW DIRECT MESSAGES (DISCORD_ALLOW_DMS)")
+        out("   Whether allowlisted users can DM the bot. Default: off — it")
+        out("   only answers @mentions / replies inside allowlisted servers.")
+        if cur_dms:
+            out(f"   Current: {cur_dms} (Enter keeps it)")
+        dms_default = cur_dms.strip().lower() in ("true", "1", "yes", "on")
+        allow_dms = "true" if confirm_fn("   Answer DMs?", dms_default) else "false"
     except (KeyboardInterrupt, EOFError):
         out("")
         out("Setup aborted — nothing was written.")
@@ -332,6 +374,7 @@ def run_setup(
         "DISCORD_BOT_TOKEN": token,
         "DISCORD_ALLOW_GUILDS": ",".join(guild_ids),
         "DISCORD_ALLOW_USERS": ",".join(user_ids),
+        "DISCORD_ALLOW_DMS": allow_dms,
     }
     try:
         write_env_file(path, updates)
@@ -344,7 +387,19 @@ def run_setup(
     out(f"  DISCORD_BOT_TOKEN={redact_token(token)}")
     out(f"  DISCORD_ALLOW_GUILDS={','.join(guild_ids) or '(empty)'}")
     out(f"  DISCORD_ALLOW_USERS={','.join(user_ids) or '(empty)'}")
+    out(f"  DISCORD_ALLOW_DMS={allow_dms}")
+    out("")
+    out("Invite the bot to your server (one-time):")
+    if app_id:
+        out(f"  {invite_url(app_id)}")
+    out("  or: Developer Portal -> OAuth2 -> URL Generator -> scope 'bot',")
+    out("  permissions: View Channels + Send Messages + Read Message History.")
+    out("  Open the URL, pick your server, Authorize — then @mention it.")
+    if allow_dms == "true":
+        out("DMs: ON — allowlisted users can message the bot directly.")
+    else:
+        out("DMs: OFF — re-run setup (answer yes to step 4) to enable DMs.")
     out("")
     out("Next:  agentkthx discord --dry-run   # policy decisions only, no sends")
-    out("       agentkthx discord             # live gateway (replies land in M1)")
+    out("       agentkthx discord             # live gateway + chat responder")
     return 0

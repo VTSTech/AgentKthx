@@ -5,7 +5,8 @@ Fully offline: I/O is injected (input_fn / secret_fn / confirm_fn / out /
 rest_factory), the env file lives under tmp_path, and token validation
 uses a fake REST client. Covers file primitives (parse/merge/write/load),
 input normalizers, the wizard flow (fresh, keep-existing, validate-fail,
-abort), and the `discord setup` CLI dispatch.
+abort, DMs default/stored, OAuth2 invite URL), and the `discord setup`
+CLI dispatch.
 
 Written by VTSTech — https://www.vts-tech.org
 """
@@ -23,6 +24,7 @@ from agentkthx.plugins.discord.discord_bot import BotConfig  # noqa: E402
 from agentkthx.plugins.discord.setup import (  # noqa: E402
     MANAGED_KEYS,
     default_env_path,
+    invite_url,
     load_env_file,
     merge_env_lines,
     normalize_ids,
@@ -49,6 +51,11 @@ class FakeRest:
         if self._error is not None:
             raise self._error
         return self._me
+
+    def get_application(self) -> dict:
+        if self._error is not None:
+            raise self._error
+        return {"id": "999888777", "name": "AgentKthx"}
 
 
 def rest_ok(token: str) -> FakeRest:
@@ -103,7 +110,7 @@ class TestWriteEnvFile:
         assert rc is None
         text = Path(path).read_text(encoding="utf-8")
         assert f"DISCORD_BOT_TOKEN={GOOD_TOKEN}" in text
-        for key in ("DISCORD_ALLOW_GUILDS", "DISCORD_ALLOW_USERS"):
+        for key in ("DISCORD_ALLOW_GUILDS", "DISCORD_ALLOW_USERS", "DISCORD_ALLOW_DMS"):
             assert f"{key}=" in text
         assert "do NOT commit" in text
 
@@ -289,8 +296,11 @@ class TestRunSetup:
         assert values["DISCORD_BOT_TOKEN"] == GOOD_TOKEN
         assert values["DISCORD_ALLOW_GUILDS"] == "111,222"  # abc dropped as non-numeric
         assert values["DISCORD_ALLOW_USERS"] == "999"
+        assert values["DISCORD_ALLOW_DMS"] == "true"  # scripted confirm=True
         joined = "\n".join(outs)
         assert "OK — token valid: AgentKthx" in joined
+        assert "Application ID: 999888777" in joined
+        assert "client_id=999888777&scope=bot&permissions=68608" in joined
         assert "dropped non-numeric IDs: abc" in joined
         assert GOOD_TOKEN not in joined  # screen output is redacted
         assert "DISCORD_BOT_TOKEN=MTAk…tuvw" in joined
@@ -307,6 +317,7 @@ class TestRunSetup:
         assert values["DISCORD_BOT_TOKEN"] == GOOD_TOKEN
         assert values["DISCORD_ALLOW_GUILDS"] == "666"
         assert values["DISCORD_ALLOW_USERS"] == ""  # empty written explicitly
+        assert values["DISCORD_ALLOW_DMS"] == "true"  # scripted confirm=True
 
     def test_validation_failure_still_saves(self, tmp_path):
         rc, outs = self._run(tmp_path, ["111"], [GOOD_TOKEN], rest=rest_401)
@@ -352,6 +363,8 @@ class TestRunSetup:
         assert "Copy Server ID" in joined
         assert "Copy User ID" in joined
         assert "MESSAGE CONTENT" in joined
+        assert "URL Generator" in joined
+        assert "ALLOW DIRECT MESSAGES" in joined
 
     def test_custom_path_respected(self, tmp_path):
         custom = str(tmp_path / "custom.env")
@@ -366,6 +379,40 @@ class TestRunSetup:
         )
         assert rc == 0
         assert Path(custom).exists()
+
+    def test_dms_off_by_default(self, tmp_path):
+        rc, outs = self._run(tmp_path, ["111"], [GOOD_TOKEN], confirm=False)
+        assert rc == 0
+        values = parse_env_file(str(tmp_path / "discord.env"))
+        assert values["DISCORD_ALLOW_DMS"] == "false"
+        assert "DMs: OFF" in "\n".join(outs)
+
+    def test_dms_keeps_stored_true_on_enter(self, tmp_path):
+        path = str(tmp_path / "discord.env")
+        Path(path).write_text(
+            f"DISCORD_BOT_TOKEN={GOOD_TOKEN}\nDISCORD_ALLOW_DMS=true\n",
+            encoding="utf-8",
+        )
+        in_fn, sec_fn, _ = make_wizard(["", ""], [""])  # Enter everywhere
+        outs: list[str] = []
+        rc = run_setup(
+            input_fn=in_fn,
+            secret_fn=sec_fn,
+            confirm_fn=lambda prompt, default: default,  # Enter = shown default
+            rest_factory=rest_ok,
+            path=path,
+            out=outs.append,
+        )
+        assert rc == 0
+        assert parse_env_file(path)["DISCORD_ALLOW_DMS"] == "true"
+        assert "DMs: ON" in "\n".join(outs)
+        assert "Current: true (Enter keeps it)" in "\n".join(outs)
+
+    def test_invite_url_format(self):
+        assert invite_url("123456789012345678") == (
+            "https://discord.com/oauth2/authorize"
+            "?client_id=123456789012345678&scope=bot&permissions=68608"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -415,6 +462,7 @@ class TestCliDispatch:
             "DISCORD_BOT_TOKEN",
             "DISCORD_ALLOW_GUILDS",
             "DISCORD_ALLOW_USERS",
+            "DISCORD_ALLOW_DMS",
         )
 
 
