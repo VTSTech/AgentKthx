@@ -34,6 +34,7 @@
           "DISCORD_TOOLS": "",
           "DISCORD_UNSAFE_TOOLS": "false",
           "DISCORD_REGISTER_SLASH": "false",
+          "DISCORD_DEBUG": "false",
           "DISCORD_ENABLE_SEND_TOOL": "false",
           "DISCORD_SESSION_TTL_DAYS": "30",
           "DISCORD_CONFIG": "~/.agentkthx/discord.json"

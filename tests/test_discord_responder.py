@@ -17,8 +17,6 @@ import threading
 import time
 from pathlib import Path
 
-import pytest
-
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from agentkthx.core.models import AgentRun  # noqa: E402
@@ -413,6 +411,31 @@ class TestResponderEndToEnd:
         finally:
             pool.stop()
 
+    def test_debug_echoes_pipeline(self, capsys):
+        """--debug: [discord:debug] lines carry run start, envelope, outcome."""
+        pool, rest, agent, built = make_pool(cfg=make_cfg(debug=True))
+        pool.start()
+        try:
+            pool.submit_event(make_ev())
+            assert wait_until(lambda: rest.sent), "no reply sent"
+        finally:
+            pool.stop()
+        out = capsys.readouterr().out
+        assert "[discord:debug] run start user=vtstech" in out
+        assert "envelope:" in out
+        assert "[Discord] guild=" in out
+        assert "[discord:debug] run done success=True" in out
+
+    def test_debug_echo_silent_when_off(self, capsys):
+        pool, rest, agent, built = make_pool()
+        pool.start()
+        try:
+            pool.submit_event(make_ev())
+            assert wait_until(lambda: rest.sent), "no reply sent"
+        finally:
+            pool.stop()
+        assert "[discord:debug]" not in capsys.readouterr().out
+
     def test_second_rapid_mention_held_by_cooldown(self):
         cfg = make_cfg(cooldown_s=0.5, max_workers=1)
         pool, rest, agent, built = make_pool(cfg=cfg, agent=FakeAgent(delay=0.15))
@@ -618,7 +641,6 @@ class TestBuildAgent:
         over channel defaults when no per-channel override exists."""
         cfg = make_cfg(tools="todo")
         pool = ResponderPool(cfg, make_policy(), FakeRest())
-        job = Job(make_ev(), "hello", "k", resolve_channel_config(CHANNEL, None))
         assert pool._build_agent.__self__.cfg.tools == "todo"
 
     def test_no_tools_by_default(self, monkeypatch):
@@ -676,9 +698,34 @@ class TestBuildAgent:
         monkeypatch.setenv("DISCORD_TOOLS", "none")
         assert BotConfig.from_env().tools == "none"
 
+    def test_build_agent_forwards_debug(self, monkeypatch):
+        """--debug reaches the core Agent (chat --debug machinery)."""
+        monkeypatch.setattr("agentkthx.agent.Agent", AgentCapture)
+        AgentCapture.instances.clear()
+        job = Job(make_ev(), "hello", "k", resolve_channel_config(CHANNEL, None))
+        pool = ResponderPool(make_cfg(debug=True), make_policy(), FakeRest())
+        pool._build_agent(job)
+        assert AgentCapture.instances[-1]["debug"] is True
+        pool_off = ResponderPool(make_cfg(), make_policy(), FakeRest())
+        pool_off._build_agent(job)
+        assert AgentCapture.instances[-1]["debug"] is False
+
+    def test_from_env_debug_flag_and_override_semantics(self, monkeypatch):
+        """DISCORD_DEBUG env enables; the --debug flag wins only when raised
+        (None = flag absent keeps the env value)."""
+        monkeypatch.delenv("DISCORD_DEBUG", raising=False)
+        assert BotConfig.from_env().debug is False
+        monkeypatch.setenv("DISCORD_DEBUG", "true")
+        assert BotConfig.from_env().debug is True
+        assert BotConfig.from_env(overrides={"debug": None}).debug is True
+        assert BotConfig.from_env(overrides={"debug": True}).debug is True
+        monkeypatch.setenv("DISCORD_DEBUG", "false")
+        assert BotConfig.from_env(overrides={"debug": True}).debug is True
+        assert BotConfig.from_env().debug is False
+
 
 class TestToolsDisplay:
-    """Banner //status rendering helper."""
+    """Banner / /status rendering helper."""
 
     def test_falsy_and_off_variants_render_none(self):
         assert db_mod._tools_display(None) == "none"

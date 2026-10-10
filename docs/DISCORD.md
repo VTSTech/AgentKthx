@@ -59,6 +59,7 @@ comments and unknown keys preserved). It asks for:
 | `DISCORD_MAX_STEPS` | `5` | Agent step cap (Discord has its **own** knob — the CLI/`AGENTKTHX_MAX_STEPS` setting does not apply here) |
 | `DISCORD_TOOLS` | *(none)* | **No tools by default (R07.33)** — opt in with a comma list, e.g. `calculator,web_search`; `none`/`off`/empty all mean off; `shell`/`python_repl` always excluded |
 | `DISCORD_UNSAFE_TOOLS` | `false` | Lifts the shell exclusion (banner warns) |
+| `DISCORD_DEBUG` | `false` | Debug echo: backend prompts/responses/errors + pipeline details (same as `--debug`) |
 | `DISCORD_QUEUE_MAX` | `8` | Bounded dispatch queue; overflow gets a one-liner |
 | `DISCORD_MAX_WORKERS` | `2` | Worker threads (agent runs serialize on a semaphore) |
 | `DISCORD_SESSION_TTL_DAYS` | `30` | Stale `discord-*` session prune at startup |
@@ -66,7 +67,18 @@ comments and unknown keys preserved). It asks for:
 | `DISCORD_SOUL` | *(none)* | Soul name; **no soul by default** |
 
 CLI flags: `--backend` `--model` `--api` `--soul` `--tools` `--max-steps`
-`--dry-run` `--register-commands`.
+`--dry-run` `--debug` `--register-commands`.
+
+### Debugging (`--debug` / `DISCORD_DEBUG=true`)
+
+- Startup banner prints `debug: ON`.
+- The core `Agent` is built with `debug=True` — **the same machinery as
+  `agentkthx chat --debug`**: per-step backend prompts/responses, tool-call
+  payloads and errors are echoed while a job runs.
+- The plugin adds `[discord:debug]` pipeline lines on stdout: run start (user,
+  session, model, prompt size), the full envelope, and the outcome (success,
+  step count, tokens, ms) — including an explicit marker when a run ends
+  incomplete (the max-steps case).
 
 ### Per-channel overrides (`~/.agentkthx/discord.json`)
 
@@ -149,6 +161,7 @@ User=youruser   # ~/.agentkthx/.env is 0600 — run as the owner
 | `cooldown` reply | 10s per-user cooldown | Wait, or raise `DISCORD_USER_COOLDOWN_S` |
 | `typing unavailable (404)` | Fresh-session race or channel type without typing | Cosmetic; logged once per channel, replies unaffected |
 | `(incomplete — maximum steps reached)` | Step budget exhausted — only possible when tools were opted in (each tool round burns a step) | Tools are off by default now; if you enabled them, raise `DISCORD_MAX_STEPS` or drop them again. Note Discord has its own `DISCORD_MAX_STEPS` (default 5) — the CLI max-steps setting does not apply |
+| Replies vague or backend misbehaving | Need visibility | Run with `--debug` (or `DISCORD_DEBUG=true`) — backend prompts/responses/errors are echoed; check `/status` for the effective model |
 | Slash commands missing | Never registered | `agentkthx discord --register-commands`, restart the client |
 | `insufficient permission` on `/model` | Not in `DISCORD_OWNER_IDS` | Add your user ID |
 | 429 rate-limit loop | Discord REST bucket | Handled internally (single retry + global pause); slow down bulk tests |

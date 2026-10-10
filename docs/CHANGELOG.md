@@ -55,6 +55,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Opt-in paths preserved** for when tools are wanted later: `DISCORD_TOOLS=calculator,web_search`, `--tools`, or a per-channel `discord.json` `"tools"` entry (each channel entry is itself the opt-in). `shell`/`python_repl` stay excluded even when opted in, and **a soul never grants tools on its own** — the soul `allowedTools` intersection only narrows an explicit opt-in.
 - Banner + `/status` render the effective setting (`tools=none` when off, comma-joined list when a channel opts in) instead of the raw config string.
 
+### `agentkthx discord --debug`
+
+- **New `--debug` flag (+ `DISCORD_DEBUG=true` env for systemd setups)**: the `Agent` is built with `debug=True` — the **same machinery as `agentkthx chat --debug`** — so backend prompts, responses, tool-call payloads and errors are echoed while a Discord job runs.
+- Plugin-side `[discord:debug]` pipeline lines: run start (user, session, model, prompt size), the full envelope, and the outcome (success, steps, tokens, ms), with an explicit marker when a run ends incomplete; the startup banner prints `debug: ON`. The flag wins over the env only when raised; env alone works too.
+
 ## [R07.32] - 2026-10-10 1:08:09 PM
 
 ### Date/time built-ins removed → MCP time server (@infoinlet/mcp-time)

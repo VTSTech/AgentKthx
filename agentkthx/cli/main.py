@@ -6,7 +6,6 @@ imports command handlers directly rather than through the facade."""
 from __future__ import annotations
 
 import sys  # R07.33: module-level (was only imported inside the except handler)
-
 from typing import Callable, Optional
 
 from .banner import _print_update_notice, _run_update_check, print_banner
@@ -124,8 +123,6 @@ def main(argv: Optional[list[str]] = None) -> int:
                                 file=sys.stderr,
                             )
     except Exception as e:
-        import sys
-
         print(f"[PluginManager] Warning: plugin CLI discovery failed: {e}", file=sys.stderr)
 
     # R07.19 (follow-up #6): plugin CLI subparsers were registered after

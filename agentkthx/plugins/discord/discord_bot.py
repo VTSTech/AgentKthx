@@ -38,10 +38,9 @@ from dataclasses import dataclass, field
 from .commands import (
     CALLBACK_DEFER,
     CALLBACK_MESSAGE,
-    COMMAND_NAMES,
     EPHEMERAL,
-    Interaction,
     SLASH_COMMANDS,
+    Interaction,
     gate_interaction,
     handle_model,
     handle_reset,
@@ -173,6 +172,7 @@ class BotConfig:
     dry_run: bool = False
     backend: str | None = None
     model: str | None = None
+    debug: bool = False
 
     @classmethod
     def from_env(cls, overrides: dict | None = None) -> "BotConfig":
@@ -196,6 +196,7 @@ class BotConfig:
             owner_ids=_split_ids(_cfg("DISCORD_OWNER_IDS", "")),
             register_slash=_as_bool(_cfg("DISCORD_REGISTER_SLASH", "false")),
             soul=(_cfg("DISCORD_SOUL", "") or None),  # no soul by default (R07.33)
+            debug=_as_bool(_cfg("DISCORD_DEBUG", "false")),
         )
         for key, value in overrides.items():
             if value is not None:
@@ -237,6 +238,12 @@ def setup_parser(parser) -> None:
         "--max-steps", type=int, default=None, help="Agent step cap override"
     )
     parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Echo backend prompts/responses/errors and pipeline details "
+        "(or set DISCORD_DEBUG=true)",
+    )
+    parser.add_argument(
         "--register-commands",
         action="store_true",
         help="Register slash commands (global) then exit without the gateway",
@@ -270,6 +277,8 @@ def cmd_discord(args) -> int:
             "api_mode": getattr(args, "api", None),
             "soul": getattr(args, "soul", None),
             "max_steps": getattr(args, "max_steps", None),
+            # flag wins only when raised — None keeps the DISCORD_DEBUG env value
+            "debug": True if getattr(args, "debug", False) else None,
         }
     )
     tools_arg = getattr(args, "tools", None)
@@ -302,6 +311,8 @@ def cmd_discord(args) -> int:
         f"[discord] pool: workers={cfg.max_workers} queue={cfg.queue_max} "
         f"max-steps={cfg.max_steps} session-ttl={cfg.session_ttl_days}d"
     )
+    if cfg.debug:
+        print("[discord] debug: ON — backend prompts/responses/errors will be echoed")
 
     rest = DiscordRest(cfg.token)
     try:
@@ -470,6 +481,12 @@ class ResponderPool:
         )
         self._started_at = 0.0
         self.agent_runs = 0  # observable for tests/status
+
+    def _dbg(self, msg: str) -> None:
+        """--debug / DISCORD_DEBUG pipeline echo (backend payloads themselves
+        are printed by the core Agent when built with debug=True)."""
+        if self.cfg.debug:
+            print(f"[discord:debug] {msg}")
 
     # -- lifecycle -----------------------------------------------------------
 
@@ -727,8 +744,25 @@ class ResponderPool:
         try:
             with self._agent_sem:
                 agent = self._build_agent(job)
-                run = agent.run(self._build_envelope(job))
+                envelope = self._build_envelope(job)
+                self._dbg(
+                    f"run start user={ev.username} session={job.session_key} "
+                    f"model={getattr(agent, 'model', '?')} "
+                    f"max-steps={self.cfg.max_steps} prompt={len(job.prompt)}ch"
+                )
+                self._dbg(f"envelope:\n{envelope}")
+                run = agent.run(envelope)
             self.agent_runs += 1
+            self._dbg(
+                f"run done success={run.success} steps={len(getattr(run, 'steps', []) or [])} "
+                f"tokens={getattr(run, 'total_tokens', '?')} "
+                f"{getattr(run, 'total_ms', 0) or 0:.0f}ms"
+            )
+            if not run.success:
+                self._dbg(
+                    "incomplete run — check backend errors above "
+                    "(core debug echoes prompts/responses per step)"
+                )
         except Exception as err:  # noqa: BLE001 - reply one line, log full trace
             traceback.print_exc()
             text = f"Backend error: {type(err).__name__} — try again later."
@@ -766,6 +800,7 @@ class ResponderPool:
             session_id=job.session_key,
             max_steps=self.cfg.max_steps,
             confirm_dangerous=_deny_dangerous,
+            debug=self.cfg.debug,
         )
 
     # -- replies ---------------------------------------------------------------

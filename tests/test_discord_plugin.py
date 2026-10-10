@@ -135,6 +135,7 @@ class TestCliWiring:
         out = capsys.readouterr().out
         assert "--dry-run" in out
         assert "--backend" in out
+        assert "--debug" in out
 
     def test_discord_without_token_fails_cleanly(self, monkeypatch, capsys, clean_env):
         monkeypatch.setattr(CLI_MAIN_MODULE, "_run_update_check", lambda: None)
