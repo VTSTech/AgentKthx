@@ -365,7 +365,7 @@ class TestEnvelope:
         assert pool._channel_label(CHANNEL) == f"#{CHANNEL}"
 
     def test_dm_envelope(self):
-        pool, _ = self._pool_with_cache()
+        pool, rest = self._pool_with_cache()
         job = Job(
             make_ev(guild_id=None, channel_id=DM_CHANNEL, content=f"<@{BOT_ID}> hi"),
             "hi",
@@ -373,8 +373,9 @@ class TestEnvelope:
             resolve_channel_config(DM_CHANNEL, None),
         )
         assert pool._build_envelope(job).startswith(
-            f"[Discord] guild=dm channel=#general user=vtstech\n"
+            "[Discord] guild=dm channel=dm user=vtstech\n"
         )
+        assert rest.channels_queried == []  # DMs skip the REST name lookup
 
 
 # ---------------------------------------------------------------------------

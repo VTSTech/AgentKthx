@@ -536,9 +536,13 @@ class ResponderPool:
     def _build_envelope(self, job: Job) -> str:
         """Prompt envelope (plan §8) — a normal user message for the loop."""
         ev = job.ev
+        if ev.guild_id:
+            label = self._channel_label(ev.channel_id)
+        else:
+            label = "dm"  # DM channels have no name; skip the REST lookup
         guild = ev.guild_id if ev.guild_id else "dm"
         return (
-            f"[Discord] guild={guild} channel={self._channel_label(ev.channel_id)} "
+            f"[Discord] guild={guild} channel={label} "
             f"user={ev.username}\n{job.prompt}"
         )
 

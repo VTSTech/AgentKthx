@@ -142,6 +142,34 @@ class TestTriggerMatrix:
         decision = policy.check_event(ctx(is_dm=True, guild_id=None))
         assert decision.allowed is True
 
+    def test_dm_plain_message_triggers_without_mention(self):
+        """M1.1: a DM is a 1:1 conversation — every message from an
+        allowlisted user triggers, no @mention required (guild messages
+        still need one)."""
+        policy = make_policy(allow_dms=True)
+        decision = policy.check_event(
+            ctx(is_dm=True, guild_id=None, mentions=(), content="plain hi")
+        )
+        assert decision.allowed is True
+        assert decision.reason == "ok"
+
+    def test_dm_plain_message_respects_user_allowlist(self):
+        policy = make_policy(allow_dms=True, allow_users=["111"])
+        ok = policy.check_event(
+            ctx(is_dm=True, guild_id=None, mentions=(), user_id="111")
+        )
+        denied = policy.check_event(
+            ctx(is_dm=True, guild_id=None, mentions=(), user_id="222")
+        )
+        assert ok.allowed is True
+        assert not denied.allowed and denied.reason == "user-not-allowed"
+
+    def test_guild_plain_message_still_needs_trigger(self):
+        policy = make_policy()
+        decision = policy.check_event(ctx(mentions=()))
+        assert decision.allowed is False
+        assert decision.reason == "no-trigger"
+
     def test_dm_user_allowlist(self):
         policy = make_policy(allow_dms=True, allow_users=["111"])
         assert policy.check_event(ctx(is_dm=True, guild_id=None)).allowed

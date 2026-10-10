@@ -98,7 +98,7 @@ class Policy:
 
     Precedence (first failure wins):
       self -> bot author -> DM gate -> guild allowlist -> channel allowlist
-      -> user allowlist -> trigger matrix (mention / reply-to-bot).
+      -> user allowlist -> trigger matrix (DM / mention / reply-to-bot).
 
     An empty allow list denies everything in its scope — the bot stays
     silent until the operator opts in via DISCORD_ALLOW_*.
@@ -152,7 +152,15 @@ class Policy:
         return Decision(True, "ok")
 
     def _is_trigger(self, ev: MessageContext) -> bool:
-        """Mention of the bot, or a direct reply to a bot-authored message."""
+        """DM, mention of the bot, or direct reply to a bot-authored message.
+
+        DMs trigger WITHOUT a mention (plan §16 trigger matrix: a DM is a
+        1:1 conversation, not a channel ping) — the dms-disabled /
+        user-not-allowed gates have already run by the time we get here,
+        so guild chatter still requires an explicit @ or reply.
+        """
+        if ev.is_dm:
+            return True
         if self.bot_user_id in ev.mentions:
             return True
         return ev.reference_author_id == self.bot_user_id
