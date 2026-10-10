@@ -1,0 +1,53 @@
+{
+  "$schema": "https://raw.githubusercontent.com/VTSTech/AgentKthx/main/schemas/v0.2/plugin.schema.json",
+  "name": "discord",
+  "version": "0.1.0",
+  "description": "Discord gateway integration - run AgentKthx as a Discord bot (stdlib-only client)",
+  "author": {
+    "name": "VTSTech",
+    "url": "https://www.vts-tech.org"
+  },
+  "license": "MIT",
+  "extensions": {
+    "org.vts-tech.agentkthx": {
+      "display_name": "Discord Bot Gateway",
+      "type": "feature",
+      "entrypoint": "__init__",
+      "depends": [],
+      "optional_depends": [],
+      "config": {
+        "env_prefix": "DISCORD",
+        "defaults": {
+          "DISCORD_BOT_TOKEN": "",
+          "DISCORD_APP_ID": "",
+          "DISCORD_ALLOW_GUILDS": "",
+          "DISCORD_ALLOW_CHANNELS": "",
+          "DISCORD_ALLOW_USERS": "",
+          "DISCORD_ALLOW_DMS": "false",
+          "DISCORD_OWNER_IDS": "",
+          "DISCORD_MAX_WORKERS": "2",
+          "DISCORD_QUEUE_MAX": "8",
+          "DISCORD_USER_COOLDOWN_S": "10",
+          "DISCORD_MAX_PROMPT_CHARS": "1500",
+          "DISCORD_MAX_REPLY_MSGS": "3",
+          "DISCORD_MAX_STEPS": "5",
+          "DISCORD_TOOLS": "calculator,parse_json,todo,web_search,http_get",
+          "DISCORD_UNSAFE_TOOLS": "false",
+          "DISCORD_REGISTER_SLASH": "false",
+          "DISCORD_ENABLE_SEND_TOOL": "false",
+          "DISCORD_SESSION_TTL_DAYS": "30",
+          "DISCORD_CONFIG": "~/.agentkthx/discord.json"
+        }
+      },
+      "provides": {
+        "cli_commands": ["discord"],
+        "hooks": {
+          "on_shutdown": "discord_bot.on_shutdown"
+        }
+      },
+      "compatibility": {
+        "agentkthx": ">=0.7.32"
+      }
+    }
+  }
+}

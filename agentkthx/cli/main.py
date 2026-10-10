@@ -5,6 +5,8 @@ imports command handlers directly rather than through the facade."""
 
 from __future__ import annotations
 
+import sys  # R07.33: module-level (was only imported inside the except handler)
+
 from typing import Callable, Optional
 
 from .banner import _print_update_notice, _run_update_check, print_banner
@@ -68,6 +70,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     # Discover plugin-provided CLI commands, add as subparsers, and mark with *
     _plugin_cli_handlers: dict[str, Callable] = {}
+    _new_plugin_parsers: dict[str, object] = {}
     try:
         from ..plugins import get_plugin_manager
 
@@ -95,7 +98,10 @@ def main(argv: Optional[list[str]] = None) -> int:
                                     break
                         else:
                             # Add a new subparser for this plugin command
-                            subparsers_action.add_parser(cmd_name, help=f"* {cmd_name} [plugin]")
+                            _p = subparsers_action.add_parser(
+                                cmd_name, help=f"* {cmd_name} [plugin]"
+                            )
+                            _new_plugin_parsers[cmd_name] = _p
 
                 # Load all plugins so their register_cli_command() handlers are wired
                 pm.load_all()
@@ -103,6 +109,20 @@ def main(argv: Optional[list[str]] = None) -> int:
                 # Collect the handlers for dispatch
                 for cmd_name, cmd_info in pm.get_cli_commands().items():
                     _plugin_cli_handlers[cmd_name] = cmd_info["handler"]
+                    # R07.33: spec §PluginManager documents setup_parser, but it
+                    # was stored and never invoked — plugin subparsers stayed bare
+                    # and plugin commands could not accept flags. Invoke it for
+                    # the parsers WE created above (native commands keep theirs).
+                    _sp = cmd_info.get("setup_parser")
+                    if _sp and cmd_name in _new_plugin_parsers:
+                        try:
+                            _sp(_new_plugin_parsers[cmd_name])
+                        except Exception as setup_err:
+                            print(
+                                f"[PluginManager] Warning: setup_parser failed for "
+                                f"'{cmd_name}': {setup_err}",
+                                file=sys.stderr,
+                            )
     except Exception as e:
         import sys
 
