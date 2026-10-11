@@ -124,8 +124,10 @@ from agentkthx.model_cache import load_seed_catalog
 # and `:free`-suffixed ids coexist; "Model id is whatever appears in
 # /models"). No pricing or context_length is seeded: the /v1/models entry
 # schema is undocumented and docs-only pricing would be fabrication —
-# context falls back to the 128K CloudBackend default until the live
-# catalog proves otherwise.
+# context is read tolerantly from the live payload when present (R07.35),
+# else omitted so the CloudBackend family-knowledge layer resolves it
+# (Claude 200K, GPT-6 400K, Gemini 1M, …) with the 128K generic fallback
+# as the last resort.
 TOKENHARBOR_MODELS: dict[str, dict] = load_seed_catalog("tokenharbor")
 """Static catalog for the tokenharbor backend — R07.31 seed (15 ids,
 each named by Token Harbor's own docs: compare page, quickstart, and
@@ -387,13 +389,19 @@ class TokenHarborBackend(CloudBackend):
 
         The /v1/models entry schema is UNDOCUMENTED (docs say only
         "returns the callable model ids as JSON") — assume the OpenAI
-        ``{"data": [...]}`` envelope and read ONLY ``data[].id``. Do not
-        wire any other field (context_length? pricing? modality?) until
-        the probe pins the schema (doc §16 probe checklist #1).
+        ``{"data": [...]}`` envelope. ``data[].id`` is the only IDENTITY
+        field. R07.35: context-window fields are read TOLERANTLY when
+        present (owner-directed metadata detection — the models table
+        showed every model at the 128K fallback because only ``id`` was
+        read); see ``_extract_live_context``. Anything else (pricing,
+        modality, …) stays unwired until the probe pins the schema (doc
+        §16 probe checklist #1).
 
-        Seed entries enrich matching live ids; unknown live ids get the
-        conservative defaults (128K context, free_tier from the :free
-        suffix only).
+        Catalog enrichment ladder per entry: live payload context →
+        seed ``context_length`` → (omitted). A context field is only
+        written when REAL data exists — no default stamping, so the
+        CloudBackend family-knowledge layer (``get_model_max_context``
+        step 3) decides for unknown ids.
         """
         url = self._get_models_url()
         headers = self._get_auth_headers()
@@ -402,16 +410,18 @@ class TokenHarborBackend(CloudBackend):
         with urllib.request.urlopen(req, timeout=15) as response:
             result = json.loads(response.read().decode("utf-8"))
 
-        api_model_ids: list[str] = []
+        # id → raw entry dict (kept for the tolerant context extraction;
+        # non-dict data items are tolerated junk with no metadata).
+        api_entries: dict[str, dict] = {}
         for m in result.get("data", []) or []:
             name = m.get("id") if isinstance(m, dict) else None
             # Only string ids are catalog entries — a non-string id from a
             # malformed payload is skipped (tolerated junk), not a crash.
             if isinstance(name, str) and name:
-                api_model_ids.append(name)
+                api_entries[name] = m if isinstance(m, dict) else {}
 
         if os.environ.get("AGENTKTHX_DEBUG"):
-            print(f"  [TokenHarbor] API returned {len(api_model_ids)} models")
+            print(f"  [TokenHarbor] API returned {len(api_entries)} models")
 
         # Live-discovered first (confirmed callable), then catalog-only
         # ids (seeded variants the live response may omit — e.g. the
@@ -419,51 +429,87 @@ class TokenHarborBackend(CloudBackend):
         seen: set[str] = set()
         models: list[dict] = []
 
-        for name in sorted(api_model_ids):
+        for name in sorted(api_entries):
             if name in seen:
                 continue
             seen.add(name)
             meta = TOKENHARBOR_MODELS.get(name, {})
-            models.append(
-                {
-                    "name": name,
-                    "size": 0,
-                    "details": {
-                        "family": meta.get("family", self._catalog_family_name()),
-                        "backend": self._catalog_backend_name(),
-                        "context_length": meta.get(
-                            "context_length", self._DEFAULT_CONTEXT_FALLBACK
-                        ),
-                        "free_tier": _is_free_model(name),
-                        "is_chat_model": True,
-                        "pricing": meta.get("pricing", {}),
-                    },
-                }
-            )
+            live_ctx = self._extract_live_context(api_entries[name])
+            models.append(self._catalog_entry(name, meta, live_ctx=live_ctx))
 
         for catalog_name in sorted(TOKENHARBOR_MODELS.keys()):
             if catalog_name in seen:
                 continue
             seen.add(catalog_name)
             meta = TOKENHARBOR_MODELS[catalog_name]
-            models.append(
-                {
-                    "name": catalog_name,
-                    "size": 0,
-                    "details": {
-                        "family": self._catalog_family_name(),
-                        "backend": self._catalog_backend_name(),
-                        "context_length": meta.get(
-                            "context_length", self._DEFAULT_CONTEXT_FALLBACK
-                        ),
-                        "free_tier": _is_free_model(catalog_name),
-                        "is_chat_model": True,
-                        "pricing": meta.get("pricing", {}),
-                    },
-                }
-            )
+            models.append(self._catalog_entry(catalog_name, meta))
 
         return models
+
+    #: Live-entry fields that may carry a context window. The /v1/models
+    #: schema is undocumented, so the extractor is defensive: known
+    #: gateway conventions only (OpenRouter ``context_length`` top-level
+    #: and nested under ``top_provider``, generic ``context_size`` /
+    #: ``max_context_tokens`` / ``max_input_tokens``). Anything absent or
+    #: junk yields None — never a fabricated default.
+    _LIVE_CONTEXT_FIELDS: tuple[str, ...] = (
+        "context_length",
+        "context_size",
+        "max_context_tokens",
+        "max_input_tokens",
+    )
+
+    @staticmethod
+    def _extract_live_context(entry: dict) -> int | None:
+        """Tolerantly read a context window from a live /v1/models entry.
+
+        R07.35: returns the first positive integer found among the known
+        context field conventions (``_LIVE_CONTEXT_FIELDS``, plus the
+        OpenRouter-style nested ``top_provider.context_length``); None
+        when the entry carries none. Absent ≠ 128K — the omit-and-fall-
+        through contract keeps fabricated defaults out of the catalog.
+        """
+        if not isinstance(entry, dict):
+            return None
+        for field in TokenHarborBackend._LIVE_CONTEXT_FIELDS:
+            value = entry.get(field)
+            if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+                return value
+        top_provider = entry.get("top_provider")
+        if isinstance(top_provider, dict):
+            value = top_provider.get("context_length")
+            if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+                return value
+        return None
+
+    def _catalog_entry(
+        self, name: str, meta: dict, live_ctx: int | None = None
+    ) -> dict:
+        """Shape one catalog entry (shared by live + fallback builders).
+
+        R07.35: ``details.context_length`` is written ONLY from real
+        data — the live payload's context field (``live_ctx``) or the
+        seed meta's ``context_length``. When neither exists the key is
+        OMITTED (was: stamped with the 128000 CloudBackend default,
+        which made every model in ``agentkthx models`` render 125K and
+        blocked the family-knowledge layer in
+        ``CloudBackend.get_model_max_context``).
+        """
+        details: dict = {
+            "family": meta.get("family", self._catalog_family_name()),
+            "backend": self._catalog_backend_name(),
+            "free_tier": _is_free_model(name),
+            "is_chat_model": True,
+            "pricing": meta.get("pricing", {}),
+        }
+        ctx = live_ctx if isinstance(live_ctx, int) and live_ctx > 0 else None
+        if ctx is None:
+            seed_ctx = meta.get("context_length")
+            if isinstance(seed_ctx, int) and not isinstance(seed_ctx, bool) and seed_ctx > 0:
+                ctx = seed_ctx
+        if ctx is not None:
+            details["context_length"] = ctx
+        return {"name": name, "size": 0, "details": details}
 
     def _apply_free_only(self, models: list[dict]) -> list[dict]:
         """Apply the TOKENHARBOR_FREE_ONLY filter (:free suffix only).
@@ -590,26 +636,14 @@ class TokenHarborBackend(CloudBackend):
         empty/missing. The seed carries only the ids Token Harbor's own
         docs name (docs-only, perishable — see the "_tokenharbor_note"
         metadata key in the seed JSON).
+
+        R07.35: shares ``_catalog_entry`` with the live builder —
+        ``details.context_length`` only when the seed meta actually has
+        one (currently none do), never the 128000 default stamp.
         """
         models: list[dict] = []
         for name in sorted(TOKENHARBOR_MODELS.keys()):
-            meta = TOKENHARBOR_MODELS[name]
-            models.append(
-                {
-                    "name": name,
-                    "size": 0,
-                    "details": {
-                        "family": self._catalog_family_name(),
-                        "backend": self._catalog_backend_name(),
-                        "context_length": meta.get(
-                            "context_length", self._DEFAULT_CONTEXT_FALLBACK
-                        ),
-                        "free_tier": _is_free_model(name),
-                        "is_chat_model": True,
-                        "pricing": meta.get("pricing", {}),
-                    },
-                }
-            )
+            models.append(self._catalog_entry(name, TOKENHARBOR_MODELS[name]))
         return models
 
     # ─────────────────────────────────────────────────────────────────────

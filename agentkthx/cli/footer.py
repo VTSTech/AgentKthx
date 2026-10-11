@@ -67,12 +67,32 @@ def fmt_token_size(n) -> str:
 
     Always integer K/M (no '2.5K') — matches how Ollama/llama-server report
     context sizes in their docs and how users specify them via --num-ctx 128k.
+
+    R07.35: decimal-K/M branch added. Cloud providers advertise context
+    windows in DECIMAL tokens (128000, 200000, 400000, 1000000), not KiB —
+    but 128000 happens to be an exact multiple of 1024 (125 × 1024), so the
+    binary-only formatter rendered every 128K cloud model as the confusing
+    '125K' (spotted on the TokenHarbor catalog: all 69 models showed 125K).
+    Order: binary M → decimal M → decimal K (context-scale, ≥100000) →
+    binary K → int. The ≥100000 floor keeps small max-tokens values
+    (1000 → '1000') rendering as plain ints, unchanged from R07.18.
+
+      - 128000  → '128K'  (decimal, was '125K')
+      - 200000  → '200K'  (decimal)
+      - 400000  → '400K'  (decimal)
+      - 1000000 → '1M'    (decimal)
+      - 262144  → '256K'  (binary)
+      - 2097152 → '2M'    (binary)
     """
     if n is None:
         return "?"
     n = int(str(n).strip())
     if n >= 1024 * 1024 and n % (1024 * 1024) == 0:
         return f"{n // (1024 * 1024)}M"
+    if n >= 1000000 and n % 1000000 == 0:
+        return f"{n // 1000000}M"
+    if n >= 100000 and n % 1000 == 0:
+        return f"{n // 1000}K"
     if n >= 1024 and n % 1024 == 0:
         return f"{n // 1024}K"
     return str(n)

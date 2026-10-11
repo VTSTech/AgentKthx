@@ -558,7 +558,7 @@ def cmd_models(args: argparse.Namespace) -> int:
     print(
         f"{dim('Think:')} {bright_green('✓ yes')} (reasoning model) | {dim('✗ no')} | {dim('? unknown')}"
     )
-    print(f"{dim('Context:')} Max context window from model API")
+    print(f"{dim('Context:')} Max context window (model API data, family-known window, or 128K default)")
     print(
         f"{dim('Single capability check per model (API-mode-independent); none falls back to react.')}"
     )

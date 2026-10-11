@@ -920,11 +920,23 @@ class OpenAICompatibleBackend(BaseBackend):
     # requires an explicit reasoning marker in the ID, never a loose
     # substring ("gpt-4o" must NOT match the o-series patterns). A miss is
     # UNKNOWN, not NO: we never claim a model can't think without evidence.
+    #
+    # R07.35: reasoning became the DEFAULT for every major family (hybrid
+    # thinking modes ship on all current flagships), so the marker list
+    # was extended from "explicit reasoning markers only" to "families
+    # whose current generation is reasoning-capable by design". Each new
+    # entry is grounded in this repo's own seed catalogs (the
+    # supports_thinking / supports_reasoning flags other backends carry)
+    # or the vendor's published spec — see the per-line comments. Old
+    # generations stay UNKNOWN: gemini-2.0, gpt-4o, claude-3-5-*, and
+    # kimi-k2 base instruct are NOT matched.
 
     #: Model-name patterns that indicate thinking / reasoning output.
-    #: Order is irrelevant; anchored regexes, matched case-insensitively.
+    #: Order is irrelevant; anchored regexes, matched case-insensitively
+    #: against the model segment (after the last ``/``).
     _THINKING_NAME_PATTERNS: tuple[str, ...] = (
         r"deepseek-r\d",  # deepseek-r1, r1-distill-llama-8b, deepseek-r1:8b
+        r"deepseek-v(3\.[1-9]|[4-9])",  # V3.1+ hybrid thinking mode (V3.2-Exp, V4)
         r"\bqwq",  # qwq-32b, Qwen/QwQ-32B
         r"\bo[134](-|$|:)",  # o1, o3, o4-mini, o3-preview (word-boundary)
         r"glm-[45]\.\d",  # glm-4.5 / glm-4.6 / glm-4.7 hybrid-thinking family
@@ -934,6 +946,16 @@ class OpenAICompatibleBackend(BaseBackend):
         r"reason",  # reasoning, reasoning-mini, phi-4-reasoning
         r"magistral",  # Mistral's reasoning family
         r"exaone-deep",  # LG's reasoning family
+        # ── R07.35: current-generation families (reasoning by design) ──
+        r"claude-(opus|sonnet|haiku|fable)-[4-9]",  # Claude 4/5+ extended thinking (seed: pollinations claude-sonnet-4.6 supports_thinking)
+        r"claude-3-7",  # Claude 3.7 Sonnet — first extended-thinking release
+        r"gpt-[5-9]",  # GPT-5/6+ reasoning-first lineup (gpt-4o NOT matched)
+        r"gpt-oss",  # OpenAI open-weight reasoning models (gpt-oss-20b/120b)
+        r"gemini-(2\.5|[3-9])",  # Gemini 2.5+ thinking built-in (gemini-2.0 NOT matched)
+        r"grok-[4-9]",  # Grok 4+ reasoning-first (grok-4.5/4.6/4.7)
+        r"kimi-k(2\.[5-9]|[3-9])",  # Kimi K2.5+/K3 reasoning (kimi-k2 base instruct NOT matched — use ...-thinking)
+        r"mimo",  # Xiaomi MiMo reasoning family
+        r"mistral-large",  # Mistral Large (seed: mistral-large-latest supports_reasoning=True)
     )
 
     @classmethod
@@ -968,6 +990,14 @@ class OpenAICompatibleBackend(BaseBackend):
         Never NO: absence of a marker is not evidence of absence (a
         provider can ship a reasoning model under any name). Verdicts are
         cached under the ``thinking:<model>`` key.
+
+        R07.35: the marker list grew into current-generation family
+        detection — reasoning is now the default for every major flagship
+        family (Claude 3.7+/4+/5+, GPT-5/6, Gemini 2.5+/3+, Grok 4+,
+        DeepSeek V3.1+/V4, Kimi K2.5+/K3, MiMo, Mistral Large), grounded
+        in the sibling backends' seed ``supports_thinking`` flags. Older
+        generations (gpt-4o, gemini-2.0, claude-3-5-*, kimi-k2 base) are
+        deliberately NOT matched and stay UNKNOWN.
 
         OllamaBackend overrides this with the authoritative /api/tags
         capabilities verdict (``thinking`` in capabilities), so the

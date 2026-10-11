@@ -253,6 +253,58 @@ class CloudBackend(OpenAICompatibleBackend):
     _DEFAULT_CONTEXT_FALLBACK: int = 128000
 
     # ─────────────────────────────────────────────────────────────────────
+    # R07.35: family-level context-window knowledge
+    # ─────────────────────────────────────────────────────────────────────
+    # Backends whose /v1/models schema is undocumented (TokenHarbor) or
+    # whose catalog omits context_length have no per-model window data —
+    # every model used to fall straight to ``_DEFAULT_CONTEXT_FALLBACK``,
+    # so ``agentkthx models`` showed the same 125K (128000) for a 200K
+    # Claude and a 1M Gemini alike. This table (the context twin of
+    # OpenAICompatibleBackend._THINKING_NAME_PATTERNS) maps well-known
+    # model families to their published context windows, consulted AFTER
+    # exact catalog/live data and BEFORE the generic fallback.
+    #
+    # Grounding: every entry cross-references a sibling backend's seed
+    # catalog in agentkthx/data/model_seed.json (the same model ids under
+    # other gateways carry verified context_length values) or the vendor's
+    # published spec. Ordered most-specific first (Pro tier before
+    # mainline, Max tier before family default); matched against the model
+    # SEGMENT after the last ``/`` (same vendor-bleed protection as the
+    # thinking patterns). A model that matches nothing gets the generic
+    # fallback — the table never invents a window for unknown families.
+    _FAMILY_CONTEXT_PATTERNS: tuple[tuple[str, int], ...] = (
+        # Gemini Pro tier → 2M (gemini seed: 2.5-pro / 3.1-pro-preview)
+        (r"gemini-[23][\w.-]*pro", 2097152),
+        # Gemini mainline / flash → 1M (gemini seed: 2.5-flash … 3.8-flash)
+        (r"gemini-(2\.5|[3-9])", 1048576),
+        # GLM 5.2+ → 1M (zai seed: glm-5.2 / glm-5.3)
+        (r"glm-5\.[2-9]", 1048576),
+        # GLM 4.5 → 5.1 → 200K (zai seed: 204800)
+        (r"glm-[45]", 204800),
+        # GPT-6+ → 400K (openai seed: gpt-6-astra / gpt-6-sol)
+        (r"gpt-[6-9]", 400000),
+        # GPT-5.x → 200K (openai seed: gpt-5 … gpt-5.6)
+        (r"gpt-5", 200000),
+        # Claude → 200K (pollinations/ddg seeds: sonnet-4.6, haiku-4.5)
+        (r"claude-(opus|sonnet|haiku|fable)", 200000),
+        # Grok 4+ → 256K (xAI published spec)
+        (r"grok-[4-9]", 256000),
+        # Mistral Large → 256K (mistral seed: mistral-large-3 = 262144)
+        (r"mistral-large", 262144),
+        # Magistral → 128K (mistral seed: magistral-* = 131072)
+        (r"magistral", 131072),
+        # Kimi K2/K3 → 128K (nvidia seed: kimi-k2.6 / kimi-k3 = 131072)
+        (r"kimi-k[23]", 131072),
+        # Qwen3 Max tier → 256K (Qwen3-Max published spec)
+        (r"qwen3[\w.-]*max", 262144),
+        # Qwen3 mainline → 128K (pollinations seed: qwen3.8-flash = 128000)
+        (r"qwen3", 128000),
+        # DeepSeek V3.1+/V4 → 128K (nvidia seed: deepseek-v4.1-flash = 131072;
+        # V3.0 stays unmatched — the HF seed pins it at 65536)
+        (r"deepseek-v(3\.[1-9]|[4-9])", 131072),
+    )
+
+    # ─────────────────────────────────────────────────────────────────────
     # __init__ — shared cloud-backend initialization
     # ─────────────────────────────────────────────────────────────────────
 
@@ -1297,28 +1349,49 @@ class CloudBackend(OpenAICompatibleBackend):
     # trained context (no separate runtime context like Ollama's
     # Modelfile ``num_ctx``). The catalog lookup falls back to 128K
     # (a safe default for modern cloud chat models).
+    #
+    # R07.35: the fallback became a 4-step ladder. Previously step 2 was
+    # ``self.get_model_info(model)`` — the SAME static catalog as step 1,
+    # but with the 128000 default STAMPED into every entry's
+    # ``details.context_length`` — so a catalog entry without its own
+    # context_length short-circuited to 128000 and the family-knowledge
+    # layer (added below) could never fire. The old step 2 also claimed
+    # (in its comment) to read "the live model cache" while actually
+    # re-reading the static catalog. It now really consults the in-process
+    # live catalog that ``list_models()`` populated, then the family
+    # table, then the generic default.
 
     def get_model_max_context(self, model: str, family: str | None = None) -> int:
         """Return the model's maximum trained context window size.
 
-        For cloud backends, this is the ``context_length`` field from the
-        static ``MODELS`` catalog. The ``family`` argument is ignored for
-        cloud backends (the catalog is authoritative per-model, not
-        per-family). Falls back to 128000 (128K) if the model is not in
-        the catalog — a safe default for modern cloud chat models.
+        R07.35 resolution ladder (first hit wins):
 
-        Cloud backends don't have Ollama's ``/api/show`` endpoint, so we
-        can't probe the model's actual context window at runtime. The
-        catalog is the source of truth.
+        1. Static catalog — ``MODELS[model].context_length`` when the
+           entry carries an explicit positive value (exact data beats
+           everything).
+        2. Live in-process catalog — the entry ``list_models()`` stored
+           on ``self._model_cache`` (populated by a live ``/v1/models``
+           fetch or the persistent cache). Only a REAL value counts:
+           entries whose context_length is absent, junk, or the legacy
+           stamped-in ``_DEFAULT_CONTEXT_FALLBACK`` are skipped, so a
+           pre-R07.35 cached catalog self-heals through the family layer
+           without requiring a ``--refresh`` first.
+        3. Family knowledge — ``_family_context_guess()`` maps the model
+           name onto its family's published window (Claude 200K, GPT-6
+           400K, Gemini 1M/2M, …).
+        4. Generic fallback — ``_DEFAULT_CONTEXT_FALLBACK`` (128000).
+
+        The ``family`` argument is ignored for cloud backends (the
+        resolution is per-model, not per-family).
 
         Args:
             model: Model name (provider prefix stripped automatically).
-            family: Ignored for cloud backends (catalog is per-model).
+            family: Ignored for cloud backends.
 
         Returns:
             Maximum context window size in tokens (default: 128000).
         """
-        # Try the static catalog first (CloudBackend.MODELS)
+        # 1. Static catalog — exact value only (no default stamping)
         model_key = self._catalog_model_key(model)
         meta = self.MODELS.get(model_key, {})
         if meta:
@@ -1326,20 +1399,62 @@ class CloudBackend(OpenAICompatibleBackend):
             if ctx and isinstance(ctx, int) and ctx > 0:
                 return ctx
 
-        # Try the live model cache (populated by list_models() for
-        # backends like OrcaRouter that query /v1/models at runtime)
-        info = self.get_model_info(model)
-        if info and "details" in info:
-            ctx = info["details"].get("context_length")
-            if ctx and isinstance(ctx, int) and ctx > 0:
-                return ctx
+        # 2. Live in-process catalog (list_models entries). getattr, not
+        #    a hard attribute: CloudBackend itself does not define
+        #    _model_cache — concrete backends (TokenHarbor, OrcaRouter,
+        #    Mistral, …) own the field and the 1-hour TTL.
+        live_entries = getattr(self, "_model_cache", None)
+        if isinstance(live_entries, (list, tuple)):
+            for entry in live_entries:
+                if not isinstance(entry, dict):
+                    continue
+                if entry.get("name") in (model, model_key):
+                    details = entry.get("details") or {}
+                    ctx = details.get("context_length")
+                    # The != fallback check skips legacy entries the old
+                    # code stamped 128000 into — that value carried no
+                    # information, and honoring it here would shadow the
+                    # family layer below.
+                    if (
+                        isinstance(ctx, int)
+                        and ctx > 0
+                        and ctx != self._DEFAULT_CONTEXT_FALLBACK
+                    ):
+                        return ctx
+                    break
 
-        # Safe fallback — 128K is the minimum for modern cloud chat models
+        # 3. Family knowledge (R07.35) — published windows for well-known
+        #    families; None when nothing matches.
+        ctx = self._family_context_guess(model)
+        if ctx:
+            return ctx
+
+        # 4. Safe fallback — 128K is the minimum for modern cloud chat models
         # (GPT-4o-mini, Claude Haiku, Gemini Flash, GLM-4-Flash all support
         # at least 128K). Older models that support less will trigger the
         # _handle_context_length_400 recovery on first request.
         # MAINT-12 (R07.07): use class attribute so subclasses can override.
         return self._DEFAULT_CONTEXT_FALLBACK
+
+    @classmethod
+    def _family_context_guess(cls, model: str) -> int | None:
+        """Family-published context window for a model name, or None.
+
+        R07.35: matched against the model SEGMENT (after the last ``/``)
+        with the same vendor-bleed protection as
+        ``_name_matches_thinking`` — ``acme/claude-sonnet-5`` resolves via
+        the claude pattern, ``claudefans/mistral-large`` does not leak a
+        Claude verdict onto Mistral. First match wins (the table is
+        ordered most-specific first), unknown families return None so the
+        caller falls through to the generic default.
+        """
+        import re
+
+        segment = (model or "").split("/")[-1].lower()
+        for pattern, ctx in cls._FAMILY_CONTEXT_PATTERNS:
+            if re.search(pattern, segment):
+                return ctx
+        return None
 
     def get_model_runtime_context(self, model: str) -> int:
         """Return the runtime context window size for a model.
