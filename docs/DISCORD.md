@@ -139,6 +139,27 @@ Sessions: `discord-g{guild}-c{channel}[-r{run}]` in guilds,
 any CLI session. See **Conversation history** above for the fresh-on-restart
 default and `--keep`.
 
+### The built-in Discord prompt
+
+With no soul configured, every Discord run uses the plugin's own identity
+instead of the stock one-liner:
+
+> You are AGI AgentKthx — an autonomous agent bringing **Agentic Reasoning to
+> Discord**. … Tools: the agent runtime fully supports tools, but tools are
+> **DISABLED by default** on Discord — most channels run tool-free. Unless
+> tool instructions follow this prompt, answer from your own knowledge and
+> never claim you looked something up, ran a command, or can act outside
+> this chat. The bot's operator can enable tools per channel at any time.
+
+- **No host details**: the CLI's host-environment probe (OS/kernel/shell
+  section) is skipped on Discord — the shell tool is excluded there
+  unconditionally anyway, so it is dead weight in a chat prompt.
+- When a channel opts into tools, the standard tool section and ReAct/native
+  instructions are appended to this identity automatically — the prompt stays
+  truthful either way.
+- A configured soul (`--soul`, `DISCORD_SOUL`, `discord.json`, `/soul`)
+  replaces this identity entirely (souls carry their own).
+
 ## 5. Slash commands (M2)
 
 Register once with `agentkthx discord --register-commands` (global; needs the
@@ -155,6 +176,36 @@ token, app id auto-resolves). Every interaction is ACKed within 3 seconds
 | `/status` | allowlisted | Backend, model, soul, tools, uptime, queue depth, run counters |
 
 Non-owners get an ephemeral "insufficient permission" on `/model`/`/soul` sets.
+
+### Text commands (no registration needed)
+
+Every command above also works typed as plain message text — this is what
+happens when you send `@AgentKthx /status` as a regular message (Discord only
+fires real interactions for picker invocations):
+
+```text
+@AgentKthx /status
+@AgentKthx /think why is the sky blue?
+@AgentKthx /model qwen3:8b        (owner)
+/reset                            (DM — no @ needed)
+```
+
+- Quick commands (`/status` `/reset` `/model` `/soul`) answer in-channel on
+  the spot — no cooldown (same as native quick interactions).
+- `/ask` + `/think` run the full agent pipeline: cooldown, sessions, chunking.
+- Case-insensitive; a leading `/` that is NOT one of the six commands
+  (`/usr/bin/env`, `/shrug`, typos) goes to the agent as a normal prompt.
+- Ephemeral replies are a native-interaction feature only; text forms answer
+  in-channel.
+
+The startup banner reports the native registration state so the picker's
+behavior is never a mystery:
+
+```text
+[discord] slash: 6 global command(s) registered (native / picker + @bot /command text both live)
+[discord] slash: NOT registered — the native / picker will not list commands. Run
+          'agentkthx discord --register-commands' once; @bot /command text forms work either way
+```
 
 ## 6. Run cookbook
 
@@ -190,7 +241,7 @@ User=youruser   # ~/.agentkthx/.env is 0600 — run as the owner
 | `(incomplete — maximum steps reached)` | Step budget exhausted — only possible when tools were opted in (each tool round burns a step) | Tools are off by default now; if you enabled them, raise `DISCORD_MAX_STEPS` or drop them again. Note Discord has its own `DISCORD_MAX_STEPS` (default 5) — the CLI max-steps setting does not apply |
 | Replies vague or backend misbehaving | Need visibility | Run with `--debug` (or `DISCORD_DEBUG=true`) — backend prompts/responses/errors are echoed; check `/status` for the effective model |
 | Bot "forgot" the conversation | Fresh-sessions default (R07.33): every restart starts new conversations | Expected — run with `--keep` (or `DISCORD_KEEP_SESSIONS=true`) to resume history across restarts; `/reset` clears the current conversation either way |
-| Slash commands missing | Never registered | `agentkthx discord --register-commands`, restart the client |
+| Slash commands missing | Never registered | `agentkthx discord --register-commands`, restart the client — the startup banner reports `slash: NOT registered` when so; `@bot /command` text forms work either way |
 | `insufficient permission` on `/model` | Not in `DISCORD_OWNER_IDS` | Add your user ID |
 | 429 rate-limit loop | Discord REST bucket | Handled internally (single retry + global pause); slow down bulk tests |
 

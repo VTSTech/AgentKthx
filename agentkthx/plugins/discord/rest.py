@@ -214,6 +214,13 @@ class DiscordRest:
         data = self._request("GET", "/oauth2/applications/@me")
         return data or {}
 
+    def list_commands(self, app_id: str) -> list:
+        """GET /applications/{app_id}/commands — currently registered global
+        slash commands (startup status check: tells the operator whether the
+        native / picker has commands at all)."""
+        data = self._request("GET", f"/applications/{app_id}/commands")
+        return data or []
+
     def register_commands(
         self, app_id: str, commands: list[dict], guild_id: str | None = None
     ) -> list:

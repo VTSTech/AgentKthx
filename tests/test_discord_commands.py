@@ -33,6 +33,7 @@ from agentkthx.plugins.discord.commands import (  # noqa: E402
     handle_status,
     is_owner,
     parse_interaction,
+    parse_text_command,
 )
 from agentkthx.plugins.discord.discord_bot import (  # noqa: E402
     BotConfig,
@@ -539,6 +540,178 @@ class TestSubmitInteractionWiring:
         assert pool._owners == [USER]
         pool2, _ = make_pool(owner_ids=["111"])
         assert pool2._owners == ["111"]
+
+
+# ---------------------------------------------------------------------------
+# Text commands (R07.33): "/status" typed as plain message text.
+# Discord delivers @bot /command as an ordinary MESSAGE_CREATE — no
+# interaction — so the pool must parse it before the agent sees it.
+# ---------------------------------------------------------------------------
+
+TEXT_BOT = "999000111222333444"  # make_pool's policy bot_user_id
+
+
+def make_text_ev(content, message_id="m1", **kw):
+    from agentkthx.plugins.discord.policy import MessageContext
+
+    base = dict(
+        message_id=message_id,
+        channel_id=CHANNEL,
+        guild_id=GUILD,
+        user_id=USER,
+        username="vtstech",
+        content=content,
+        mentions=(TEXT_BOT,),
+    )
+    base.update(kw)
+    return MessageContext(**base)
+
+
+def flush_text_commands(pool):
+    """Wait for the single interaction thread to finish queued quick commands."""
+    pool._inter_executor.shutdown(wait=True)
+
+
+class TestParseTextCommand:
+    def test_all_six_bare(self):
+        assert parse_text_command("/status") == ("status", {})
+        assert parse_text_command("/reset") == ("reset", {})
+        assert parse_text_command("/model") == ("model", {})
+        assert parse_text_command("/soul") == ("soul", {})
+        assert parse_text_command("/ask") == ("ask", {"prompt": ""})
+        assert parse_text_command("/think") == ("think", {"prompt": ""})
+
+    def test_ask_carries_prompt(self):
+        assert parse_text_command("/ask hi there") == ("ask", {"prompt": "hi there"})
+
+    def test_think_multiword_prompt(self):
+        got = parse_text_command("/think why is the sky blue?")
+        assert got == ("think", {"prompt": "why is the sky blue?"})
+
+    def test_model_and_soul_carry_name(self):
+        assert parse_text_command("/model qwen3:8b") == ("model", {"name": "qwen3:8b"})
+        assert parse_text_command("/soul kthx-helper") == ("soul", {"name": "kthx-helper"})
+
+    def test_case_insensitive(self):
+        assert parse_text_command("/STATUS") == ("status", {})
+        assert parse_text_command("/Ask hi") == ("ask", {"prompt": "hi"})
+
+    def test_surrounding_whitespace_tolerated(self):
+        assert parse_text_command("  /status  ") == ("status", {})
+
+    def test_unknown_slash_left_for_agent(self):
+        # paths, shrug, typos — anything not naming a registered command
+        assert parse_text_command("/usr/bin/env python") is None
+        assert parse_text_command("/shrug") is None
+        assert parse_text_command("/statusx") is None
+        assert parse_text_command("/frobnicate now") is None
+
+    def test_not_starting_with_slash(self):
+        assert parse_text_command("hello /status") is None
+        assert parse_text_command("") is None
+        assert parse_text_command("/") is None
+        assert parse_text_command(None) is None
+
+
+class TestTextCommandWiring:
+    def test_status_replies_in_channel_not_queue(self):
+        pool, rest = make_pool()
+        pool.submit_event(make_text_ev(f"<@{TEXT_BOT}> /status"))
+        flush_text_commands(pool)
+        (channel, content), *_ = rest.sent
+        assert channel == CHANNEL
+        assert "AgentKthx status" in content
+        assert pool._queue.empty()  # nothing reached the agent pipeline
+
+    def test_reset_text_clears_stamped_session(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(
+            PersistentMemory,
+            "delete_session",
+            staticmethod(lambda session_id, db_path=None: calls.append(session_id) or True),
+        )
+        pool, rest = make_pool(run_stamp="1700000000")
+        pool.submit_event(make_text_ev(f"<@{TEXT_BOT}> /reset"))
+        flush_text_commands(pool)
+        assert calls == [f"discord-g{GUILD}-c{CHANNEL}-r1700000000"]
+        assert any("cleared" in c for _, c in rest.sent)
+
+    def test_model_owner_sets_runtime_override(self):
+        pool, rest = make_pool()
+        pool.submit_event(make_text_ev(f"<@{TEXT_BOT}> /model qwen3:8b"))
+        flush_text_commands(pool)
+        assert any("qwen3:8b" in c for _, c in rest.sent)
+        assert pool._channel_cfg(CHANNEL).model == "qwen3:8b"
+
+    def test_model_non_owner_denied(self):
+        # passes the message gate (allow_users) but is not in owner_ids
+        pool, rest = make_pool(owner_ids=["999"])
+        pool.submit_event(make_text_ev(f"<@{TEXT_BOT}> /model m2"))
+        flush_text_commands(pool)
+        assert any("owners" in c for _, c in rest.sent)
+        assert CHANNEL not in pool._channel_overrides
+
+    def test_ask_enqueues_regular_job(self):
+        pool, rest = make_pool(run_stamp="1700000000")
+        pool.submit_event(make_text_ev(f"<@{TEXT_BOT}> /ask hi there"))
+        job = pool._queue.get_nowait()
+        assert job.prompt == "hi there"
+        assert job.want_think is False
+        assert job.interaction is None  # replies go through normal channel sends
+        assert job.ev.message_id == "m1"
+        assert job.session_key == f"discord-g{GUILD}-c{CHANNEL}-r1700000000"
+        assert rest.sent == []
+
+    def test_think_marks_want_think(self):
+        pool, _ = make_pool()
+        pool.submit_event(make_text_ev(f"<@{TEXT_BOT}> /think why"))
+        assert pool._queue.get_nowait().want_think is True
+
+    def test_ask_empty_prompt_noticed(self):
+        pool, rest = make_pool()
+        pool.submit_event(make_text_ev(f"<@{TEXT_BOT}> /ask"))
+        flush_text_commands(pool)
+        assert any("Prompt is empty" in c for _, c in rest.sent)
+        assert pool._queue.empty()
+
+    def test_unknown_slash_is_a_normal_job(self):
+        pool, _ = make_pool()
+        pool.submit_event(make_text_ev(f"<@{TEXT_BOT}> /nope what"))
+        job = pool._queue.get_nowait()
+        assert job.prompt == "/nope what"
+
+    def test_path_slash_is_a_normal_job(self):
+        pool, _ = make_pool()
+        pool.submit_event(make_text_ev(f"<@{TEXT_BOT}> /usr/bin/env"))
+        assert pool._queue.get_nowait().prompt == "/usr/bin/env"
+
+    def test_quick_commands_bypass_cooldown(self):
+        """Parity with native quick interactions: two /status back-to-back
+        both answer (the per-user cooldown only gates agent runs)."""
+        pool, rest = make_pool()
+        pool.submit_event(make_text_ev(f"<@{TEXT_BOT}> /status", message_id="m1"))
+        pool.submit_event(make_text_ev(f"<@{TEXT_BOT}> /status", message_id="m2"))
+        flush_text_commands(pool)
+        assert len(rest.sent) == 2
+
+    def test_dry_run_prints_and_sends_nothing(self, capsys):
+        pool, rest = make_pool(dry_run=True)
+        pool.submit_event(make_text_ev(f"<@{TEXT_BOT}> /status"))
+        flush_text_commands(pool)
+        assert "DRY-RUN would run /status" in capsys.readouterr().out
+        assert rest.sent == []
+
+    def test_dm_text_command_allowed_with_dms(self):
+        pool, rest = make_pool(allow_dms=True, run_stamp="1700000000")
+        pool.submit_event(
+            make_text_ev(
+                "/status", message_id="m3", guild_id=None, channel_id=DM_CHANNEL, is_dm=True
+            )
+        )
+        flush_text_commands(pool)
+        (channel, content), *_ = rest.sent
+        assert channel == DM_CHANNEL
+        assert "AgentKthx status" in content
 
 
 def make_ev_placeholder():

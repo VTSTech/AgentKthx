@@ -13,6 +13,18 @@ ACKs (type 4 direct or type 5 defer) -> /ask //think enqueue regular jobs
 answered via webhook followups; quick commands answer in the callback.
 /model + /soul are owner-gated and apply per-channel runtime overrides.
 
+Text commands (R07.33): the same six commands also work as plain message
+text — `@AgentKthx /status`, `@AgentKthx /think why ...`, `/reset` in a DM —
+so the bot responds even when the native / picker was never registered.
+Discord only dispatches real interactions for picker invocations; typed
+`/command` text arrives as an ordinary MESSAGE_CREATE and is parsed here.
+
+Discord identity prompt (R07.33): with no soul configured, runs are built
+with `identity_prompt=DISCORD_IDENTITY_PROMPT` (AGI AgentKthx — bringing
+Agentic Reasoning to Discord; tools supported but disabled by default) and
+`env_section=False` — no host details in the prompt. A configured soul
+(--soul / DISCORD_SOUL / discord.json / /soul) replaces the identity.
+
 Safety posture (plan §12): deny-by-default allowlists, per-user cooldowns,
 **no tools by default** (opt in via DISCORD_TOOLS / --tools / channel
 override; shell/python_repl always excluded), `confirm_dangerous` denies
@@ -60,6 +72,7 @@ from .commands import (
     handle_status,
     is_owner,
     parse_interaction,
+    parse_text_command,
 )
 from .gateway import (
     FATAL_CLOSE_CODES,
@@ -71,6 +84,7 @@ from .gateway import (
     GatewayClient,
 )
 from .policy import MessageContext, Policy, context_from_payload
+from .prompt import DISCORD_IDENTITY_PROMPT
 from .rest import DiscordRest, DiscordRestError, chunk_reply
 from .sessions import (
     ChannelConfig,
@@ -486,6 +500,24 @@ def cmd_discord(args) -> int:
     if register_now:
         print("[discord] --register-commands: done — gateway not started")
         return 0
+    # Startup visibility (R07.33): report whether native slash commands are
+    # actually registered — the #1 "slash commands do not appear" cause.
+    if app_id and not cfg.register_slash:
+        try:
+            known = rest.list_commands(app_id)
+            if known:
+                print(
+                    f"[discord] slash: {len(known)} global command(s) registered "
+                    f"(native / picker + @bot /command text both live)"
+                )
+            else:
+                print(
+                    "[discord] slash: NOT registered — the native / picker will "
+                    "not list commands. Run 'agentkthx discord --register-commands' "
+                    "once; @bot /command text forms work either way"
+                )
+        except DiscordRestError as err:
+            print(f"[discord] slash status check failed: {err}")
 
     policy = Policy(
         bot_user_id=bot_user_id,
@@ -685,6 +717,10 @@ class ResponderPool:
         if not prompt:
             print(f"[discord] ignored empty trigger {ev.message_id} (bare ping)")
             return
+        text_cmd = parse_text_command(prompt)
+        if text_cmd is not None:
+            self._submit_text_command(ev, text_cmd[0], text_cmd[1])
+            return
         if self.cfg.dry_run:
             preview = prompt[:80] + ("…" if len(prompt) > 80 else "")
             print(f"[discord] DRY-RUN would answer {ev.username}: {preview!r}")
@@ -797,6 +833,80 @@ class ResponderPool:
             )
         except DiscordRestError as err:
             print(f"[discord] interaction followup failed: {err}")
+
+    # -- text commands (R07.33): "/status" typed as a plain message -----------
+
+    _TEXT_QUICK_HANDLERS = {
+        "reset": "_run_reset",
+        "status": "_run_status",
+        "model": "_run_model",
+        "soul": "_run_soul",
+    }
+
+    def _submit_text_command(self, ev: MessageContext, name: str, options: dict) -> None:
+        """Route a text-typed command through the same handlers as native
+        interactions. /ask + /think enqueue regular jobs (cooldown, sessions
+        and chunking all apply); quick commands run on the interaction thread
+        and reply in-channel — there is no interaction webhook to ACK."""
+        if self.cfg.dry_run:
+            suffix = f" {options}" if options else ""
+            print(f"[discord] DRY-RUN would run /{name}{suffix} for {ev.username}")
+            return
+        inter = Interaction(
+            interaction_id=f"text-{ev.message_id}",
+            token="",  # never used — text commands reply via send_message
+            app_id="",
+            guild_id=ev.guild_id,
+            channel_id=ev.channel_id,
+            user_id=ev.user_id,
+            username=ev.username,
+            command=name,
+            options=options,
+        )
+        if name in ("ask", "think"):
+            prompt = self.policy.sanitize_prompt(options.get("prompt", ""))
+            if not prompt:
+                self._send_command_reply(ev.channel_id, "Prompt is empty.")
+                return
+            base_key = session_key_for(ev.guild_id, ev.channel_id, ev.user_id)
+            ch_cfg = self._channel_cfg(ev.channel_id)
+            job = Job(
+                ev=ev,
+                prompt=prompt,
+                session_key=self._session_key(base_key, ch_cfg),
+                ch_cfg=ch_cfg,
+                want_think=(name == "think"),
+            )
+            try:
+                self._queue.put_nowait(job)
+            except queue.Full:
+                self._send_command_reply(ev.channel_id, "Queue is full — try again in a moment.")
+                print(f"[discord] queue full, dropped text /{name} from {ev.username}")
+            return
+        handler = getattr(self, self._TEXT_QUICK_HANDLERS[name])
+        self._inter_executor.submit(self._text_quick, inter, handler)
+
+    def _text_quick(self, inter: Interaction, handler) -> None:
+        """Run a quick command and answer in-channel (ephemeral is not
+        possible for plain messages — the flag is intentionally ignored)."""
+        try:
+            content, _ephemeral = handler(inter)
+            self._send_command_reply(inter.channel_id, content)
+        except Exception as err:  # noqa: BLE001 - never kill the executor thread
+            print(f"[discord] text /{inter.command} failed: {type(err).__name__}: {err}")
+            self._send_command_reply(inter.channel_id, f"Command failed: {type(err).__name__}")
+
+    def _send_command_reply(self, channel_id: str, content: str) -> None:
+        """Channel message for text-command answers (no rate guard — these
+        are instant lookups, mirroring native interactions which bypass the
+        cooldown too)."""
+        if self.cfg.dry_run:
+            print(f"[discord] DRY-RUN notice would send: {content!r}")
+            return
+        try:
+            self.rest.send_message(channel_id, content[:1900])
+        except DiscordRestError as err:
+            print(f"[discord] text command reply failed: {err}")
 
     def _run_reset(self, inter: Interaction) -> tuple[str, bool]:
         from agentkthx.core.persistent_memory import PersistentMemory  # lazy
@@ -965,6 +1075,13 @@ class ResponderPool:
             tools=tool_list,
             soul=soul,
             soul_level=2,
+            # Discord's own identity (R07.33): replaces the stock no-soul
+            # one-liner; a configured soul wins. The core still appends the
+            # standard tool section when a channel opts into tools.
+            identity_prompt=DISCORD_IDENTITY_PROMPT,
+            # No host details in the Discord prompt (shell is excluded on
+            # Discord unconditionally, so the OS/shell section is dead weight).
+            env_section=False,
             session_id=job.session_key,
             max_steps=self.cfg.max_steps,
             num_ctx=num_ctx,

@@ -29,6 +29,7 @@ from agentkthx.plugins.discord.discord_bot import (  # noqa: E402
     _deny_dangerous,
 )
 from agentkthx.plugins.discord.policy import MessageContext, Policy  # noqa: E402
+from agentkthx.plugins.discord.prompt import DISCORD_IDENTITY_PROMPT  # noqa: E402
 from agentkthx.plugins.discord.rest import DiscordRestError  # noqa: E402
 from agentkthx.plugins.discord.sessions import (  # noqa: E402
     DEFAULT_SESSION_TTL_DAYS,
@@ -613,6 +614,9 @@ class TestBuildAgent:
         assert kw["session_id"] == f"discord-g{GUILD}-c{CHANNEL}"
         assert kw["max_steps"] == 5
         assert kw["confirm_dangerous"] is _deny_dangerous
+        # R07.33: Discord's own identity + no host details
+        assert kw["identity_prompt"] == DISCORD_IDENTITY_PROMPT
+        assert kw["env_section"] is False
 
     def test_channel_soul_override(self, monkeypatch, tmp_path):
         monkeypatch.setattr("agentkthx.agent.Agent", AgentCapture)

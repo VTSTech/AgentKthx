@@ -137,6 +137,35 @@ SLASH_COMMANDS = [
 COMMAND_NAMES = frozenset(c["name"] for c in SLASH_COMMANDS)
 
 
+def parse_text_command(text: str) -> tuple[str, dict[str, str]] | None:
+    """Detect a slash command typed as plain message text (``@bot /status``).
+
+    Discord delivers those as ordinary MESSAGE_CREATE payloads — no
+    INTERACTION_CREATE ever fires — so without this parser the command text
+    would reach the LLM as a normal prompt. Matches ``/<name>`` where name is
+    one of the six registered commands (case-insensitive), followed by
+    end-of-string or whitespace. Returns ``(command_name, options)`` or None
+    — a leading '/' that does NOT name a known command (paths, /shrug, typo'd
+    commands) is left untouched for the agent.
+    """
+    text = (text or "").strip()
+    if not text.startswith("/"):
+        return None
+    parts = text[1:].split(None, 1)
+    if not parts:
+        return None
+    name = parts[0].lower()
+    if name not in COMMAND_NAMES:
+        return None
+    rest = (parts[1] if len(parts) > 1 else "").strip()
+    options: dict[str, str] = {}
+    if name in ("ask", "think"):
+        options["prompt"] = rest
+    elif name in ("model", "soul") and rest:
+        options["name"] = rest
+    return name, options
+
+
 def gate_interaction(
     inter: Interaction,
     *,

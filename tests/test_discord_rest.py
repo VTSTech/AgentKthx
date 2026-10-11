@@ -312,3 +312,18 @@ class TestDiscordRest:
         assert calls[0]["path"] == "/webhooks/app1/tok"
         assert json.loads(calls[0]["body"]) == {"content": "hi", "flags": 64}
         assert "authorization" not in calls[0]["headers"]
+
+    def test_list_commands_get(self, rest_factory):
+        def responder(call, n):
+            return (
+                200,
+                json.dumps([{"id": "c1", "name": "ask"}, {"id": "c2", "name": "ask2"}]).encode(),
+                {},
+            )
+
+        rest, calls = rest_factory(responder)
+        out = rest.list_commands("app1")
+        assert [c["name"] for c in out] == ["ask", "ask2"]
+        assert calls[0]["method"] == "GET"
+        assert calls[0]["path"] == "/applications/app1/commands"
+        assert calls[0]["headers"]["authorization"] == f"Bot {TOKEN}"

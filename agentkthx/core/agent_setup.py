@@ -111,6 +111,19 @@ class AgentSetupMixin:
         force_react: bool = False,
         # Skills injection
         skills_prompt: str | None = None,
+        # R07.33: identity text for the no-soul default prompt. Replaces the
+        # stock "You are AGI AgentKthx." one-liner while keeping the standard
+        # tool machinery (native/ReAct decision + tool section) — surfaces
+        # like the Discord bot ship their own identity without losing tool
+        # instructions when a channel opts into tools. Ignored by the BitNet
+        # lean prompt (its <500-char crash budget leaves no room) and by an
+        # explicitly configured soul (souls carry their own identity).
+        identity_prompt: str | None = None,
+        # R07.33: False skips the host-environment probe section (# Host
+        # Environment / OS / shell note) — chat surfaces that never expose
+        # the shell tool (Discord excludes it unconditionally) should not
+        # leak host details into the prompt.
+        env_section: bool = True,
         # Retry-with-error-feedback
         retry_on_error: bool = DEFAULT_RETRY_ON_ERROR,
         max_tool_retries: int = DEFAULT_MAX_TOOL_RETRIES,
@@ -175,6 +188,14 @@ class AgentSetupMixin:
                 tool_calls first, ReAct text fallback. CLI surface:
                 --force-react flag or AGENTKTHX_FORCE_REACT=1 (shared_args).
             skills_prompt: Optional skill instructions to append to the system prompt
+            identity_prompt: Optional identity text replacing the stock no-soul
+                default prompt ("You are AGI AgentKthx. Answer questions directly
+                and accurately."). Tool instructions still apply when tools are
+                attached; ignored by the BitNet lean prompt and by a configured
+                soul. Default None keeps the stock prompt.
+            env_section: Append the host-environment probe section (OS/kernel/
+                shell syntax) to the system prompt. Default True; set False for
+                chat surfaces without the shell tool (e.g. Discord).
             retry_on_error: Whether to retry failed tool calls with error feedback (default: True)
             max_tool_retries: Maximum retries per tool call failure (default: 2)
             max_api_retries: Consecutive transient API failures tolerated per step
@@ -516,6 +537,10 @@ class AgentSetupMixin:
 
         self.model_family = detect_family(model)
 
+        # R07.33: identity override + host-environment toggle (see signature).
+        self._identity_prompt = identity_prompt
+        self._env_section = bool(env_section)
+
         # Load Soul Spec package (default: kthx-helper)
         self.soul = None
         # R07.19: remember the disclosure level so the /soul slash command
@@ -608,7 +633,11 @@ class AgentSetupMixin:
         # prompt paths (custom / soul / default) so every session carries it.
         # Best-effort: the probe is fail-safe and returns "" on any error, and
         # AGENTKTHX_NO_ENV_PROBE=1 opts out entirely.
-        env_section = build_environment_section(is_bitnet=self._is_bitnet, debug=self.debug)
+        env_section = (
+            build_environment_section(is_bitnet=self._is_bitnet, debug=self.debug)
+            if self._env_section
+            else ""
+        )
         if env_section:
             self._custom_system_prompt = f"{self._custom_system_prompt}\n\n{env_section}"
             if debug:
@@ -718,7 +747,11 @@ class AgentSetupMixin:
             prompt = f"{prompt}\n{skills_text}"
 
         # Host-environment section — same fail-safe probe as startup.
-        env_section = build_environment_section(is_bitnet=self._is_bitnet, debug=self.debug)
+        env_section = (
+            build_environment_section(is_bitnet=self._is_bitnet, debug=self.debug)
+            if self._env_section
+            else ""
+        )
         if env_section:
             prompt = f"{prompt}\n\n{env_section}"
 
@@ -770,9 +803,14 @@ class AgentSetupMixin:
         When self._is_comp_mode is True (OpenAI Chat-Completions), returns a prompt
         without ReAct format instructions — tools are passed via the API body and
         the model uses native function calling.
+
+        R07.33: ``self._identity_prompt`` (when set) replaces the stock identity
+        text in the no-tools and native/ReAct branches — the standard tool
+        machinery is untouched. The BitNet lean branch ignores it (crash budget).
         """
+        identity = getattr(self, "_identity_prompt", None)
         if not has_tools:
-            return "You are AGI AgentKthx. Answer questions directly and accurately."
+            return identity or "You are AGI AgentKthx. Answer questions directly and accurately."
 
         if self._is_bitnet:
             # Ultra-lean ReAct prompt for BitNet's degraded tokenizer.
@@ -792,18 +830,19 @@ class AgentSetupMixin:
             # OpenAI Chat-Completions mode + model supports native function calling
             # (or user explicitly opted in via --force-react=False / cloud backend).
             # Tools are in the API body — no ReAct format instructions needed.
-            return """You are AGI AgentKthx with access to tools.
+            head = identity or "You are AGI AgentKthx with access to tools."
+            return (
+                f"{head}\n\n"
+                "Use the available tools when needed. The tools are provided via "
+                "the API — call them naturally as function calls.\n\n"
+                "**CRITICAL RULES:**\n"
+                "1. Only use tools from the available tools list\n"
+                "2. Always use tools for calculations and external operations\n"
+                "3. Never make up information\n\n"
+            ) + _UNTRUSTED_TOOL_OUTPUT_INSTRUCTION
 
-Use the available tools when needed. The tools are provided via the API — call them naturally as function calls.
-
-**CRITICAL RULES:**
-1. Only use tools from the available tools list
-2. Always use tools for calculations and external operations
-3. Never make up information
-
-""" + _UNTRUSTED_TOOL_OUTPUT_INSTRUCTION
-
-        return """You are AI AgentKthx with access to tools.
+        head = identity or "You are AI AgentKthx with access to tools."
+        return f"""{head}
 
 When you need to use a tool, follow this EXACT format:
 
