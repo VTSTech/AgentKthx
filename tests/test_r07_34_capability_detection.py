@@ -1,5 +1,5 @@
 """
-R07.35 — model capability detection (context + thinking) regression tests.
+R07.34 — model capability detection (context + thinking) regression tests.
 
 Covers the owner-reported ``agentkthx models`` defects on the TokenHarbor
 catalog (69 models, all showing "125K" context and "? unknown" thinking):
@@ -21,7 +21,7 @@ catalog (69 models, all showing "125K" context and "? unknown" thinking):
 
   3. ``CloudBackend.get_model_max_context`` 4-step ladder — static
      catalog exact value → live in-process catalog entry (only REAL
-     values; the legacy stamped-in 128000 is skipped so pre-R07.35
+     values; the legacy stamped-in 128000 is skipped so pre-R07.34
      caches self-heal) → family-knowledge table → generic 128000
      fallback. The old step 2 re-read the static catalog via
      ``get_model_info()`` (which stamps 128000 into every entry),
@@ -120,7 +120,7 @@ def isolated_tool_cache(monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# 1. fmt_token_size — decimal-K/M branch (R07.35)
+# 1. fmt_token_size — decimal-K/M branch (R07.34)
 # ---------------------------------------------------------------------------
 
 
@@ -165,7 +165,7 @@ class TestFmtTokenSizeDecimal:
 
 
 # ---------------------------------------------------------------------------
-# 2. Thinking name-heuristics (R07.35 family expansion)
+# 2. Thinking name-heuristics (R07.34 family expansion)
 # ---------------------------------------------------------------------------
 
 
@@ -267,7 +267,7 @@ class TestThinkingNamePatterns:
 
 
 # ---------------------------------------------------------------------------
-# 3. Family context table + get_model_max_context ladder (R07.35)
+# 3. Family context table + get_model_max_context ladder (R07.34)
 # ---------------------------------------------------------------------------
 
 
@@ -341,7 +341,7 @@ class TestGetModelMaxContextLadder:
         assert backend.get_model_max_context("live-model") == 262144
 
     def test_step2_legacy_default_stamp_skipped(self, backend):
-        """Pre-R07.35 caches stamped 128000 into every entry — that value
+        """Pre-R07.34 caches stamped 128000 into every entry — that value
         carries no information, so the family layer decides instead
         (self-healing without --refresh)."""
         backend.MODELS = {}
@@ -351,7 +351,7 @@ class TestGetModelMaxContextLadder:
         assert backend.get_model_max_context("legacy-claude-sonnet-5") == 200000
 
     def test_step2_entry_without_context_falls_through(self, backend):
-        """R07.35-shaped entries (context omitted) fall to the family layer."""
+        """R07.34-shaped entries (context omitted) fall to the family layer."""
         backend.MODELS = {}
         backend._model_cache = [
             {"name": "claude-opus-5.5", "details": {"family": "tokenharbor"}}
@@ -385,7 +385,7 @@ class TestGetModelMaxContextLadder:
 
 
 # ---------------------------------------------------------------------------
-# 4. TokenHarbor live-catalog shaping (R07.35)
+# 4. TokenHarbor live-catalog shaping (R07.34)
 # ---------------------------------------------------------------------------
 
 

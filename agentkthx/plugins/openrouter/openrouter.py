@@ -360,7 +360,7 @@ class OpenRouterBackend(OpenAICompatibleBackend):
             },
         }
 
-        # R07.36: hoist the provider's OWN capability declaration.
+        # R07.34: hoist the provider's OWN capability declaration.
         # ``supported_parameters`` is OpenRouter's per-model list of chat
         # parameters the model/router accepts — "reasoning"/
         # "include_reasoning" → thinking output, "tools" → native function
@@ -385,9 +385,9 @@ class OpenRouterBackend(OpenAICompatibleBackend):
 
     @classmethod
     def _hoist_capability_flags(cls, entries: list[dict] | None) -> list[dict] | None:
-        """Upgrade pre-R07.36 cached catalog entries in place.
+        """Upgrade pre-R07.34 cached catalog entries in place.
 
-        Entries stored before the R07.36 parse change carry the raw
+        Entries stored before the R07.34 parse change carry the raw
         ``model_data`` payload but lack the hoisted
         ``details.supports_reasoning`` / ``details.supports_tools`` flags.
         On the L2-restore path (no live fetch) the flags are recomputed
@@ -449,7 +449,7 @@ class OpenRouterBackend(OpenAICompatibleBackend):
         cached = model_cache.get_cached_models(self.MODEL_CACHE_KEY)
         if cached is not None:
             result = self._apply_free_only(cached)
-            # R07.36: legacy cached entries self-heal their capability
+            # R07.34: legacy cached entries self-heal their capability
             # flags from the stored payload (no --refresh required).
             self._hoist_capability_flags(result)
             type(self)._model_cache = result
@@ -1014,13 +1014,13 @@ class OpenRouterBackend(OpenAICompatibleBackend):
             ToolSupportLevel.UNTESTED for non-chat slugs (ROB-39).
         """
         # ROB-39 (R07.21 CLOSED): classify non-chat slugs as UNKNOWN.
-        # R07.36: slug-WORD matching — (?<![a-z0-9]) replaces the raw
+        # R07.34: slug-WORD matching — (?<![a-z0-9]) replaces the raw
         # substring test, which misfired on contained words:
         # "thinkingmachines/inkling" contains "kling" (i-n-KLING), so a
         # chat-capable reasoning model rendered ``tools ? untested`` in
         # the models table. The lookbehind keeps every real non-chat slug
         # matching ("-tts", "/flux", start-of-id) while blocking mid-word
-        # hits. Also R07.36: after the non-chat check, a hoisted provider
+        # hits. Also R07.34: after the non-chat check, a hoisted provider
         # declaration (details.supports_tools — see _parse_openrouter_model)
         # downgrades to REACT when the provider omits "tools" from the
         # model's supported_parameters, and pins NATIVE when it lists it.

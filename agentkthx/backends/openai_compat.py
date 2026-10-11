@@ -921,7 +921,7 @@ class OpenAICompatibleBackend(BaseBackend):
     # substring ("gpt-4o" must NOT match the o-series patterns). A miss is
     # UNKNOWN, not NO: we never claim a model can't think without evidence.
     #
-    # R07.35: reasoning became the DEFAULT for every major family (hybrid
+    # R07.34: reasoning became the DEFAULT for every major family (hybrid
     # thinking modes ship on all current flagships), so the marker list
     # was extended from "explicit reasoning markers only" to "families
     # whose current generation is reasoning-capable by design". Each new
@@ -946,7 +946,7 @@ class OpenAICompatibleBackend(BaseBackend):
         r"reason",  # reasoning, reasoning-mini, phi-4-reasoning
         r"magistral",  # Mistral's reasoning family
         r"exaone-deep",  # LG's reasoning family
-        # ── R07.35: current-generation families (reasoning by design) ──
+        # ── R07.34: current-generation families (reasoning by design) ──
         r"claude-(opus|sonnet|haiku|fable)-[4-9]",  # Claude 4/5+ extended thinking (seed: pollinations claude-sonnet-4.6 supports_thinking)
         r"claude-3-7",  # Claude 3.7 Sonnet — first extended-thinking release
         r"gpt-[5-9]",  # GPT-5/6+ reasoning-first lineup (gpt-4o NOT matched)
@@ -956,7 +956,7 @@ class OpenAICompatibleBackend(BaseBackend):
         r"kimi-k(2\.[5-9]|[3-9])",  # Kimi K2.5+/K3 reasoning (kimi-k2 base instruct NOT matched — use ...-thinking)
         r"mimo",  # Xiaomi MiMo reasoning family
         r"mistral-large",  # Mistral Large (seed: mistral-large-latest supports_reasoning=True)
-        # ── R07.36: more current-generation families (owner live-run report:
+        # ── R07.34: more current-generation families (owner live-run report:
         # "? unknown" spam on OpenRouter/HF/TokenHarbor catalogs) ──
         r"nemotron-\d",  # NVIDIA Nemotron 3/3.5+ hybrid reasoning (nano/super/ultra/lightning)
         #   — content-safety/guard variants are excluded via
@@ -966,12 +966,12 @@ class OpenAICompatibleBackend(BaseBackend):
         #   (gemini-flash-lite-latest inherits the current family verdict)
     )
 
-    #: R07.36: model-name patterns that mark a model as DEFINITELY NOT a
+    #: R07.34: model-name patterns that mark a model as DEFINITELY NOT a
     #: text-chat reasoning model — speech/audio (tts, transcribe, whisper),
     #: embeddings, robotics (VLA), and safety classifiers. These carry
     #: positive evidence of absence (a TTS endpoint has no reasoning trace),
     #: so unlike a plain pattern miss they yield NO, not UNKNOWN — and they
-    #: take PRECEDENCE over the family patterns above (the R07.35 gemini
+    #: take PRECEDENCE over the family patterns above (the R07.34 gemini
     #: family regex was flagging 'gemini-2.5-flash-preview-tts' as ✓ yes).
     _NON_THINKING_NAME_PATTERNS: tuple[str, ...] = (
         r"tts",  # gemini-3.8-flash-tts, *-preview-tts, kokoro-tts
@@ -988,7 +988,7 @@ class OpenAICompatibleBackend(BaseBackend):
     @classmethod
     def _name_thinking_verdict(cls, model: str) -> "ThinkingSupport":
         """Tri-state name verdict: YES (reasoning marker), NO (non-chat
-        modality marker — TTS/embedding/classifiers, R07.36), or UNKNOWN
+        modality marker — TTS/embedding/classifiers, R07.34), or UNKNOWN
         (no signal). Exclusions take precedence over family markers: a
         modality suffix is stronger evidence than a family prefix.
         """
@@ -1014,7 +1014,7 @@ class OpenAICompatibleBackend(BaseBackend):
         ``/``) only: every shipped marker (deepseek-r1, qwq, o1/o3/o4,
         glm-4.5+, qwen3, thinking, reason, magistral, exaone-deep) is
         model-level, so the restriction keeps every true positive and kills
-        vendor bleed. R07.36: implemented via ``_name_thinking_verdict`` —
+        vendor bleed. R07.34: implemented via ``_name_thinking_verdict`` —
         modality exclusions (tts/embedding/…) now return False here too
         (they are NO, not YES), while a plain pattern miss still yields
         UNKNOWN upstream (never NO without evidence).
@@ -1022,7 +1022,7 @@ class OpenAICompatibleBackend(BaseBackend):
         return cls._name_thinking_verdict(model) is ThinkingSupport.YES
 
     # ─────────────────────────────────────────────────────────────────
-    # R07.36: capability metadata from the live catalog entry
+    # R07.34: capability metadata from the live catalog entry
     # ─────────────────────────────────────────────────────────────────
     # Backends that parse a rich provider payload (OpenRouter's
     # ``supported_parameters`` list) hoist per-model capability flags into
@@ -1082,7 +1082,7 @@ class OpenAICompatibleBackend(BaseBackend):
         provider can ship a reasoning model under any name). Verdicts are
         cached under the ``thinking:<model>`` key.
 
-        R07.35: the marker list grew into current-generation family
+        R07.34: the marker list grew into current-generation family
         detection — reasoning is now the default for every major flagship
         family (Claude 3.7+/4+/5+, GPT-5/6, Gemini 2.5+/3+, Grok 4+,
         DeepSeek V3.1+/V4, Kimi K2.5+/K3, MiMo, Mistral Large), grounded
@@ -1094,10 +1094,10 @@ class OpenAICompatibleBackend(BaseBackend):
         capabilities verdict (``thinking`` in capabilities), so the
         heuristic only governs true cloud backends.
 
-        R07.36 resolution order (first hit wins):
+        R07.34 resolution order (first hit wins):
         1. Cached verdict (``thinking:<model>`` key) — EXCEPT when the name
            now matches a non-chat modality exclusion: a cached YES from the
-           pre-R07.36 era (the gemini family regex flagged
+           pre-R07.34 era (the gemini family regex flagged
            ``gemini-2.5-flash-preview-tts`` ✓ yes) loses to the exclusion
            list's positive evidence of absence. Owner machines self-heal
            without a cache purge.
@@ -1107,9 +1107,9 @@ class OpenAICompatibleBackend(BaseBackend):
            cached (provider declarations are evidence, not guesses).
         3. Name verdict — YES on a reasoning marker, NO on a non-chat
            modality marker (tts/transcribe/embedding/robotics/classifier),
-           UNKNOWN otherwise. Only YES is cached: like R07.35 UNKNOWNs,
-           an un-cached NO/UNKNOWN lets later pattern or exclusion
-           refinements take effect without a cache purge.
+           UNKNOWN otherwise. Only YES is cached: leaving NO/UNKNOWN
+           un-cached lets later pattern or exclusion refinements take
+           effect without a cache purge.
 
         Args:
             model: Model name
@@ -1123,7 +1123,7 @@ class OpenAICompatibleBackend(BaseBackend):
 
         cached = get_cached_thinking_support(model)
         if cached is not None:
-            # R07.36: exclusion evidence outranks a stale cached YES (see
+            # R07.34: exclusion evidence outranks a stale cached YES (see
             # docstring). Only the YES case is re-examined — cached NO and
             # cached UNKNOWN keep their normal precedence.
             if cached is ThinkingSupport.YES:

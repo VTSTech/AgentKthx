@@ -253,7 +253,7 @@ class CloudBackend(OpenAICompatibleBackend):
     _DEFAULT_CONTEXT_FALLBACK: int = 128000
 
     # ─────────────────────────────────────────────────────────────────────
-    # R07.35: family-level context-window knowledge
+    # R07.34: family-level context-window knowledge
     # ─────────────────────────────────────────────────────────────────────
     # Backends whose /v1/models schema is undocumented (TokenHarbor) or
     # whose catalog omits context_length have no per-model window data —
@@ -1350,7 +1350,7 @@ class CloudBackend(OpenAICompatibleBackend):
     # Modelfile ``num_ctx``). The catalog lookup falls back to 128K
     # (a safe default for modern cloud chat models).
     #
-    # R07.35: the fallback became a 4-step ladder. Previously step 2 was
+    # R07.34: the fallback became a 4-step ladder. Previously step 2 was
     # ``self.get_model_info(model)`` — the SAME static catalog as step 1,
     # but with the 128000 default STAMPED into every entry's
     # ``details.context_length`` — so a catalog entry without its own
@@ -1364,7 +1364,7 @@ class CloudBackend(OpenAICompatibleBackend):
     def get_model_max_context(self, model: str, family: str | None = None) -> int:
         """Return the model's maximum trained context window size.
 
-        R07.35 resolution ladder (first hit wins):
+        R07.34 resolution ladder (first hit wins):
 
         1. Static catalog — ``MODELS[model].context_length`` when the
            entry carries an explicit positive value (exact data beats
@@ -1374,7 +1374,7 @@ class CloudBackend(OpenAICompatibleBackend):
            fetch or the persistent cache). Only a REAL value counts:
            entries whose context_length is absent, junk, or the legacy
            stamped-in ``_DEFAULT_CONTEXT_FALLBACK`` are skipped, so a
-           pre-R07.35 cached catalog self-heals through the family layer
+           pre-R07.34 cached catalog self-heals through the family layer
            without requiring a ``--refresh`` first.
         3. Family knowledge — ``_family_context_guess()`` maps the model
            name onto its family's published window (Claude 200K, GPT-6
@@ -1423,7 +1423,7 @@ class CloudBackend(OpenAICompatibleBackend):
                         return ctx
                     break
 
-        # 3. Family knowledge (R07.35) — published windows for well-known
+        # 3. Family knowledge (R07.34) — published windows for well-known
         #    families; None when nothing matches.
         ctx = self._family_context_guess(model)
         if ctx:
@@ -1440,7 +1440,7 @@ class CloudBackend(OpenAICompatibleBackend):
     def _family_context_guess(cls, model: str) -> int | None:
         """Family-published context window for a model name, or None.
 
-        R07.35: matched against the model SEGMENT (after the last ``/``)
+        R07.34: matched against the model SEGMENT (after the last ``/``)
         with the same vendor-bleed protection as
         ``_name_matches_thinking`` — ``acme/claude-sonnet-5`` resolves via
         the claude pattern, ``claudefans/mistral-large`` does not leak a
@@ -1485,7 +1485,7 @@ class CloudBackend(OpenAICompatibleBackend):
         known gaps for some 1.5 Flash variants — override in the
         Gemini backend if needed.
 
-        R07.36: an explicit provider declaration beats the NATIVE
+        R07.34: an explicit provider declaration beats the NATIVE
         default. When the model's catalog entry carries
         ``details.supports_tools`` (hoisted at parse time from a rich
         provider payload — OpenRouter's ``supported_parameters``), True

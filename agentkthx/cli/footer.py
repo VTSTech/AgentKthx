@@ -68,7 +68,7 @@ def fmt_token_size(n) -> str:
     Always integer K/M (no '2.5K') — matches how Ollama/llama-server report
     context sizes in their docs and how users specify them via --num-ctx 128k.
 
-    R07.35: decimal-K/M branch added. Cloud providers advertise context
+    R07.34: decimal-K/M branch added. Cloud providers advertise context
     windows in DECIMAL tokens (128000, 200000, 400000, 1000000), not KiB —
     but 128000 happens to be an exact multiple of 1024 (125 × 1024), so the
     binary-only formatter rendered every 128K cloud model as the confusing
@@ -84,7 +84,7 @@ def fmt_token_size(n) -> str:
       - 262144  → '256K'  (binary)
       - 2097152 → '2M'    (binary)
 
-    R07.36: non-exact context-scale values round to decimal-K. Live
+    R07.34: non-exact context-scale values round to decimal-K. Live
     provider payloads carry odd windows that are neither decimal nor
     binary multiples (TokenHarbor's qwen3.8-27b reports 991808,
     qwen3.8-flash 983616) — the exact-multiple ladder fell through to the
@@ -105,7 +105,7 @@ def fmt_token_size(n) -> str:
         return f"{n // 1000}K"
     if n >= 1024 and n % 1024 == 0:
         return f"{n // 1024}K"
-    # R07.36: context-scale non-multiples round to the nearest decimal-K
+    # R07.34: context-scale non-multiples round to the nearest decimal-K
     # (after every exact branch — 131072 still resolves as binary '128K'
     # above, and sub-100000 values keep the plain-int R07.18 behavior).
     if n >= 100000:

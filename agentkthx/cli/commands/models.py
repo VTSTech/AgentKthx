@@ -196,7 +196,7 @@ def cmd_models(args: argparse.Namespace) -> int:
 
     backend = get_backend(backend_name, api_mode=api_mode)  # default for list_models etc.
 
-    # R07.36: the hint is now scoped to LOCAL backends. Cloud backends
+    # R07.34: the hint is now scoped to LOCAL backends. Cloud backends
     # have had full catalog support since R07.20 (L1/L2 JSON cache,
     # --refresh, capability columns), so printing an Ollama-only
     # recommendation on every tokenharbor/openrouter/zai/gemini run was

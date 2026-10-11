@@ -5,6 +5,53 @@ All notable changes to AgentKthx will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [R07.34] - 2026-10-11 7:46:35 PM
+
+### TokenHarbor backend #14 — OpenRouter-style `:free` aggregator (`tokenharbor`)
+
+- **New plugin `agentkthx/plugins/tokenharbor/`** — hooks-only `CloudBackend` for `https://tokenharbor.ai/v1` (OpenAI wire): `thk_live_` key validation (`sk-` keys rejected with the docs' guidance), auth-gated `/v1/models`, and the shared L1/L2 catalog cache storing the catalog **UNFILTERED** — `TOKENHARBOR_FREE_ONLY` filters at every return (mid-session toggles apply without waiting the TTL) and the L2-fresh short-circuit avoids burning rate-limited `/v1/models` requests. Default model `deepseek-v4.1-flash:free` (the only `:free` id the TH docs name), keeping smoke tests at $0.
+- **Spend gate handled at the 400 layer**: a 400 whose body matches the spend-confirmation / spend-limit errors is delivered via `_raise_non_retryable_status` (never auto-confirmed, retried, or treated as transient), while non-spend 400s keep the generic ReAct-detectable message so the tools→ReAct fallback still works. Quota classification orders `spend_limit_exceeded` ahead of the transient veto; quota messages carry the window age.
+- **Companion wiring**: `BackendType.TOKENHARBOR` (14th member), `TOKENHARBOR_BASE_URL` / `_API_KEY` / `_DEFAULT_MODEL` / `_FREE_ONLY` config block, 15 docs-only seed ids with the `_tokenharbor_note` perishable marker (loader-filtered), auth-picker row + shown-once `thk_live_` hint, `agentkthx config` rows/URL block, SUPPORT.md Limited Support row (promotion gated on the live probe + a funded 5/5 smoke), and `scripts/probe_tokenharbor.sh` — 4 stages answering the reference doc's 8-item probe checklist.
+- **`docs/api/TOKENHARBOR_API_TECHNICAL_REFERENCE.md` (new, 1,043 lines)** — house-style reference grounded on all 14 published TokenHarbor docs pages: auth + universal-key lifecycle, OpenAI/Anthropic wires, `:free` tier rules, spend gate, caching headers, error→CloudBackend-hook mapping, implementation and migration plans. Docs-only discipline: 21 explicit UNVERIFIED markers stay open until the live probe runs.
+
+### `agentkthx models --refresh` — live catalog re-fetch with dead-entry pruning
+
+- **New flag**: stale-marks the cached catalog (`model_cache.mark_stale()` — sets `updated_at=0.0` but KEEPS the stored list as the offline fallback) and resets the in-process L1, forcing the next listing to hit the live endpoint, then replaces the catalog wholesale — entries the provider no longer lists are dropped, `--persist` pins are re-attached and never counted as removed.
+- **Outcome report**: `Catalog refreshed: N models (+A new, -R removed)` with 5-name previews; on failure nothing is pruned and the CLI says so (`Live refresh failed — cached catalog kept as fallback`). Backends without a JSON catalog cache get a no-op note (Ollama lists live from `/api/tags`).
+- **Design rule**: a failed refresh must never destroy the only known-good catalog — hence stale-mark instead of clear.
+
+### Context windows rebuilt — real windows instead of a stamped 128K (`agentkthx models`)
+
+- **Root cause of the wall of "125K"**: the TokenHarbor live-catalog reader stamped the 128000 fallback into every entry, and `get_model_max_context` step 2 re-read that same static catalog via `get_model_info()` (its comment claimed "live model cache") — so every model short-circuited to the fabricated 128000, which the binary-only formatter rendered as "125K" (128000 = 125 × 1024).
+- **Decimal-K/M formatter** (`fmt_token_size`): context-scale values ≥100000 render decimal — 128000→`128K`, 200000→`200K`, 1000000→`1M`; non-exact windows round to the nearest decimal-K (991808→`992K`, 983616→`984K`); every R07.18 expectation preserved (512/1024/131072/1500/1000 byte-identical; 131072 still binary `128K`).
+- **4-step resolution ladder** (`get_model_max_context`): static catalog exact value → live in-process cache entry (only REAL values — legacy stamped-in 128000 entries are skipped, so pre-R07.34 caches self-heal WITHOUT `--refresh`) → family-known window (`_FAMILY_CONTEXT_PATTERNS`: gemini-pro 2M, gemini / GLM-5.2+ 1M, gpt-6 400K, grok-4+ / qwen3-max / mistral-large 256K-class, gpt-5 / claude 200K, deepseek-v3.1+ / v4 / kimi / qwen3 128K-class) → generic 128000. The `agentkthx models` legend now says exactly that: "model API data, family-known window, or 128K default".
+- **Live payloads are mined for context** when the provider includes it (`context_length` / `context_size` / `max_context_tokens` / `max_input_tokens` / nested `top_provider.context_length`, junk-guarded); `details.context_length` is written ONLY from real data and the key is omitted otherwise — no fabricated defaults anywhere.
+
+### Thinking detection — family patterns, provider metadata, modality exclusions
+
+- **Current-generation family patterns** (the shared name-heuristics only knew explicit markers like `deepseek-r`/`qwq`/`thinking`): claude 3.7+/4/5 (incl. fable), gpt-5/6, gpt-oss, gemini 2.5+/3, grok-4+, deepseek-v3.1+/v4, kimi-k2.5+/k3, mimo, mistral-large, nemotron-3+, ling, gemini-*-latest → `✓ yes`. Old generations deliberately stay UNKNOWN (gpt-4o, gemini-2.0, claude-3-5, kimi-k2 instruct, deepseek-v3.0).
+- **Provider-declared reasoning honored**: OpenRouter's `supported_parameters` (`reasoning` / `include_reasoning`) is hoisted at parse time into `details.supports_reasoning`; YES/NO metadata verdicts are both cached and beat name heuristics in both directions. Raw `model_data` payloads are deliberately not trusted generically (a foreign payload shape without a parameter list must not downgrade whole catalogs).
+- **Modality exclusions**: tts / transcribe / whisper / embedding / robotics / content-safety / aegis / guard / moderation name markers → `✗ no`, taking PRECEDENCE over family matches (the first-pass gemini family regex was flagging `gemini-2.5-flash-preview-tts` as ✓ yes). Exclusion evidence also outranks a stale cached YES — owner machines self-heal without purging the cache.
+- **Legacy caches self-heal**: entries stored before the capability-metadata parse change are upgraded in place on the L2-restore path (OpenRouter `_hoist_capability_flags`) — no `--refresh` required.
+- Deliberately left `? unknown` (no published grounding found): apex, muse-spark-*, gemma-4, poolside/laguna, liquid/lfm, apodex, dots-3, antigravity-preview, Ternary-Bonsai, cohere/north — one-line table additions once any are confirmed reasoning chat models.
+
+### Tool detection — provider metadata + the `inkling`/`kling` substring bug
+
+- **`thinkingmachines/inkling` showed `? untested` because the non-chat slug patterns matched `kling` as a RAW SUBSTRING** (i-n-**kling**), mis-classifying a chat model as non-chat and skipping its probe. Non-chat matching is now slug-WORD based (`(?<![a-z0-9])`): `bytedance/kling-v2`, `whisper`, `flux`, `tts` slugs are still detected; `inkling` probes and reports native tools.
+- **Provider-declared tool support honored**: OpenRouter's `supported_parameters.tools` hoists into `details.supports_tools`; `False` → `○ react` (the provider omits the `tools` parameter — matching the 400→ReAct fallback), `True`/absent → `✓ native`.
+
+### `agentkthx models` output polish
+
+- The "Models command works best with Ollama backend" hint no longer prints on every cloud-backend run (cloud backends have had full catalog support since R07.20) — scoped to local backends.
+
+### Housekeeping — version labels reconciled to R07.34
+
+- In-code working labels from the detection rounds (`R07.35` / `R07.36`) are relabeled **R07.34** — it all shipped inside this release. The two test files are renamed to match: `test_r07_35_capability_detection.py` → `test_r07_34_capability_detection.py` and `test_r07_36_think_tool_metadata.py` → `test_r07_34_think_tool_metadata.py` (contents unchanged apart from the labels).
+
+### Tests
+
+- 303 new offline tests — TokenHarbor backend 78 (the reference doc's 9-item plan + inheritance identity pins + companion wiring), `--refresh` 14 (stale-mark unit + real `cmd_models` flows), capability detection 114 (formatter, family table, 4-step ladder, TokenHarbor shaping), think/tool metadata 97 (exclusions, metadata verdicts, self-heals, slug-word guards). Full suite: **4,111 passed / 16 skipped**.
+
 ## [R07.33] - 2026-10-10 8:59:33 PM
 
 ### Discord plugin M0 — stdlib gateway, policy gate, REST client (`agentkthx discord`)

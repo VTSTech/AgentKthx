@@ -124,7 +124,7 @@ from agentkthx.model_cache import load_seed_catalog
 # and `:free`-suffixed ids coexist; "Model id is whatever appears in
 # /models"). No pricing or context_length is seeded: the /v1/models entry
 # schema is undocumented and docs-only pricing would be fabrication —
-# context is read tolerantly from the live payload when present (R07.35),
+# context is read tolerantly from the live payload when present (R07.34),
 # else omitted so the CloudBackend family-knowledge layer resolves it
 # (Claude 200K, GPT-6 400K, Gemini 1M, …) with the 128K generic fallback
 # as the last resort.
@@ -390,7 +390,7 @@ class TokenHarborBackend(CloudBackend):
         The /v1/models entry schema is UNDOCUMENTED (docs say only
         "returns the callable model ids as JSON") — assume the OpenAI
         ``{"data": [...]}`` envelope. ``data[].id`` is the only IDENTITY
-        field. R07.35: context-window fields are read TOLERANTLY when
+        field. R07.34: context-window fields are read TOLERANTLY when
         present (owner-directed metadata detection — the models table
         showed every model at the 128K fallback because only ``id`` was
         read); see ``_extract_live_context``. Anything else (pricing,
@@ -463,7 +463,7 @@ class TokenHarborBackend(CloudBackend):
     def _extract_live_context(entry: dict) -> int | None:
         """Tolerantly read a context window from a live /v1/models entry.
 
-        R07.35: returns the first positive integer found among the known
+        R07.34: returns the first positive integer found among the known
         context field conventions (``_LIVE_CONTEXT_FIELDS``, plus the
         OpenRouter-style nested ``top_provider.context_length``); None
         when the entry carries none. Absent ≠ 128K — the omit-and-fall-
@@ -487,7 +487,7 @@ class TokenHarborBackend(CloudBackend):
     ) -> dict:
         """Shape one catalog entry (shared by live + fallback builders).
 
-        R07.35: ``details.context_length`` is written ONLY from real
+        R07.34: ``details.context_length`` is written ONLY from real
         data — the live payload's context field (``live_ctx``) or the
         seed meta's ``context_length``. When neither exists the key is
         OMITTED (was: stamped with the 128000 CloudBackend default,
@@ -637,7 +637,7 @@ class TokenHarborBackend(CloudBackend):
         docs name (docs-only, perishable — see the "_tokenharbor_note"
         metadata key in the seed JSON).
 
-        R07.35: shares ``_catalog_entry`` with the live builder —
+        R07.34: shares ``_catalog_entry`` with the live builder —
         ``details.context_length`` only when the seed meta actually has
         one (currently none do), never the 128000 default stamp.
         """

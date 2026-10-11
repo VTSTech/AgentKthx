@@ -1,5 +1,6 @@
 """
-R07.36 — think/tool detection round 2 (owner live-run report after R07.35).
+R07.34 — think/tool detection, second pass (owner cross-backend live-run
+report).
 
 Five fixes, one suite:
 
@@ -9,8 +10,8 @@ Five fixes, one suite:
    (Nemotron 3/3.5+, inclusionAI Ling, version-less gemini-*-latest
    aliases) and a NON-thinking exclusion list (tts / transcribe /
    whisper / embedding / robotics / safety classifiers) that yields NO
-   and takes precedence over family matches — the R07.35 gemini family
-   regex flagged ``gemini-2.5-flash-preview-tts`` as ✓ yes.
+   and takes precedence over family matches — the first-pass gemini
+   family regex flagged ``gemini-2.5-flash-preview-tts`` as ✓ yes.
 3. Provider-metadata verdicts — ``details.supports_reasoning`` /
    ``details.supports_tools`` (hoisted at parse time from OpenRouter's
    ``supported_parameters``) beat every name heuristic in both
@@ -27,7 +28,7 @@ Five fixes, one suite:
 
 The conftest autouse fixture points AGENTKTHX_MODEL_CACHE at a per-test
 file; the fixtures below isolate the tool_cache and model_cache modules
-the same way the R07.19/R07.35 suites do.
+the same way the R07.19 detection suites do.
 """
 
 from __future__ import annotations
@@ -232,7 +233,7 @@ def or_backend(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# 1. fmt_token_size — R07.36 rounding + R07.35/R07.18 regressions
+# 1. fmt_token_size — odd-window rounding + earlier-pass regressions
 # ---------------------------------------------------------------------------
 
 
@@ -240,12 +241,12 @@ class TestFmtTokenSizeRounding:
     @pytest.mark.parametrize(
         "n,expected",
         [
-            # R07.36: live-API odd windows round to the nearest decimal-K
+            # R07.34: live-API odd windows round to the nearest decimal-K
             (991808, "992K"),  # TokenHarbor qwen3.8-27b (was raw '991808')
             (983616, "984K"),  # TokenHarbor qwen3.8-flash (was raw '983616')
             (999999, "1000K"),  # rounding can cross the K boundary
             (150001, "150K"),
-            # R07.35 decimal forms unchanged
+            # decimal forms unchanged
             (128000, "128K"),
             (200000, "200K"),
             (400000, "400K"),
@@ -280,7 +281,7 @@ class TestFmtTokenSizeRounding:
 
 
 # ---------------------------------------------------------------------------
-# 2. R07.36 name heuristics — new families, exclusions, preserved unknowns
+# 2. R07.34 name heuristics — new families, exclusions, preserved unknowns
 # ---------------------------------------------------------------------------
 
 
@@ -313,7 +314,7 @@ class TestThinkingNameVerdictR0736:
     @pytest.mark.parametrize(
         "model",
         [
-            # TTS / transcribe: the R07.35 gemini family regex false-YESed
+            # TTS / transcribe: the first-pass gemini family regex false-YESed
             "gemini-2.5-flash-preview-tts",
             "gemini-3.8-flash-tts",
             "gemini-3.8-flash-lite-tts",
@@ -343,7 +344,7 @@ class TestThinkingNameVerdictR0736:
     @pytest.mark.parametrize(
         "model",
         [
-            # ungrounded families stay UNKNOWN (R07.35 pins preserved)
+            # ungrounded families stay UNKNOWN (first-pass pins preserved)
             "apex",
             "muse-spark-1-3",
             "muse-spark-1.2",
@@ -495,8 +496,8 @@ class TestMetadataThinking:
             type(b)._model_cache = None
 
     def test_cached_yes_loses_to_new_exclusion(self, isolated_tool_cache):
-        """R07.36 self-heal: a YES verdict cached by the pre-exclusion
-        R07.35 heuristic (gemini TTS family) is overridden by the new
+        """Second-pass self-heal: a YES verdict cached by the pre-exclusion
+        first-pass heuristic (gemini TTS family) is overridden by the new
         exclusion evidence — owner machines heal without a cache purge."""
         from agentkthx.core.tool_cache import (
             cache_thinking_support,
@@ -716,7 +717,7 @@ class TestOpenRouterHoistLegacyCache:
         assert "supports_tools" not in entry["details"]
 
     def test_l2_restore_path_self_heals(self, or_backend, monkeypatch):
-        """list_models() on a fresh L2 hit upgrades pre-R07.36 entries —
+        """list_models() on a fresh L2 hit upgrades pre-R07.34 entries —
         no --refresh and no live fetch required."""
         import agentkthx.model_cache as mc
 
