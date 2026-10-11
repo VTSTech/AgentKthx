@@ -174,6 +174,17 @@ def create_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Show model-cache status (path, TTL, per-backend freshness) and exit",
     )
+    # R07.34: force a live catalog re-fetch (needs the backend's discovery
+    # endpoint, so unlike the R07.20 flags above this runs after backend
+    # construction). Stale-marks the cached entry (data kept as offline
+    # fallback) instead of dropping it.
+    models_parser.add_argument(
+        "--refresh",
+        action="store_true",
+        help="Force a live catalog refresh: re-fetch from the provider and drop "
+        "cached entries it no longer lists (persistent pins survive; the old "
+        "catalog stays as fallback if the fetch fails)",
+    )
 
     # Modelfile command
     modelfile_parser = subparsers.add_parser("modelfile", help="Show model's Modelfile info")

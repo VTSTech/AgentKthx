@@ -206,7 +206,103 @@ def cmd_models(args: argparse.Namespace) -> int:
             print("   Or set OLLAMA_BASE_URL to your remote server")
         return 1
 
+    # ── R07.34: --refresh — force a live catalog re-fetch ───────────────
+    # Runs AFTER backend construction (unlike the R07.20 management flags
+    # above): a refresh needs the backend's discovery endpoint. The cached
+    # entry is marked STALE (updated_at = 0.0 — the data stays on disk as
+    # the offline fallback, unlike --clear-cache which drops it) and the
+    # backend's in-process L1 class cache is reset, so the list_models()
+    # call below is a guaranteed live fetch. On success store_models()
+    # replaces the stored catalog wholesale — entries the provider no
+    # longer lists are removed and persistent pins are re-attached; on
+    # failure nothing is stored and the old catalog still serves.
+    refresh = getattr(args, "refresh", False)
+    refresh_key = getattr(backend, "MODEL_CACHE_KEY", None)
+    refresh_before: list[dict] | None = None
+    if refresh and refresh_key is not None:
+        refresh_before = model_cache.get_stale_models(refresh_key)
+        model_cache.mark_stale(refresh_key)
+        # Reset the backend's in-process L1 catalog cache so same-process
+        # callers (tests, the chat REPL) re-fetch instead of serving the
+        # 1-hour class cache.
+        for _attr, _val in (("_model_cache", None), ("_cache_time", 0.0)):
+            if hasattr(type(backend), _attr):
+                try:
+                    setattr(type(backend), _attr, _val)
+                except Exception:
+                    pass
+        if refresh_before:
+            print(
+                f"⟳ Refreshing catalog for {bright_green(backend_name)} — "
+                f"{len(refresh_before)} cached model(s) kept as fallback, fetching live..."
+            )
+        else:
+            print(f"⟳ No cached catalog for {bright_green(backend_name)} — fetching live...")
+    elif refresh:
+        # Backends without a JSON catalog cache: local runtimes list live
+        # from the server (/api/tags etc.) and anything else serves a
+        # static catalog — there is nothing cached to refresh.
+        if isinstance(backend, OllamaBackend):
+            print(dim("⟳ Ollama lists live from /api/tags — nothing cached to refresh."))
+        else:
+            print(
+                dim(
+                    f"⟳ {backend_name} has no JSON catalog cache — "
+                    f"listing live/static, nothing to refresh."
+                )
+            )
+
     models = backend.list_models()
+
+    # ── R07.34: refresh outcome report ──────────────────────────────────
+    # Success detector: a store-on-success backend stamps the entry fresh
+    # (source "api", updated_at ≈ now) when the live fetch landed. If no
+    # store happened (provider unreachable, 401 degrade, stale-first
+    # fallback) the old catalog was served — warn instead of claiming a
+    # prune that never occurred.
+    if refresh and refresh_key is not None:
+        _info = model_cache.cache_info(refresh_key)
+        _stored_now = model_cache.get_stale_models(refresh_key)
+        _store_happened = bool(
+            _info
+            and _info.get("source") == "api"
+            and _info.get("age_seconds") is not None
+            and _info["age_seconds"] < 60
+        )
+        if _store_happened and _stored_now is not None:
+            _old_names = {
+                m.get("name") for m in (refresh_before or []) if isinstance(m, dict)
+            }
+            _new_names = {m.get("name") for m in _stored_now if isinstance(m, dict)}
+            _added = sorted(_new_names - _old_names)
+            _removed = sorted(_old_names - _new_names)
+            if _added or _removed:
+                print(
+                    f"⟳ Catalog refreshed: {len(_new_names)} models "
+                    f"({bright_green(f'+{len(_added)}')} new, "
+                    f"{yellow(f'-{len(_removed)}')} removed)"
+                )
+                if _added:
+                    _preview = ", ".join(_added[:5]) + (", …" if len(_added) > 5 else "")
+                    print(dim(f"  + {_preview}"))
+                if _removed:
+                    _preview = ", ".join(_removed[:5]) + (", …" if len(_removed) > 5 else "")
+                    print(dim(f"  - {_preview}"))
+            else:
+                print(f"⟳ Catalog refreshed: {len(_new_names)} models (no changes)")
+            _pins = model_cache.persistent_names(refresh_key)
+            if _pins:
+                print(
+                    f"  {bright_yellow('📌')} {len(_pins)} persistent pin(s) re-attached "
+                    f"(pins are never removed by a refresh)."
+                )
+        else:
+            print(
+                yellow(
+                    "⚠ Live refresh failed — the cached catalog was kept as "
+                    "fallback; nothing was removed."
+                )
+            )
 
     if not models:
         print("No models found.")

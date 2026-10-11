@@ -93,6 +93,7 @@ __all__ = [
     "store",
     "store_models",
     "ensure_seeded",
+    "mark_stale",
     "set_persistent",
     "is_persistent",
     "persistent_names",
@@ -396,6 +397,35 @@ def ensure_seeded(backend: str, seed_models: list[dict]) -> bool:
         backends[backend] = {"updated_at": 0.0, "source": "seed", "data": models}
         cache["version"] = _CACHE_VERSION
         save_cache(cache)
+        return True
+
+
+def mark_stale(backend: str) -> bool:
+    """Mark ``backend``'s cached catalog stale WITHOUT dropping its data.
+
+    Sets ``updated_at = 0.0`` so the next ``list_models()`` treats the
+    cache as expired and re-fetches from the live API, while the stored
+    list stays on disk as the offline fallback if that fetch fails.
+    This is the gentle counterpart to :func:`clear_backend` (which drops
+    the data): a refresh that goes wrong must never destroy the only
+    known-good catalog. On a successful re-fetch ``store_models()``
+    replaces the stored list wholesale — entries the provider no longer
+    lists are removed and persistent pins are re-attached.
+
+    Returns True when an entry was marked, False when the backend has no
+    cache entry yet (nothing to mark — the next ``list_models()`` seeds
+    and fetches live anyway). Idempotent: re-marking an already-stale
+    entry is a no-op that still returns True.
+    """
+    with _LOCK:
+        cache = load_cache()
+        entry = cache.get("backends", {}).get(backend)
+        if not isinstance(entry, dict) or "updated_at" not in entry:
+            return False
+        if entry.get("updated_at") != 0.0:
+            entry["updated_at"] = 0.0
+            cache["version"] = _CACHE_VERSION
+            save_cache(cache)
         return True
 
 
