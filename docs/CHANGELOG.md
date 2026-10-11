@@ -73,8 +73,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Discord num_ctx / max_tokens (chat parity)
 
-- **`agentkthx discord` now takes `--num-ctx` and `--max-tokens`** (+ `DISCORD_NUM_CTX` / `DISCORD_MAX_TOKENS` env), wired through to the core Agent exactly like `agentkthx chat` — including the R07.18 human suffixes (`--num-ctx 128k`, `--max-tokens 2k`). Banner reports `gen: num_ctx=… max_tokens=…`; `/status` shows both (unset renders as `auto`).
-- **Why it matters:** with nothing set, the agent caps max_tokens to `num_ctx//32` (256 tokens at the 8K default), so longer Discord replies were silently truncated (`finish_reason: length` → marked incomplete). An explicit `--max-tokens` skips that cap; an explicit `--num-ctx` widens both the input window and the derived cap when left alone.
+- **`agentkthx discord` now takes `--num-ctx` and `--max-tokens`** (+ `DISCORD_NUM_CTX` / `DISCORD_MAX_TOKENS` env), wired through to the core Agent exactly like `agentkthx chat` — including the R07.18 human suffixes (`--num-ctx 128k`, `--max-tokens 2k`). Banner reports `gen: num_ctx=… max_tokens=…` tagged `(set)` / `(catalog)` / `auto`; `/status` shows the effective values.
+- **Unset = detected from the backend/model catalog, not a hardcoded default.** The plugin reuses chat's `_get_catalog_defaults` chain (offline static tables for cloud backends; TurboState/GGUF metadata/remote probe for local ones; final fallback `config.num_ctx` from `AGENTKTHX_NUM_CTX`, then the agent default). Detection runs once per model and is cached (channel `/model` overrides resolve their own entry). Live-verified against zai: `glm-4.5-flash` detects **num_ctx=132000 / max_tokens=4125** — the exact numbers `agentkthx chat` sends.
+- **Why it matters:** before this, the Discord bot sent nothing, so the agent fell back to num_ctx 8192 with max_tokens capped to `num_ctx//32` (256 tokens) — longer replies were silently truncated (`finish_reason: length` → marked incomplete). With catalog detection the window matches the model (132k for glm-4.5-flash) and the cap is the catalog's 4125; explicit flags still win when set.
 
 ## [R07.32] - 2026-10-10 1:08:09 PM
 

@@ -156,6 +156,66 @@ def _size_cfg(key: str) -> int | None:
         return None
 
 
+def _config_num_ctx() -> int | None:
+    """config.num_ctx fallback (chat parity): OLLAMA_NUM_CTX / AGENTKTHX_NUM_CTX."""
+    try:
+        from agentkthx.config import get_config
+
+        return get_config().num_ctx
+    except Exception:  # noqa: BLE001 - lookup must never crash the bot
+        return None
+
+
+def resolve_gen_params(
+    backend_name: str | None,
+    model: str,
+    num_ctx: int | None,
+    max_tokens: int | None,
+) -> tuple[int | None, int | None]:
+    """Chat-parity generation params for `agentkthx discord` (mirrors
+    agent_factory._build_agent): an explicit value always wins; otherwise
+    num_ctx/max_tokens are DETECTED from the backend/model catalog exactly
+    as chat does — _get_catalog_defaults (offline static tables for cloud
+    backends, TurboState/GGUF metadata/remote probe for local ones); the
+    final num_ctx fallback is config.num_ctx (env), then the Agent built-in
+    8192. Returns (num_ctx, max_tokens).
+
+    Live-verified: --backend zai -m glm-4.5-flash detects num_ctx=132000,
+    max_tokens=4125 — the same numbers `agentkthx chat` sends.
+    """
+    if num_ctx is not None and max_tokens is not None:
+        return num_ctx, max_tokens  # fully explicit — skip detection entirely
+    if backend_name is None:  # chat: args.backend or config.backend
+        try:
+            from agentkthx.config import get_config
+
+            backend_name = get_config().backend
+        except Exception:  # noqa: BLE001
+            backend_name = "ollama"
+    defaults: dict = {}
+    try:
+        from agentkthx.backends import get_backend
+        from agentkthx.cli.agent_factory import _get_catalog_defaults
+
+        defaults = _get_catalog_defaults(get_backend(backend_name), model) or {}
+    except Exception:  # noqa: BLE001 - unknown backend / offline -> agent defaults
+        pass
+    eff_ctx = num_ctx if num_ctx is not None else (defaults.get("num_ctx") or _config_num_ctx())
+    eff_pred = max_tokens if max_tokens is not None else defaults.get("num_predict")
+    return eff_ctx, eff_pred
+
+
+def _gen_display(set_val: int | None, eff_val: int | None) -> str:
+    """Banner rendering for one gen param: '(set)' = explicit,
+    '(catalog)' = detected from the backend/model catalog (chat parity),
+    'auto' = agent default (8192 / num_ctx//32 cap)."""
+    if set_val is not None:
+        return f"{set_val} (set)"
+    if eff_val is not None:
+        return f"{eff_val} (catalog)"
+    return "auto"
+
+
 def _tools_display(raw) -> str:
     """Banner/status rendering: '' / 'none' / 'off' / empty list -> 'none';
     a channel override list renders comma-joined."""
@@ -205,9 +265,10 @@ class BotConfig:
     backend: str | None = None
     model: str | None = None
     debug: bool = False
-    # Chat-parity generation params (None = Agent built-in defaults:
-    # num_ctx 8192, max_tokens capped to num_ctx//32 — i.e. 256 at 8K,
-    # which is why Discord replies used to die with finish_reason=length).
+    # Chat-parity generation params. None = DETECT from the backend/model
+    # catalog exactly like `agentkthx chat` (zai glm-4.5-flash detects
+    # num_ctx=132000 / max_tokens=4125; live-verified) — not the agent's
+    # 8192/num_ctx//32 defaults that truncated Discord replies.
     num_ctx: int | None = None
     max_tokens: int | None = None
 
@@ -276,16 +337,16 @@ def setup_parser(parser) -> None:
         type=_parse_token_size,
         default=None,
         metavar="TOKENS",
-        help="Context window override, e.g. 32768 or 128k "
-        "(default: agent default 8192; DISCORD_NUM_CTX also works)",
+        help="Context window override, e.g. 32768 or 128k (default: detected "
+        "from the backend/model catalog like chat; DISCORD_NUM_CTX also works)",
     )
     parser.add_argument(
         "--max-tokens",
         type=_parse_token_size,
         default=None,
         metavar="TOKENS",
-        help="Generation cap override, e.g. 4096 or 2k — skips the agent's "
-        "num_ctx//32 truncation cap (DISCORD_MAX_TOKENS also works)",
+        help="Generation cap override, e.g. 4096 or 2k (default: catalog "
+        "value, else the agent's num_ctx//32 cap; DISCORD_MAX_TOKENS also works)",
     )
     parser.add_argument(
         "--keep",
@@ -373,8 +434,14 @@ def cmd_discord(args) -> int:
         f"max-steps={cfg.max_steps} sessions={'keep' if cfg.keep_sessions else 'fresh'} "
         f"session-ttl={cfg.session_ttl_days}d"
     )
+    # Resolve the banner's gen line up front (offline for static catalogs,
+    # same chain as the pool's per-model resolution).
+    eff_ctx, eff_pred = resolve_gen_params(
+        cfg.backend, cfg.model or _default_model(), cfg.num_ctx, cfg.max_tokens
+    )
     print(
-        f"[discord] gen: num_ctx={cfg.num_ctx or 'auto'} " f"max_tokens={cfg.max_tokens or 'auto'}"
+        f"[discord] gen: num_ctx={_gen_display(cfg.num_ctx, eff_ctx)} "
+        f"max_tokens={_gen_display(cfg.max_tokens, eff_pred)}"
     )
     if cfg.debug:
         print("[discord] debug: ON — backend prompts/responses/errors will be echoed")
@@ -550,6 +617,9 @@ class ResponderPool:
         self._label_lock = threading.Lock()
         self._typing_quiet: set[str] = set()  # channels that 404'd typing once
         self._channel_overrides: dict[str, ChannelConfig] = {}  # /model, /soul
+        # (num_ctx, max_tokens) resolution cache, keyed by model name —
+        # catalog detection runs once per model, not per message.
+        self._gen_params: dict[str, tuple[int | None, int | None]] = {}
         self._owners = cfg.owner_ids or cfg.allow_users  # owner fallback
         self._inter_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="discord-inter")
         self._started_at = 0.0
@@ -742,6 +812,9 @@ class ResponderPool:
     def _run_status(self, inter: Interaction) -> tuple[str, bool]:
         ch = self._channel_cfg(inter.channel_id)
         key = session_key_for(inter.guild_id, inter.channel_id, inter.user_id)
+        eff_ctx, eff_pred = self._effective_gen_params(
+            ch.model or self.cfg.model or _default_model()
+        )
         return handle_status(
             inter,
             backend=self.cfg.backend or "default",
@@ -750,8 +823,8 @@ class ResponderPool:
             tools=_tools_display(ch.tools if ch.tools is not None else self.cfg.tools),
             max_steps=self.cfg.max_steps,
             cooldown_s=self.cfg.cooldown_s,
-            num_ctx=self.cfg.num_ctx,
-            max_tokens=self.cfg.max_tokens,
+            num_ctx=eff_ctx,
+            max_tokens=eff_pred,
             uptime_s=time.monotonic() - (self._started_at or time.monotonic()),
             queue_depth=self._queue.qsize(),
             agent_runs=self.agent_runs,
@@ -863,6 +936,16 @@ class ResponderPool:
                 typing_thread.join(timeout=3)
         self._send_reply(job, run)
 
+    def _effective_gen_params(self, model: str) -> tuple[int | None, int | None]:
+        """Resolved (num_ctx, max_tokens) for this model — explicit cfg wins,
+        else backend/model catalog detection (chat parity), cached per model
+        so a channel /model override pays the lookup once."""
+        if model not in self._gen_params:
+            self._gen_params[model] = resolve_gen_params(
+                self.cfg.backend, model, self.cfg.num_ctx, self.cfg.max_tokens
+            )
+        return self._gen_params[model]
+
     def _build_agent(self, job: Job):
         """Construct the Agent exactly as the CLI would, but session-scoped
         to the Discord channel and deny-all on dangerous tools."""
@@ -874,16 +957,18 @@ class ResponderPool:
         tool_list = self.policy.filter_tools(
             tools_raw, soul_allowed=resolve_soul_allowed_tools(soul)
         )
+        model = ch.model or self.cfg.model or _default_model()
+        num_ctx, max_tokens = self._effective_gen_params(model)
         return Agent(
-            model=ch.model or self.cfg.model or _default_model(),
+            model=model,
             backend=self.cfg.backend or None,
             tools=tool_list,
             soul=soul,
             soul_level=2,
             session_id=job.session_key,
             max_steps=self.cfg.max_steps,
-            num_ctx=self.cfg.num_ctx,
-            num_predict=self.cfg.max_tokens,
+            num_ctx=num_ctx,
+            num_predict=max_tokens,
             confirm_dangerous=_deny_dangerous,
             debug=self.cfg.debug,
         )

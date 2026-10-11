@@ -57,8 +57,8 @@ comments and unknown keys preserved). It asks for:
 | `DISCORD_MAX_PROMPT_CHARS` | `1500` | Prompt cap after sanitization |
 | `DISCORD_MAX_REPLY_MSGS` | `3` | Max 2000-char chunks per answer |
 | `DISCORD_MAX_STEPS` | `5` | Agent step cap (Discord has its **own** knob — the CLI/`AGENTKTHX_MAX_STEPS` setting does not apply here) |
-| `DISCORD_NUM_CTX` | *(auto)* | Context window override (chat parity) — plain int or human suffix, e.g. `32768` / `128k`; unset keeps the agent default (8192) |
-| `DISCORD_MAX_TOKENS` | *(auto)* | Generation cap override (chat parity, same as chat's `--num-predict`) — e.g. `4096` / `2k`. **Important:** without it the agent caps max_tokens to `num_ctx//32` (256 at the 8K default), which truncates longer replies (`finish_reason: length`); an explicit value skips that cap |
+| `DISCORD_NUM_CTX` | *(detect)* | Context window (chat parity) — plain int or human suffix, e.g. `32768` / `128k`. Unset = **detected from the backend/model catalog exactly like `agentkthx chat`** (zai glm-4.5-flash → 132000), falling back to `AGENTKTHX_NUM_CTX`, then the agent default (8192) |
+| `DISCORD_MAX_TOKENS` | *(detect)* | Generation cap (chat parity, same as chat's `--num-predict`) — e.g. `4096` / `2k`. Unset = detected from the catalog when the backend publishes it (zai glm-4.5-flash → 4125); when nothing is detected the agent caps to `num_ctx//32`. **Without either knob the 8K-default cap was 256 tokens — the cause of truncated replies (`finish_reason: length`)** |
 | `DISCORD_TOOLS` | *(none)* | **No tools by default (R07.33)** — opt in with a comma list, e.g. `calculator,web_search`; `none`/`off`/empty all mean off; `shell`/`python_repl` always excluded |
 | `DISCORD_UNSAFE_TOOLS` | `false` | Lifts the shell exclusion (banner warns) |
 | `DISCORD_DEBUG` | `false` | Debug echo: backend prompts/responses/errors + pipeline details (same as `--debug`) |

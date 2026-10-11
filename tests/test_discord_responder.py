@@ -844,20 +844,131 @@ class TestBuildAgent:
         assert cfg.max_tokens == 8192
 
     def test_build_agent_forwards_num_ctx_and_max_tokens(self, monkeypatch):
-        """--num-ctx/--max-tokens reach the core Agent as num_ctx/num_predict
-        (chat parity); an explicit num_predict skips the num_ctx//32 cap that
-        produced the 256-token truncation on Discord."""
+        """Explicit --num-ctx/--max-tokens reach the core Agent as
+        num_ctx/num_predict and SKIP catalog detection entirely; with nothing
+        set the resolver decides (stubbed None here = agent defaults)."""
         monkeypatch.setattr("agentkthx.agent.Agent", AgentCapture)
         AgentCapture.instances.clear()
+        calls = []
+        real_resolve = db_mod.resolve_gen_params
+
+        def spy(backend_name, model, num_ctx, max_tokens):
+            calls.append((backend_name, model, num_ctx, max_tokens))
+            return real_resolve(backend_name, model, num_ctx, max_tokens)
+
+        monkeypatch.setattr(db_mod, "resolve_gen_params", spy)
+        # Detection would construct a backend — booby-trap it: with both
+        # params explicit the resolver must return before touching it.
+        monkeypatch.setattr(
+            "agentkthx.backends.get_backend",
+            lambda name, **kw: (_ for _ in ()).throw(AssertionError("must not construct")),
+        )
         job = Job(make_ev(), "hello", "k", resolve_channel_config(CHANNEL, None))
         pool = ResponderPool(make_cfg(num_ctx=32768, max_tokens=4096), make_policy(), FakeRest())
         pool._build_agent(job)
         assert AgentCapture.instances[-1]["num_ctx"] == 32768
         assert AgentCapture.instances[-1]["num_predict"] == 4096
+        assert calls == [("fake", "fake-model", 32768, 4096)]  # explicit passthrough
+        monkeypatch.setattr(db_mod, "resolve_gen_params", lambda *a: (None, None))
         pool_def = ResponderPool(make_cfg(), make_policy(), FakeRest())
         pool_def._build_agent(job)
         assert AgentCapture.instances[-1]["num_ctx"] is None
         assert AgentCapture.instances[-1]["num_predict"] is None
+
+    def test_resolve_gen_params_catalog_detection(self, monkeypatch):
+        """Nothing explicit -> chat-parity catalog detection: the same
+        _get_catalog_defaults chain agent_factory uses (live-verified on
+        zai glm-4.5-flash: num_ctx=132000, max_tokens=4125)."""
+        seen = {}
+
+        def fake_backend(name, **kw):
+            seen["backend"] = name
+            return object()
+
+        monkeypatch.setattr("agentkthx.backends.get_backend", fake_backend)
+        monkeypatch.setattr(
+            "agentkthx.cli.agent_factory._get_catalog_defaults",
+            lambda backend, model: {"num_ctx": 132000, "num_predict": 4125},
+        )
+        assert db_mod.resolve_gen_params("zai", "glm-4.5-flash", None, None) == (
+            132000,
+            4125,
+        )
+        assert seen["backend"] == "zai"
+
+    def test_resolve_gen_params_partial_explicit(self, monkeypatch):
+        """One explicit value wins for its field; the other is still detected
+        from the catalog (chat applies overrides per-field too)."""
+        monkeypatch.setattr("agentkthx.backends.get_backend", lambda name, **kw: object())
+        monkeypatch.setattr(
+            "agentkthx.cli.agent_factory._get_catalog_defaults",
+            lambda backend, model: {"num_ctx": 132000, "num_predict": 4125},
+        )
+        assert db_mod.resolve_gen_params("zai", "m", 32768, None) == (32768, 4125)
+        assert db_mod.resolve_gen_params("zai", "m", None, 2048) == (132000, 2048)
+
+    def test_resolve_gen_params_fully_explicit_skips_detection(self, monkeypatch):
+        """Both explicit -> detection never runs (no backend construction)."""
+        monkeypatch.setattr(
+            "agentkthx.backends.get_backend",
+            lambda name, **kw: (_ for _ in ()).throw(AssertionError("must not construct")),
+        )
+        assert db_mod.resolve_gen_params("zai", "m", 4096, 1024) == (4096, 1024)
+
+    def test_resolve_gen_params_config_num_ctx_fallback(self, monkeypatch):
+        """Catalog miss -> config.num_ctx (OLLAMA_NUM_CTX/AGENTKTHX_NUM_CTX),
+        exactly like chat's `catalog_defaults.get('num_ctx') or config.num_ctx`."""
+        monkeypatch.setattr("agentkthx.backends.get_backend", lambda name, **kw: object())
+        monkeypatch.setattr(
+            "agentkthx.cli.agent_factory._get_catalog_defaults", lambda backend, model: {}
+        )
+        import types
+
+        monkeypatch.setattr(
+            "agentkthx.config.get_config",
+            lambda reload=False: types.SimpleNamespace(num_ctx=2048, backend="ollama"),
+        )
+        assert db_mod.resolve_gen_params("ollama", "m", None, None) == (2048, None)
+
+    def test_resolve_gen_params_unknown_backend(self, monkeypatch):
+        """Unknown backend -> lookup fails softly, agent defaults apply
+        (deterministic: env num_ctx vars cleared)."""
+        monkeypatch.delenv("OLLAMA_NUM_CTX", raising=False)
+        monkeypatch.delenv("AGENTKTHX_NUM_CTX", raising=False)
+        assert db_mod.resolve_gen_params("no-such-backend", "m", None, None) == (
+            None,
+            None,
+        )
+
+    def test_resolve_gen_params_real_zai_catalog(self, monkeypatch):
+        """Real zai plugin, real seed catalog (offline): the Discord resolver
+        must produce the same num_ctx/max_tokens `agentkthx chat` sends for
+        glm-4.5-flash — NOT the 8192//32 agent defaults."""
+        monkeypatch.setenv("ZAI_API_KEY", "a" * 32)  # format-valid dummy; catalog is static
+        num_ctx, max_tokens = db_mod.resolve_gen_params("zai", "glm-4.5-flash", None, None)
+        assert num_ctx >= 65536  # detected, not the 8192 default
+        assert max_tokens is not None and max_tokens >= 1024
+
+    def test_effective_gen_params_cached_per_model(self, monkeypatch):
+        """Catalog detection runs once per model, not per message; a channel
+        /model override resolves its own entry exactly once."""
+        calls = []
+        monkeypatch.setattr(
+            db_mod,
+            "resolve_gen_params",
+            lambda backend, model, ctx, pred: calls.append(model) or (132000, 4125),
+        )
+        pool = ResponderPool(make_cfg(), make_policy(), FakeRest())
+        assert pool._effective_gen_params("glm-4.5-flash") == (132000, 4125)
+        assert pool._effective_gen_params("glm-4.5-flash") == (132000, 4125)
+        assert pool._effective_gen_params("other-model") == (132000, 4125)
+        assert calls == ["glm-4.5-flash", "other-model"]
+
+    def test_gen_display_tags(self):
+        """Banner tags: (set) explicit, (catalog) detected, auto = defaults."""
+        assert db_mod._gen_display(32768, 65536) == "32768 (set)"
+        assert db_mod._gen_display(None, 132000) == "132000 (catalog)"
+        assert db_mod._gen_display(None, None) == "auto"
 
 
 class TestToolsDisplay:
