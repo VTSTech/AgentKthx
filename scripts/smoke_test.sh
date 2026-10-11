@@ -46,7 +46,7 @@ set -u
 # ─── config ──────────────────────────────────────────────────────────────
 # Backends to test, in order. Skip any by passing --skip "openai mistral"
 # (the SKIP env var is no longer supported — use --skip).
-DEFAULT_BACKENDS="zai openrouter orcarouter gemini huggingface openai mistral pollinations nvidia cloudflare siliconflow"
+DEFAULT_BACKENDS="zai openrouter orcarouter gemini huggingface openai mistral pollinations nvidia cloudflare siliconflow tokenharbor"
 # SKIP + BACKENDS are populated by the arg parser below (deferred so --skip
 # can override before the filter loop runs).
 SKIP=""
@@ -106,6 +106,7 @@ has_key() {
     nvidia)       envvar="NVIDIA_API_KEY" ;;
     cloudflare)   envvar="CLOUDFLARE_API_KEY" ;;
     siliconflow)  envvar="SILICONFLOW_API_KEY" ;;
+    tokenharbor)  envvar="TOKENHARBOR_API_KEY" ;;
   esac
   # Empty envvar (unknown backend) → no key. Guard against the
   # `${!envvar:-}` indirect-expansion error on empty var names.
@@ -140,6 +141,9 @@ free_only_var() {
     # bills ≈$0.06/1M input), so FREE_ONLY=1 would filter the models
     # listing to EMPTY and make generate() refuse. List unfiltered.
     siliconflow)  ;;
+    # TokenHarbor: the :free tier is real (:free-suffixed ids never bill)
+    # — FREE_ONLY filtering works and keeps the smoke run at $0.
+    tokenharbor)  echo "TOKENHARBOR_FREE_ONLY" ;;
     *)           echo "" ;;
   esac
 }
@@ -176,6 +180,12 @@ default_model_for_backend() {
     # AND has no tools support — the ReAct path would diverge from the
     # other backends' native-tools smoke steps.)
     siliconflow)  echo "Qwen/Qwen3-8B" ;;
+    # TokenHarbor: hardcode the docs-named :free id — :free routes never
+    # charge the wallet (each smoke step stays $0) and the free tier only
+    # has the account-level rate limits. PERISHABLE: docs-only id (the
+    # only :free id Token Harbor's docs name) — re-verify against the
+    # live Free list via scripts/probe_tokenharbor.sh at smoke time.
+    tokenharbor)  echo "deepseek-v4.1-flash:free" ;;
     *)           echo "" ;;
   esac
 }

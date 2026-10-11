@@ -453,6 +453,33 @@ SILICONFLOW_FREE_ONLY = os.environ.get("SILICONFLOW_FREE_ONLY", "").lower() in (
 # models exist. Defaults to the cheapest known model.
 SILICONFLOW_FREE_FALLBACK_MODEL = os.environ.get("SILICONFLOW_FREE_FALLBACK_MODEL", "Qwen/Qwen3-8B")
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# TokenHarbor plugin (agentkthx/plugins/tokenharbor/)
+# ═══════════════════════════════════════════════════════════════════════════════
+# docs/api/TOKENHARBOR_API_TECHNICAL_REFERENCE.md — TokenHarbor cloud backend
+# (backend #14, R07.31 scaffold). OpenAI-compatible surface at
+# https://tokenharbor.ai/v1 (the Anthropic /v1/messages surface is out of
+# scope). GET /v1/models REQUIRES AUTH (docs-verified) — the seed catalog
+# is the only cold-start catalog source.
+TOKENHARBOR_BASE_URL = os.environ.get("TOKENHARBOR_BASE_URL", "https://tokenharbor.ai/v1")
+# thk_live_-prefixed universal key (shown once at creation; no management
+# API). An OpenAI/OpenRouter sk- key "won't work here" (their connect CLI
+# docs) — the backend's _validate_api_key rejects sk- keys early.
+TOKENHARBOR_API_KEY = os.environ.get("TOKENHARBOR_API_KEY", "")
+# Default model: the only :free id Token Harbor's own docs name in an
+# actionable context (quickstart free tier + connect CLI). Perishable —
+# re-verify against the live Free list at probe time. :free routes never
+# charge the wallet.
+TOKENHARBOR_DEFAULT_MODEL = os.environ.get("TOKENHARBOR_DEFAULT_MODEL", "deepseek-v4.1-flash:free")
+# Filter list_models() to :free ids only. Applied at RETURN time, not
+# cache-store time (OPENROUTER_FREE_ONLY precedent — toggling must not
+# wait out the cache TTL).
+TOKENHARBOR_FREE_ONLY = os.environ.get("TOKENHARBOR_FREE_ONLY", "").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # DuckDuckGo plugin (agentkthx/plugins/duckduckgo/)

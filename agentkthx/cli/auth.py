@@ -111,6 +111,12 @@ AUTH_BACKENDS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("NVIDIA", "NVIDIA_API_KEY", "NVIDIA_FREE_ONLY", ()),
     ("Cloudflare", "CLOUDFLARE_API_KEY", "CLOUDFLARE_FREE_ONLY", ()),
     ("SiliconFlow", "SILICONFLOW_API_KEY", "SILICONFLOW_FREE_ONLY", ()),
+    # TokenHarbor: keys are created dashboard-only (no management API) at
+    # tokenharbor.ai/dashboard/api-keys and SHOWN ONCE — the prompt hint
+    # below (_KEY_PROMPT_HINTS) says so. OpenAI/OpenRouter sk- keys are
+    # rejected by the backend's _validate_api_key (their connect CLI docs
+    # confirm an sk- key "won't work here").
+    ("TokenHarbor", "TOKENHARBOR_API_KEY", "TOKENHARBOR_FREE_ONLY", ()),
 )
 
 # Canonical API-key env var -> BackendType.slug, used to patch the LIVE
@@ -129,6 +135,7 @@ _KEY_VAR_TO_SLUG: dict[str, str] = {
     "NVIDIA_API_KEY": "nvidia",
     "CLOUDFLARE_API_KEY": "cloudflare",
     "SILICONFLOW_API_KEY": "siliconflow",
+    "TOKENHARBOR_API_KEY": "tokenharbor",
 }
 
 # Cloudflare is unique among AgentKthx cloud backends: it requires BOTH an
@@ -149,6 +156,19 @@ _KEY_VAR_TO_SLUG: dict[str, str] = {
 _EXTRA_AUTH_ENTRIES: tuple[AuthVar, ...] = (
     AuthVar("CLOUDFLARE_ACCOUNT_ID", "key", "Cloudflare", ()),
 )
+
+# Per-backend hint printed above the secret prompt (R07.31). TokenHarbor
+# is the only backend whose acquisition flow has a footgun the prompt
+# must warn about: keys are SHOWN ONCE at creation (no management API to
+# re-read one) and an OpenAI/OpenRouter sk- key is silently useless
+# (rejected by the backend's key validation). Empty for every other
+# backend — the generic prompt is enough there.
+_KEY_PROMPT_HINTS: dict[str, str] = {
+    "TOKENHARBOR_API_KEY": (
+        "TokenHarbor keys start with thk_live_ — create one at "
+        "tokenharbor.ai/dashboard/api-keys (shown once at creation)."
+    ),
+}
 
 
 def auth_vars() -> list[AuthVar]:
@@ -362,6 +382,14 @@ def prompt_secret(name: str, stdin=None, stdout=None) -> str | None:
     prompt = f"  Enter {name} (Enter=keep, '-'=clear): "
     stdin = sys.stdin if stdin is None else stdin
     stdout = sys.stdout if stdout is None else stdout
+    # Per-backend acquisition hint (R07.31) — written to stdout BEFORE the
+    # prompt so both the TTY (getpass) and piped channels show it. Only
+    # backends with an acquisition footgun carry an entry (TokenHarbor's
+    # shown-once thk_live_ keys).
+    hint = _KEY_PROMPT_HINTS.get(name)
+    if hint:
+        stdout.write(f"  {hint}\n")
+        stdout.flush()
     try:
         if hasattr(stdin, "isatty") and stdin.isatty():
             raw = getpass.getpass(prompt)

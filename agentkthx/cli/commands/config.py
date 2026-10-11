@@ -26,6 +26,7 @@ _BACKEND_SLUG_TO_LABEL = {
     "cf": "Cloudflare",
     "siliconflow": "SiliconFlow",
     "sf": "SiliconFlow",
+    "tokenharbor": "TokenHarbor",
     "duckduckgo": "DuckDuckGo",
     "ddg": "DuckDuckGo",
 }
@@ -246,6 +247,27 @@ _ENV_REFERENCE = [
         "RESERVED for a future free tier — unused today (no free models; "
         "default: Qwen/Qwen3-8B)",
     ),
+    # ── TokenHarbor ──
+    (
+        "TOKENHARBOR_BASE_URL",
+        "TokenHarbor API URL (default: https://tokenharbor.ai/v1 — the "
+        "OpenAI wire; the Anthropic /v1/messages surface is out of scope)",
+    ),
+    (
+        "TOKENHARBOR_API_KEY",
+        "TokenHarbor universal key (thk_live_... prefix, created at "
+        "tokenharbor.ai/dashboard/api-keys — shown once; an OpenAI/OpenRouter "
+        "sk- key is rejected)",
+    ),
+    (
+        "TOKENHARBOR_DEFAULT_MODEL",
+        "Default model (default: deepseek-v4.1-flash:free — the only :free "
+        "id Token Harbor's docs name; :free routes never charge the wallet)",
+    ),
+    (
+        "TOKENHARBOR_FREE_ONLY",
+        "Restrict listings to :free ids (return-time filter; default: false)",
+    ),
     # ── DuckDuckGo AI Chat ──
     (
         "DUCKDUCKGO_BASE_URL",
@@ -392,6 +414,10 @@ def cmd_config(args: argparse.Namespace) -> int:
         SILICONFLOW_DEFAULT_MODEL,
         SILICONFLOW_FREE_FALLBACK_MODEL,
         SILICONFLOW_FREE_ONLY,
+        TOKENHARBOR_API_KEY,
+        TOKENHARBOR_BASE_URL,
+        TOKENHARBOR_DEFAULT_MODEL,
+        TOKENHARBOR_FREE_ONLY,
         TURBOQUANT_BASE_URL,
         TURBOQUANT_CTX,
         TURBOQUANT_PORT,
@@ -421,6 +447,7 @@ def cmd_config(args: argparse.Namespace) -> int:
             ("NVIDIA_BASE_URL", NVIDIA_BASE_URL),
             ("CLOUDFLARE_BASE_URL", CLOUDFLARE_BASE_URL or "(built from CLOUDFLARE_ACCOUNT_ID)"),
             ("SILICONFLOW_BASE_URL", SILICONFLOW_BASE_URL),
+            ("TOKENHARBOR_BASE_URL", TOKENHARBOR_BASE_URL),
             ("DUCKDUCKGO_BASE_URL", DUCKDUCKGO_BASE_URL),
             ("ACP_BASE_URL", ACP_BASE_URL),
         ]
@@ -529,6 +556,11 @@ def cmd_config(args: argparse.Namespace) -> int:
                 ("SILICONFLOW_FREE_ONLY", str(SILICONFLOW_FREE_ONLY)),
                 ("SILICONFLOW_FREE_FALLBACK_MODEL", SILICONFLOW_FREE_FALLBACK_MODEL),
             ],
+            "TokenHarbor": [
+                ("TOKENHARBOR_API_KEY", _mask_key(TOKENHARBOR_API_KEY)),
+                ("TOKENHARBOR_DEFAULT_MODEL", TOKENHARBOR_DEFAULT_MODEL),
+                ("TOKENHARBOR_FREE_ONLY", str(TOKENHARBOR_FREE_ONLY)),
+            ],
             "DuckDuckGo": [
                 ("DUCKDUCKGO_BASE_URL", DUCKDUCKGO_BASE_URL),
                 ("DUCKDUCKGO_DEFAULT_MODEL", DUCKDUCKGO_DEFAULT_MODEL),
@@ -605,6 +637,7 @@ def cmd_config(args: argparse.Namespace) -> int:
             "Cloudflare": CLOUDFLARE_BASE_URL
             or f"https://api.cloudflare.com/client/v4/accounts/{CLOUDFLARE_ACCOUNT_ID or '<ID>'}/ai/v1",
             "SiliconFlow": SILICONFLOW_BASE_URL,
+            "TokenHarbor": TOKENHARBOR_BASE_URL,
             "DuckDuckGo": DUCKDUCKGO_BASE_URL,
             "ACP": ACP_BASE_URL,
         },
@@ -667,6 +700,8 @@ def _backend_auth_rows(active_backend: str) -> list[tuple[str, str, str, str, st
         SILICONFLOW_API_KEY,
         SILICONFLOW_FREE_FALLBACK_MODEL,
         SILICONFLOW_FREE_ONLY,
+        TOKENHARBOR_API_KEY,
+        TOKENHARBOR_FREE_ONLY,
         ZAI_API_KEY,
         ZAI_FREE_FALLBACK_MODEL,
         ZAI_FREE_ONLY,
@@ -695,6 +730,10 @@ def _backend_auth_rows(active_backend: str) -> list[tuple[str, str, str, str, st
             SILICONFLOW_FREE_ONLY,
             SILICONFLOW_FREE_FALLBACK_MODEL,
         ),
+        # TokenHarbor has no free-fallback env var — FREE_ONLY filters to
+        # the :free-suffixed ids at listing time (the :free tier is real,
+        # unlike SiliconFlow's).
+        ("TokenHarbor", TOKENHARBOR_API_KEY, TOKENHARBOR_FREE_ONLY, ""),
     ]
     rows: list[tuple[str, str, str, str, str]] = []
     for label, key_val, free_only, fallback in specs:

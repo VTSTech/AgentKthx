@@ -1,0 +1,43 @@
+{
+  "$schema": "https://raw.githubusercontent.com/VTSTech/AgentKthx/main/schemas/v0.2/plugin.schema.json",
+  "name": "tokenharbor",
+  "version": "0.1.0",
+  "description": "TokenHarbor API backend — one key, every model, via OpenAI Chat-Completions at tokenharbor.ai/v1 (thk_live_ keys, :free tier, auth-gated /v1/models, never auto-confirms the spend gate)",
+  "author": {
+    "name": "VTSTech",
+    "url": "https://www.vts-tech.org"
+  },
+  "license": "MIT",
+  "extensions": {
+    "org.vts-tech.agentkthx": {
+      "display_name": "TokenHarbor Cloud Backend",
+      "type": "backend",
+      "entrypoint": "__init__",
+      "depends": [],
+      "optional_depends": [],
+      "config": {
+        "env_prefix": "TOKENHARBOR",
+        "defaults": {
+          "TOKENHARBOR_API_KEY": "",
+          "TOKENHARBOR_BASE_URL": "https://tokenharbor.ai/v1",
+          "TOKENHARBOR_DEFAULT_MODEL": "deepseek-v4.1-flash:free",
+          "TOKENHARBOR_FREE_ONLY": "false"
+        }
+      },
+      "provides": {
+        "backends": {
+          "tokenharbor": "tokenharbor.TokenHarborBackend"
+        },
+        "cli_commands": [],
+        "cli_flags": {
+          "--backend": [
+            "tokenharbor"
+          ]
+        }
+      },
+      "compatibility": {
+        "agentkthx": ">=0.7.28"
+      }
+    }
+  }
+}

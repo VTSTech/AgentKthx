@@ -133,24 +133,25 @@ class FakeAgent:
 
 class TestAuthRegistry:
     def test_sixteen_entries_eight_pairs(self):
-        """R07.29: SiliconFlow added — 23 entries (11 keys + 11 flags + 1
+        """R07.31: TokenHarbor added — 25 entries (12 keys + 12 flags + 1
         extra account-ID key entry).
 
         Historical name retained. The count grew from 8 pairs (16) to 9
         pairs (18) when NVIDIA NIM was added in R07.26, again to 10
         pairs (20) + 1 extra (Cloudflare's CLOUDFLARE_ACCOUNT_ID) when
-        Cloudflare Workers AI was added in R07.27, and to 11 pairs (22)
-        + 1 extra when SiliconFlow was added in R07.29. Cloudflare is
-        unique among cloud backends: it requires BOTH an API key AND an
-        account ID baked into the URL path.
+        Cloudflare Workers AI was added in R07.27, to 11 pairs (22)
+        + 1 extra when SiliconFlow was added in R07.29, and to 12 pairs
+        (24) + 1 extra when TokenHarbor was added in R07.31. Cloudflare
+        is unique among cloud backends: it requires BOTH an API key AND
+        an account ID baked into the URL path.
         """
         entries = auth_vars()
-        assert len(entries) == 23
-        assert len({e.name for e in entries}) == 23
+        assert len(entries) == 25
+        assert len({e.name for e in entries}) == 25
         kinds = [e.kind for e in entries]
-        # 11 API-key rows + 1 extra account-ID row = 12 key-kind entries
-        assert kinds.count("key") == 12
-        assert kinds.count("flag") == 11
+        # 12 API-key rows + 1 extra account-ID row = 13 key-kind entries
+        assert kinds.count("key") == 13
+        assert kinds.count("flag") == 12
 
     def test_pairs_grouped_key_first(self):
         entries = auth_vars()
@@ -196,7 +197,7 @@ class TestAuthRegistry:
         )
 
     def test_all_eight_cloud_backends_present(self):
-        """R07.29: SiliconFlow added — 11 cloud backends now."""
+        """R07.31: TokenHarbor added — 12 cloud backends now."""
         labels = {t[0] for t in AUTH_BACKENDS}
         assert labels == {
             "ZAI",
@@ -210,6 +211,7 @@ class TestAuthRegistry:
             "NVIDIA",
             "Cloudflare",
             "SiliconFlow",
+            "TokenHarbor",
         }
 
     def test_canonical_env_names_match_backend_resolution(self):
@@ -226,6 +228,7 @@ class TestAuthRegistry:
             "NVIDIA_API_KEY",
             "CLOUDFLARE_API_KEY",
             "SILICONFLOW_API_KEY",
+            "TOKENHARBOR_API_KEY",
         }
         flags = {t[2] for t in AUTH_BACKENDS}
         assert flags == {
@@ -240,6 +243,7 @@ class TestAuthRegistry:
             "NVIDIA_FREE_ONLY",
             "CLOUDFLARE_FREE_ONLY",
             "SILICONFLOW_FREE_ONLY",
+            "TOKENHARBOR_FREE_ONLY",
         }
 
     def test_gemini_and_hf_carry_alt_names(self):
@@ -750,7 +754,7 @@ class TestConfigBackendRows:
         return re.compile(r"\x1b\[[0-9;]*m").sub("", s)
 
     def test_eight_rows_all_cloud_backends(self, rows_ansi):
-        """R07.29: SiliconFlow added — 11 rows now. Historical name retained."""
+        """R07.31: TokenHarbor added — 12 rows now. Historical name retained."""
         labels = [r[1] for r in rows_ansi]
         assert labels == [
             "ZAI",
@@ -764,6 +768,7 @@ class TestConfigBackendRows:
             "NVIDIA",
             "Cloudflare",
             "SiliconFlow",
+            "TokenHarbor",
         ]
 
     def test_key_display_masked_or_not_set(self, rows_ansi):

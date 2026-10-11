@@ -213,6 +213,21 @@ class BackendType(Enum):
     # docs/api/DUCKDUCKGO_API_TECHNICAL_REFERENCE.md.
     DUCKDUCKGO = "duckduckgo"
 
+    # TokenHarbor — OpenRouter-style LLM gateway at
+    # https://tokenharbor.ai/v1 (OpenAI Chat-Completions wire ONLY —
+    # the Anthropic /v1/messages surface is out of scope). One wallet,
+    # `thk_live_` keys, :free-suffixed free models. Key differences
+    # from OpenRouter: GET /v1/models REQUIRES AUTH (docs-verified —
+    # the seed catalog is the only cold-start catalog source), a
+    # spend-confirmation gate pauses any call estimated > half the
+    # balance (400 spend_confirmation_required — AgentKthx NEVER
+    # auto-confirms), per-key USD spend caps surface as 429
+    # spend_limit_exceeded (quota-class fast-fail, not rate-class),
+    # and dual server-side caches (exact + prompt) are transparent to
+    # the client. See agentkthx/plugins/tokenharbor/ and
+    # docs/api/TOKENHARBOR_API_TECHNICAL_REFERENCE.md.
+    TOKENHARBOR = "tokenharbor"
+
     # Stable Diffusion — local sd.cpp server (leejet/stable-diffusion.cpp)
     # at http://127.0.0.1:1234 (SD_BASE_URL). Follows the Ollama pattern:
     # an EXTERNAL process AgentKthx never manages — the backend only talks
