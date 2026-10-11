@@ -1485,6 +1485,16 @@ class CloudBackend(OpenAICompatibleBackend):
         known gaps for some 1.5 Flash variants — override in the
         Gemini backend if needed.
 
+        R07.36: an explicit provider declaration beats the NATIVE
+        default. When the model's catalog entry carries
+        ``details.supports_tools`` (hoisted at parse time from a rich
+        provider payload — OpenRouter's ``supported_parameters``), True
+        pins NATIVE and False downgrades to REACT: a model whose provider
+        omits ``tools`` from its supported-parameter list rejects the
+        ``tools`` field, so text-parsed (ReAct) tool calls are the honest
+        verdict — matching the 400 → ReAct fallback generate() already
+        performs. Entries without the flag keep the cloud NATIVE default.
+
         Args:
             model: Model identifier.
             family: Optional model family hint (unused in default impl).
@@ -1494,8 +1504,15 @@ class CloudBackend(OpenAICompatibleBackend):
                 live testing.
 
         Returns:
-            ``ToolSupportLevel.NATIVE`` by default.
+            NATIVE by default; NATIVE/REACT per ``supports_tools`` when
+            the catalog entry declares it.
         """
+        try:
+            _reasoning, tools = self._entry_capability_flags(model)
+        except Exception:
+            tools = None
+        if tools is False:
+            return ToolSupportLevel.REACT
         return ToolSupportLevel.NATIVE
 
     # ─────────────────────────────────────────────────────────────────────

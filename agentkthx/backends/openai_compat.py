@@ -956,7 +956,50 @@ class OpenAICompatibleBackend(BaseBackend):
         r"kimi-k(2\.[5-9]|[3-9])",  # Kimi K2.5+/K3 reasoning (kimi-k2 base instruct NOT matched — use ...-thinking)
         r"mimo",  # Xiaomi MiMo reasoning family
         r"mistral-large",  # Mistral Large (seed: mistral-large-latest supports_reasoning=True)
+        # ── R07.36: more current-generation families (owner live-run report:
+        # "? unknown" spam on OpenRouter/HF/TokenHarbor catalogs) ──
+        r"nemotron-\d",  # NVIDIA Nemotron 3/3.5+ hybrid reasoning (nano/super/ultra/lightning)
+        #   — content-safety/guard variants are excluded via
+        #   _NON_THINKING_NAME_PATTERNS below (classifiers, not chat models)
+        r"\bling-\d",  # inclusionAI Ling 1T/2.x/3.x hybrid thinking (ling-3.0-flash-Fin)
+        r"gemini-(flash|pro|flash-lite|ultra)-latest",  # version-less Google aliases
+        #   (gemini-flash-lite-latest inherits the current family verdict)
     )
+
+    #: R07.36: model-name patterns that mark a model as DEFINITELY NOT a
+    #: text-chat reasoning model — speech/audio (tts, transcribe, whisper),
+    #: embeddings, robotics (VLA), and safety classifiers. These carry
+    #: positive evidence of absence (a TTS endpoint has no reasoning trace),
+    #: so unlike a plain pattern miss they yield NO, not UNKNOWN — and they
+    #: take PRECEDENCE over the family patterns above (the R07.35 gemini
+    #: family regex was flagging 'gemini-2.5-flash-preview-tts' as ✓ yes).
+    _NON_THINKING_NAME_PATTERNS: tuple[str, ...] = (
+        r"tts",  # gemini-3.8-flash-tts, *-preview-tts, kokoro-tts
+        r"transcri",  # gemini-3.5-transcribe(-live)
+        r"whisper",  # ASR only
+        r"embedding",  # gemini-embedding-*
+        r"robotics",  # gemini-robotics-er-* (vision-language-action)
+        r"content-safety",  # nvidia/nemotron-3.5-content-safety (classifier)
+        r"aegis",  # guard/classifier family
+        r"guard",  # llama-guard-* and friends
+        r"moderation",  # moderation classifiers
+    )
+
+    @classmethod
+    def _name_thinking_verdict(cls, model: str) -> "ThinkingSupport":
+        """Tri-state name verdict: YES (reasoning marker), NO (non-chat
+        modality marker — TTS/embedding/classifiers, R07.36), or UNKNOWN
+        (no signal). Exclusions take precedence over family markers: a
+        modality suffix is stronger evidence than a family prefix.
+        """
+        import re
+
+        segment = (model or "").split("/")[-1].lower()
+        if any(re.search(p, segment) for p in cls._NON_THINKING_NAME_PATTERNS):
+            return ThinkingSupport.NO
+        if any(re.search(p, segment) for p in cls._THINKING_NAME_PATTERNS):
+            return ThinkingSupport.YES
+        return ThinkingSupport.UNKNOWN
 
     @classmethod
     def _name_matches_thinking(cls, model: str) -> bool:
@@ -971,12 +1014,60 @@ class OpenAICompatibleBackend(BaseBackend):
         ``/``) only: every shipped marker (deepseek-r1, qwq, o1/o3/o4,
         glm-4.5+, qwen3, thinking, reason, magistral, exaone-deep) is
         model-level, so the restriction keeps every true positive and kills
-        vendor bleed. Never NO: a miss still yields UNKNOWN.
+        vendor bleed. R07.36: implemented via ``_name_thinking_verdict`` —
+        modality exclusions (tts/embedding/…) now return False here too
+        (they are NO, not YES), while a plain pattern miss still yields
+        UNKNOWN upstream (never NO without evidence).
         """
-        import re
+        return cls._name_thinking_verdict(model) is ThinkingSupport.YES
 
+    # ─────────────────────────────────────────────────────────────────
+    # R07.36: capability metadata from the live catalog entry
+    # ─────────────────────────────────────────────────────────────────
+    # Backends that parse a rich provider payload (OpenRouter's
+    # ``supported_parameters`` list) hoist per-model capability flags into
+    # ``details.supports_reasoning`` / ``details.supports_tools`` at parse
+    # time. Those flags are the provider's OWN declaration — strictly
+    # better evidence than name heuristics. Lookup is defensive: backends
+    # without an in-process catalog (or entries without the flags) return
+    # (None, None) and the caller falls through to the name verdict.
+    # Raw ``model_data`` payloads are deliberately NOT consulted here: a
+    # foreign payload shape that happens to carry a ``supported_parameters``
+    # list without "tools"/"reasoning" would downgrade every model on
+    # backends that merely store the raw dict (TokenHarbor live entries).
+    # Only the explicit, parse-time-hoisted details flags are trusted.
+
+    def _entry_capability_flags(self, model: str) -> tuple[bool | None, bool | None]:
+        """(supports_reasoning, supports_tools) from the catalog entry.
+
+        Reads the in-process catalog (``self._model_cache`` — populated by
+        a live ``list_models()`` fetch or a persistent-cache restore).
+        Entries match by exact name or by model SEGMENT (after the last
+        ``/`` — same vendor-bleed rules as the name heuristics). Returns
+        ``(None, None)`` when there is no entry or no hoisted flags.
+        """
+        entries = getattr(self, "_model_cache", None)
+        if not isinstance(entries, (list, tuple)):
+            return None, None
         segment = (model or "").split("/")[-1].lower()
-        return any(re.search(p, segment) for p in cls._THINKING_NAME_PATTERNS)
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            name = entry.get("name")
+            if name != model and (
+                not isinstance(name, str) or name.split("/")[-1].lower() != segment
+            ):
+                continue
+            details = entry.get("details") or {}
+            if not isinstance(details, dict):
+                return None, None
+            reasoning = details.get("supports_reasoning")
+            tools = details.get("supports_tools")
+            return (
+                reasoning if isinstance(reasoning, bool) else None,
+                tools if isinstance(tools, bool) else None,
+            )
+        return None, None
 
     def test_thinking_support(
         self, model: str, family: str | None = None, force_test: bool = False
@@ -1003,25 +1094,60 @@ class OpenAICompatibleBackend(BaseBackend):
         capabilities verdict (``thinking`` in capabilities), so the
         heuristic only governs true cloud backends.
 
+        R07.36 resolution order (first hit wins):
+        1. Cached verdict (``thinking:<model>`` key) — EXCEPT when the name
+           now matches a non-chat modality exclusion: a cached YES from the
+           pre-R07.36 era (the gemini family regex flagged
+           ``gemini-2.5-flash-preview-tts`` ✓ yes) loses to the exclusion
+           list's positive evidence of absence. Owner machines self-heal
+           without a cache purge.
+        2. Catalog metadata — ``details.supports_reasoning`` hoisted from
+           the provider's own payload (OpenRouter ``supported_parameters``)
+           beats every name heuristic: True → YES, False → NO. Both are
+           cached (provider declarations are evidence, not guesses).
+        3. Name verdict — YES on a reasoning marker, NO on a non-chat
+           modality marker (tts/transcribe/embedding/robotics/classifier),
+           UNKNOWN otherwise. Only YES is cached: like R07.35 UNKNOWNs,
+           an un-cached NO/UNKNOWN lets later pattern or exclusion
+           refinements take effect without a cache purge.
+
         Args:
             model: Model name
             family: Optional family hint (stored with the cache entry)
             force_test: Unused (the heuristic is name-local and free)
 
         Returns:
-            ThinkingSupport.YES on a marker hit, UNKNOWN otherwise
+            ThinkingSupport.YES / NO / UNKNOWN per the resolution order
         """
         from ..core.tool_cache import cache_thinking_support, get_cached_thinking_support
 
         cached = get_cached_thinking_support(model)
         if cached is not None:
+            # R07.36: exclusion evidence outranks a stale cached YES (see
+            # docstring). Only the YES case is re-examined — cached NO and
+            # cached UNKNOWN keep their normal precedence.
+            if cached is ThinkingSupport.YES:
+                if self._name_thinking_verdict(model) is ThinkingSupport.NO:
+                    return ThinkingSupport.NO
             return cached
 
-        if self._name_matches_thinking(model):
+        try:
+            reasoning, _tools = self._entry_capability_flags(model)
+        except Exception:
+            reasoning = None
+        if reasoning is True:
             result = ThinkingSupport.YES
             cache_thinking_support(model, result, family=family or "")
             return result
-        return ThinkingSupport.UNKNOWN
+        if reasoning is False:
+            result = ThinkingSupport.NO
+            cache_thinking_support(model, result, family=family or "")
+            return result
+
+        verdict = self._name_thinking_verdict(model)
+        if verdict is ThinkingSupport.YES:
+            cache_thinking_support(model, verdict, family=family or "")
+        return verdict
 
     # ─────────────────────────────────────────────────────────────────────
     # ARCH-03 (R06.57): Shared context-length 400 recovery helpers

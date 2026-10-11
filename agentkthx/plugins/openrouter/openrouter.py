@@ -344,26 +344,83 @@ class OpenRouterBackend(OpenAICompatibleBackend):
         if is_zero_pricing:
             free_tier = True  # pricing is the ground truth — overrides is_free
 
+        details = {
+            "family": family,
+            "backend": "openrouter",
+            "context_length": context_length,
+            "max_completion_tokens": max_completion_tokens,
+            "free_tier": free_tier,
+            "is_chat_model": is_chat_model,
+            "is_free_suffix": is_free_suffix,
+            "is_free_api": is_free_api,
+            "is_zero_pricing": is_zero_pricing,
+            "pricing": {
+                "prompt": prompt_price,
+                "completion": completion_price,
+            },
+        }
+
+        # R07.36: hoist the provider's OWN capability declaration.
+        # ``supported_parameters`` is OpenRouter's per-model list of chat
+        # parameters the model/router accepts — "reasoning"/
+        # "include_reasoning" → thinking output, "tools" → native function
+        # calling. These flags feed the models-table think/tools columns
+        # via _entry_capability_flags() with strictly better evidence than
+        # name heuristics. Only a non-empty list is trusted (absent field
+        # → no flags → heuristics apply).
+        supported_params = model_data.get("supported_parameters")
+        if isinstance(supported_params, (list, tuple)) and supported_params:
+            pset = {str(p).lower() for p in supported_params}
+            details["supports_reasoning"] = (
+                "reasoning" in pset or "include_reasoning" in pset
+            )
+            details["supports_tools"] = "tools" in pset
+
         return {
             "name": model_id,
             "size": 0,  # OpenRouter doesn't provide size info
-            "details": {
-                "family": family,
-                "backend": "openrouter",
-                "context_length": context_length,
-                "max_completion_tokens": max_completion_tokens,
-                "free_tier": free_tier,
-                "is_chat_model": is_chat_model,
-                "is_free_suffix": is_free_suffix,
-                "is_free_api": is_free_api,
-                "is_zero_pricing": is_zero_pricing,
-                "pricing": {
-                    "prompt": prompt_price,
-                    "completion": completion_price,
-                },
-            },
+            "details": details,
             "model_data": model_data,  # Store original data for future reference
         }
+
+    @classmethod
+    def _hoist_capability_flags(cls, entries: list[dict] | None) -> list[dict] | None:
+        """Upgrade pre-R07.36 cached catalog entries in place.
+
+        Entries stored before the R07.36 parse change carry the raw
+        ``model_data`` payload but lack the hoisted
+        ``details.supports_reasoning`` / ``details.supports_tools`` flags.
+        On the L2-restore path (no live fetch) the flags are recomputed
+        from the stored payload so the think/tools columns light up
+        WITHOUT waiting for the 30-minute TTL or a ``--refresh``. Scoped
+        to this backend only — foreign catalogs are never touched.
+        """
+        for entry in entries or []:
+            if not isinstance(entry, dict):
+                continue
+            details = entry.get("details")
+            if not isinstance(details, dict):
+                details = {}
+                entry["details"] = details
+            if (
+                isinstance(details.get("supports_tools"), bool)
+                and isinstance(details.get("supports_reasoning"), bool)
+            ):
+                continue  # already hoisted
+            model_data = entry.get("model_data")
+            if not isinstance(model_data, dict):
+                continue
+            params = model_data.get("supported_parameters")
+            if not isinstance(params, (list, tuple)) or not params:
+                continue
+            pset = {str(p).lower() for p in params}
+            if not isinstance(details.get("supports_tools"), bool):
+                details["supports_tools"] = "tools" in pset
+            if not isinstance(details.get("supports_reasoning"), bool):
+                details["supports_reasoning"] = (
+                    "reasoning" in pset or "include_reasoning" in pset
+                )
+        return entries
 
     def list_models(self) -> list[dict]:
         """List available models from OpenRouter API with caching.
@@ -392,6 +449,9 @@ class OpenRouterBackend(OpenAICompatibleBackend):
         cached = model_cache.get_cached_models(self.MODEL_CACHE_KEY)
         if cached is not None:
             result = self._apply_free_only(cached)
+            # R07.36: legacy cached entries self-heal their capability
+            # flags from the stored payload (no --refresh required).
+            self._hoist_capability_flags(result)
             type(self)._model_cache = result
             type(self)._cache_time = current_time
             return result
@@ -954,12 +1014,28 @@ class OpenRouterBackend(OpenAICompatibleBackend):
             ToolSupportLevel.UNTESTED for non-chat slugs (ROB-39).
         """
         # ROB-39 (R07.21 CLOSED): classify non-chat slugs as UNKNOWN.
-        # Substring match against the lowercase model id — patterns are
-        # conservative (only unambiguous non-chat slugs).
+        # R07.36: slug-WORD matching — (?<![a-z0-9]) replaces the raw
+        # substring test, which misfired on contained words:
+        # "thinkingmachines/inkling" contains "kling" (i-n-KLING), so a
+        # chat-capable reasoning model rendered ``tools ? untested`` in
+        # the models table. The lookbehind keeps every real non-chat slug
+        # matching ("-tts", "/flux", start-of-id) while blocking mid-word
+        # hits. Also R07.36: after the non-chat check, a hoisted provider
+        # declaration (details.supports_tools — see _parse_openrouter_model)
+        # downgrades to REACT when the provider omits "tools" from the
+        # model's supported_parameters, and pins NATIVE when it lists it.
+        import re
+
         _model_lower = model.lower()
         for pattern in self._NON_CHAT_SLUG_PATTERNS:
-            if pattern in _model_lower:
+            if re.search(rf"(?<![a-z0-9]){re.escape(pattern)}", _model_lower):
                 return ToolSupportLevel.UNTESTED
+        try:
+            _reasoning, tools = self._entry_capability_flags(model)
+        except Exception:
+            tools = None
+        if tools is False:
+            return ToolSupportLevel.REACT
         return ToolSupportLevel.NATIVE
 
     # _build_openai_body() is inherited from OpenAICompatibleBackend (ARCH-01)

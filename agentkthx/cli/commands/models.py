@@ -196,7 +196,12 @@ def cmd_models(args: argparse.Namespace) -> int:
 
     backend = get_backend(backend_name, api_mode=api_mode)  # default for list_models etc.
 
-    if not isinstance(backend, OllamaBackend):
+    # R07.36: the hint is now scoped to LOCAL backends. Cloud backends
+    # have had full catalog support since R07.20 (L1/L2 JSON cache,
+    # --refresh, capability columns), so printing an Ollama-only
+    # recommendation on every tokenharbor/openrouter/zai/gemini run was
+    # pure noise (owner live-run report). Static local backends keep it.
+    if not isinstance(backend, OllamaBackend) and not getattr(backend, "is_cloud", False):
         print(f"Models command works best with Ollama backend (current: {backend_name})")
 
     if not backend.is_running():

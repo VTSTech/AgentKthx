@@ -83,6 +83,16 @@ def fmt_token_size(n) -> str:
       - 1000000 → '1M'    (decimal)
       - 262144  → '256K'  (binary)
       - 2097152 → '2M'    (binary)
+
+    R07.36: non-exact context-scale values round to decimal-K. Live
+    provider payloads carry odd windows that are neither decimal nor
+    binary multiples (TokenHarbor's qwen3.8-27b reports 991808,
+    qwen3.8-flash 983616) — the exact-multiple ladder fell through to the
+    raw int and the Context column rendered '991808'. Rounding is
+    display-only: the underlying int is untouched.
+
+      - 991808  → '992K'  (rounded)
+      - 983616  → '984K'  (rounded)
     """
     if n is None:
         return "?"
@@ -95,6 +105,11 @@ def fmt_token_size(n) -> str:
         return f"{n // 1000}K"
     if n >= 1024 and n % 1024 == 0:
         return f"{n // 1024}K"
+    # R07.36: context-scale non-multiples round to the nearest decimal-K
+    # (after every exact branch — 131072 still resolves as binary '128K'
+    # above, and sub-100000 values keep the plain-int R07.18 behavior).
+    if n >= 100000:
+        return f"{round(n / 1000)}K"
     return str(n)
 
 
