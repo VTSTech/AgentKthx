@@ -185,7 +185,7 @@ default_model_for_backend() {
     # has the account-level rate limits. PERISHABLE: docs-only id (the
     # only :free id Token Harbor's docs name) — re-verify against the
     # live Free list via scripts/probe_tokenharbor.sh at smoke time.
-    tokenharbor)  echo "deepseek-v4.1-flash:free" ;;
+    tokenharbor)  echo "mimo-v2.6-flash:free" ;;
     *)           echo "" ;;
   esac
 }
