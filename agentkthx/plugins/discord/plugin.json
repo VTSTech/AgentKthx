@@ -38,6 +38,8 @@
           "DISCORD_ENABLE_SEND_TOOL": "false",
           "DISCORD_SESSION_TTL_DAYS": "7",
           "DISCORD_KEEP_SESSIONS": "false",
+          "DISCORD_NUM_CTX": "",
+          "DISCORD_MAX_TOKENS": "",
           "DISCORD_CONFIG": "~/.agentkthx/discord.json"
         }
       },

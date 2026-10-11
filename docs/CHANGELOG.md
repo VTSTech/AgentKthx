@@ -71,6 +71,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The 13 Discord plugin files + test files (authored since the lint burn-down) are reformatted with CI's pinned `black==26.5.1` — `python -m black --check agentkthx/ tests/` is green again alongside `ruff==0.16.9`. No behavior change from formatting.
 
+### Discord num_ctx / max_tokens (chat parity)
+
+- **`agentkthx discord` now takes `--num-ctx` and `--max-tokens`** (+ `DISCORD_NUM_CTX` / `DISCORD_MAX_TOKENS` env), wired through to the core Agent exactly like `agentkthx chat` — including the R07.18 human suffixes (`--num-ctx 128k`, `--max-tokens 2k`). Banner reports `gen: num_ctx=… max_tokens=…`; `/status` shows both (unset renders as `auto`).
+- **Why it matters:** with nothing set, the agent caps max_tokens to `num_ctx//32` (256 tokens at the 8K default), so longer Discord replies were silently truncated (`finish_reason: length` → marked incomplete). An explicit `--max-tokens` skips that cap; an explicit `--num-ctx` widens both the input window and the derived cap when left alone.
+
 ## [R07.32] - 2026-10-10 1:08:09 PM
 
 ### Date/time built-ins removed → MCP time server (@infoinlet/mcp-time)

@@ -42,6 +42,11 @@ import traceback
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
+# Chat-parity token-size parsing: --num-ctx 128k / DISCORD_NUM_CTX=131072.
+# Intentionally re-uses the CLI's parser so `agentkthx discord` accepts the
+# same human-friendly forms as `agentkthx chat` (R07.18 suffixes).
+from agentkthx.shared_args import _parse_token_size
+
 from .commands import (
     CALLBACK_DEFER,
     CALLBACK_MESSAGE,
@@ -133,6 +138,24 @@ def _as_bool(value: str) -> bool:
     return value.strip().lower() in ("1", "true", "yes", "on")
 
 
+def _size_cfg(key: str) -> int | None:
+    """Parse an optional token-size setting (DISCORD_NUM_CTX / DISCORD_MAX_TOKENS).
+
+    Empty/unset -> None (the Agent keeps its built-in defaults). Accepts the
+    same human-friendly forms as the CLI's --num-ctx / --num-predict
+    (``32768``, ``128k``, ``2.5k`` …) via the shared _parse_token_size.
+    A malformed value is reported and ignored rather than crashing startup.
+    """
+    raw = _cfg(key, "").strip()
+    if not raw:
+        return None
+    try:
+        return _parse_token_size(raw)
+    except (ValueError, TypeError):
+        print(f"[discord] ignoring invalid {key}={raw!r} (expected int or e.g. 128k)")
+        return None
+
+
 def _tools_display(raw) -> str:
     """Banner/status rendering: '' / 'none' / 'off' / empty list -> 'none';
     a channel override list renders comma-joined."""
@@ -182,6 +205,11 @@ class BotConfig:
     backend: str | None = None
     model: str | None = None
     debug: bool = False
+    # Chat-parity generation params (None = Agent built-in defaults:
+    # num_ctx 8192, max_tokens capped to num_ctx//32 — i.e. 256 at 8K,
+    # which is why Discord replies used to die with finish_reason=length).
+    num_ctx: int | None = None
+    max_tokens: int | None = None
 
     @classmethod
     def from_env(cls, overrides: dict | None = None) -> "BotConfig":
@@ -207,6 +235,8 @@ class BotConfig:
             register_slash=_as_bool(_cfg("DISCORD_REGISTER_SLASH", "false")),
             soul=(_cfg("DISCORD_SOUL", "") or None),  # no soul by default (R07.33)
             debug=_as_bool(_cfg("DISCORD_DEBUG", "false")),
+            num_ctx=_size_cfg("DISCORD_NUM_CTX"),
+            max_tokens=_size_cfg("DISCORD_MAX_TOKENS"),
         )
         for key, value in overrides.items():
             if value is not None:
@@ -241,6 +271,22 @@ def setup_parser(parser) -> None:
     )
     parser.add_argument("--tools", default=None, help="Comma-separated tool allowlist override")
     parser.add_argument("--max-steps", type=int, default=None, help="Agent step cap override")
+    parser.add_argument(
+        "--num-ctx",
+        type=_parse_token_size,
+        default=None,
+        metavar="TOKENS",
+        help="Context window override, e.g. 32768 or 128k "
+        "(default: agent default 8192; DISCORD_NUM_CTX also works)",
+    )
+    parser.add_argument(
+        "--max-tokens",
+        type=_parse_token_size,
+        default=None,
+        metavar="TOKENS",
+        help="Generation cap override, e.g. 4096 or 2k — skips the agent's "
+        "num_ctx//32 truncation cap (DISCORD_MAX_TOKENS also works)",
+    )
     parser.add_argument(
         "--keep",
         action="store_true",
@@ -288,6 +334,8 @@ def cmd_discord(args) -> int:
             "api_mode": getattr(args, "api", None),
             "soul": getattr(args, "soul", None),
             "max_steps": getattr(args, "max_steps", None),
+            "num_ctx": getattr(args, "num_ctx", None),
+            "max_tokens": getattr(args, "max_tokens", None),
             # flag wins only when raised — None keeps the DISCORD_DEBUG env value
             "debug": True if getattr(args, "debug", False) else None,
             # same None-skip semantics for --keep (DISCORD_KEEP_SESSIONS env works alone)
@@ -324,6 +372,9 @@ def cmd_discord(args) -> int:
         f"[discord] pool: workers={cfg.max_workers} queue={cfg.queue_max} "
         f"max-steps={cfg.max_steps} sessions={'keep' if cfg.keep_sessions else 'fresh'} "
         f"session-ttl={cfg.session_ttl_days}d"
+    )
+    print(
+        f"[discord] gen: num_ctx={cfg.num_ctx or 'auto'} " f"max_tokens={cfg.max_tokens or 'auto'}"
     )
     if cfg.debug:
         print("[discord] debug: ON — backend prompts/responses/errors will be echoed")
@@ -699,6 +750,8 @@ class ResponderPool:
             tools=_tools_display(ch.tools if ch.tools is not None else self.cfg.tools),
             max_steps=self.cfg.max_steps,
             cooldown_s=self.cfg.cooldown_s,
+            num_ctx=self.cfg.num_ctx,
+            max_tokens=self.cfg.max_tokens,
             uptime_s=time.monotonic() - (self._started_at or time.monotonic()),
             queue_depth=self._queue.qsize(),
             agent_runs=self.agent_runs,
@@ -829,6 +882,8 @@ class ResponderPool:
             soul_level=2,
             session_id=job.session_key,
             max_steps=self.cfg.max_steps,
+            num_ctx=self.cfg.num_ctx,
+            num_predict=self.cfg.max_tokens,
             confirm_dangerous=_deny_dangerous,
             debug=self.cfg.debug,
         )

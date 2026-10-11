@@ -140,6 +140,8 @@ class TestCliWiring:
         assert "--backend" in out
         assert "--debug" in out
         assert "--keep" in out
+        assert "--num-ctx" in out
+        assert "--max-tokens" in out
 
     def test_discord_without_token_fails_cleanly(self, monkeypatch, capsys, clean_env):
         monkeypatch.setattr(CLI_MAIN_MODULE, "_run_update_check", lambda: None)
@@ -153,7 +155,18 @@ class TestCliWiring:
         """Flags parse (no unrecognized-argument error) even without a token."""
         monkeypatch.setattr(CLI_MAIN_MODULE, "_run_update_check", lambda: None)
         monkeypatch.setattr(CLI_MAIN_MODULE, "_print_update_notice", lambda: None)
-        rc = cli_main(["discord", "--dry-run", "--backend", "ollama"])
+        rc = cli_main(
+            [
+                "discord",
+                "--dry-run",
+                "--backend",
+                "ollama",
+                "--num-ctx",
+                "16384",
+                "--max-tokens",
+                "2k",
+            ]
+        )
         out = capsys.readouterr().out
         assert rc == 1  # still no token in CI
         assert "DISCORD_BOT_TOKEN" in out

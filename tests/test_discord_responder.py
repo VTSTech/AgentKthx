@@ -804,6 +804,61 @@ class TestBuildAgent:
         monkeypatch.setenv("DISCORD_KEEP_SESSIONS", "true")
         assert BotConfig.from_env(overrides={"keep_sessions": None}).keep_sessions is True
 
+    def test_from_env_num_ctx_and_max_tokens_defaults(self, monkeypatch):
+        """Chat-parity gen params default to None — the Agent keeps its
+        built-ins (num_ctx 8192, max_tokens = num_ctx//32 cap)."""
+        monkeypatch.delenv("DISCORD_NUM_CTX", raising=False)
+        monkeypatch.delenv("DISCORD_MAX_TOKENS", raising=False)
+        cfg = BotConfig.from_env()
+        assert cfg.num_ctx is None
+        assert cfg.max_tokens is None
+
+    def test_from_env_num_ctx_and_max_tokens_parse(self, monkeypatch):
+        """Plain ints and R07.18 human suffixes (128k/2k) both parse, exactly
+        like `agentkthx chat`; a malformed value is reported and ignored."""
+        monkeypatch.setenv("DISCORD_NUM_CTX", "32768")
+        monkeypatch.setenv("DISCORD_MAX_TOKENS", "4096")
+        cfg = BotConfig.from_env()
+        assert cfg.num_ctx == 32768
+        assert cfg.max_tokens == 4096
+        monkeypatch.setenv("DISCORD_NUM_CTX", "128k")
+        monkeypatch.setenv("DISCORD_MAX_TOKENS", "2k")
+        cfg = BotConfig.from_env()
+        assert cfg.num_ctx == 131072
+        assert cfg.max_tokens == 2048
+        monkeypatch.setenv("DISCORD_NUM_CTX", "bananas")
+        cfg = BotConfig.from_env()
+        assert cfg.num_ctx is None
+
+    def test_num_ctx_max_tokens_flag_override_semantics(self, monkeypatch):
+        """--num-ctx/--max-tokens flow through overrides with the same
+        None-skip semantics as --debug/--keep: flag wins when raised,
+        env alone works."""
+        monkeypatch.delenv("DISCORD_NUM_CTX", raising=False)
+        monkeypatch.delenv("DISCORD_MAX_TOKENS", raising=False)
+        cfg = BotConfig.from_env(overrides={"num_ctx": None, "max_tokens": None})
+        assert cfg.num_ctx is None
+        assert cfg.max_tokens is None
+        cfg = BotConfig.from_env(overrides={"num_ctx": 65536, "max_tokens": 8192})
+        assert cfg.num_ctx == 65536
+        assert cfg.max_tokens == 8192
+
+    def test_build_agent_forwards_num_ctx_and_max_tokens(self, monkeypatch):
+        """--num-ctx/--max-tokens reach the core Agent as num_ctx/num_predict
+        (chat parity); an explicit num_predict skips the num_ctx//32 cap that
+        produced the 256-token truncation on Discord."""
+        monkeypatch.setattr("agentkthx.agent.Agent", AgentCapture)
+        AgentCapture.instances.clear()
+        job = Job(make_ev(), "hello", "k", resolve_channel_config(CHANNEL, None))
+        pool = ResponderPool(make_cfg(num_ctx=32768, max_tokens=4096), make_policy(), FakeRest())
+        pool._build_agent(job)
+        assert AgentCapture.instances[-1]["num_ctx"] == 32768
+        assert AgentCapture.instances[-1]["num_predict"] == 4096
+        pool_def = ResponderPool(make_cfg(), make_policy(), FakeRest())
+        pool_def._build_agent(job)
+        assert AgentCapture.instances[-1]["num_ctx"] is None
+        assert AgentCapture.instances[-1]["num_predict"] is None
+
 
 class TestToolsDisplay:
     """Banner / /status rendering helper."""

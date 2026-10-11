@@ -234,6 +234,40 @@ class TestQuickHandlers:
         assert "agent runs this session: 7" in content
         assert "discord-g1-c2" in content
 
+    def test_status_gen_params(self):
+        """/status shows the effective gen params; unset renders as auto."""
+        inter = make_inter(command="status")
+        content, _ = handle_status(
+            inter,
+            backend="zai",
+            model="glm-4.5-flash",
+            soul="none",
+            tools="none",
+            max_steps=5,
+            cooldown_s=10.0,
+            num_ctx=32768,
+            max_tokens=4096,
+            uptime_s=10.0,
+            queue_depth=0,
+            agent_runs=0,
+            session_key="s",
+        )
+        assert "num_ctx: 32768 | max-tokens: 4096" in content
+        content, _ = handle_status(
+            inter,
+            backend="zai",
+            model="glm-4.5-flash",
+            soul="none",
+            tools="none",
+            max_steps=5,
+            cooldown_s=10.0,
+            uptime_s=10.0,
+            queue_depth=0,
+            agent_runs=0,
+            session_key="s",
+        )
+        assert "num_ctx: auto | max-tokens: auto" in content
+
     def test_model_show_and_set(self):
         inter = make_inter(command="model")
         content, _ = handle_model(inter, current_model="glm-4.5-flash", owner=True, name="")
