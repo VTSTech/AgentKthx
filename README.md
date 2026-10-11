@@ -15,6 +15,16 @@ Inspired by the architecture of OpenClaw, rebuilt from scratch for local-first o
 
 [![License](https://img.shields.io/badge/License-MIT-blue)](#license) [![Go to Python website](https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2FVTSTech%2FAgentKthx%2Frefs%2Fheads%2Fmain%2Fpyproject.toml&query=project.requires-python&label=python&logo=python&logoColor=white)](https://python.org)
 
+## Installation
+
+```bash
+# Latest Development Release
+pip install git+https://github.com/VTSTech/AgentKthx.git --force-reinstall
+
+# Last Stable (as stable as Alpha can be) Release
+pip install agentkthx
+```
+
 <img width="1648" height="996" alt="image" src="https://github.com/user-attachments/assets/42a7dfd6-ffb4-4e1a-844d-7984b4c8b59c" />
 <img width="1295" height="1002" alt="image" src="https://github.com/user-attachments/assets/4264616b-1af7-44ad-bc74-24f78737f8e3" />
 <img width="1498" height="721" alt="image" src="https://github.com/user-attachments/assets/f1f1e13b-c489-4fc3-b05c-9f6084818e7b" />
@@ -26,8 +36,6 @@ Inspired by the architecture of OpenClaw, rebuilt from scratch for local-first o
 <img width="672" height="617" alt="image" src="https://github.com/user-attachments/assets/59b4a074-fd8a-4970-8289-5ec671324a94" />
 <img width="1553" height="648" alt="image" src="https://github.com/user-attachments/assets/aeeb37b8-8f80-429b-b0e3-a31f8b3a482d" />
 <img width="1311" height="668" alt="image" src="https://github.com/user-attachments/assets/b813736c-4944-4b11-96c1-27aeda70b9e8" />
-
-
 
 ## 📚 Documentation
 
@@ -79,16 +87,6 @@ Inspired by the architecture of OpenClaw, rebuilt from scratch for local-first o
 - **Tool-call visibility** — Tool calls and results displayed in chat mode (R05.4); per-response stats (`⏱️ N steps, M tool calls, Xms` + tools used) in both chat and agent modes (R07.15)
 - **Audit-tracked development** — every release since R07.04 documents findings in `audit/audit.md` with stable IDs (SEC / ROB / MAINT / PERF / FEAT / ARCH / TEST / MCP) and closure deltas. 101 CLOSED + 10 WONTFIX of 125 findings archived (~89%). See the [audit dashboard](https://kthx.vts-tech.org/audit-dash/) for the live register.
 
-## Installation
-
-```bash
-# Latest Development Release
-pip install git+https://github.com/VTSTech/AgentKthx.git --force-reinstall
-
-# Last Stable (as stable as Alpha can be) Release
-pip install agentkthx
-```
-
 ## Usage
 
 All usage instructions have moved to **[docs/USAGE.md](docs/USAGE.md)** —
@@ -123,15 +121,6 @@ agentkthx chat --mcp filesystem
 For backend configs, security modes, environment variables, MCP setup,
 and the complete CLI options table, see [docs/USAGE.md](docs/USAGE.md).
 
-## LocalClaw Redirect
-
-The `localclaw` command is provided for backward compatibility:
-
-```bash
-# Both work identically
-localclaw run "What is 2+2?"
-agentkthx run "What is 2+2?"
-```
 
 ## Tests & Examples
 
@@ -189,42 +178,6 @@ Contributions welcome!
 ## Changelog
 
 See [docs/CHANGELOG.md](https://github.com/VTSTech/AgentKthx/blob/main/docs/CHANGELOG.md) for detailed version history and release notes.
-
-## Migration from AgentNova
-
-R06.0 renamed the project from `AgentNova` → `AgentKthx`. The rename was driven by name collisions in the AI agent space (multiple projects, Instagram accounts, etc. were using the AgentNova name).
-
-### What changed
-
-| Old | New |
-|-----|-----|
-| PyPI package: `agentnova` | `agentkthx` |
-| CLI command: `agentnova` | `agentkthx` |
-| Python import: `import agentnova` | `import agentkthx` |
-| GitHub repo: `VTSTech/AgentNova` | `VTSTech/AgentKthx` |
-
-### What stays the same (backward compat)
-
-- ✅ The `agentnova` CLI command still works (redirects to `agentkthx`)
-- ✅ `import agentnova` still works (re-exports from `agentkthx`, emits DeprecationWarning)
-- ✅ All `AGENTKTHX_*` env vars still work unchanged
-- ✅ `localclaw` CLI command still works (redirects through to `agentkthx`)
-- ✅ All existing skills, souls, plugins, and configs continue to work
-- ✅ SQLite persistent memory sessions remain compatible
-
-### Migration steps (recommended but not required)
-
-```bash
-# Uninstall old package (optional — both can coexist)
-pip uninstall agentnova
-
-# Install new package
-pip install agentkthx
-
-# Update your scripts (optional — old imports still work with a warning)
-# Old: from agentnova import Agent
-# New: from agentkthx import Agent
-```
 
 ### Why "AgentKthx"?
 
