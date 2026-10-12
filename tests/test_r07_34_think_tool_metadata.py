@@ -505,6 +505,14 @@ class TestMetadataThinking:
         )
 
         cache_thinking_support("gemini-2.5-flash-preview-tts", ThinkingSupport.YES)
+        # Pin the precondition: the stale YES is genuinely in the cache.
+        # Without this, the NO verdict below could come from the exclusion
+        # path alone (TTS matches an exclusion even uncached) and the test
+        # would pass even if the cache write had silently failed.
+        assert (
+            get_cached_thinking_support("gemini-2.5-flash-preview-tts")
+            is ThinkingSupport.YES
+        )
         b = _ConcreteCompat()
         type(b)._model_cache = None
         try:
