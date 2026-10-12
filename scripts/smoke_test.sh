@@ -180,11 +180,13 @@ default_model_for_backend() {
     # AND has no tools support — the ReAct path would diverge from the
     # other backends' native-tools smoke steps.)
     siliconflow)  echo "Qwen/Qwen3-8B" ;;
-    # TokenHarbor: hardcode the docs-named :free id — :free routes never
+    # TokenHarbor: hardcode a live-verified :free id — :free routes never
     # charge the wallet (each smoke step stays $0) and the free tier only
-    # has the account-level rate limits. PERISHABLE: docs-only id (the
-    # only :free id Token Harbor's docs name) — re-verify against the
-    # live Free list via scripts/probe_tokenharbor.sh at smoke time.
+    # has the account-level rate limits. PERISHABLE: the live Free list
+    # changes — re-verify via scripts/probe_tokenharbor.sh at smoke time.
+    # (Was the docs-named deepseek-v4.1-flash:free until it started
+    # 402ing "can't serve this model on this account"; mimo-v2.6-flash:free
+    # is the 5/5-smoke-verified replacement.)
     tokenharbor)  echo "mimo-v2.6-flash:free" ;;
     *)           echo "" ;;
   esac

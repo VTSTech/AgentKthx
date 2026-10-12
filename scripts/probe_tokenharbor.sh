@@ -28,7 +28,7 @@ set -uo pipefail
 
 API_KEY="${TOKENHARBOR_API_KEY:-}"
 BASE_URL="${TOKENHARBOR_BASE_URL:-https://tokenharbor.ai/v1}"
-MODEL="${TOKENHARBOR_DEFAULT_MODEL:-deepseek-v4.1-flash:free}"
+MODEL="${TOKENHARBOR_DEFAULT_MODEL:-mimo-v2.6-flash:free}"
 OUT="/tmp/agentkthx_probe_tokenharbor.json"
 
 CYAN='\033[0;36m'; BOLD='\033[1m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; RED='\033[0;31m'; NC='\033[0m'
@@ -111,7 +111,7 @@ echo -e "${BOLD}[3/4] POST /v1/chat/completions (non-streaming, ${MODEL})${NC}"
 REQ_BODY=$(python3 -c "
 import json, os
 print(json.dumps({
-    'model': os.environ.get('PROBE_MODEL', 'deepseek-v4.1-flash:free'),
+    'model': os.environ.get('PROBE_MODEL', 'mimo-v2.6-flash:free'),
     'messages': [{'role': 'user', 'content': 'Reply with the single word: pong'}],
     'max_tokens': 32,
     'stream': False,
@@ -157,7 +157,7 @@ PROBE_MODEL="$MODEL" python3 - <<'PYEOF' || echo -e "  ${RED}✗ streaming call 
 import json, os, urllib.error, urllib.request
 
 body = json.dumps({
-    "model": os.environ.get("PROBE_MODEL", "deepseek-v4.1-flash:free"),
+    "model": os.environ.get("PROBE_MODEL", "mimo-v2.6-flash:free"),
     "messages": [{"role": "user", "content": "Count from 1 to 5, digits only."}],
     "max_tokens": 32,
     "stream": True,

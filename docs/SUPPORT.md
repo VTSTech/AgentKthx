@@ -1,6 +1,6 @@
 # Backend Support Tiers
 
-AgentKthx ships 11 cloud backends plus TurboQuant (local llama.cpp) and
+AgentKthx ships 12 cloud backends plus TurboQuant (local llama.cpp) and
 Ollama (local). As of R07.29, the cloud backends are split into two
 support tiers based on **owner testing coverage** — not on code
 quality, completeness, or feature surface.
@@ -16,7 +16,7 @@ in the foreseeable future. Rather than ship those backends with the
 implicit "fully tested" promise the other backends carry, this file
 makes the distinction explicit so users know what to expect.
 
-**This is not a code-quality judgment.** All 11 cloud backends share
+**This is not a code-quality judgment.** All 12 cloud backends share
 the same `CloudBackend` base class (R07.05 MAINT-02), the same
 retry-loop helpers (R07.24 MAINT-23), the same SSE streaming pattern,
 the same tool-support detection, and the same JSON-endpoint layout.
@@ -37,6 +37,7 @@ before every release. Bug reports against them are prioritized.
 | **Mistral** | mistral.ai (La Plateforme) | `MISTRAL_API_KEY` | Yes (`MISTRAL_FREE_ONLY=1`) |
 | **NVIDIA NIM** | build.nvidia.com (NVIDIA-hosted open models) | `NVIDIA_API_KEY` | Yes (`NVIDIA_FREE_ONLY=1`) — monthly credit allowance, resets monthly |
 | **Cloudflare** | Cloudflare Workers AI (20+ open models) | `CLOUDFLARE_API_KEY` + `CLOUDFLARE_ACCOUNT_ID` | Yes (`CLOUDFLARE_FREE_ONLY=1`) — 10,000 neurons/day, UTC reset |
+| **TokenHarbor** | tokenharbor.ai (OpenRouter-style LLM gateway, one wallet, OpenAI wire) | `TOKENHARBOR_API_KEY` | Yes (`TOKENHARBOR_FREE_ONLY=1`) — `:free` ids never bill; catalog cached UNFILTERED, filter applies at return time so mid-session toggles don't wait out the TTL |
 
 Plus the local backends:
 - **TurboQuant** — llama.cpp's `llama-server` binary (primary local backend)
@@ -58,7 +59,6 @@ but have not been recently verified.
 | **OrcaRouter** | orcarouter.com (zero-markup gateway) | `ORCAROUTER_API_KEY` | Limited | API key beyond limits; maintainer can't test the streaming or non-streaming paths. The backend shares the same code path as OpenRouter (its sibling) so it's *likely* functional. |
 | **OpenAI** | openai.com (GPT models) | `OPENAI_API_KEY` | Limited | Maintainer has no active OpenAI account. OpenAI has no free tier (the `--free` listing returns 0 models — known + documented in the smoke test). Bug reports against the OpenAI backend are accepted but the maintainer can't reproduce them without an active key. |
 | **SiliconFlow** | api.siliconflow.com (China-hosted OpenAI-compat aggregator, 79-model live catalog) | `SILICONFLOW_API_KEY` | Limited (new scaffold) | R07.29 scaffold — the FIRST backend scaffolded on the post-R07.28 hardened CloudBackend patterns (shared transport, ROB-42 cache contract, MAINT-28 hooks). 106 mocked unit tests green; live catalog probe passed (79 models, R07.29); smoke ATTEMPTED 2026-10-09 — key auth ✓, models ✓ (79 → 58 after the blocklist, parity with the probe), one `--think` generation ✓, then both tool-call steps failed **402 "Sorry, your account balance is insufficient"** (33/35 — the key's balance is exhausted, not a plugin defect; with no free tier there is no path to finish the run). Stays Limited until a topped-up 5/5 `./scripts/smoke_test.sh --backend siliconflow` pass (Cloudflare's R07.27 promotion path). NO free tier — every model bills (Qwen3-8B is the cheapest known, input ≈$0.06/1M tokens, billing-verified Oct 2026; a $0.0000 console row is 4-decimal display rounding, not free). |
-| **TokenHarbor** | tokenharbor.ai (OpenRouter-style LLM gateway, one wallet, OpenAI wire) | `TOKENHARBOR_API_KEY` | Limited (new scaffold) | R07.31 scaffold — docs-only integration (docs/api/TOKENHARBOR_API_TECHNICAL_REFERENCE.md; no live probe has ever run against the gateway). The seed catalog carries ONLY the ids Token Harbor's docs name (perishable — refresh from the live, AUTH-GATED /v1/models at probe time). Mocked regression suite green (tests/test_tokenharbor_backend.py). Unique behaviors: `thk_live_` keys shown once (sk- keys rejected); the spend gate (`400 spend_confirmation_required`) is surfaced fatally and NEVER auto-confirmed; 429 `spend_limit_exceeded` fast-fails as quota-class; :free ids never bill. Stays Limited until the maintainer runs `./scripts/probe_tokenharbor.sh` + a funded 5/5 `./scripts/smoke_test.sh --backend tokenharbor` pass. |
 
 ### What "Limited Support" means in practice
 
@@ -67,7 +67,7 @@ but have not been recently verified.
   will get fast turnaround; users who report bugs without a
   reproducer may wait until the maintainer has key access again.
 - **Smoke test coverage**: the smoke test (`scripts/smoke_test.sh`)
-  exercises all 11 cloud backends, but Limited Support backends are
+  exercises all 12 cloud backends, but Limited Support backends are
   expected to skip with "no API key" on the maintainer's machine. A
   user with a working key can run `./scripts/smoke_test.sh
   --backend pollinations` to verify their own setup.
@@ -113,6 +113,18 @@ of their respective maintainers.
 
 ## Changelog
 
+- **R07.34** (2026-10-12): TokenHarbor promoted to Fully Supported after
+  the maintainer's end-to-end smoke test passed 5/5
+  (`./scripts/smoke_test.sh --backend tokenharbor`, `TOKENHARBOR_FREE_ONLY=1`,
+  $0 on the :free tier): models listing (5 live free models with
+  tools/think verdicts), `--think` reasoning panel, non-streaming shell
+  tool, streaming shell tool — smoke markers found in all outputs.
+  Same run swapped the default model to `mimo-v2.6-flash:free` after
+  `deepseek-v4.1-flash:free` (the docs-named id) returned live
+  402 "We can't serve this model on this account" — code default
+  (`TOKENHARBOR_DEFAULT_MODEL`), plugin fallback, manifest defaults,
+  probe script, smoke script, and the MAINT-30 tier pins all synced.
+  Tier tables now classify 12 cloud backends (8 Fully + 4 Limited).
 - **R07.29** (2026-10-09): SiliconFlow added as the 11th cloud backend
   (agentkthx/plugins/siliconflow/, ~700 LOC + 106 unit tests) — the
   first scaffold to copy the post-R07.28 hardened CloudBackend patterns

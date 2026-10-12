@@ -193,7 +193,7 @@ class TestTokenharborInheritance:
         assert TokenHarborBackend._api_key_env_var == "TOKENHARBOR_API_KEY"
         assert TokenHarborBackend._provider_label == "TokenHarbor"
         assert TokenHarborBackend._default_base_url == "https://tokenharbor.ai/v1"
-        assert TokenHarborBackend._default_model == "deepseek-v4.1-flash:free"
+        assert TokenHarborBackend._default_model == "mimo-v2.6-flash:free"
         assert TokenHarborBackend.MODEL_CACHE_KEY == "tokenharbor"
         assert TokenHarborBackend._error_brand == "Token Harbor"
 
@@ -700,14 +700,15 @@ class TestTokenharborFreeTier:
         assert _is_free_model(":free") is True  # degenerate but honest
 
     def test_default_model_resolves_from_seed(self, backend):
-        """The default model is a seed entry (docs-only, perishable) and
-        is free."""
-        from agentkthx.plugins.tokenharbor.tokenharbor import (
-            TOKENHARBOR_MODELS,
-            _is_free_model,
-        )
+        """The default model never bills (a :free route id).
+        Historical name: the default WAS a seed entry (docs-only,
+        perishable) until the promotion smoke moved it to the
+        live-verified mimo-v2.6-flash:free after the docs-named
+        deepseek-v4.1-flash:free started returning 402 — and the
+        docs-only seed deliberately does not carry live-observed ids."""
+        from agentkthx.plugins.tokenharbor.tokenharbor import _is_free_model
 
-        assert backend._default_model in TOKENHARBOR_MODELS
+        assert backend._default_model == "mimo-v2.6-flash:free"
         assert _is_free_model(backend._default_model)
 
     def test_free_only_filters_at_return_time(self, backend, isolated_cache, monkeypatch):
@@ -1026,7 +1027,7 @@ class TestTokenharborManifest:
         defaults = th_m.config["defaults"]
         assert defaults["TOKENHARBOR_BASE_URL"] == "https://tokenharbor.ai/v1"
         assert defaults["TOKENHARBOR_API_KEY"] == ""
-        assert defaults["TOKENHARBOR_DEFAULT_MODEL"] == "deepseek-v4.1-flash:free"
+        assert defaults["TOKENHARBOR_DEFAULT_MODEL"] == "mimo-v2.6-flash:free"
         assert defaults["TOKENHARBOR_FREE_ONLY"] == "false"
         assert th_m.config["env_prefix"] == "TOKENHARBOR"
 
@@ -1073,7 +1074,7 @@ class TestTokenharborCompanionWiring:
 
         assert config.TOKENHARBOR_BASE_URL == "https://tokenharbor.ai/v1"
         assert config.TOKENHARBOR_API_KEY == ""
-        assert config.TOKENHARBOR_DEFAULT_MODEL == "deepseek-v4.1-flash:free"
+        assert config.TOKENHARBOR_DEFAULT_MODEL == "mimo-v2.6-flash:free"
         assert config.TOKENHARBOR_FREE_ONLY is False
 
     def test_backend_type_enum_member(self):

@@ -466,11 +466,13 @@ TOKENHARBOR_BASE_URL = os.environ.get("TOKENHARBOR_BASE_URL", "https://tokenharb
 # API). An OpenAI/OpenRouter sk- key "won't work here" (their connect CLI
 # docs) — the backend's _validate_api_key rejects sk- keys early.
 TOKENHARBOR_API_KEY = os.environ.get("TOKENHARBOR_API_KEY", "")
-# Default model: the only :free id Token Harbor's own docs name in an
-# actionable context (quickstart free tier + connect CLI). Perishable —
-# re-verify against the live Free list at probe time. :free routes never
-# charge the wallet.
-TOKENHARBOR_DEFAULT_MODEL = os.environ.get("TOKENHARBOR_DEFAULT_MODEL", "deepseek-v4.1-flash:free")
+# Default model: live-verified in the maintainer's 5/5 :free smoke pass
+# (models listing, --think reasoning, shell tools in both modes). Was the
+# docs-named deepseek-v4.1-flash:free until it started returning live
+# 402 "We can't serve this model on this account". Perishable — re-verify
+# against the live Free list at probe time. :free routes never charge the
+# wallet.
+TOKENHARBOR_DEFAULT_MODEL = os.environ.get("TOKENHARBOR_DEFAULT_MODEL", "mimo-v2.6-flash:free")
 # Filter list_models() to :free ids only. Applied at RETURN time, not
 # cache-store time (OPENROUTER_FREE_ONLY precedent — toggling must not
 # wait out the cache TTL).

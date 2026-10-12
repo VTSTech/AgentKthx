@@ -282,10 +282,13 @@ FULLY_SUPPORTED = (
     "Mistral",
     "NVIDIA NIM",
     "Cloudflare",
+    "TokenHarbor",
 )
 # R07.29: SiliconFlow added as Limited (scaffold — pending the first
-# live smoke test). Count-pins updated in the same diff, the conscious
-# MAINT-30 path (a tier change is a diff, not an accident).
+# live smoke test). R07.34: TokenHarbor promoted to Fully after the
+# maintainer's 5/5 :free smoke pass. Count-pins updated in the same
+# diff, the conscious MAINT-30 path (a tier change is a diff, not an
+# accident).
 LIMITED = ("Pollinations", "OrcaRouter", "OpenAI", "SiliconFlow")
 
 
@@ -306,10 +309,25 @@ class TestMaint30SupportMdCompleteness:
         assert "NVIDIA_API_KEY" in fully
         assert "build.nvidia.com" in fully
 
+    def test_tokenharbor_row_in_fully_supported_table(self):
+        """R07.34: TokenHarbor promoted out of Limited after the
+        maintainer's 5/5 end-to-end smoke pass (the Cloudflare R07.27
+        path) — the Fully row must carry the provider, env var, and
+        free-tier selector, and the Limited table must no longer
+        contain it."""
+        text = self._support_md()
+        fully = self._section(text, "## Fully Supported", "## Limited Support")
+        assert "**TokenHarbor**" in fully
+        assert "TOKENHARBOR_API_KEY" in fully
+        assert "tokenharbor.ai" in fully
+        assert "TOKENHARBOR_FREE_ONLY=1" in fully
+        limited = self._section(text, "## Limited Support", "### ")
+        assert "**TokenHarbor**" not in limited
+
     def test_all_ten_cloud_backends_classified(self):
-        """R07.29: 11 cloud backends classified (7 Fully + 4 Limited —
-        SiliconFlow joined Limited as a new scaffold). Historical name
-        retained."""
+        """R07.34: 12 cloud backends classified (8 Fully + 4 Limited —
+        TokenHarbor promoted to Fully after the maintainer's 5/5 :free
+        smoke pass). Historical name retained."""
         text = self._support_md()
         fully = self._section(text, "## Fully Supported", "## Limited Support")
         limited = self._section(text, "## Limited Support", "### ")
@@ -332,7 +350,8 @@ class TestMaint30SupportMdCompleteness:
         text = self._support_md()
         assert "all 9 cloud backends" not in text
         assert "all 10 cloud backends" not in text
-        assert "all 11 cloud backends" in text
+        assert "all 11 cloud backends" not in text
+        assert "all 12 cloud backends" in text
 
     def test_r0728_changelog_note_present(self):
         text = self._support_md()

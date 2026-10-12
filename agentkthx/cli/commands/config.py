@@ -261,8 +261,8 @@ _ENV_REFERENCE = [
     ),
     (
         "TOKENHARBOR_DEFAULT_MODEL",
-        "Default model (default: deepseek-v4.1-flash:free — the only :free "
-        "id Token Harbor's docs name; :free routes never charge the wallet)",
+        "Default model (default: mimo-v2.6-flash:free — live-verified on "
+        "the :free tier; :free routes never charge the wallet)",
     ),
     (
         "TOKENHARBOR_FREE_ONLY",

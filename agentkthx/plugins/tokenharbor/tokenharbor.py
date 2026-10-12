@@ -137,11 +137,12 @@ initial defaults of the persistent model-catalog cache and the offline
 fallback list. Update the seed JSON (or refresh the backend's cache
 from the live API) instead of editing code here."""
 
-# Default model when none specified. deepseek-v4.1-flash:free is the only
-# :free id Token Harbor's own docs name in an actionable context (the
-# quickstart free tier + the connect CLI's Qwen Code adapter). Perishable —
-# re-verify against the live Free list at probe time.
-TOKENHARBOR_DEFAULT_MODEL_STR = TOKENHARBOR_DEFAULT_MODEL or "deepseek-v4.1-flash:free"
+# Default model when none specified. mimo-v2.6-flash:free — live-verified in
+# the maintainer's 5/5 :free smoke pass. Was the docs-named
+# deepseek-v4.1-flash:free until it started returning live 402 "We can't
+# serve this model on this account". Perishable — re-verify against the
+# live Free list at probe time.
+TOKENHARBOR_DEFAULT_MODEL_STR = TOKENHARBOR_DEFAULT_MODEL or "mimo-v2.6-flash:free"
 
 #: Shape of a documented live key: `thk_live_` + 64 base64url chars
 #: (docs observation, NOT a hard invariant — warn-only; the 401

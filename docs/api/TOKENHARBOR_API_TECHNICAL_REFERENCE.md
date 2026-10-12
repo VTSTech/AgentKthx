@@ -714,7 +714,7 @@ def _is_free_model(self, model: str) -> bool:      # CloudBackend hook — inher
 
 - The inherited `_is_free_model()` (suffix check) is exactly right for Token Harbor — no whitelist beyond the suffix is needed, and none is possible docs-only (the live set changes).
 - Planned env var: **`TOKENHARBOR_FREE_ONLY=1`** — filter `list_models()` output to `:free` ids only, mirroring `OPENROUTER_FREE_ONLY`. Filter at *return* time, not cache-store time (the ROB-42 cache contract keeps the unfiltered catalog; toggling the flag must not wait out a TTL).
-- Planned default model: **`deepseek-v4.1-flash:free`** — it is the only `:free` id Token Harbor's own docs name in an actionable context (quickstart free tier + the connect CLI's Qwen Code default), so it's the least-fabricated default a docs-only reference can pick. Re-verify against the live Free list at scaffold time; the seed catalog's `:free` entries must be marked perishable.
+- Default model (shipped): **`mimo-v2.6-flash:free`** — the scaffold default was the docs-named `deepseek-v4.1-flash:free` (the only `:free` id Token Harbor's docs name in an actionable context), but the maintainer's live smoke found it returning 402 "We can't serve this model on this account" on a free account, so the default moved to `mimo-v2.6-flash:free` (live-verified 5/5: models listing, thinking, shell tools both modes). Either id is perishable — re-verify against the live Free list at probe time; the seed catalog's `:free` entries must be marked perishable.
 - **FEAT-08 interplay** (free-TIER mode, OPEN in the audit register): Token Harbor is the cleanest FEAT-08 target yet — a standing documented free tier with an account-level (not per-model) limit and an explicit `:free` selector. The register's FEAT-08 design should treat `tokenharbor` as a reference implementation candidate when it lands.
 - **Privacy note for users**: enabling free models opts the account into free-route retention (per their docs). This is the user's dashboard choice, not AgentKthx's — but it belongs in the plugin's README row of `docs/SUPPORT.md` once scaffolded, so users make it knowingly.
 
@@ -816,7 +816,7 @@ Companion changes, in dependency order:
         "defaults": {
           "TOKENHARBOR_API_KEY": "",
           "TOKENHARBOR_BASE_URL": "https://tokenharbor.ai/v1",
-          "TOKENHARBOR_DEFAULT_MODEL": "deepseek-v4.1-flash:free",
+          "TOKENHARBOR_DEFAULT_MODEL": "mimo-v2.6-flash:free",
           "TOKENHARBOR_FREE_ONLY": "false"
         }
       },
@@ -840,10 +840,12 @@ Companion changes, in dependency order:
 # catalog is the only cold-start catalog source.
 TOKENHARBOR_BASE_URL = os.environ.get("TOKENHARBOR_BASE_URL", "https://tokenharbor.ai/v1")
 TOKENHARBOR_API_KEY = os.environ.get("TOKENHARBOR_API_KEY", "")
-# Default model: the only :free id Token Harbor's own docs name in an actionable
-# context (quickstart + connect CLI). Perishable — re-verify against the live
-# Free list at scaffold time. :free routes never charge the wallet.
-TOKENHARBOR_DEFAULT_MODEL = os.environ.get("TOKENHARBOR_DEFAULT_MODEL", "deepseek-v4.1-flash:free")
+# Default model: live-verified in the maintainer's 5/5 :free smoke pass.
+# Was the docs-named deepseek-v4.1-flash:free until it started returning
+# live 402 "We can't serve this model on this account". Perishable —
+# re-verify against the live Free list at probe time. :free routes never
+# charge the wallet.
+TOKENHARBOR_DEFAULT_MODEL = os.environ.get("TOKENHARBOR_DEFAULT_MODEL", "mimo-v2.6-flash:free")
 # Filter list_models() to :free ids only. Applied at RETURN time, not cache-store
 # time (OPENROUTER_FREE_ONLY precedent — toggling must not wait out the cache TTL).
 TOKENHARBOR_FREE_ONLY = os.environ.get("TOKENHARBOR_FREE_ONLY", "").lower() in ("1", "true", "yes")
@@ -957,7 +959,7 @@ The two-line swap from Token Harbor's compare page, plus what changes for an exi
 |------------|------------------------|-------|
 | `OPENROUTER_API_KEY` | `TOKENHARBOR_API_KEY` | Prefix differs (`sk-or-v1-…` vs `thk_live_…`); key is reveal-once on both, but Token Harbor has no management API at all |
 | `OPENROUTER_BASE_URL` | `TOKENHARBOR_BASE_URL` | `https://tokenharbor.ai/v1` |
-| `OPENROUTER_DEFAULT_MODEL` | `TOKENHARBOR_DEFAULT_MODEL` | Default differs: `openrouter/free` (meta-router) vs `deepseek-v4.1-flash:free` (no documented TH router equivalent) |
+| `OPENROUTER_DEFAULT_MODEL` | `TOKENHARBOR_DEFAULT_MODEL` | Default differs: `openrouter/free` (meta-router) vs `mimo-v2.6-flash:free` (no documented TH router equivalent) |
 | `OPENROUTER_FREE_ONLY` | `TOKENHARBOR_FREE_ONLY` | Same return-time filter semantics |
 | `OPENROUTER_MAX_429_RETRIES` | (inherited `_MAX_RETRIES`) | No TH-specific override planned |
 

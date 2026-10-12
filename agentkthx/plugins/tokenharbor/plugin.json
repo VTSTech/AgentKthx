@@ -20,7 +20,7 @@
         "defaults": {
           "TOKENHARBOR_API_KEY": "",
           "TOKENHARBOR_BASE_URL": "https://tokenharbor.ai/v1",
-          "TOKENHARBOR_DEFAULT_MODEL": "deepseek-v4.1-flash:free",
+          "TOKENHARBOR_DEFAULT_MODEL": "mimo-v2.6-flash:free",
           "TOKENHARBOR_FREE_ONLY": "false"
         }
       },
