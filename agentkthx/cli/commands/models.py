@@ -275,9 +275,7 @@ def cmd_models(args: argparse.Namespace) -> int:
             and _info["age_seconds"] < 60
         )
         if _store_happened and _stored_now is not None:
-            _old_names = {
-                m.get("name") for m in (refresh_before or []) if isinstance(m, dict)
-            }
+            _old_names = {m.get("name") for m in (refresh_before or []) if isinstance(m, dict)}
             _new_names = {m.get("name") for m in _stored_now if isinstance(m, dict)}
             _added = sorted(_new_names - _old_names)
             _removed = sorted(_old_names - _new_names)
@@ -563,7 +561,9 @@ def cmd_models(args: argparse.Namespace) -> int:
     print(
         f"{dim('Think:')} {bright_green('✓ yes')} (reasoning model) | {dim('✗ no')} | {dim('? unknown')}"
     )
-    print(f"{dim('Context:')} Max context window (model API data, family-known window, or 128K default)")
+    print(
+        f"{dim('Context:')} Max context window (model API data, family-known window, or 128K default)"
+    )
     print(
         f"{dim('Single capability check per model (API-mode-independent); none falls back to react.')}"
     )

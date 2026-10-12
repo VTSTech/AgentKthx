@@ -83,9 +83,7 @@ def tokenharbor_env(monkeypatch):
     monkeypatch.setenv("TOKENHARBOR_DEFAULT_MODEL", "deepseek-v4.1-flash:free")
     monkeypatch.setenv("TOKENHARBOR_FREE_ONLY", "false")
     monkeypatch.setattr(_config, "TOKENHARBOR_API_KEY", VALID_KEY, raising=False)
-    monkeypatch.setattr(
-        _config, "TOKENHARBOR_BASE_URL", "https://tokenharbor.ai/v1", raising=False
-    )
+    monkeypatch.setattr(_config, "TOKENHARBOR_BASE_URL", "https://tokenharbor.ai/v1", raising=False)
     monkeypatch.setattr(
         _config, "TOKENHARBOR_DEFAULT_MODEL", "deepseek-v4.1-flash:free", raising=False
     )
@@ -245,9 +243,7 @@ class TestThinkingNamePatterns:
     def test_unknown_stays_unknown(self, model):
         assert OpenAICompatibleBackend._name_matches_thinking(model) is False
 
-    def test_verdict_yes_and_cached(
-        self, backend, isolated_tool_cache, monkeypatch
-    ):
+    def test_verdict_yes_and_cached(self, backend, isolated_tool_cache, monkeypatch):
         """test_thinking_support → YES for a current family, cached."""
         from agentkthx.core.tool_cache import get_cached_thinking_support
 
@@ -255,9 +251,7 @@ class TestThinkingNamePatterns:
         assert verdict is ThinkingSupport.YES
         assert get_cached_thinking_support("claude-opus-5.5") is ThinkingSupport.YES
 
-    def test_verdict_unknown_not_cached(
-        self, backend, isolated_tool_cache
-    ):
+    def test_verdict_unknown_not_cached(self, backend, isolated_tool_cache):
         """UNKNOWN is never cached — pattern expansion takes effect live."""
         from agentkthx.core.tool_cache import get_cached_thinking_support
 
@@ -335,9 +329,7 @@ class TestGetModelMaxContextLadder:
     def test_step2_live_cache_real_value_wins(self, backend):
         """A list_models entry with a REAL context value is honored."""
         backend.MODELS = {}
-        backend._model_cache = [
-            {"name": "live-model", "details": {"context_length": 262144}}
-        ]
+        backend._model_cache = [{"name": "live-model", "details": {"context_length": 262144}}]
         assert backend.get_model_max_context("live-model") == 262144
 
     def test_step2_legacy_default_stamp_skipped(self, backend):
@@ -353,9 +345,7 @@ class TestGetModelMaxContextLadder:
     def test_step2_entry_without_context_falls_through(self, backend):
         """R07.34-shaped entries (context omitted) fall to the family layer."""
         backend.MODELS = {}
-        backend._model_cache = [
-            {"name": "claude-opus-5.5", "details": {"family": "tokenharbor"}}
-        ]
+        backend._model_cache = [{"name": "claude-opus-5.5", "details": {"family": "tokenharbor"}}]
         assert backend.get_model_max_context("claude-opus-5.5") == 200000
 
     def test_step3_family_table(self, backend):
@@ -371,9 +361,7 @@ class TestGetModelMaxContextLadder:
     def test_junk_context_values_ignored(self, backend):
         """Negative/zero/junk context values never resolve."""
         backend.MODELS = {"junk": {"context_length": -5}}
-        backend._model_cache = [
-            {"name": "junk-live", "details": {"context_length": 0}}
-        ]
+        backend._model_cache = [{"name": "junk-live", "details": {"context_length": 0}}]
         assert backend.get_model_max_context("junk") == 128000
         assert backend.get_model_max_context("junk-live") == 128000
 
@@ -391,30 +379,16 @@ class TestGetModelMaxContextLadder:
 
 class TestExtractLiveContext:
     def test_openrouter_style_top_level(self):
-        assert (
-            TokenHarborBackend._extract_live_context({"context_length": 400000})
-            == 400000
-        )
+        assert TokenHarborBackend._extract_live_context({"context_length": 400000}) == 400000
 
     def test_alternate_field_conventions(self):
-        assert (
-            TokenHarborBackend._extract_live_context({"context_size": 200000})
-            == 200000
-        )
-        assert (
-            TokenHarborBackend._extract_live_context({"max_context_tokens": 1048576})
-            == 1048576
-        )
-        assert (
-            TokenHarborBackend._extract_live_context({"max_input_tokens": 131072})
-            == 131072
-        )
+        assert TokenHarborBackend._extract_live_context({"context_size": 200000}) == 200000
+        assert TokenHarborBackend._extract_live_context({"max_context_tokens": 1048576}) == 1048576
+        assert TokenHarborBackend._extract_live_context({"max_input_tokens": 131072}) == 131072
 
     def test_nested_top_provider(self):
         assert (
-            TokenHarborBackend._extract_live_context(
-                {"top_provider": {"context_length": 262144}}
-            )
+            TokenHarborBackend._extract_live_context({"top_provider": {"context_length": 262144}})
             == 262144
         )
 
@@ -455,9 +429,7 @@ class TestTokenHarborEntryShaping:
         assert entry["details"]["context_length"] == 204800
 
     def test_live_ctx_beats_seed_meta(self, backend):
-        entry = backend._catalog_entry(
-            "some-model", {"context_length": 131072}, live_ctx=400000
-        )
+        entry = backend._catalog_entry("some-model", {"context_length": 131072}, live_ctx=400000)
         assert entry["details"]["context_length"] == 400000
 
     def test_free_suffix_still_detected(self, backend):
@@ -492,9 +464,7 @@ class TestLiveFetchContextShaping:
         assert by_name["nested-style"]["details"]["context_length"] == 262144
         assert "context_length" not in by_name["contextless-model"]["details"]
 
-    def test_live_entries_reach_context_ladder(
-        self, backend, isolated_cache, monkeypatch
-    ):
+    def test_live_entries_reach_context_ladder(self, backend, isolated_cache, monkeypatch):
         """End-to-end: live fetch → list_models → get_model_max_context."""
         live = {
             "data": [

@@ -306,10 +306,7 @@ class TestThinkingNameVerdictR0736:
     )
     def test_new_families_yes(self, model):
         assert OpenAICompatibleBackend._name_matches_thinking(model) is True
-        assert (
-            OpenAICompatibleBackend._name_thinking_verdict(model)
-            is ThinkingSupport.YES
-        )
+        assert OpenAICompatibleBackend._name_thinking_verdict(model) is ThinkingSupport.YES
 
     @pytest.mark.parametrize(
         "model",
@@ -335,10 +332,7 @@ class TestThinkingNameVerdictR0736:
     )
     def test_modality_exclusions_no(self, model):
         """Exclusions yield NO and override the family YES patterns."""
-        assert (
-            OpenAICompatibleBackend._name_thinking_verdict(model)
-            is ThinkingSupport.NO
-        )
+        assert OpenAICompatibleBackend._name_thinking_verdict(model) is ThinkingSupport.NO
         assert OpenAICompatibleBackend._name_matches_thinking(model) is False
 
     @pytest.mark.parametrize(
@@ -368,10 +362,7 @@ class TestThinkingNameVerdictR0736:
         ],
     )
     def test_unknown_stays_unknown(self, model):
-        assert (
-            OpenAICompatibleBackend._name_thinking_verdict(model)
-            is ThinkingSupport.UNKNOWN
-        )
+        assert OpenAICompatibleBackend._name_thinking_verdict(model) is ThinkingSupport.UNKNOWN
 
     def test_exclusions_match_segment_not_org(self):
         """The org may carry an exclusion word without poisoning the model;
@@ -383,9 +374,7 @@ class TestThinkingNameVerdictR0736:
         )
         # org "safety" + a marker-bearing model still YES (segment rules)
         assert (
-            OpenAICompatibleBackend._name_thinking_verdict(
-                "safety-labs/claude-sonnet-5"
-            )
+            OpenAICompatibleBackend._name_thinking_verdict("safety-labs/claude-sonnet-5")
             is ThinkingSupport.YES
         )
 
@@ -408,13 +397,8 @@ class TestMetadataThinking:
             }
         ]
         try:
-            assert b.test_thinking_support("cohere/north-mini-code:free") is (
-                ThinkingSupport.YES
-            )
-            assert (
-                get_cached_thinking_support("cohere/north-mini-code:free")
-                is ThinkingSupport.YES
-            )
+            assert b.test_thinking_support("cohere/north-mini-code:free") is (ThinkingSupport.YES)
+            assert get_cached_thinking_support("cohere/north-mini-code:free") is ThinkingSupport.YES
         finally:
             type(b)._model_cache = None
 
@@ -430,13 +414,8 @@ class TestMetadataThinking:
             }
         ]
         try:
-            assert b.test_thinking_support("acme/claude-opus-5") is (
-                ThinkingSupport.NO
-            )
-            assert (
-                get_cached_thinking_support("acme/claude-opus-5")
-                is ThinkingSupport.NO
-            )
+            assert b.test_thinking_support("acme/claude-opus-5") is (ThinkingSupport.NO)
+            assert get_cached_thinking_support("acme/claude-opus-5") is ThinkingSupport.NO
         finally:
             type(b)._model_cache = None
 
@@ -509,16 +488,11 @@ class TestMetadataThinking:
         # Without this, the NO verdict below could come from the exclusion
         # path alone (TTS matches an exclusion even uncached) and the test
         # would pass even if the cache write had silently failed.
-        assert (
-            get_cached_thinking_support("gemini-2.5-flash-preview-tts")
-            is ThinkingSupport.YES
-        )
+        assert get_cached_thinking_support("gemini-2.5-flash-preview-tts") is ThinkingSupport.YES
         b = _ConcreteCompat()
         type(b)._model_cache = None
         try:
-            assert b.test_thinking_support("gemini-2.5-flash-preview-tts") is (
-                ThinkingSupport.NO
-            )
+            assert b.test_thinking_support("gemini-2.5-flash-preview-tts") is (ThinkingSupport.NO)
         finally:
             type(b)._model_cache = None
 
@@ -530,9 +504,7 @@ class TestMetadataThinking:
         b = _ConcreteCompat()
         assert b.test_thinking_support("claude-opus-5.5") is ThinkingSupport.YES
 
-    def test_heuristics_still_fire_without_metadata(
-        self, isolated_tool_cache
-    ):
+    def test_heuristics_still_fire_without_metadata(self, isolated_tool_cache):
         """No entries → plain name heuristics (YES for a marked family)."""
         b = _ConcreteCompat()
         type(b)._model_cache = None
@@ -552,14 +524,8 @@ class TestMetadataThinking:
             }
         ]
         try:
-            assert (
-                th_backend.test_thinking_support("future/reasoner-pro")
-                is ThinkingSupport.YES
-            )
-            assert (
-                th_backend.test_tool_support("future/reasoner-pro")
-                is ToolSupportLevel.REACT
-            )
+            assert th_backend.test_thinking_support("future/reasoner-pro") is ThinkingSupport.YES
+            assert th_backend.test_tool_support("future/reasoner-pro") is ToolSupportLevel.REACT
         finally:
             type(th_backend)._model_cache = None
 
@@ -583,9 +549,7 @@ class TestCloudToolMetadata:
             }
         )
         try:
-            assert b.test_tool_support("prov/no-tools-model") is (
-                ToolSupportLevel.REACT
-            )
+            assert b.test_tool_support("prov/no-tools-model") is (ToolSupportLevel.REACT)
         finally:
             type(b)._model_cache = None
 
@@ -597,9 +561,7 @@ class TestCloudToolMetadata:
             }
         )
         try:
-            assert b.test_tool_support("prov/tools-model") is (
-                ToolSupportLevel.NATIVE
-            )
+            assert b.test_tool_support("prov/tools-model") is (ToolSupportLevel.NATIVE)
         finally:
             type(b)._model_cache = None
 
@@ -617,9 +579,7 @@ class TestCloudToolMetadata:
             }
         )
         try:
-            assert b.test_tool_support("prov/raw-only") is (
-                ToolSupportLevel.NATIVE
-            )
+            assert b.test_tool_support("prov/raw-only") is (ToolSupportLevel.NATIVE)
         finally:
             type(b)._model_cache = None
 
@@ -756,18 +716,11 @@ class TestOpenRouterHoistLegacyCache:
         result = or_backend.list_models()
         by_name = {m["name"]: m for m in result}
         assert by_name["vendor/legacy-model"]["details"]["supports_tools"] is True
-        assert (
-            by_name["vendor/legacy-model"]["details"]["supports_reasoning"] is True
-        )
+        assert by_name["vendor/legacy-model"]["details"]["supports_reasoning"] is True
         # no payload → no flags, entry still served
-        assert (
-            "supports_tools"
-            not in by_name["vendor/legacy-no-params"]["details"]
-        )
+        assert "supports_tools" not in by_name["vendor/legacy-no-params"]["details"]
         # and the L1 class cache got the same upgraded list
-        assert type(or_backend)._model_cache is result or (
-            type(or_backend)._model_cache == result
-        )
+        assert type(or_backend)._model_cache is result or (type(or_backend)._model_cache == result)
 
 
 # ---------------------------------------------------------------------------
@@ -780,13 +733,9 @@ class TestOpenRouterToolSupportR0736:
         """THE bug: 'thinkingmachines/inkling' contains 'kling'; the raw
         substring test mis-classified it as non-chat (? untested)."""
         assert (
-            or_backend.test_tool_support("thinkingmachines/inkling:free")
-            is ToolSupportLevel.NATIVE
+            or_backend.test_tool_support("thinkingmachines/inkling:free") is ToolSupportLevel.NATIVE
         )
-        assert (
-            or_backend.test_tool_support("thinkingmachines/inkling")
-            is ToolSupportLevel.NATIVE
-        )
+        assert or_backend.test_tool_support("thinkingmachines/inkling") is ToolSupportLevel.NATIVE
 
     @pytest.mark.parametrize(
         "model",
@@ -800,21 +749,13 @@ class TestOpenRouterToolSupportR0736:
         ],
     )
     def test_non_chat_slugs_still_untested(self, or_backend, model):
-        assert (
-            or_backend.test_tool_support(model) is ToolSupportLevel.UNTESTED
-        )
+        assert or_backend.test_tool_support(model) is ToolSupportLevel.UNTESTED
 
     def test_word_boundary_blocks_midword_hits(self, or_backend):
         """'guard' inside 'vanguard' and 'clip' inside 'eclipse' must not
         classify a chat model as non-chat."""
-        assert (
-            or_backend.test_tool_support("acme/vanguard-chat")
-            is ToolSupportLevel.NATIVE
-        )
-        assert (
-            or_backend.test_tool_support("acme/eclipse-chat")
-            is ToolSupportLevel.NATIVE
-        )
+        assert or_backend.test_tool_support("acme/vanguard-chat") is ToolSupportLevel.NATIVE
+        assert or_backend.test_tool_support("acme/eclipse-chat") is ToolSupportLevel.NATIVE
 
     def test_metadata_downgrade_to_react(self, or_backend, isolated_tool_cache):
         type(or_backend)._model_cache = [
@@ -824,9 +765,10 @@ class TestOpenRouterToolSupportR0736:
             }
         ]
         try:
-            assert or_backend.test_tool_support(
-                "nvidia/nemotron-3-super-120b-a12b:free"
-            ) is ToolSupportLevel.REACT
+            assert (
+                or_backend.test_tool_support("nvidia/nemotron-3-super-120b-a12b:free")
+                is ToolSupportLevel.REACT
+            )
         finally:
             type(or_backend)._model_cache = None
 
@@ -838,9 +780,7 @@ class TestOpenRouterToolSupportR0736:
             }
         ]
         try:
-            assert or_backend.test_tool_support("vendor/tools-model") is (
-                ToolSupportLevel.NATIVE
-            )
+            assert or_backend.test_tool_support("vendor/tools-model") is (ToolSupportLevel.NATIVE)
         finally:
             type(or_backend)._model_cache = None
 
@@ -853,10 +793,7 @@ class TestOpenRouterToolSupportR0736:
             }
         ]
         try:
-            assert (
-                or_backend.test_tool_support("vendor/thing-tts")
-                is ToolSupportLevel.UNTESTED
-            )
+            assert or_backend.test_tool_support("vendor/thing-tts") is ToolSupportLevel.UNTESTED
         finally:
             type(or_backend)._model_cache = None
 
@@ -871,12 +808,8 @@ def _stub_env(monkeypatch, backend_obj, backend_name: str) -> None:
     import agentkthx.cli.commands.models as models_mod
     import agentkthx.config as config_mod
 
-    monkeypatch.setattr(
-        models_mod, "get_config", lambda: argparse.Namespace(backend=backend_name)
-    )
-    monkeypatch.setattr(
-        models_mod, "get_backend", lambda name, api_mode=None: backend_obj
-    )
+    monkeypatch.setattr(models_mod, "get_config", lambda: argparse.Namespace(backend=backend_name))
+    monkeypatch.setattr(models_mod, "get_backend", lambda name, api_mode=None: backend_obj)
     monkeypatch.setattr("agentkthx.cli._init_acp", lambda *a, **k: (None, None))
     monkeypatch.setattr(
         "agentkthx.core.tool_cache.get_cached_tool_support",

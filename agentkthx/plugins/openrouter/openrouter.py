@@ -371,9 +371,7 @@ class OpenRouterBackend(OpenAICompatibleBackend):
         supported_params = model_data.get("supported_parameters")
         if isinstance(supported_params, (list, tuple)) and supported_params:
             pset = {str(p).lower() for p in supported_params}
-            details["supports_reasoning"] = (
-                "reasoning" in pset or "include_reasoning" in pset
-            )
+            details["supports_reasoning"] = "reasoning" in pset or "include_reasoning" in pset
             details["supports_tools"] = "tools" in pset
 
         return {
@@ -402,9 +400,8 @@ class OpenRouterBackend(OpenAICompatibleBackend):
             if not isinstance(details, dict):
                 details = {}
                 entry["details"] = details
-            if (
-                isinstance(details.get("supports_tools"), bool)
-                and isinstance(details.get("supports_reasoning"), bool)
+            if isinstance(details.get("supports_tools"), bool) and isinstance(
+                details.get("supports_reasoning"), bool
             ):
                 continue  # already hoisted
             model_data = entry.get("model_data")
@@ -417,9 +414,7 @@ class OpenRouterBackend(OpenAICompatibleBackend):
             if not isinstance(details.get("supports_tools"), bool):
                 details["supports_tools"] = "tools" in pset
             if not isinstance(details.get("supports_reasoning"), bool):
-                details["supports_reasoning"] = (
-                    "reasoning" in pset or "include_reasoning" in pset
-                )
+                details["supports_reasoning"] = "reasoning" in pset or "include_reasoning" in pset
         return entries
 
     def list_models(self) -> list[dict]:

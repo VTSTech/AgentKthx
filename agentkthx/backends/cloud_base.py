@@ -1415,11 +1415,7 @@ class CloudBackend(OpenAICompatibleBackend):
                     # code stamped 128000 into — that value carried no
                     # information, and honoring it here would shadow the
                     # family layer below.
-                    if (
-                        isinstance(ctx, int)
-                        and ctx > 0
-                        and ctx != self._DEFAULT_CONTEXT_FALLBACK
-                    ):
+                    if isinstance(ctx, int) and ctx > 0 and ctx != self._DEFAULT_CONTEXT_FALLBACK:
                         return ctx
                     break
 

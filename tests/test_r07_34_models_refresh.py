@@ -143,12 +143,8 @@ def _stub_env(monkeypatch, backend_obj, backend_name: str) -> None:
     import agentkthx.cli.commands.models as models_mod
     import agentkthx.config as config_mod
 
-    monkeypatch.setattr(
-        models_mod, "get_config", lambda: argparse.Namespace(backend=backend_name)
-    )
-    monkeypatch.setattr(
-        models_mod, "get_backend", lambda name, api_mode=None: backend_obj
-    )
+    monkeypatch.setattr(models_mod, "get_config", lambda: argparse.Namespace(backend=backend_name))
+    monkeypatch.setattr(models_mod, "get_backend", lambda name, api_mode=None: backend_obj)
     monkeypatch.setattr("agentkthx.cli._init_acp", lambda *a, **k: (None, None))
     monkeypatch.setattr(
         "agentkthx.core.tool_cache.get_cached_tool_support",
@@ -301,9 +297,7 @@ class TestModelsRefreshFlag:
         """A cloud backend without a JSON catalog cache gets the static
         note and its (stub) listing still renders."""
         stub = StubPlainCloudBackend([_entry("static-1")])
-        rc, out = _run(
-            ["models", "--refresh"], capsys, monkeypatch, stub, "test-plugin"
-        )
+        rc, out = _run(["models", "--refresh"], capsys, monkeypatch, stub, "test-plugin")
         assert rc == 0
         assert "no JSON catalog cache" in out
         assert "static-1" in out

@@ -78,9 +78,7 @@ def tokenharbor_env(monkeypatch):
     from agentkthx import config as _config
 
     monkeypatch.setattr(_config, "TOKENHARBOR_API_KEY", VALID_KEY, raising=False)
-    monkeypatch.setattr(
-        _config, "TOKENHARBOR_BASE_URL", "https://tokenharbor.ai/v1", raising=False
-    )
+    monkeypatch.setattr(_config, "TOKENHARBOR_BASE_URL", "https://tokenharbor.ai/v1", raising=False)
     monkeypatch.setattr(
         _config, "TOKENHARBOR_DEFAULT_MODEL", "deepseek-v4.1-flash:free", raising=False
     )
@@ -347,9 +345,7 @@ class TestTokenharborKeyValidation:
         assert b.api_key.startswith("future_fmt_")
         assert "does not start with" in capsys.readouterr().out
 
-    def test_wrong_length_thk_live_warns_not_raises(
-        self, tokenharbor_env, monkeypatch, capsys
-    ):
+    def test_wrong_length_thk_live_warns_not_raises(self, tokenharbor_env, monkeypatch, capsys):
         """thk_live_ with a wrong remainder warns (shape is a docs
         observation, not a hard invariant) but is accepted."""
         monkeypatch.setenv("AGENTKTHX_DEBUG", "1")
@@ -380,10 +376,7 @@ class TestTokenharborIdentity:
 
 class TestTokenharborUrls:
     def test_chat_completions_url(self, backend):
-        assert (
-            backend._get_chat_completions_url()
-            == "https://tokenharbor.ai/v1/chat/completions"
-        )
+        assert backend._get_chat_completions_url() == "https://tokenharbor.ai/v1/chat/completions"
 
     def test_models_url(self, backend):
         assert backend._get_models_url() == "https://tokenharbor.ai/v1/models"
@@ -618,9 +611,7 @@ class TestTokenharborQuotaClassification:
             calls.append(req)
             raise _http_error(
                 429,
-                json.dumps(
-                    {"error": {"code": "spend_limit_exceeded", "message": "cap reached"}}
-                ),
+                json.dumps({"error": {"code": "spend_limit_exceeded", "message": "cap reached"}}),
                 headers={"Retry-After": "120"},
             )
 
@@ -646,9 +637,7 @@ class TestTokenharborQuotaClassification:
             return _FakeResponse(_openai_ok())
 
         monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
-        result = backend.generate(
-            "deepseek-v4.1-flash:free", [{"role": "user", "content": "hi"}]
-        )
+        result = backend.generate("deepseek-v4.1-flash:free", [{"role": "user", "content": "hi"}])
         assert result["content"] == "pong"
         assert len(calls) == 2
 
@@ -841,21 +830,19 @@ class TestTokenharborCatalog:
         """Junk entries in the live payload (non-dict rows, non-string or
         None ids) are SKIPPED, not crashes — the /v1/models entry schema
         is undocumented, so the id reader is defensive."""
+
         def fake_urlopen(req, timeout=None):
-            return _FakeResponse(
-                {"data": [{"id": 1}, {"id": None}, {"id": "glm-5.3"}, "junk", 42]}
-            )
+            return _FakeResponse({"data": [{"id": 1}, {"id": None}, {"id": "glm-5.3"}, "junk", 42]})
 
         monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
         models = backend.list_models()
         assert "glm-5.3" in {m["name"] for m in models}
 
-    def test_root_non_dict_payload_propagates_as_bug(
-        self, backend, isolated_cache, monkeypatch
-    ):
+    def test_root_non_dict_payload_propagates_as_bug(self, backend, isolated_cache, monkeypatch):
         """A programming-error shape (JSON root is a list → .get() raises
         AttributeError) is NOT masked as 'discovery failed' — it
         propagates as a real bug (ROB-42 catch-narrowing)."""
+
         def fake_urlopen(req, timeout=None):
             return _FakeResponse(["not", "a", "dict"])
 
@@ -892,9 +879,7 @@ class TestTokenharborToolSupport:
             if len(sent_bodies) == 1:
                 raise _http_error(
                     400,
-                    json.dumps(
-                        {"error": {"message": "This model does not support tools"}}
-                    ),
+                    json.dumps({"error": {"message": "This model does not support tools"}}),
                 )
             return _FakeResponse(_openai_ok("react path"))
 

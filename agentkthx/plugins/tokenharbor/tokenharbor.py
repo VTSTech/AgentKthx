@@ -483,9 +483,7 @@ class TokenHarborBackend(CloudBackend):
                 return value
         return None
 
-    def _catalog_entry(
-        self, name: str, meta: dict, live_ctx: int | None = None
-    ) -> dict:
+    def _catalog_entry(self, name: str, meta: dict, live_ctx: int | None = None) -> dict:
         """Shape one catalog entry (shared by live + fallback builders).
 
         R07.34: ``details.context_length`` is written ONLY from real
