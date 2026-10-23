@@ -22,6 +22,12 @@ otherwise the notification is logged to the stderr ring buffer (the
 original R07.22 behavior). The manager wires
 ``notifications/tools/list_changed`` to its
 :meth:`MCPManager._refresh_tools_for_server` method on connect.
+
+R07.35 (MCP-06): :meth:`MCPClient.reconnect` rebuilds the underlying
+transport in place — close the old one, spawn a fresh subprocess, redo
+the ``initialize`` handshake — without replacing the client object, so
+notification handlers registered on the client survive the reconnect
+and the manager can swap the connection underneath live shim tools.
 """
 
 from __future__ import annotations
@@ -184,6 +190,55 @@ class MCPClient:
         self._initialized = False
         self._transport.close(timeout=timeout)
 
+    def reconnect(self, timeout: float = 2.0) -> None:
+        """R07.35 (MCP-06): rebuild the transport and redo the handshake.
+
+        Used when the current transport is poisoned or the subprocess
+        died mid-session (:class:`MCPTransportGone`). The old transport
+        is closed best-effort (a wedged subprocess is terminated), a
+        fresh :class:`StdioTransport` is created, and ``initialize`` +
+        ``notifications/initialized`` are re-sent.
+
+        State handling:
+
+        * ``_server_info`` / ``_server_caps`` are refreshed from the new
+          handshake (they may legitimately change across a restart).
+        * Per-method notification handlers registered via
+          :meth:`set_notification_handler` are NOT lost — they live on
+          the client, and :meth:`connect` re-wires the new transport's
+          callback to the client's trampoline before initializing.
+
+        Safe to call on a never-connected client (acts like ``connect``
+        on a clean transport) and repeatedly on a wedged one (each call
+        builds a brand-new transport).
+
+        Args:
+            timeout: Teardown timeout forwarded to the old transport's
+                ``close()``. Short values (e.g. 0.2s) make reconnects
+                snappy when the old subprocess is known-dead.
+
+        Raises:
+            MCPClientError: On protocol mismatch or failed handshake.
+            MCPTransportGone: If the fresh subprocess also fails
+                (spawn failure, timeout, EOF) — the caller decides
+                whether to retry.
+        """
+        old = self._transport
+        self._initialized = False
+        try:
+            old.close(timeout=timeout)
+        except Exception:
+            # Never block recovery on a wedged transport — the daemon
+            # reader/stderr threads die when the pipes close, and any
+            # stuck subprocess gets terminated inside close().
+            pass
+        self._transport = StdioTransport(self._config)
+        # connect() re-installs the notification trampoline on the new
+        # transport BEFORE the initialize handshake (R07.24 MCP-05
+        # ordering), and re-raises transport failures from the fresh
+        # spawn/handshake so the caller can bound its retries.
+        self.connect()
+
     # ---- protocol methods ----
 
     def list_tools(self) -> list[dict[str, Any]]:
@@ -286,6 +341,19 @@ class MCPClient:
     def is_alive(self) -> bool:
         return self._transport.is_alive
 
+    @property
+    def is_poisoned(self) -> bool:
+        """R07.35 (MCP-06): True if the transport is poisoned (MCP-01) —
+        a per-call timeout fired and the connection state is unknown.
+        The next :meth:`call_tool`/:meth:`list_tools` raises
+        :class:`MCPTransportGone`; the manager's invoke path uses this
+        flag to decide to auto-reconnect.
+        """
+        return self._transport.is_poisoned
+
     def __repr__(self) -> str:
-        state = "connected" if self._initialized else "disconnected"
+        if self._transport.is_poisoned:
+            state = "poisoned"
+        else:
+            state = "connected" if self._initialized else "disconnected"
         return f"<MCPClient server={self._config.name!r} {state}>"

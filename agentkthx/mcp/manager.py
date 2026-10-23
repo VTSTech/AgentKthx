@@ -33,11 +33,27 @@ Lazy vs eager
 v0.1 is **eager** — :meth:`connect_all` opens every server and queries
 every tool list. This is simplest and surfaces config errors immediately.
 The roadmap has lazy mode for v0.2 (servers started on first tool call).
+
+R07.35 (MCP-06) — auto-reconnect
+--------------------------------
+Before R07.35, a mid-session transport failure (hung server → per-call
+timeout → poisoned transport, or a crashed subprocess) was fatal for the
+rest of the session: every later call to that server returned
+"[MCP transport error: … transport poisoned …]" until the agent was
+restarted. Now :meth:`_invoke` classifies transport failures — fatal
+ones (:class:`MCPTransportGone`) trigger a bounded auto-reconnect
+(fresh subprocess + ``initialize`` + tool-surface re-diff) and one
+re-dispatch of the original call, controlled by the per-server config
+knobs ``reconnect`` / ``reconnect_attempts`` / ``reconnect_backoff``.
+JSON-RPC *protocol* errors (the server answered with an error) never
+trigger a reconnect — the server is alive, the call was just bad.
 """
 
 from __future__ import annotations
 
+import sys
 import threading
+import time
 from typing import Any
 
 from ..core.helpers import sanitize_tool_output
@@ -45,7 +61,7 @@ from ..core.models import Tool, ToolParam
 from ..tools.registry import ToolRegistry
 from .client import MCPClient, MCPClientError
 from .config import MCPServerConfig, load_mcp_config
-from .transport import MCPTransportError
+from .transport import MCPTransportError, MCPTransportGone
 
 
 class MCPManagerError(RuntimeError):
@@ -466,6 +482,10 @@ class MCPManager:
                 out[name] = {
                     "configured": True,
                     "connected": client.is_alive,
+                    # R07.35 (MCP-06): surface the poisoned flag so
+                    # `agentkthx mcp list` can show a wedged connection
+                    # before the next call auto-recovers it.
+                    "poisoned": bool(getattr(client, "is_poisoned", False)),
                     "tools": tool_count,
                     "command": cfg.command,
                     "server_info": client.server_info,
@@ -617,11 +637,25 @@ class MCPManager:
 
         try:
             result = client.call_tool(mcp_name, forwarded_args)
+        except MCPTransportGone as e:
+            # R07.35 (MCP-06): connection-fatal failure — poisoned
+            # transport, per-call timeout, EOF, broken pipe. The server
+            # subprocess is in an unknown/dead state. Auto-reconnect
+            # (bounded, config-controlled) and re-dispatch the original
+            # call through the fresh connection before reporting failure.
+            return self._reconnect_and_retry(
+                server_name, mcp_name, namespaced_name, forwarded_args, e
+            )
         except MCPTransportError as e:
-            # Transport failure — return a clean error string to the model
-            # rather than raising. The agent loop treats raised exceptions
-            # as tool-execution failures; a returned string lets the model
-            # reason about the failure and try an alternative.
+            # Plain transport error — the server is (or should be) alive:
+            # JSON-RPC error response, spawn/config failure. Pre-R07.35
+            # transports may also raise this class for fatal conditions,
+            # so fall back to a liveness heuristic: reconnect only if the
+            # client LOOKS dead (poisoned flag or dead subprocess).
+            if self._client_looks_dead(client):
+                return self._reconnect_and_retry(
+                    server_name, mcp_name, namespaced_name, forwarded_args, e
+                )
             return f"[MCP transport error: {e}]"
         except MCPClientError as e:
             return f"[MCP protocol error: {e}]"
@@ -633,6 +667,161 @@ class MCPManager:
             tool_name=namespaced_name,
             tool_call_id="",  # filled in by the agent loop if available
         )
+
+    def _client_looks_dead(self, client: Any) -> bool:
+        """R07.35 (MCP-06): liveness heuristic for pre-Gone error classes.
+
+        Transport implementations written before R07.35 raise plain
+        :class:`MCPTransportError` for fatal conditions. When one of
+        those surfaces, reconnect only if the client independently looks
+        dead — poisoned transport or a subprocess that is no longer
+        running. Uses ``getattr`` with defaults so test fakes that lack
+        the properties are treated as alive (no behavior change for
+        existing mocked tests).
+        """
+        poisoned = getattr(client, "is_poisoned", False)
+        alive = getattr(client, "is_alive", True)
+        return bool(poisoned) or not bool(alive)
+
+    def _reconnect_and_retry(
+        self,
+        server_name: str,
+        mcp_name: str,
+        namespaced_name: str,
+        forwarded_args: dict[str, Any],
+        first_error: Exception,
+    ) -> str:
+        """R07.35 (MCP-06): bounded auto-reconnect + one re-dispatch per round.
+
+        Runs when a tool call hits a connection-fatal failure. Each round:
+
+        1. optional linear backoff (``reconnect_backoff * round``),
+        2. :meth:`_reconnect_server` — fresh subprocess + handshake +
+           tool-surface re-diff (shim tools survive — they resolve the
+           client per call, so the new connection is picked up
+           transparently),
+        3. re-dispatch the ORIGINAL call through the new connection.
+
+        Controlled by the server config: ``reconnect=False`` restores the
+        pre-R07.35 behavior (clean error string, no restarts);
+        ``reconnect_attempts`` bounds the rounds (default 2);
+        ``reconnect_backoff`` spaces them (default 0.5s, linear).
+
+        Always returns a string — on exhaustion, a single clean error
+        that names the original failure and the reconnect outcome. The
+        model can reason about it; the agent loop never sees a raise.
+        """
+        cfg = self._configs.get(server_name)
+        if cfg is None or not cfg.reconnect:
+            # Reconnect disabled (or server unknown) — pre-R07.35 behavior.
+            return f"[MCP transport error: {first_error}]"
+
+        attempts = max(0, int(cfg.reconnect_attempts))
+        backoff = max(0.0, float(cfg.reconnect_backoff))
+        last_error: Exception = first_error
+
+        for round_no in range(1, attempts + 1):
+            print(
+                f"[MCP] {server_name}: connection lost "
+                f"({first_error}) — reconnecting "
+                f"(attempt {round_no}/{attempts})...",
+                file=sys.stderr,
+            )
+            if backoff:
+                time.sleep(backoff * round_no)
+            try:
+                self._reconnect_server(server_name)
+            except MCPManagerError as e:
+                last_error = e
+                continue
+
+            client = self._clients.get(server_name)
+            if client is None:  # defensive — _reconnect_server installs it
+                last_error = MCPManagerError(
+                    f"MCP server '{server_name}': reconnect produced no client"
+                )
+                continue
+            try:
+                result = client.call_tool(mcp_name, forwarded_args)
+            except (MCPTransportGone, MCPTransportError, MCPClientError) as e:
+                # Fresh connection still failing (or the re-dispatch hit a
+                # protocol error) — burn this round and retry if allowed.
+                last_error = e
+                continue
+
+            # Success — sanitize exactly like the normal path.
+            text = _flatten_call_result(result)
+            return sanitize_tool_output(
+                text,
+                tool_name=namespaced_name,
+                tool_call_id="",  # filled in by the agent loop if available
+            )
+
+        return (
+            f"[MCP transport error: {first_error} — auto-reconnect failed "
+            f"after {attempts} attempt(s): {last_error}]"
+        )
+
+    def _reconnect_server(self, name: str) -> MCPClient:
+        """R07.35 (MCP-06): rebuild a dead/poisoned server connection in place.
+
+        Closes the old client best-effort (a wedged subprocess is
+        terminated inside ``close()``), spawns a fresh one, redoes the
+        ``initialize`` handshake and a ``tools/list`` sanity probe, then
+        swaps it into ``_clients`` — the live shim Tools pick it up
+        transparently because they resolve the client per call.
+
+        After the lock is released, the tool surface is re-diffed via
+        :meth:`_refresh_tools_for_server` (the restarted server may
+        expose different tools; added/removed shims update the live
+        registry exactly like an MCP-05 ``list_changed`` notification).
+
+        Raises:
+            MCPManagerError: If the server isn't configured, or the
+                fresh spawn/handshake/probe fails. The dead client is
+                NOT put back — a later call reports "not connected" and
+                the next failing invoke retries the reconnect.
+        """
+        with self._lock:
+            cfg = self._configs.get(name)
+            if cfg is None:
+                raise MCPManagerError(
+                    f"MCP server '{name}' is not configured (known: "
+                    f"{list(self._configs.keys())})"
+                )
+            old = self._clients.pop(name, None)
+            if old is not None:
+                try:
+                    old.close()
+                except Exception:
+                    # The old transport may be wedged (stuck reader
+                    # thread, dead subprocess) — never block recovery.
+                    pass
+            client = MCPClient(cfg)
+            # Same defensive wiring as warmup_server: the list_changed
+            # handler goes on BEFORE connect (R07.24 MCP-05 ordering).
+            self._install_list_changed_handler(client, name)
+            try:
+                client.connect()
+                # Sanity probe — proves the new pipe actually serves
+                # requests before we re-dispatch the model's call.
+                client.list_tools()
+            except (MCPClientError, MCPTransportError) as e:
+                try:
+                    client.close()
+                except Exception:
+                    pass
+                raise MCPManagerError(
+                    f"MCP server '{name}' reconnect failed: {e}"
+                ) from e
+            self._clients[name] = client
+
+        # Outside the lock — _refresh_tools_for_server re-acquires it.
+        # Diff-only: existing shims still point at this manager and
+        # resolve the (new) client per call, so unchanged tools need no
+        # re-registration.
+        self._refresh_tools_for_server(name)
+        return client
 
 
 def _extract_params(input_schema: dict[str, Any]) -> list[ToolParam]:

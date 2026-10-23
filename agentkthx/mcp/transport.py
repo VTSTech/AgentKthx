@@ -41,6 +41,24 @@ On timeout, the transport is marked as **poisoned** (subsequent calls
 raise immediately) and the daemon thread dies naturally when the subprocess
 closes. Bonus: this also fixes Ctrl+C interruptibility on POSIX — the
 main thread no longer holds the GIL inside ``readline()``.
+
+R07.35 (MCP-06): reconnectable vs protocol failures
+---------------------------------------------------
+Poisoning left the transport dead forever — every later call in the
+session raised "transport poisoned — close() and reconnect" and the only
+recovery was restarting the whole agent. R07.35 splits the failure
+surface in two so callers can react automatically:
+
+* :class:`MCPTransportGone` (subclass of :class:`MCPTransportError`) —
+  the pipe/subprocess is in an unknown or dead state: poisoning, per-call
+  timeout, EOF, write failure, transport closed. The transport instance
+  must be discarded; :meth:`MCPClient.reconnect` rebuilds it.
+* plain :class:`MCPTransportError` — the subprocess is alive and
+  answered: JSON-RPC error responses, config/resolve failures. There is
+  nothing to reconnect; the error is informational.
+
+``except MCPTransportError`` handlers written before R07.35 keep working
+unchanged — ``Gone`` is a subclass.
 """
 
 from __future__ import annotations
@@ -59,6 +77,22 @@ from .config import MCPServerConfig
 
 class MCPTransportError(RuntimeError):
     """Raised when the stdio transport cannot send/receive a message."""
+
+
+class MCPTransportGone(MCPTransportError):
+    """R07.35 (MCP-06): connection-fatal transport failure.
+
+    Raised at every site where the pipe/subprocess is in an unknown or
+    dead state — poisoning (MCP-01), per-call timeout, EOF on stdout,
+    write failure, closed transport. The transport instance must be
+    discarded; :meth:`MCPClient.reconnect` builds a fresh one and
+    redoes the handshake.
+
+    Distinct from a plain :class:`MCPTransportError`, which the
+    transport raises when the subprocess is ALIVE and answered (JSON-RPC
+    error response) or when the failure is config-level (unresolvable
+    command) — those are informational, not reconnect triggers.
+    """
 
 
 class StdioTransport:
@@ -116,7 +150,9 @@ class StdioTransport:
         if self._proc is not None and self._proc.poll() is None:
             return  # already running
         if self._closed:
-            raise MCPTransportError(
+            # R07.35 (MCP-06): gone, not a protocol error — the manager's
+            # reconnect path builds a new transport and retries.
+            raise MCPTransportGone(
                 f"MCP server '{self._config.name}': transport closed; "
                 f"create a new instance to reconnect"
             )
@@ -254,13 +290,20 @@ class StdioTransport:
 
     def _send_raw(self, obj: dict) -> None:
         if self._proc is None or self._proc.stdin is None:
-            raise MCPTransportError(f"MCP server '{self._config.name}': subprocess not running")
+            # R07.35 (MCP-06): gone — the pipe is unusable.
+            raise MCPTransportGone(
+                f"MCP server '{self._config.name}': subprocess not running"
+            )
         try:
             data = json.dumps(obj) + "\n"
             self._proc.stdin.write(data)
             self._proc.stdin.flush()
         except (BrokenPipeError, OSError) as e:
-            raise MCPTransportError(f"MCP server '{self._config.name}': write failed: {e}") from e
+            # R07.35 (MCP-06): a broken pipe means the subprocess died —
+            # gone (reconnectable), not a protocol error.
+            raise MCPTransportGone(
+                f"MCP server '{self._config.name}': write failed: {e}"
+            ) from e
 
     def _read_response(self, expected_id: int, timeout: float) -> Any:
         """Read one JSON-RPC response, with per-call timeout that actually interrupts.
@@ -280,12 +323,19 @@ class StdioTransport:
         notification; this transport only routes.
         """
         if self._proc is None or self._proc.stdout is None:
-            raise MCPTransportError(f"MCP server '{self._config.name}': subprocess not running")
+            # R07.35 (MCP-06): gone — the pipe is unusable.
+            raise MCPTransportGone(
+                f"MCP server '{self._config.name}': subprocess not running"
+            )
 
         if self._poisoned:
-            raise MCPTransportError(
+            # R07.35 (MCP-06): gone (fast-fail) — the manager's reconnect
+            # path detects this class and rebuilds the transport
+            # automatically; the message no longer tells the model to do
+            # it manually.
+            raise MCPTransportGone(
                 f"MCP server '{self._config.name}': transport poisoned after a previous "
-                f"timeout — close() and create a new instance to reconnect"
+                f"timeout — reconnect to recover"
             )
 
         deadline = time.monotonic() + timeout
@@ -294,11 +344,12 @@ class StdioTransport:
             if remaining <= 0:
                 # Mark poisoned — the daemon thread is likely still stuck
                 # in readline(); future calls on this transport would hang.
+                # R07.35 (MCP-06): Gone class so callers can auto-reconnect.
                 self._poisoned = True
-                raise MCPTransportError(
+                raise MCPTransportGone(
                     f"MCP server '{self._config.name}': timeout waiting for "
                     f"response to id={expected_id} (transport poisoned — "
-                    f"close() and reconnect to recover)"
+                    f"auto-reconnect pending)"
                 )
 
             # Thread+queue pattern: the daemon thread does the blocking
@@ -321,16 +372,19 @@ class StdioTransport:
                 # die naturally when the subprocess closes (close_fds=True
                 # ensures the pipe is closed even if the main thread exits).
                 # Mark poisoned so the next call fails fast.
+                # R07.35 (MCP-06): Gone class so callers can auto-reconnect.
                 self._poisoned = True
-                raise MCPTransportError(
+                raise MCPTransportGone(
                     f"MCP server '{self._config.name}': timeout waiting for "
                     f"response to id={expected_id} (transport poisoned — "
-                    f"close() and reconnect to recover)"
+                    f"auto-reconnect pending)"
                 )
 
             if line is None:
                 # The subprocess closed stdout (EOF) — no more output coming.
-                raise MCPTransportError(
+                # R07.35 (MCP-06): the server died mid-call — Gone
+                # (reconnectable), not a protocol error.
+                raise MCPTransportGone(
                     f"MCP server '{self._config.name}': subprocess closed "
                     f"stdout while waiting for id={expected_id}"
                 )
@@ -374,6 +428,10 @@ class StdioTransport:
                 continue
 
             if "error" in msg:
+                # R07.35 (MCP-06): deliberately stays a PLAIN
+                # MCPTransportError — the subprocess is alive and answered.
+                # A JSON-RPC error is informational (bad method/params),
+                # not a connection failure; reconnecting would be wrong.
                 err = msg["error"]
                 raise MCPTransportError(
                     f"MCP server '{self._config.name}': JSON-RPC error on "
@@ -429,7 +487,12 @@ class StdioTransport:
     def is_poisoned(self) -> bool:
         """R07.24 (MCP-01): True if a per-call timeout fired and the transport
         is in an unknown state. Subsequent :meth:`request` calls raise
-        immediately. Recovery: :meth:`close` and create a new instance.
+        immediately.
+
+        R07.35 (MCP-06): recovery is no longer manual-only — poisoned
+        transports raise :class:`MCPTransportGone`, which the manager's
+        invoke path catches to rebuild the connection automatically.
+        :meth:`close` + a new instance remains the manual escape hatch.
         """
         return self._poisoned
 
@@ -445,3 +508,9 @@ class StdioTransport:
     # rather than blocking the calling thread indefinitely. The transport
     # is poisoned on timeout so the next call fails fast; recovery requires
     # close() + new instance.
+    #
+    # R07.35 (MCP-06): the fatal sites now raise MCPTransportGone (a
+    # MCPTransportError subclass) so the manager can distinguish
+    # "connection dead — reconnect" from "server answered with an error".
+    # Poisoned transports self-heal via MCPClient.reconnect() when the
+    # manager's auto-reconnect path fires (config: reconnect*, MCP-06).

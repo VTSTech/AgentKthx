@@ -70,7 +70,7 @@ from .registry import (
     search_all,
     search_all_with_errors,
 )
-from .transport import MCPTransportError, StdioTransport
+from .transport import MCPTransportError, MCPTransportGone, StdioTransport
 
 __all__ = [
     # Config
@@ -82,6 +82,7 @@ __all__ = [
     # Transport + client
     "StdioTransport",
     "MCPTransportError",
+    "MCPTransportGone",
     "MCPClient",
     "MCPClientError",
     "MCPManager",

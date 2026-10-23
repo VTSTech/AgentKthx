@@ -54,6 +54,19 @@ Fields
   server declared but inactive.
 * ``timeout_seconds`` (int, default ``30``) — per-request timeout for
   JSON-RPC calls. Does NOT limit the lifetime of the subprocess itself.
+* ``reconnect`` (bool, default ``true``) — R07.35 (MCP-06): when a tool
+  call hits a connection-fatal transport failure (poisoned transport,
+  per-call timeout, EOF, broken pipe), automatically restart the server
+  subprocess, redo the MCP handshake, and re-dispatch the call before
+  giving up. Set to ``false`` to restore the pre-R07.35 behavior (clean
+  error string to the model, manual recovery only).
+* ``reconnect_attempts`` (int, default ``2``) — max reconnect rounds per
+  failing tool call. Each round = fresh subprocess + initialize +
+  tools/list re-diff + one re-dispatch of the original call. ``0``
+  disables retry rounds (one clean failure, no restarts).
+* ``reconnect_backoff`` (float, default ``0.5``) — seconds before round
+  N (linear: ``backoff * N``), giving a crashed server's supervisor a
+  moment to breathe. ``0`` retries immediately.
 * ``comment`` (str, optional) — ignored by code; for human readers.
 
 Security model
@@ -128,6 +141,12 @@ class MCPServerConfig:
     env: dict[str, str] = field(default_factory=dict)
     enabled: bool = True
     timeout_seconds: int = 30
+    # R07.35 (MCP-06): auto-reconnect knobs. Defaults keep every existing
+    # config reconnect-capable without edits; ``reconnect: false`` in
+    # mcp.json restores the pre-R07.35 manual-only recovery.
+    reconnect: bool = True
+    reconnect_attempts: int = 2
+    reconnect_backoff: float = 0.5
     comment: str = ""
 
     def __post_init__(self) -> None:
@@ -254,6 +273,12 @@ def load_mcp_config(path: str | os.PathLike | None = None) -> list[MCPServerConf
                 env=dict(entry.get("env", {})),
                 enabled=bool(entry.get("enabled", True)),
                 timeout_seconds=int(entry.get("timeout_seconds", 30)),
+                # R07.35 (MCP-06): optional auto-reconnect knobs — all
+                # default to the dataclass values when absent, so every
+                # pre-R07.35 config file keeps working unmodified.
+                reconnect=bool(entry.get("reconnect", True)),
+                reconnect_attempts=int(entry.get("reconnect_attempts", 2)),
+                reconnect_backoff=float(entry.get("reconnect_backoff", 0.5)),
                 comment=str(entry.get("comment", "")),
             )
         except KeyError as e:
