@@ -385,8 +385,10 @@ class StdioTransport:
             # is alive (should not happen), revive it — otherwise every
             # request would burn its full timeout window.
             if (
-                self._reader_thread is None or not self._reader_thread.is_alive()
-            ) and self._proc is not None and self._proc.poll() is None:
+                (self._reader_thread is None or not self._reader_thread.is_alive())
+                and self._proc is not None
+                and self._proc.poll() is None
+            ):
                 self._start_reader()
 
             msg_id = self._next_id
@@ -440,9 +442,7 @@ class StdioTransport:
     def _send_raw(self, obj: dict) -> None:
         if self._proc is None or self._proc.stdin is None:
             # R07.35 (MCP-06): gone — the pipe is unusable.
-            raise MCPTransportGone(
-                f"MCP server '{self._config.name}': subprocess not running"
-            )
+            raise MCPTransportGone(f"MCP server '{self._config.name}': subprocess not running")
         try:
             data = json.dumps(obj) + "\n"
             self._proc.stdin.write(data)
@@ -450,9 +450,7 @@ class StdioTransport:
         except (BrokenPipeError, OSError) as e:
             # R07.35 (MCP-06): a broken pipe means the subprocess died —
             # gone (reconnectable), not a protocol error.
-            raise MCPTransportGone(
-                f"MCP server '{self._config.name}': write failed: {e}"
-            ) from e
+            raise MCPTransportGone(f"MCP server '{self._config.name}': write failed: {e}") from e
 
     def _read_response(self, expected_id: int, timeout: float) -> Any:
         """Wait for the response to ``expected_id``, routed by the reader thread.
@@ -623,9 +621,7 @@ class StdioTransport:
                 try:
                     self._notification_callback(msg)
                 except Exception:
-                    self._stderr_ring.append(
-                        f"HANDLER-ERR: {str(msg.get('method', '?'))[:180]}"
-                    )
+                    self._stderr_ring.append(f"HANDLER-ERR: {str(msg.get('method', '?'))[:180]}")
 
     def _drain_stderr(self) -> None:
         if self._proc is None or self._proc.stderr is None:

@@ -102,10 +102,7 @@ def _call_tool_maybe_timeout(
     except (TypeError, ValueError):
         return client.call_tool(mcp_name, args)
     params = sig.parameters.values()
-    accepts = any(
-        p.name == "timeout" or p.kind is inspect.Parameter.VAR_KEYWORD
-        for p in params
-    )
+    accepts = any(p.name == "timeout" or p.kind is inspect.Parameter.VAR_KEYWORD for p in params)
     if accepts:
         return client.call_tool(mcp_name, args, timeout=timeout)
     return client.call_tool(mcp_name, args)
@@ -692,11 +689,7 @@ class MCPManager:
             # Only treat REPEATED timeouts as a wedged server.
             cfg_t = self._configs.get(server_name)
             consecutive = int(getattr(client, "consecutive_timeouts", 0))
-            if (
-                cfg_t is not None
-                and cfg_t.reconnect
-                and consecutive >= _WEDGED_TIMEOUT_THRESHOLD
-            ):
+            if cfg_t is not None and cfg_t.reconnect and consecutive >= _WEDGED_TIMEOUT_THRESHOLD:
                 print(
                     f"[MCP] {server_name}: {consecutive} consecutive request "
                     f"timeouts — treating server as wedged, reconnecting",
@@ -818,13 +811,9 @@ class MCPManager:
                 continue
             retry_timeout: float | None = None
             if escalate_timeout:
-                retry_timeout = min(
-                    float(cfg.timeout_seconds) * (round_no + 1), 120.0
-                )
+                retry_timeout = min(float(cfg.timeout_seconds) * (round_no + 1), 120.0)
             try:
-                result = _call_tool_maybe_timeout(
-                    client, mcp_name, forwarded_args, retry_timeout
-                )
+                result = _call_tool_maybe_timeout(client, mcp_name, forwarded_args, retry_timeout)
             except (MCPTransportGone, MCPTransportError, MCPClientError) as e:
                 # Fresh connection still failing (or the re-dispatch hit a
                 # protocol error) — burn this round and retry if allowed.
@@ -898,9 +887,7 @@ class MCPManager:
                     client.close()
                 except Exception:
                     pass
-                raise MCPManagerError(
-                    f"MCP server '{name}' reconnect failed: {e}"
-                ) from e
+                raise MCPManagerError(f"MCP server '{name}' reconnect failed: {e}") from e
             self._clients[name] = client
 
         # Outside the lock — _refresh_tools_for_server re-acquires it.

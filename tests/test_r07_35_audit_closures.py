@@ -187,8 +187,7 @@ class TestRob49CleanMaxStepsError:
         def fake_get_backend(name, timeout=None, api_mode=None, **kwargs):
             if "sample_steps" in kwargs:
                 raise ValueError(
-                    "sample_steps must be an integer in 1..100 "
-                    "(sd-server clamp range), got 200"
+                    "sample_steps must be an integer in 1..100 " "(sd-server clamp range), got 200"
                 )
             raise AssertionError("expected the sample_steps construction path")
 

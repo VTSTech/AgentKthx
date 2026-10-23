@@ -205,13 +205,25 @@ _CHALLENGE_RETRY_SLEEP_S = 1.0
 # beyond the entries below; NODE_OPTIONS / NODE_PATH deliberately do
 # NOT pass through. Windows-critical vars keep the helpers working on
 # the Win11 host.
-_NODE_ENV_ALLOWLIST = frozenset({
-    # POSIX
-    "PATH", "HOME", "LANG", "TMPDIR",
-    # Windows Node essentials
-    "SYSTEMROOT", "SYSTEMDRIVE", "COMSPEC", "PATHEXT",
-    "TEMP", "TMP", "APPDATA", "LOCALAPPDATA", "PROGRAMFILES",
-})
+_NODE_ENV_ALLOWLIST = frozenset(
+    {
+        # POSIX
+        "PATH",
+        "HOME",
+        "LANG",
+        "TMPDIR",
+        # Windows Node essentials
+        "SYSTEMROOT",
+        "SYSTEMDRIVE",
+        "COMSPEC",
+        "PATHEXT",
+        "TEMP",
+        "TMP",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "PROGRAMFILES",
+    }
+)
 
 
 def _node_env(extra: dict | None = None) -> dict:
@@ -225,6 +237,7 @@ def _node_env(extra: dict | None = None) -> dict:
     if extra:
         env.update(extra)
     return env
+
 
 #: Proof acquisition mode. "synth" (default) = fetch challenge ->
 #: Node solve -> build header. "capture" (page-built proof via a

@@ -71,8 +71,7 @@ from agentkthx.mcp.transport import (  # noqa: E402
 # * anything else    → echoes back
 # Unknown methods get a JSON-RPC error, which pins the "plain
 # MCPTransportError, NOT Gone" classification.
-_FAKE_ECHO_SERVER = textwrap.dedent(
-    """
+_FAKE_ECHO_SERVER = textwrap.dedent("""
     import json
     import sys
     import threading
@@ -149,8 +148,7 @@ _FAKE_ECHO_SERVER = textwrap.dedent(
         except json.JSONDecodeError:
             continue
         threading.Thread(target=_handle, args=(msg,), daemon=True).start()
-    """
-).lstrip()
+    """).lstrip()
 
 
 @pytest.fixture()
@@ -194,9 +192,7 @@ def test_timeout_does_not_kill_connection(echo_server_config):
     try:
         start = time.monotonic()
         with pytest.raises(MCPRequestTimeoutError) as exc_info:
-            transport.request(
-                "tools/call", {"name": "echo", "arguments": {"q": "hang:2"}}
-            )
+            transport.request("tools/call", {"name": "echo", "arguments": {"q": "hang:2"}})
         elapsed = time.monotonic() - start
 
         # Timeout honored (1s window); the class is a PLAIN transport
@@ -210,9 +206,7 @@ def test_timeout_does_not_kill_connection(echo_server_config):
 
         # The connection survives — the next call round-trips normally
         # (thread-per-message server: the hanging call doesn't block it).
-        result = transport.request(
-            "tools/call", {"name": "echo", "arguments": {"q": "fine"}}
-        )
+        result = transport.request("tools/call", {"name": "echo", "arguments": {"q": "fine"}})
         assert result["content"][0]["text"] == "echo: fine"
         # Any response resets the wedged-detection counter.
         assert transport.consecutive_timeouts == 0
@@ -220,9 +214,7 @@ def test_timeout_does_not_kill_connection(echo_server_config):
         # The abandoned request's response arrives ~1s later (2s sleep
         # started at dispatch) — the reader must drop it, not mis-route.
         assert _wait_for(
-            lambda: any(
-                "LATE-RESPONSE" in line for line in transport.stderr_tail
-            ),
+            lambda: any("LATE-RESPONSE" in line for line in transport.stderr_tail),
             timeout=5.0,
         )
     finally:
@@ -254,9 +246,7 @@ def test_client_reconnect_recovers_after_real_death(echo_server_config):
         with pytest.raises(MCPTransportGone) as fast_fail:
             client.call_tool("echo", {"q": "fine"})
         assert time.monotonic() - start < 1.0
-        assert "poisoned" in str(fast_fail.value) or "reconnect" in str(
-            fast_fail.value
-        )
+        assert "poisoned" in str(fast_fail.value) or "reconnect" in str(fast_fail.value)
         assert client.is_poisoned is True
 
         # Reconnect — short teardown timeout (the old subprocess is
@@ -300,9 +290,7 @@ def test_notification_midcall_does_not_deadlock(echo_server_config):
             # back into the client from notification dispatch.
             refresh_calls.append(client.list_tools())
 
-        client.set_notification_handler(
-            "notifications/tools/list_changed", _refresh
-        )
+        client.set_notification_handler("notifications/tools/list_changed", _refresh)
 
         # The server pushes list_changed BEFORE the response — the OLD
         # code ran the handler mid-read on a locked transport.
@@ -405,9 +393,7 @@ def test_client_reconnect_preserves_notification_handlers(monkeypatch):
     client = MCPClient(cfg)
 
     fired: list = []
-    client.set_notification_handler(
-        "notifications/tools/list_changed", lambda m: fired.append(m)
-    )
+    client.set_notification_handler("notifications/tools/list_changed", lambda m: fired.append(m))
 
     old = client._transport
     client.reconnect()
@@ -653,9 +639,7 @@ def test_invoke_single_timeout_returns_clean_error_no_reconnect(monkeypatch, cap
     assert "reconnecting" not in err
 
 
-def test_invoke_wedged_server_reconnects_after_consecutive_timeouts(
-    monkeypatch, capsys
-):
+def test_invoke_wedged_server_reconnects_after_consecutive_timeouts(monkeypatch, capsys):
     """Two consecutive timeouts → wedged → reconnect → escalated re-dispatch.
 
     A server with an alive pipe but a stuck event loop times out on
@@ -1068,9 +1052,7 @@ def test_config_reconnect_defaults_absent_fields(tmp_path):
     """Pre-R07.35 config files (no reconnect keys) get the defaults."""
     cfg_file = tmp_path / "mcp.json"
     cfg_file.write_text(
-        json.dumps(
-            {"version": "0.1", "servers": [{"name": "git", "command": "python3"}]}
-        ),
+        json.dumps({"version": "0.1", "servers": [{"name": "git", "command": "python3"}]}),
         encoding="utf-8",
     )
     configs = load_mcp_config(cfg_file)
