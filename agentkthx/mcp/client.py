@@ -42,7 +42,7 @@ from .transport import StdioTransport
 _MCP_PROTOCOL_VERSION = "2025-06-18"
 
 _CLIENT_NAME = "agentkthx"
-_CLIENT_VERSION = "0.7.27"  # mirror __init__ package version
+_CLIENT_VERSION = "0.7.35"  # mirror __init__ package version
 
 
 class MCPClientError(RuntimeError):
@@ -241,7 +241,7 @@ class MCPClient:
 
     # ---- protocol methods ----
 
-    def list_tools(self) -> list[dict[str, Any]]:
+    def list_tools(self, timeout: float | None = None) -> list[dict[str, Any]]:
         """Call ``tools/list`` and return the raw tool def array.
 
         Each entry looks like:
@@ -258,6 +258,11 @@ class MCPClient:
               }
             }
 
+        Args:
+            timeout: Optional per-call timeout override (seconds).
+                R07.35 (MCP-07): used by the manager's reconnect
+                re-dispatch to give a recovered server a fair window.
+
         Returns:
             List of tool def dicts. Empty list if the server exposes no tools.
 
@@ -265,7 +270,7 @@ class MCPClient:
             MCPClientError: If the server returns a non-list response.
             MCPTransportError: On transport failure.
         """
-        result = self._transport.request("tools/list")
+        result = self._transport.request("tools/list", None, timeout)
         if not isinstance(result, dict):
             raise MCPClientError(
                 f"MCP server '{self._config.name}': tools/list returned "
@@ -276,12 +281,20 @@ class MCPClient:
             raise MCPClientError(f"MCP server '{self._config.name}': 'tools' field is not a list")
         return tools
 
-    def call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
+    def call_tool(
+        self,
+        name: str,
+        arguments: dict[str, Any] | None = None,
+        timeout: float | None = None,
+    ) -> dict[str, Any]:
         """Call ``tools/call`` and return the structured result.
 
         Args:
             name: Tool name as returned by :meth:`list_tools`.
             arguments: Tool arguments (may be empty or None).
+            timeout: Optional per-call timeout override (seconds). Falls
+                back to the server config's ``timeout_seconds``. Defaults
+                to ``None`` (config value).
 
         Returns:
             The MCP ``CallToolResult`` object. Shape::
@@ -308,7 +321,7 @@ class MCPClient:
         if arguments is not None:
             params["arguments"] = arguments
 
-        result = self._transport.request("tools/call", params)
+        result = self._transport.request("tools/call", params, timeout)
         if not isinstance(result, dict):
             raise MCPClientError(
                 f"MCP server '{self._config.name}': tools/call returned "
@@ -344,16 +357,32 @@ class MCPClient:
     @property
     def is_poisoned(self) -> bool:
         """R07.35 (MCP-06): True if the transport is poisoned (MCP-01) —
-        a per-call timeout fired and the connection state is unknown.
-        The next :meth:`call_tool`/:meth:`list_tools` raises
+        a REAL fatal failure (EOF, write failure, closed) happened and
+        the connection state is unusable. The next
+        :meth:`call_tool`/:meth:`list_tools` raises
         :class:`MCPTransportGone`; the manager's invoke path uses this
         flag to decide to auto-reconnect.
+
+        R07.35 (MCP-07): a per-call timeout does NOT set this — see
+        :attr:`consecutive_timeouts` for the slow-server signal.
         """
         return self._transport.is_poisoned
 
+    @property
+    def consecutive_timeouts(self) -> int:
+        """R07.35 (MCP-07): consecutive per-call timeouts with no response
+        in between (reset on any response). The manager treats a high
+        count as a WEDGED server (alive pipe, stuck event loop) and
+        takes the reconnect path. getattr-friendly for test fakes.
+        """
+        return getattr(self._transport, "consecutive_timeouts", 0)
+
     def __repr__(self) -> str:
+        timeouts = getattr(self._transport, "consecutive_timeouts", 0)
         if self._transport.is_poisoned:
             state = "poisoned"
+        elif timeouts:
+            state = f"degraded ({timeouts} timeout(s))"
         else:
             state = "connected" if self._initialized else "disconnected"
         return f"<MCPClient server={self._config.name!r} {state}>"

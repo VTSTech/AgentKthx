@@ -51,6 +51,7 @@ trigger a reconnect — the server is alive, the call was just bad.
 
 from __future__ import annotations
 
+import inspect
 import sys
 import threading
 import time
@@ -61,7 +62,17 @@ from ..core.models import Tool, ToolParam
 from ..tools.registry import ToolRegistry
 from .client import MCPClient, MCPClientError
 from .config import MCPServerConfig, load_mcp_config
-from .transport import MCPTransportError, MCPTransportGone
+from .transport import (
+    MCPRequestTimeoutError,
+    MCPTransportError,
+    MCPTransportGone,
+)
+
+# R07.35 (MCP-07): a server whose pipe is alive but whose event loop is
+# stuck times out on EVERY call. One timeout = "slow call, keep the
+# connection"; this many IN A ROW = "wedged server, take the reconnect
+# path" (the counter resets on any response, even a JSON-RPC error).
+_WEDGED_TIMEOUT_THRESHOLD = 2
 
 
 class MCPManagerError(RuntimeError):
@@ -71,6 +82,33 @@ class MCPManagerError(RuntimeError):
 def _ns(server_name: str, tool_name: str) -> str:
     """Build a namespaced tool identifier."""
     return f"{server_name}__{tool_name}"
+
+
+def _call_tool_maybe_timeout(
+    client: Any, mcp_name: str, args: dict[str, Any], timeout: float | None
+) -> dict[str, Any]:
+    """R07.35 (MCP-07): call_tool with a timeout kwarg when supported.
+
+    The re-dispatch after a reconnect passes an escalated timeout, but
+    test fakes (and any older MCPClient-shaped wrapper) may not accept a
+    ``timeout`` parameter. Inspect the signature once and fall back to
+    the two-arg call instead of masking a TypeError raised inside the
+    handler body.
+    """
+    if timeout is None:
+        return client.call_tool(mcp_name, args)
+    try:
+        sig = inspect.signature(client.call_tool)
+    except (TypeError, ValueError):
+        return client.call_tool(mcp_name, args)
+    params = sig.parameters.values()
+    accepts = any(
+        p.name == "timeout" or p.kind is inspect.Parameter.VAR_KEYWORD
+        for p in params
+    )
+    if accepts:
+        return client.call_tool(mcp_name, args, timeout=timeout)
+    return client.call_tool(mcp_name, args)
 
 
 def _split_ns(namespaced: str) -> tuple[str, str]:
@@ -639,12 +677,44 @@ class MCPManager:
             result = client.call_tool(mcp_name, forwarded_args)
         except MCPTransportGone as e:
             # R07.35 (MCP-06): connection-fatal failure — poisoned
-            # transport, per-call timeout, EOF, broken pipe. The server
-            # subprocess is in an unknown/dead state. Auto-reconnect
-            # (bounded, config-controlled) and re-dispatch the original
-            # call through the fresh connection before reporting failure.
+            # transport, EOF, broken pipe. The server subprocess is in
+            # an unknown/dead state. Auto-reconnect (bounded,
+            # config-controlled) and re-dispatch the original call
+            # through the fresh connection before reporting failure.
             return self._reconnect_and_retry(
                 server_name, mcp_name, namespaced_name, forwarded_args, e
+            )
+        except MCPRequestTimeoutError as e:
+            # R07.35 (MCP-07): the server is ALIVE — one call was just
+            # slow (e.g. search_files globbing a large workspace).
+            # Tearing down a healthy connection here is what made R07.35
+            # churn: reconnect → same slow call → same timeout → fail.
+            # Only treat REPEATED timeouts as a wedged server.
+            cfg_t = self._configs.get(server_name)
+            consecutive = int(getattr(client, "consecutive_timeouts", 0))
+            if (
+                cfg_t is not None
+                and cfg_t.reconnect
+                and consecutive >= _WEDGED_TIMEOUT_THRESHOLD
+            ):
+                print(
+                    f"[MCP] {server_name}: {consecutive} consecutive request "
+                    f"timeouts — treating server as wedged, reconnecting",
+                    file=sys.stderr,
+                )
+                return self._reconnect_and_retry(
+                    server_name, mcp_name, namespaced_name, forwarded_args, e
+                )
+            print(
+                f"[MCP] {server_name}: request timed out "
+                f"(connection still healthy — no reconnect)",
+                file=sys.stderr,
+            )
+            return (
+                f"[MCP timeout: {e} — the MCP server is alive; the call did not "
+                f"finish in time. Retry with narrower arguments (smaller path or "
+                f"glob), raise 'timeout_seconds' for this server in mcp.json, or "
+                f"use a different tool.]"
             )
         except MCPTransportError as e:
             # Plain transport error — the server is (or should be) alive:
@@ -719,11 +789,16 @@ class MCPManager:
         attempts = max(0, int(cfg.reconnect_attempts))
         backoff = max(0.0, float(cfg.reconnect_backoff))
         last_error: Exception = first_error
+        # R07.35 (MCP-07): when the trigger was a per-call timeout, the
+        # re-dispatch gets an ESCALATED timeout — the same call at the
+        # same timeout is exactly what failed before. Round N gets
+        # timeout_seconds * (N+1), capped at 120s.
+        escalate_timeout = isinstance(first_error, MCPRequestTimeoutError)
 
         for round_no in range(1, attempts + 1):
             print(
                 f"[MCP] {server_name}: connection lost "
-                f"({first_error}) — reconnecting "
+                f"({last_error}) — reconnecting "
                 f"(attempt {round_no}/{attempts})...",
                 file=sys.stderr,
             )
@@ -741,8 +816,15 @@ class MCPManager:
                     f"MCP server '{server_name}': reconnect produced no client"
                 )
                 continue
+            retry_timeout: float | None = None
+            if escalate_timeout:
+                retry_timeout = min(
+                    float(cfg.timeout_seconds) * (round_no + 1), 120.0
+                )
             try:
-                result = client.call_tool(mcp_name, forwarded_args)
+                result = _call_tool_maybe_timeout(
+                    client, mcp_name, forwarded_args, retry_timeout
+                )
             except (MCPTransportGone, MCPTransportError, MCPClientError) as e:
                 # Fresh connection still failing (or the re-dispatch hit a
                 # protocol error) — burn this round and retry if allowed.
@@ -750,6 +832,11 @@ class MCPManager:
                 continue
 
             # Success — sanitize exactly like the normal path.
+            print(
+                f"[MCP] {server_name}: reconnected — call recovered "
+                f"(attempt {round_no}/{attempts})",
+                file=sys.stderr,
+            )
             text = _flatten_call_result(result)
             return sanitize_tool_output(
                 text,
