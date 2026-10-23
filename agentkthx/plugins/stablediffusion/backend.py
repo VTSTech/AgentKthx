@@ -610,12 +610,23 @@ class StableDiffusionBackend(OpenAICompatibleBackend):
 
         The backend NEVER opens paths from the model (untrusted-input
         discipline, plan §5) — the filename is fully generated here.
+
+        R07.35 (ROB-50 CLOSED): the write is exclusive-create ('xb') —
+        on a collision (a model-switch rebuild resets the per-instance
+        counter; two processes generating in the same second) the
+        counter bumps until a free name is found instead of silently
+        truncating an already-written image.
         """
         artifacts_dir = Path(os.environ.get("AGENTKTHX_ARTIFACTS_DIR") or "./generated")
         artifacts_dir.mkdir(parents=True, exist_ok=True)
         counter = getattr(self, "_artifact_counter", 0) + 1
-        self._artifact_counter = counter
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-        path = artifacts_dir / f"sd_{stamp}_{counter:03d}.png"
-        path.write_bytes(png_bytes)
-        return path
+        while True:
+            path = artifacts_dir / f"sd_{stamp}_{counter:03d}.png"
+            try:
+                with open(path, "xb") as fh:
+                    fh.write(png_bytes)
+                self._artifact_counter = counter
+                return path
+            except FileExistsError:
+                counter += 1

@@ -214,7 +214,19 @@ def _build_agent(args: argparse.Namespace, config) -> Agent:
     backend_kwargs: dict = {}
     if backend_name in ("stable-diffusion", "sd") and getattr(args, "max_steps", None) is not None:
         backend_kwargs["sample_steps"] = getattr(args, "max_steps")
-    backend = get_backend(backend_name, timeout=timeout, api_mode=api_mode, **backend_kwargs)
+    try:
+        backend = get_backend(backend_name, timeout=timeout, api_mode=api_mode, **backend_kwargs)
+    except ValueError as e:
+        # R07.35 (ROB-49 CLOSED): an out-of-range --max-steps on the sd
+        # backend raises ValueError inside the StableDiffusionBackend
+        # constructor — surface the clean usage-error shape (ROB-36
+        # class) instead of a raw traceback at startup. Narrow guard:
+        # only the sd sample-steps remap path converts to SystemExit,
+        # so a genuine bug ValueError from another backend still
+        # raises loudly.
+        if backend_kwargs:
+            raise SystemExit(f"agentkthx: error: --max-steps: {e}") from e
+        raise
 
     # Default API mode: cloud providers use OpenAI, local providers use OpenResponses
     # R06.57 (MAINT-05): replaced hardcoded [OPENROUTER, ZAI, GEMINI] list with

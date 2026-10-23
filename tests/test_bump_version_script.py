@@ -11,11 +11,21 @@ Run with: ``python -m pytest tests/test_bump_version_script.py -v``
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import textwrap
 from pathlib import Path
 
 import pytest
+
+# TEST-05 (R07.35, partially closed): this harness drives
+# scripts/bump-version.sh through bash — skip cleanly where bash does
+# not exist (Windows hosts, minimal CI images) instead of erroring.
+# The full closure (extracting the bump logic into a Python module and
+# testing that directly) remains open in the audit register.
+pytestmark = pytest.mark.skipif(
+    shutil.which("bash") is None, reason="TEST-05: bash not available on this host"
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = REPO_ROOT / "scripts" / "bump-version.sh"

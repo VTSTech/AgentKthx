@@ -21,6 +21,7 @@ import base64
 import contextlib
 import io
 import json
+import re
 import sys
 import unittest
 import urllib.error
@@ -617,16 +618,20 @@ class TestStream(unittest.TestCase):
 
         with patch("urllib.request.urlopen", side_effect=capturing_urlopen):
             buffered = backend.generate("sd-cpp-local", [{"role": "user", "content": "a cat"}])
-        # Same backend instance — reset the artifact counter so both runs
-        # produce identical content strings (filename counter restarts).
-        backend._artifact_counter = 0
+        # Same backend instance — the second run now lands on the NEXT
+        # artifact index (ROB-50, R07.35: exclusive-create, never an
+        # overwrite), so compare with the artifact index normalized out.
         with patch("urllib.request.urlopen", side_effect=capturing_urlopen):
             deltas = list(
                 backend.generate_stream("sd-cpp-local", [{"role": "user", "content": "a cat"}])
             )
 
         self.assertEqual(len(deltas), 1)
-        self.assertEqual(deltas[0], buffered["content"])
+
+        def normalize(s):
+            return re.sub(r"sd_\d{8}-\d{6}_\d{3}\.png", "sd_<artifact>.png", s)
+
+        self.assertEqual(normalize(deltas[0]), normalize(buffered["content"]))
 
 
 # ---------------------------------------------------------------------------
@@ -905,11 +910,17 @@ class TestFactorySampleStepsMapping:
         assert agent_kwargs.get("max_steps") is None
 
     def test_validation_error_propagates_for_out_of_range(self, monkeypatch):
+        # ROB-49 (R07.35 CLOSED): the raw constructor ValueError is now
+        # surfaced as the clean argparse-style usage error — not a
+        # startup traceback.
         from agentkthx.cli import agent_factory
 
         backend_kwargs: dict = {}
         agent_kwargs: dict = {}
         self._install_fakes(monkeypatch, backend_kwargs, agent_kwargs)
 
-        with pytest.raises(ValueError, match="1..100"):
+        with pytest.raises(SystemExit) as ei:
             agent_factory._build_agent(self._args(max_steps=150), self._config())
+        msg = str(ei.value.code)
+        assert "--max-steps" in msg
+        assert "1..100" in msg

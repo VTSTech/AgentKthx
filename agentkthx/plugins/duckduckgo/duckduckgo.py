@@ -100,12 +100,14 @@ Protocol constraints honored here:
     are paced to DUCKDUCKGO_MIN_INTERVAL (default 3s) so agentic
     loops don't rate-limit themselves.
   - Proof modes: ``synth`` (default — /status challenge solved by
-    the bundled Node helper) or DUCKDUCKGO_PROOF_MODE=capture (a
-    real headless-Chromium session loads duck.ai, the PAGE builds
-    its own proof, and the outgoing /chat request is intercepted +
-    aborted before it consumes quota — the exact design the
-    maintained Go client ships; needs a local Chrome/Chromium and
-    Node >= 22).
+    the bundled Node helper). DUCKDUCKGO_PROOF_MODE=capture (a
+    headless-Chromium session that builds its own proof) is
+    RESERVED / NOT YET IMPLEMENTED — setting it warns once and
+    synth behavior applies (R07.35, MAINT-32); the design it would
+    ship (page-built proof, outgoing /chat intercepted + aborted
+    before it consumes quota — the approach the maintained Go
+    client uses; needs a local Chrome/Chromium and Node >= 22) is
+    documented but unbuilt.
 
 Model catalog (wire IDs — the 2025-era IDs now 404 with
 ERR_MODEL_UNAVAILABLE; verified 2026-10-09):
@@ -143,6 +145,7 @@ import random
 import re
 import shutil
 import subprocess
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -161,15 +164,14 @@ _DEFAULT_UA = (
     "(KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"
 )
 
-#: Bundled Node helpers (challenge solver + durableStream keygen +
-#: optional browser proof-capture). Shipped inside the plugin package
+#: Bundled Node helpers (challenge solver + durableStream keygen).
+#: Shipped inside the plugin package
 #: so the backend is self-contained — pyproject package-data MUST
 #: include plugins/*/*.js or pip installs silently drop them (live
 #: finding 2026-10-09: the site-packages install had no .js at all).
 _PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
 _SOLVER_JS = os.path.join(_PLUGIN_DIR, "ddg_vqd.js")
 _DURABLE_JS = os.path.join(_PLUGIN_DIR, "ddg_durable.js")
-_CAPTURE_JS = os.path.join(_PLUGIN_DIR, "ddg_capture.js")
 
 #: Minimum cookie contract (mirrors benoitpetit/duckduckgo-chat-cli,
 #: which sets exactly these three on every request). Cheap to send,
@@ -194,12 +196,44 @@ _PROOF_DURATION_FLOOR_MS = 250
 #: politely, not hammered.
 _CHALLENGE_RETRY_SLEEP_S = 1.0
 
+# R07.35 (SEC-21 CLOSED): BOTH Node helper spawns run with an
+# environment ALLOWLIST instead of inheriting ``os.environ`` — the
+# synth proof executes server-supplied challenge JS, and an inherited
+# env would hand every sibling-provider API key held by the CLI
+# process (OPENROUTER_API_KEY, ZAI_API_KEY, ...) to that process on a
+# hostile duck.ai response. The solver and the keygen need nothing
+# beyond the entries below; NODE_OPTIONS / NODE_PATH deliberately do
+# NOT pass through. Windows-critical vars keep the helpers working on
+# the Win11 host.
+_NODE_ENV_ALLOWLIST = frozenset({
+    # POSIX
+    "PATH", "HOME", "LANG", "TMPDIR",
+    # Windows Node essentials
+    "SYSTEMROOT", "SYSTEMDRIVE", "COMSPEC", "PATHEXT",
+    "TEMP", "TMP", "APPDATA", "LOCALAPPDATA", "PROGRAMFILES",
+})
+
+
+def _node_env(extra: dict | None = None) -> dict:
+    """Allowlisted environment for Node helper spawns (SEC-21).
+
+    Never inherits ``os.environ`` wholesale — only the allowlisted
+    names survive, plus any explicitly-passed ``extra`` (e.g. the
+    per-request DDG_SOLVE_UA).
+    """
+    env = {k: v for k, v in os.environ.items() if k in _NODE_ENV_ALLOWLIST}
+    if extra:
+        env.update(extra)
+    return env
+
 #: Proof acquisition mode. "synth" (default) = fetch challenge ->
-#: Node solve -> build header. "capture" = make a real headless
-#: Chromium load duck.ai and lift the proof off its aborted /chat
-#: request (the approach the maintained Go client shipped after the
-#: 2026-10 hardening — immune to proof-validation tightening, needs
-#: a local Chrome/Chromium + Node >= 22). Set DUCKDUCKGO_PROOF_MODE.
+#: Node solve -> build header. "capture" (page-built proof via a
+#: real headless Chromium — the approach the maintained Go client
+#: shipped after the 2026-10 hardening) is RESERVED / NOT YET
+#: IMPLEMENTED (MAINT-32): setting DUCKDUCKGO_PROOF_MODE=capture
+#: warns once at construction and synth applies. Do not rely on it
+#: as the SEC-21 mitigation until it actually ships (the SEC-21
+#: env-allowlist hardening is the shipped mitigation).
 _PROOF_MODE = (os.environ.get("DUCKDUCKGO_PROOF_MODE") or "synth").strip().lower()
 
 #: Frontend metadata fallbacks (user capture, 2026-10-08 build).
@@ -434,6 +468,15 @@ class DuckDuckGoBackend(BaseBackend):
         self._model_cache: list[dict] | None = None
         self._model_cache_ts: float = 0.0
 
+        # MAINT-32 (R07.35 CLOSED): capture mode is RESERVED — say so
+        # loudly instead of silently no-op'ing back to synth.
+        if _PROOF_MODE != "synth":
+            print(
+                f"[ddg] DUCKDUCKGO_PROOF_MODE={_PROOF_MODE!r} is RESERVED "
+                "(not implemented) — synth proof mode applies.",
+                file=sys.stderr,
+            )
+
     # ─────────────────────────────────────────────────────────────────────
     # Provider identity
     # ─────────────────────────────────────────────────────────────────────
@@ -486,8 +529,7 @@ class DuckDuckGoBackend(BaseBackend):
                 f"({os.path.dirname(path)}). The installed package was "
                 "built without the plugin's .js helpers — fix with "
                 "`pip install -e /path/to/AgentKthx` (editable install) "
-                "or copy ddg_vqd.js + ddg_durable.js (+ ddg_capture.js "
-                "if you use capture mode) from the repo's "
+                "or copy ddg_vqd.js + ddg_durable.js from the repo's "
                 "agentkthx/plugins/duckduckgo/ into that directory."
             )
 
@@ -500,8 +542,8 @@ class DuckDuckGoBackend(BaseBackend):
         THIS backend's UA — a mismatch invalidates the proof.
         """
         self._require_node("challenge solving")
-        env = dict(os.environ)
-        env["DDG_SOLVE_UA"] = self._user_agent
+        # R07.35 (SEC-21 CLOSED): allowlisted env — never os.environ.
+        env = _node_env({"DDG_SOLVE_UA": self._user_agent})
         proc = subprocess.run(
             ["node", _SOLVER_JS],
             input=challenge_b64.encode("utf-8"),
@@ -530,6 +572,7 @@ class DuckDuckGoBackend(BaseBackend):
             ["node", _DURABLE_JS],
             capture_output=True,
             timeout=20,
+            env=_node_env(),  # R07.35 (SEC-21): never inherit os.environ
         )
         if proc.returncode != 0:
             raise RuntimeError(

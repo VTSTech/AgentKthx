@@ -583,3 +583,80 @@ class TestFormatNotice:
         assert text is not None
         assert "pip install --upgrade" not in text
         assert "agentkthx update" in text
+
+
+class TestNetworkFailurePaths:
+    """TEST-07 (R07.35 CLOSED): the network-failure edge cases resolve
+    gracefully. Each track swallows its own failure — URLError (network
+    down), socket.timeout (stalled connection), malformed JSON (hostile
+    or broken body) — and check_for_update() still returns a well-formed
+    result dict with the failed tracks as None. It must never raise into
+    the CLI startup path."""
+
+    def test_urlerror_is_swallowed(self, counter_urlopen):
+        import urllib.error
+
+        _, set_fake = counter_urlopen
+
+        def boom(url, timeout=None):
+            raise urllib.error.URLError("name resolution failed")
+
+        set_fake(boom)
+        result = update_check.check_for_update(timeout=0.1)
+        assert result is not None
+        assert result["pypi_latest"] is None
+        assert result["github_latest_version"] is None
+
+    def test_socket_timeout_is_swallowed(self, counter_urlopen):
+        import socket
+
+        _, set_fake = counter_urlopen
+
+        def slow(url, timeout=None):
+            raise socket.timeout("connection timed out")
+
+        set_fake(slow)
+        result = update_check.check_for_update(timeout=0.1)
+        assert result is not None
+        assert result["pypi_latest"] is None
+
+    def test_malformed_json_is_swallowed(self, counter_urlopen):
+        _, set_fake = counter_urlopen
+        set_fake(lambda url, timeout=None: _FakeResponse(b"{definitely-not-json"))
+        result = update_check.check_for_update(timeout=0.1)
+        assert result is not None
+        assert result["pypi_latest"] is None
+
+    def test_tracks_fail_independently(self, counter_urlopen):
+        """One source failing must not take the others down — PyPI
+        500s while the GitHub __init__.py fetch succeeds."""
+        from agentkthx.update_check import GITHUB_RAW_INIT_URL, PYPI_JSON_URL
+
+        _, set_fake = counter_urlopen
+
+        def responder(url, timeout=None):
+            if url.startswith(PYPI_JSON_URL):
+                raise RuntimeError("pypi is having a moment")
+            if url.startswith(GITHUB_RAW_INIT_URL):
+                return _FakeResponse(_github_init_payload("0.6.57"))
+            raise AssertionError(f"unexpected url {url}")
+
+        set_fake(responder)
+        result = update_check.check_for_update(timeout=0.1)
+        assert result["pypi_latest"] is None
+        assert result["github_latest_version"] == "0.6.57"
+
+    def test_result_shape_is_well_formed_on_total_failure(self, counter_urlopen):
+        """Even with every track failing, the dict keeps its contract:
+        all documented keys present, checked_at a float, never raises."""
+        _, set_fake = counter_urlopen
+        set_fake(lambda url, timeout=None: (_ for _ in ()).throw(OSError("down")))
+        result = update_check.check_for_update(timeout=0.1)
+        assert set(result) == {
+            "pypi_latest",
+            "github_sha",
+            "github_latest_version",
+            "from_git",
+            "checked_at",
+        }
+        assert isinstance(result["checked_at"], float)

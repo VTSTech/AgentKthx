@@ -90,6 +90,24 @@ The codebase implements defense-in-depth across several surfaces. Contributors a
 - 5-hop redirect budget via `_SSRFSafeRedirectHandler` in `tools/builtins.py`
 - RFC1918 awareness — note ROB-28/30: `_is_local_base_url` excludes `172.16/12` so backends in that range take the remote-probe path (documented in-code, not a security bug, but a source of confusion)
 
+### DuckDuckGo challenge sandbox — `plugins/duckduckgo` (R07.35, SEC-21)
+
+- The DuckDuckGo backend's `synth` proof mode **executes server-supplied
+  challenge JavaScript** — that execution IS the authentication; the
+  challenge/proof protocol has no alternative. Treat duck.ai as a code
+  source you opt into by using this keyless backend.
+- **Environment allowlist**: both Node helper spawns (`ddg_vqd.js`
+  solver, `ddg_durable.js` keygen) run with a fixed allowlist
+  (`_NODE_ENV_ALLOWLIST`) instead of inheriting the parent
+  `os.environ` — sibling-provider API keys (`OPENROUTER_API_KEY`,
+  `ZAI_API_KEY`, ...) never reach the challenge process, and
+  `NODE_OPTIONS` / `NODE_PATH` deliberately do not pass through.
+- **Residual risk** is inherent to the protocol (remote-supplied JS
+  still runs locally, inside the allowlisted environment).
+  `DUCKDUCKGO_PROOF_MODE=capture` — the structural fix that would
+  build the proof in a real browser instead — is **RESERVED / not
+  yet implemented** (MAINT-32; setting it warns and synth applies).
+
 ### Tool-output sanitization — `core/helpers.py:sanitize_tool_output`
 
 - Wraps every tool result in `<tool_output>` tags with:

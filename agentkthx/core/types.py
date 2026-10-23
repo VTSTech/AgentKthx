@@ -201,16 +201,20 @@ class BackendType(Enum):
 
     # DuckDuckGo AI Chat — the keyless, anonymous, zero-cost LLM
     # surface at duckduckgo.com/duckchat/v1 (fronting duck.ai). NOT
-    # OpenAI-compatible: custom x-vqd-4 header-token handshake
-    # (bootstrap via GET /status, rotate on every /chat response),
-    # own SSE shape, no /models endpoint, no sampling params, tools
-    # stripped (ReAct only), ~20-turn conversation limit. Catalog:
-    # GPT-4o mini, o3-mini, Claude Haiku, Llama 3.3 70B, Mistral
-    # Small 3 24B — the upstream frontier set, IP-stripped by DDG's
-    # privacy layer. The ONLY cloud backend that subclasses
-    # BaseBackend directly instead of CloudBackend.
-    # See agentkthx/plugins/duckduckgo/ and
-    # docs/api/DUCKDUCKGO_API_TECHNICAL_REFERENCE.md.
+    # OpenAI-compatible: challenge-based x-vqd-hash-1 proofs (the
+    # server hands over a challenge; the bundled Node helper solves
+    # it — the earlier header-token handshake is RETIRED),
+    # role-based SSE shape, no /models endpoint, no sampling params,
+    # tools stripped (ReAct only), ~20-turn conversation limit.
+    # Catalog: the 8 reseeded wire IDs (gpt-6-luna, gpt-5.6-luna,
+    # gpt-5.4-nano, gpt-5.4-mini, claude-haiku-4-5,
+    # mistral-small-2603, tinfoil/gpt-oss-120b, tinfoil/gemma4-31b)
+    # — 2025-era aliases resolve forward. The ONLY cloud backend
+    # that subclasses BaseBackend directly instead of CloudBackend.
+    # MAINT-33 (R07.35): this comment stays brief on purpose — the
+    # protocol source of truth is
+    # docs/api/DUCKDUCKGO_API_TECHNICAL_REFERENCE.md, so the details
+    # cannot drift here again.
     DUCKDUCKGO = "duckduckgo"
 
     # TokenHarbor — OpenRouter-style LLM gateway at
